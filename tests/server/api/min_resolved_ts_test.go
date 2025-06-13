@@ -68,7 +68,7 @@ func (suite *minResolvedTSTestSuite) checkMinResolvedTS(cluster *tests.TestClust
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		})
-		tests.MustPutRegion(re, cluster, id, id, []byte(fmt.Sprintf("%da", id)), []byte(fmt.Sprintf("%db", id)))
+		tests.MustPutRegion(re, cluster, id, id, fmt.Appendf(nil, "%da", id), fmt.Appendf(nil, "%db", id))
 	}
 
 	leader := cluster.GetLeaderServer()

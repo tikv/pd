@@ -208,10 +208,7 @@ func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKi
 				maxRegionCount = regionCount
 			}
 		}
-		tolerantSizeRatio = maxRegionCount * adjustRatio
-		if tolerantSizeRatio < minTolerantSizeRatio {
-			tolerantSizeRatio = minTolerantSizeRatio
-		}
+		tolerantSizeRatio = max(maxRegionCount*adjustRatio, minTolerantSizeRatio)
 	}
 	return tolerantSizeRatio
 }
@@ -375,10 +372,7 @@ func (q *retryQuota) resetLimit(store *core.StoreInfo) {
 }
 
 func (q *retryQuota) attenuate(store *core.StoreInfo) {
-	newLimit := q.getLimit(store) / q.attenuation
-	if newLimit < q.minLimit {
-		newLimit = q.minLimit
-	}
+	newLimit := max(q.getLimit(store)/q.attenuation, q.minLimit)
 	q.limits[store.GetID()] = newLimit
 }
 

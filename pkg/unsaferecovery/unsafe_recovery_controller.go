@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1053,13 +1054,7 @@ func (u *Controller) generateForceLeaderPlan(newestRegionTree *regionTree, peers
 			if u.autoDetect {
 				// For auto detect, the failedStores is empty. So need to add the detected Failed store to the list
 				for _, peer := range u.getFailedPeers(leader.region()) {
-					found := false
-					for _, store := range storeRecoveryPlan.ForceLeader.FailedStores {
-						if store == peer.StoreId {
-							found = true
-							break
-						}
-					}
+					found := slices.Contains(storeRecoveryPlan.ForceLeader.FailedStores, peer.StoreId)
 					if !found {
 						storeRecoveryPlan.ForceLeader.FailedStores = append(storeRecoveryPlan.ForceLeader.FailedStores, peer.StoreId)
 					}
