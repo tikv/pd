@@ -93,9 +93,12 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName, req.WithRuStats)
+	rg, err := s.manager.GetResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName, req.WithRuStats)
+	if err != nil {
+		return nil, err
+	}
 	if rg == nil {
-		return nil, errors.New("resource group not found")
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
 	}
 	return &rmpb.GetResourceGroupResponse{
 		Group: rg.IntoProtoResourceGroup(),
@@ -107,7 +110,10 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(ExtractKeyspaceID(req.GetKeyspaceId()), req.WithRuStats)
+	groups, err := s.manager.GetResourceGroupList(ExtractKeyspaceID(req.GetKeyspaceId()), req.WithRuStats)
+	if err != nil {
+		return nil, err
+	}
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
@@ -192,9 +198,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				continue
 			}
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
+			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
 			if rg == nil {
-				log.Warn("resource group not found", logFields...)
+				log.Warn("resource group not found", append(logFields, zap.Error(err))...)
 				continue
 			}
 			// Send the consumption to update the metrics.
