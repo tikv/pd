@@ -376,8 +376,9 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("Error: ", err)
 		return
 	}
+	query := make(url.Values)
 	startKey = url.QueryEscape(startKey)
-	prefix := regionsKeyPrefix + "?key=" + startKey
+	query.Set("key", startKey)
 	if len(args) >= 2 {
 		endKey, err := parseKey(cmd.Flags(), args[1])
 		if err != nil {
@@ -385,14 +386,18 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		endKey = url.QueryEscape(endKey)
-		prefix += "&end_key=" + endKey
+		query.Set("end_key", endKey)
 	}
 	if len(args) == 3 {
 		if _, err = strconv.Atoi(args[2]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
-		prefix += "&limit=" + args[2]
+		query.Set("limit", args[2])
+	}
+	prefix := regionsKeyPrefix
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
@@ -421,15 +426,16 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	state := args[0]
 	prefix := regionsCheckPrefix + "/" + state
+	query := make(url.Values)
 	if strings.EqualFold(state, "hist-size") {
 		if len(args) == 2 {
 			if _, err := strconv.Atoi(args[1]); err != nil {
 				cmd.Println("region size histogram bound should be a number")
 				return
 			}
-			prefix += "?bound=" + args[1]
+			query.Set("bound", args[1])
 		} else {
-			prefix += "?bound=10"
+			query.Set("bound", "10")
 		}
 	} else if strings.EqualFold(state, "hist-keys") {
 		if len(args) == 2 {
@@ -437,10 +443,13 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Println("region keys histogram bound should be a number")
 				return
 			}
-			prefix += "?bound=" + args[1]
+			query.Set("bound", args[1])
 		} else {
-			prefix += "?bound=10000"
+			query.Set("bound", "10000")
 		}
+	}
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {

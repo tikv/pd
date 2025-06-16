@@ -16,6 +16,10 @@
 
 package kerneltype
 
+import (
+	"github.com/pingcap/failpoint"
+)
+
 var (
 	// KernelType is the current kernel type, which is Classic in this case.
 	KernelType = "Classic"
@@ -23,5 +27,10 @@ var (
 
 // IsNextGen returns true if the current kernel type is NextGen.
 func IsNextGen() bool {
+	failpoint.Inject("mockNextGenBuildFlag", func(val failpoint.Value) {
+		if v, ok := val.(bool); ok {
+			failpoint.Return(v)
+		}
+	})
 	return false
 }

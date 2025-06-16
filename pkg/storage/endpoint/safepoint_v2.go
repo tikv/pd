@@ -115,7 +115,7 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 		return nil, err
 	}
 	if len(keys) == 0 {
-		return se.initServiceSafePointV2ForGCWorker(keyspaceID, 0)
+		return se.initServiceSafePointV2ForGCWorker(keyspaceID)
 	}
 
 	hasGCWorker := false
@@ -149,12 +149,12 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 	if min.SafePoint == math.MaxUint64 {
 		// No service safe point or all of them are expired, set min service safe point to 0 to allow any update
 		log.Info("there are no valid service safepoints. init gc_worker's service safepoint to 0")
-		return se.initServiceSafePointV2ForGCWorker(keyspaceID, 0)
+		return se.initServiceSafePointV2ForGCWorker(keyspaceID)
 	}
 	if !hasGCWorker {
 		// If there exists some service safepoints but gc_worker is missing, init it with the min value among all
 		// safepoints (including expired ones)
-		return se.initServiceSafePointV2ForGCWorker(keyspaceID, min.SafePoint)
+		return se.initServiceSafePointV2ForGCWorker(keyspaceID)
 	}
 	return min, nil
 }
@@ -177,11 +177,17 @@ func (se *StorageEndpoint) LoadServiceSafePointV2(keyspaceID uint32, serviceID s
 	return serviceSafePoint, nil
 }
 
-func (se *StorageEndpoint) initServiceSafePointV2ForGCWorker(keyspaceID uint32, initialValue uint64) (*ServiceSafePointV2, error) {
+func (se *StorageEndpoint) initServiceSafePointV2ForGCWorker(keyspaceID uint32) (*ServiceSafePointV2, error) {
+	// Temporary solution:
+	// Use the txn safe point as the initial value of gc_worker.
+	txnSafePoint, err := se.GetGCStateProvider().LoadTxnSafePoint(keyspaceID)
+	if err != nil {
+		return nil, err
+	}
 	ssp := &ServiceSafePointV2{
 		KeyspaceID: keyspaceID,
 		ServiceID:  keypath.GCWorkerServiceSafePointID,
-		SafePoint:  initialValue,
+		SafePoint:  txnSafePoint,
 		ExpiredAt:  math.MaxInt64,
 	}
 	if err := se.SaveServiceSafePointV2(ssp); err != nil {

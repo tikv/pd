@@ -532,13 +532,3 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 		GcStates: gcStatesPb,
 	}, nil
 }
-
-// SetGlobalGCBarrier sets a global GC barrier.
-func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
-	return nil, nil
-}
-
-// DeleteGlobalGCBarrier deletes a GC barrier.
-func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
-	return nil, nil
-}
