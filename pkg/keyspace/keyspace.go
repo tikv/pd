@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -99,6 +100,19 @@ type Manager struct {
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
 type CreateKeyspaceRequest struct {
+	// Name of the keyspace to be created.
+	// Using an existing name will result in error.
+	Name   string
+	Config map[string]string
+	// CreateTime is the timestamp used to record creation time.
+	CreateTime int64
+}
+
+// CreateKeyspaceByIDRequest represents necessary arguments to create a keyspace.
+type CreateKeyspaceByIDRequest struct {
+	// ID of the keyspace to be created.
+	// Using an existing ID will result in error.
+	ID *uint32
 	// Name of the keyspace to be created.
 	// Using an existing name will result in error.
 	Name   string
@@ -220,6 +234,12 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
 	}
+	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
+	if kerneltype.IsNextGen() {
+		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
+			request.Config[GCManagementType] = KeyspaceLevelGC
+		}
+	}
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
@@ -276,6 +296,88 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	log.Info("[keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
 		zap.String("name", keyspace.GetName()),
+	)
+	return keyspace, nil
+}
+
+// CreateKeyspaceByID create a keyspace meta with given config and save it to storage.
+func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (*keyspacepb.KeyspaceMeta, error) {
+	if request.ID == nil {
+		return nil, errors.New("keyspace id is empty")
+	}
+	id := *request.ID
+	name := request.Name
+	if len(name) == 0 {
+		return nil, errors.New("keyspace name is empty")
+	}
+	// Validate purposed name's legality.
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
+	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
+	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
+	if err != nil {
+		return nil, err
+	}
+	if len(config) != 0 {
+		if request.Config == nil {
+			request.Config = config
+		} else {
+			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
+			request.Config[UserKindKey] = config[UserKindKey]
+		}
+	}
+	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
+	keyspace := &keyspacepb.KeyspaceMeta{
+		Id:             id,
+		Name:           name,
+		State:          keyspacepb.KeyspaceState_DISABLED,
+		CreatedAt:      request.CreateTime,
+		StateChangedAt: request.CreateTime,
+		Config:         request.Config,
+	}
+	err = manager.saveNewKeyspace(keyspace)
+	if err != nil {
+		log.Warn("[keyspace] failed to save keyspace before split",
+			zap.Uint32("keyspace-id", keyspace.GetId()),
+			zap.String("keyspace-name", keyspace.GetName()),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	// Split keyspace region.
+	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
+	if err != nil {
+		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			metaPath := keypath.KeyspaceMetaPath(id)
+			return txn.Remove(metaPath)
+		})
+		if err2 != nil {
+			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
+				zap.Uint32("keyspace-id", keyspace.GetId()),
+				zap.String("keyspace-name", keyspace.GetName()),
+				zap.Error(err2),
+			)
+		}
+		return nil, err
+	}
+	// enable the keyspace metadata after split.
+	keyspace.State = keyspacepb.KeyspaceState_ENABLED
+	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
+	if err != nil {
+		log.Warn("[keyspace] failed to create keyspace",
+			zap.Uint32("keyspace-id", keyspace.GetId()),
+			zap.String("keyspace-name", keyspace.GetName()),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+		return nil, err
+	}
+	log.Info("[keyspace] keyspace created",
+		zap.Uint32("keyspace-id", keyspace.GetId()),
+		zap.String("keyspace-name", keyspace.GetName()),
 	)
 	return keyspace, nil
 }

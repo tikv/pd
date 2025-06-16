@@ -220,7 +220,7 @@ func (ci *clientInner) doRequest(
 	resp, err := ci.cli.Do(req)
 	if err != nil {
 		ci.reqCounter(name, networkErrorStatus)
-		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
+		log.Warn("[pd] do http request failed", append(logFields, zap.Error(err))...)
 		return -1, errors.Trace(err)
 	}
 	ci.execDuration(name, time.Since(start))

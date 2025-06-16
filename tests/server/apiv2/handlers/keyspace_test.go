@@ -17,6 +17,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -71,6 +72,18 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 	re := suite.Require()
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)
+	for _, created := range keyspaces {
+		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
+		re.Equal(created, loaded)
+	}
+	defaultKeyspace := mustLoadKeyspaces(re, suite.server, constant.DefaultKeyspaceName)
+	re.Equal(constant.DefaultKeyspaceName, defaultKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, defaultKeyspace.State)
+}
+
+func (suite *keyspaceTestSuite) TestCreateLoadKeyspaceByID() {
+	re := suite.Require()
+	keyspaces := mustMakeTestKeyspacesByIDs(re, suite.server, 10)
 	for _, created := range keyspaces {
 		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
 		re.Equal(created, loaded)
@@ -157,6 +170,25 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 			Config: testConfig,
 		}
 		resultMeta[i] = MustCreateKeyspace(re, server, createRequest)
+	}
+	return resultMeta
+}
+
+func mustMakeTestKeyspacesByIDs(re *require.Assertions, server *tests.TestServer, count int) []*keyspacepb.KeyspaceMeta {
+	testConfig := map[string]string{
+		"config1": "100",
+		"config2": "200",
+	}
+	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
+	for i := range count {
+		name := strconv.Itoa(i + 1)
+		id := uint32(i + 1)
+		createRequest := &handlers.CreateKeyspaceByIDParams{
+			ID:     &id,
+			Name:   name,
+			Config: testConfig,
+		}
+		resultMeta[i] = MustCreateKeyspaceByID(re, server, createRequest)
 	}
 	return resultMeta
 }

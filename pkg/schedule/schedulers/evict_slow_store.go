@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 const (
@@ -46,6 +48,7 @@ type evictSlowStoreSchedulerConfig struct {
 	cluster *core.BasicCluster
 	// Last timestamp of the chosen slow store for eviction.
 	lastSlowStoreCaptureTS time.Time
+	isRecovered            bool
 	// Duration gap for recovering the candidate, unit: s.
 	RecoveryDurationGap uint64   `json:"recovery-duration"`
 	EvictedStores       []uint64 `json:"evict-stores"`
@@ -79,11 +82,11 @@ func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 	return conf.EvictedStores
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	if conf.evictStore() != id {
 		return nil
 	}
-	return []core.KeyRange{core.NewKeyRange("", "")}
+	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getBatch() int {
@@ -115,6 +118,21 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
+	return conf.save()
+}
+
+func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bool) error {
+	conf.RLock()
+	if conf.isRecovered == isRecovered {
+		conf.RUnlock()
+		return nil
+	}
+	conf.RUnlock()
+
+	conf.Lock()
+	defer conf.Unlock()
+	conf.lastSlowStoreCaptureTS = time.Now()
+	conf.isRecovered = isRecovered
 	return conf.save()
 }
 
@@ -293,19 +311,39 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 	if s.conf.evictStore() != 0 {
 		store := cluster.GetStore(s.conf.evictStore())
+		storeIDStr := strconv.FormatUint(store.GetID(), 10)
 		if store == nil || store.IsRemoved() {
 			// Previous slow store had been removed, remove the scheduler and check
 			// slow node next time.
 			log.Info("slow store has been removed",
 				zap.Uint64("store-id", store.GetID()))
-		} else if store.GetSlowScore() <= slowStoreRecoverThreshold && s.conf.readyForRecovery() {
+			evictedSlowStoreStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
+			s.cleanupEvictLeader(cluster)
+			return nil, nil
+		}
+		// recover slow store if its score is below the threshold.
+		if store.GetSlowScore() <= slowStoreRecoverThreshold {
+			if err := s.conf.tryUpdateRecoverStatus(true); err != nil {
+				log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
+				return nil, nil
+			}
+
+			if !s.conf.readyForRecovery() {
+				return nil, nil
+			}
+
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
-		} else {
-			return s.schedulerEvictLeader(cluster), nil
+			evictedSlowStoreStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
+			s.cleanupEvictLeader(cluster)
+			return nil, nil
 		}
-		s.cleanupEvictLeader(cluster)
-		return nil, nil
+		// If the slow store is still slow or slow again, we can continue to evict leaders from it.
+		if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
+			log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
+			return nil, nil
+		}
+		return s.schedulerEvictLeader(cluster), nil
 	}
 
 	var slowStore *core.StoreInfo
@@ -336,6 +374,9 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
 		return nil, nil
 	}
+	// Record the slow store evicted status.
+	storeIDStr := strconv.FormatUint(slowStore.GetID(), 10)
+	evictedSlowStoreStatusGauge.WithLabelValues(s.GetName(), storeIDStr).Set(1)
 	return s.schedulerEvictLeader(cluster), nil
 }
 

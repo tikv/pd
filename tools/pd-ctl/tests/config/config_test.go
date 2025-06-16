@@ -88,7 +88,7 @@ func (suite *configTestSuite) TearDownTest() {
 		def := placement.GroupBundle{
 			ID: "pd",
 			Rules: []*placement.Rule{
-				{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
 			},
 		}
 		data, err := json.Marshal([]placement.GroupBundle{def})
@@ -825,7 +825,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	bundles = []placement.GroupBundle{{
 		ID: "pd",
 		Rules: []*placement.Rule{
-			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+			{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
 		},
 	}}
 	b, err = json.Marshal(bundles)
@@ -837,7 +837,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	re.NoError(err)
 
 	checkLoadRuleBundle(re, pdAddr, fname, []placement.GroupBundle{
-		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 }
 

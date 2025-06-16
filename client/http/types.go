@@ -57,6 +57,7 @@ type State struct {
 	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
 	StartTimestamp int64  `json:"start_timestamp"`
+	KernelType     string `json:"kernel_type"`
 }
 
 // KeyRange alias pd.KeyRange to avoid break client compatibility.
