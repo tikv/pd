@@ -141,19 +141,19 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		if testCase.req.IsWrite() {
 			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
-			re.True(expectedConsumption.WriteCrossAzTrafficBytes > 0)
+			re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
 		}
 		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
 		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
 		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
-		kvCalculator.calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
+		calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
 		if testCase.req.IsWrite() {
-			re.True(expectedConsumption.WriteCrossAzTrafficBytes > 0, caseNum)
+			re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
 		} else if testCase.req.IsCrossAZ() {
-			re.True(expectedConsumption.ReadCrossAzTrafficBytes > 0, caseNum)
+			re.Positive(expectedConsumption.ReadCrossAzTrafficBytes, caseNum)
 		} else {
 			re.Equal(expectedConsumption.ReadCrossAzTrafficBytes, uint64(0), caseNum)
 			re.Equal(expectedConsumption.WriteCrossAzTrafficBytes, uint64(0), caseNum)

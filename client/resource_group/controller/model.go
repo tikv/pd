@@ -127,7 +127,7 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	// A write request may also read data, which should be counted into the RRU cost.
 	// This part should be counted even if the request does not succeed.
 	kc.calculateReadCost(consumption, res)
-	kc.calculateCrossAZTraffic(consumption, req, res)
+	calculateCrossAZTraffic(consumption, req, res)
 }
 
 func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
@@ -148,7 +148,7 @@ func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res Resp
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 }
 
-func (kc *KVCalculator) calculateCrossAZTraffic(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+func calculateCrossAZTraffic(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
 	if req.IsCrossAZ() {
 		if req.IsWrite() {
 			consumption.WriteCrossAzTrafficBytes += res.ResponseSize()
