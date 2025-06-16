@@ -319,6 +319,8 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs -= custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount -= custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
+	custom1.ReadCrossAzTrafficBytes -= custom2.ReadCrossAzTrafficBytes
+	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
