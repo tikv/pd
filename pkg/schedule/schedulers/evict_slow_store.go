@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -307,11 +308,13 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 	if s.conf.evictStore() != 0 {
 		store := cluster.GetStore(s.conf.evictStore())
+		storeIDStr := strconv.FormatUint(store.GetID(), 10)
 		if store == nil || store.IsRemoved() {
 			// Previous slow store had been removed, remove the scheduler and check
 			// slow node next time.
 			log.Info("slow store has been removed",
-				zap.Uint64("store-id", s.conf.evictStore()))
+				zap.Uint64("store-id", store.GetID()))
+			evictedSlowStoreStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
 			s.cleanupEvictLeader(cluster)
 			return nil, nil
 		}
@@ -328,6 +331,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
+			evictedSlowStoreStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
 			s.cleanupEvictLeader(cluster)
 			return nil, nil
 		}
@@ -367,6 +371,9 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
 		return nil, nil
 	}
+	// Record the slow store evicted status.
+	storeIDStr := strconv.FormatUint(slowStore.GetID(), 10)
+	evictedSlowStoreStatusGauge.WithLabelValues(s.GetName(), storeIDStr).Set(1)
 	return s.schedulerEvictLeader(cluster), nil
 }
 
