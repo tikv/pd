@@ -150,14 +150,13 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		kvCalculator.calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
-		if testCase.req.IsCrossAZ() {
-			if testCase.req.IsWrite() {
-				re.True(expectedConsumption.WriteCrossAzTrafficBytes > 0, caseNum)
-			} else {
-				re.True(expectedConsumption.ReadCrossAzTrafficBytes > 0, caseNum)
-			}
+		if testCase.req.IsWrite() {
+			re.True(expectedConsumption.WriteCrossAzTrafficBytes > 0, caseNum)
+		} else if testCase.req.IsCrossAZ() {
+			re.True(expectedConsumption.ReadCrossAzTrafficBytes > 0, caseNum)
 		} else {
 			re.Equal(expectedConsumption.ReadCrossAzTrafficBytes, uint64(0), caseNum)
+			re.Equal(expectedConsumption.WriteCrossAzTrafficBytes, uint64(0), caseNum)
 		}
 	}
 }

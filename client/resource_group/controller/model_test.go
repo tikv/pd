@@ -130,17 +130,19 @@ func TestGetRawResourceTokenBucketSetting(t *testing.T) {
 func TestAdd(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 10, WriteCrossAzTrafficBytes: 20}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 30, WriteCrossAzTrafficBytes: 40}
 	expected := &rmpb.Consumption{
-		RRU:               4,
-		WRU:               6,
-		ReadBytes:         0,
-		WriteBytes:        0,
-		TotalCpuTimeMs:    0,
-		SqlLayerCpuTimeMs: 0,
-		KvReadRpcCount:    0,
-		KvWriteRpcCount:   0,
+		RRU:                      4,
+		WRU:                      6,
+		ReadBytes:                0,
+		WriteBytes:               0,
+		TotalCpuTimeMs:           0,
+		SqlLayerCpuTimeMs:        0,
+		KvReadRpcCount:           0,
+		KvWriteRpcCount:          0,
+		ReadCrossAzTrafficBytes:  40,
+		WriteCrossAzTrafficBytes: 60,
 	}
 
 	add(custom1, custom2)
@@ -166,17 +168,19 @@ func TestAdd(t *testing.T) {
 func TestSub(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 30, WriteCrossAzTrafficBytes: 40}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 15, WriteCrossAzTrafficBytes: 20}
 	expected := &rmpb.Consumption{
-		RRU:               1,
-		WRU:               1,
-		ReadBytes:         0,
-		WriteBytes:        0,
-		TotalCpuTimeMs:    0,
-		SqlLayerCpuTimeMs: 0,
-		KvReadRpcCount:    0,
-		KvWriteRpcCount:   0,
+		RRU:                      1,
+		WRU:                      1,
+		ReadBytes:                0,
+		WriteBytes:               0,
+		TotalCpuTimeMs:           0,
+		SqlLayerCpuTimeMs:        0,
+		KvReadRpcCount:           0,
+		KvWriteRpcCount:          0,
+		ReadCrossAzTrafficBytes:  15,
+		WriteCrossAzTrafficBytes: 20,
 	}
 
 	sub(custom1, custom2)
