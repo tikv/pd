@@ -260,11 +260,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 
 		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
 		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
+			log.Warn("[resource group controller] load resource group revision failed", zap.Error(err))
 		}
 		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
+			log.Warn("[resource group controller] load resource group revision failed", zap.Error(err))
 		}
 		cfgRevision := resp.GetHeader().GetRevision()
 		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
@@ -272,13 +272,14 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
 			if err != nil {
-				log.Warn("watch resource group meta failed", zap.Error(err))
+				log.Warn("[resource group controller] watch resource group meta failed", zap.Int64("meta-revision", metaRevision), zap.Error(err))
 			}
+			log.Info("[resource group controller] watch resource group meta success", zap.Int64("meta-revision", metaRevision))
 		}
 
 		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, pd.WithRev(cfgRevision), pd.WithPrefix())
 		if err != nil {
-			log.Warn("watch resource group config failed", zap.Error(err))
+			log.Warn("[resource group controller] watch resource group config failed", zap.Error(err))
 		}
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
 		defer watchRetryTimer.Stop()
@@ -295,21 +296,27 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */, notifyMsg{})
 				}
 			case <-watchRetryTimer.C:
+				log.Info("[resource group controller] start to retry watch resource group meta and config",
+					zap.Int64("meta-revision", metaRevision), zap.Int64("cfg-revision", cfgRevision))
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
 					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
 					if err != nil {
-						log.Warn("watch resource group meta failed", zap.Error(err))
+						log.Warn("[resource group controller] retry watch resource group meta failed",
+							zap.Int64("meta-revision", metaRevision), zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
 						failpoint.Inject("watchStreamError", func() {
 							watchRetryTimer.Reset(20 * time.Millisecond)
 						})
 					}
+					log.Info("[resource group controller] retry watch resource group meta success",
+						zap.Int64("meta-revision", metaRevision))
 				}
 				if watchConfigChannel == nil {
 					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, pd.WithRev(cfgRevision), pd.WithPrefix())
 					if err != nil {
-						log.Warn("watch resource group config failed", zap.Error(err))
+						log.Warn("[resource group controller] retry watch resource group config failed",
+							zap.Int64("cfg-revision", cfgRevision), zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
@@ -342,6 +349,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						panic("disableWatch")
 					}
 				})
+				log.Info("[resource group controller] receive watch meta event", zap.Int("event-count", len(resp)), zap.Bool("ok", ok))
 				if !ok {
 					watchMetaChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
@@ -356,14 +364,20 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
 						if err = proto.Unmarshal(item.Kv.Value, group); err != nil {
+							log.Warn("[resource group controller] unmarshal watched resource group meta failed",
+								zap.Int64("meta-revision", metaRevision), zap.Error(err))
 							continue
 						}
 						name := group.GetName()
 						gc, ok := c.loadGroupController(name)
 						if !ok {
+							log.Info("[resource group controller] skip watched resource group meta",
+								zap.Int64("meta-revision", metaRevision), zap.String("name", name), zap.Any("group", group))
 							continue
 						}
 						if !gc.tombstone.Load() {
+							log.Info("[resource group controller] modify watched resource group meta",
+								zap.Int64("meta-revision", metaRevision), zap.String("name", name), zap.Any("group", group))
 							gc.modifyMeta(group)
 							continue
 						}
@@ -371,12 +385,15 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 						if err != nil {
 							log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
-								zap.String("name", name), zap.Error(err))
+								zap.Int64("meta-revision", metaRevision), zap.String("name", name), zap.Any("group", group), zap.Error(err))
 							continue
 						}
 						if c.groupsController.CompareAndSwap(name, gc, newGC) {
 							log.Info("[resource group controller] re-create resource group cost controller for tombstone",
-								zap.String("name", name))
+								zap.Int64("meta-revision", metaRevision), zap.String("name", name), zap.Any("group", group))
+						} else {
+							log.Info("[resource group controller] re-create resource group cost controller for tombstone CAS failed",
+								zap.Int64("meta-revision", metaRevision), zap.String("name", name), zap.Any("group", group))
 						}
 					case meta_storagepb.Event_DELETE:
 						// Prev-kv is compacted means there must have been a delete event before this event,
@@ -419,7 +436,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if enableControllerTraceLog.Load() != config.EnableControllerTraceLog {
 						enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 					}
-					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
+					log.Info("[resource group controller] load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
 			case gc := <-c.tokenBucketUpdateChan:
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
@@ -493,7 +510,11 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	gc, loaded := c.loadOrStoreGroupController(name, gc)
 	if !loaded {
 		resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
-		log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
+		log.Info("[resource group controller] create resource group cost controller",
+			zap.String("name", name), zap.Any("group", group))
+	} else {
+		log.Info("[resource group controller] create resource group cost controller CAS failed",
+			zap.String("name", name), zap.Any("group", group))
 	}
 	return gc, nil
 }
@@ -545,6 +566,8 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
+				log.Info("[resource group controller] delete stale resource group",
+					zap.String("name", resourceGroupName), zap.Any("group", gc.getMeta()), zap.Bool("inactive", gc.inactive), zap.Bool("tombstone", gc.tombstone.Load()))
 				c.groupsController.Delete(resourceGroupName)
 				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true
