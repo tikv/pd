@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+// Notes: it's a copy from mok https://github.com/oh-my-tidb/mok
+
+package command
 
 import (
 	"encoding/hex"

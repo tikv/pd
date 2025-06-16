@@ -282,11 +282,12 @@ linters:
         path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
       - linters:
           - errcheck
-        path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump|pd-patroller)
+        path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
     paths:
       - third_party$
       - builtin$
       - examples$
+      - tools/pd-ctl/pdctl/command/patrol_helper.go # It is a copy from mok.
 formatters:
   enable:
     - gci
