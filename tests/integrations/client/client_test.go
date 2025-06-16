@@ -2165,12 +2165,21 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 	re.Equal(uint64(10), minSsp.SafePoint)
 	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 
-	// Force delete gc_worker, then the min service safepoint is 11 of "a".
+	// Force delete gc_worker, then the min service safe point was 11 of "a" in previous implementation, but 0
+	// for compatibility of txn safe point.
 	err = s.srv.GetStorage().Remove(gcWorkerKey)
 	re.NoError(err)
 	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	re.NoError(err)
+	re.Equal(uint64(0), minSsp.SafePoint)
+
+	// Advancing txn safe point also affects the gc_worker's service safe point.
+	_, err = s.client.GetGCInternalController(constants.NullKeyspaceID).AdvanceTxnSafePoint(context.Background(), 11)
+	re.NoError(err)
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	re.NoError(err)
 	re.Equal(uint64(11), minSsp.SafePoint)
+
 	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
 	// will be newly created.
 	// Increase "a" so that "gc_worker" is the only minimum that will be returned by LoadMinServiceGCSafePoint.
