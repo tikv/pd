@@ -25,14 +25,16 @@ type TestRequestInfo struct {
 	isWrite    bool
 	writeBytes uint64
 	storeID    uint64
+	isCrossAZ  bool
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
-func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64) *TestRequestInfo {
+func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64, isCrossAZ bool) *TestRequestInfo {
 	return &TestRequestInfo{
 		isWrite:    isWrite,
 		writeBytes: writeBytes,
 		storeID:    storeID,
+		isCrossAZ:  isCrossAZ,
 	}
 }
 
@@ -53,7 +55,17 @@ func (tri *TestRequestInfo) StoreID() uint64 {
 
 // ReplicaNumber implements the RequestInfo interface.
 func (*TestRequestInfo) ReplicaNumber() int64 {
-	return 1
+	return 3
+}
+
+// RequestSize implements the RequestSize interface.
+func (tri *TestRequestInfo) RequestSize() uint64 {
+	return tri.writeBytes
+}
+
+// IsCrossAZ implements the IsCrossAZ interface.
+func (tri *TestRequestInfo) IsCrossAZ() bool {
+	return tri.isCrossAZ
 }
 
 // TestResponseInfo is used to test the response info interface.
@@ -85,4 +97,9 @@ func (tri *TestResponseInfo) KVCPU() time.Duration {
 // Succeed implements the ResponseInfo interface.
 func (tri *TestResponseInfo) Succeed() bool {
 	return tri.succeed
+}
+
+// ResponseSize implements the ResponseSize interface.
+func (tri *TestResponseInfo) ResponseSize() uint64 {
+	return tri.readBytes
 }

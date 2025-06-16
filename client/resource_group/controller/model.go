@@ -105,14 +105,14 @@ func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req Re
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes += writeBytes
 	// write request cost need consider the replicas, due to write data will be replicate to all replicas.
-	replicaNums := float64(req.ReplicaNumber())
+	replicaNums := uint64(req.ReplicaNumber())
 	if replicaNums == 0 {
 		replicaNums = 1
 	}
-	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * replicaNums
+	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * float64(replicaNums)
 	// TODO: for a raft group with N replicas, we assume the cross AZ network traffic for raft replication
 	// is: writeBytes * (N - 1). This is not accurate, but the deviation should be small enough.
-	consumption.WriteCrossAzTrafficBytes += req.WriteBytes() * uint64(replicaNums-1)
+	consumption.WriteCrossAzTrafficBytes += req.WriteBytes() * (replicaNums - 1)
 }
 
 // AfterKVRequest ...
@@ -127,13 +127,7 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	// A write request may also read data, which should be counted into the RRU cost.
 	// This part should be counted even if the request does not succeed.
 	kc.calculateReadCost(consumption, res)
-	if req.IsCrossAZ() {
-		if req.IsWrite() {
-			consumption.WriteCrossAzTrafficBytes += res.ResponseSize()
-		} else {
-			consumption.ReadCrossAzTrafficBytes += res.ResponseSize()
-		}
-	}
+	kc.calculateCrossAZTraffic(consumption, req, res)
 }
 
 func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
@@ -152,6 +146,16 @@ func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res Resp
 	kvCPUMs := float64(res.KVCPU().Nanoseconds()) / 1000000.0
 	consumption.TotalCpuTimeMs += kvCPUMs
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
+}
+
+func (kc *KVCalculator) calculateCrossAZTraffic(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+	if req.IsCrossAZ() {
+		if req.IsWrite() {
+			consumption.WriteCrossAzTrafficBytes += res.ResponseSize()
+		} else {
+			consumption.ReadCrossAzTrafficBytes += res.ResponseSize()
+		}
+	}
 }
 
 func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req RequestInfo) {

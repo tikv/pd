@@ -93,11 +93,36 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 				succeed:   true,
 			},
 		},
+		// Write request cross AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:    true,
+				writeBytes: 100,
+				isCrossAZ:  true,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				succeed:   true,
+			},
+		},
 		// Read request
 		{
 			req: &TestRequestInfo{
 				isWrite:    false,
 				writeBytes: 0,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				kvCPU:     100 * time.Millisecond,
+				succeed:   true,
+			},
+		},
+		// Read request cross AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:    false,
+				writeBytes: 0,
+				isCrossAZ:  true,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -116,13 +141,24 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		if testCase.req.IsWrite() {
 			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
+			re.True(expectedConsumption.WriteCrossAzTrafficBytes > 0)
 		}
 		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
 		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
 		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
+		kvCalculator.calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
+		if testCase.req.IsCrossAZ() {
+			if testCase.req.IsWrite() {
+				re.True(expectedConsumption.WriteCrossAzTrafficBytes > 0, caseNum)
+			} else {
+				re.True(expectedConsumption.ReadCrossAzTrafficBytes > 0, caseNum)
+			}
+		} else {
+			re.Equal(expectedConsumption.ReadCrossAzTrafficBytes, uint64(0), caseNum)
+		}
 	}
 }
 
@@ -353,7 +389,7 @@ func TestTryGetController(t *testing.T) {
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
-	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1), NewTestResponseInfo(1, time.Millisecond, true)
+	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1, true), NewTestResponseInfo(1, time.Millisecond, true)
 	_, _, _, _, err = controller.OnRequestWait(ctx, "test-group", requestInfo)
 	re.NoError(err)
 	consumption, err := controller.OnResponse("test-group", requestInfo, responseInfo)
