@@ -22,19 +22,21 @@ import "time"
 
 // TestRequestInfo is used to test the request info interface.
 type TestRequestInfo struct {
-	isWrite    bool
-	writeBytes uint64
-	storeID    uint64
-	isCrossAZ  bool
+	isWrite     bool
+	writeBytes  uint64
+	numReplicas int64
+	storeID     uint64
+	isCrossAZ   bool
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
 func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64, isCrossAZ bool) *TestRequestInfo {
 	return &TestRequestInfo{
-		isWrite:    isWrite,
-		writeBytes: writeBytes,
-		storeID:    storeID,
-		isCrossAZ:  isCrossAZ,
+		isWrite:     isWrite,
+		writeBytes:  writeBytes,
+		numReplicas: 1,
+		storeID:     storeID,
+		isCrossAZ:   isCrossAZ,
 	}
 }
 
@@ -55,7 +57,7 @@ func (tri *TestRequestInfo) StoreID() uint64 {
 
 // ReplicaNumber implements the RequestInfo interface.
 func (*TestRequestInfo) ReplicaNumber() int64 {
-	return 3
+	return 1
 }
 
 // RequestSize implements the RequestSize interface.

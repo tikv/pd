@@ -85,8 +85,9 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Write request
 		{
 			req: &TestRequestInfo{
-				isWrite:    true,
-				writeBytes: 100,
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -96,9 +97,10 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Write request cross AZ
 		{
 			req: &TestRequestInfo{
-				isWrite:    true,
-				writeBytes: 100,
-				isCrossAZ:  true,
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				isCrossAZ:   true,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -108,8 +110,9 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Read request
 		{
 			req: &TestRequestInfo{
-				isWrite:    false,
-				writeBytes: 0,
+				isWrite:     false,
+				writeBytes:  0,
+				numReplicas: 3,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -120,9 +123,10 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Read request cross AZ
 		{
 			req: &TestRequestInfo{
-				isWrite:    false,
-				writeBytes: 0,
-				isCrossAZ:  true,
+				isWrite:     false,
+				writeBytes:  0,
+				numReplicas: 3,
+				isCrossAZ:   true,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
