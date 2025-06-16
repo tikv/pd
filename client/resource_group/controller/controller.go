@@ -719,6 +719,20 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 	return gc.getMeta(), nil
 }
 
+// ReportConsumption is used to report ru consumption directly.
+//
+// Currently, this interface is used to report the consumption for TiFlash MPP cost
+// after the query is finished.
+func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, consumption *rmpb.Consumption) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
+		return
+	}
+
+	gc.addRUConsumption(consumption)
+}
+
 type groupCostController struct {
 	// invariant attributes
 	name    string
@@ -1525,6 +1539,12 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Unlock()
 
 	return delta, waitDuration, nil
+}
+
+func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
+	gc.mu.Lock()
+	add(gc.mu.consumption, consumption)
+	gc.mu.Unlock()
 }
 
 // GetActiveResourceGroup is used to get active resource group.
