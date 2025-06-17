@@ -79,6 +79,9 @@ func validateName(name string) error {
 	if name == constant.DefaultKeyspaceName {
 		return errors.Errorf("illegal keyspace name %s, collides with default keyspace name", name)
 	}
+	if name == constant.SystemKeyspaceName {
+		return errors.Errorf("illegal keyspace name %s, collides with system keyspace name", name)
+	}
 	return nil
 }
 

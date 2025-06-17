@@ -242,6 +242,8 @@ var (
 	ErrExceedMaxEtcdTxnOps = errors.Normalize("exceed max etcd txn operations", errors.RFCCodeText("PD:keyspace:ErrExceedMaxEtcdTxnOps"))
 	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
 	ErrModifyDefaultKeyspace = errors.Normalize("cannot modify default keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifyDefaultKeyspace"))
+	// ErrModifySystemKeyspace is used to indicate that system keyspace cannot be modified.
+	ErrModifySystemKeyspace = errors.Normalize("cannot modify system keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifySystemKeyspace"))
 	// ErrIllegalOperation is used to indicate this is an illegal operation.
 	ErrIllegalOperation = errors.Normalize("unknown operation", errors.RFCCodeText("PD:keyspace:ErrIllegalOperation"))
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.

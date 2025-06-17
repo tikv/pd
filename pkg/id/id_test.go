@@ -21,6 +21,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
@@ -72,4 +74,56 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 		re.NoError(err)
 		re.Equal(i, id)
 	}
+}
+
+// TestIDAllocationStartValue tests the start value for different label allocators.
+func TestIDAllocationStartValue(t *testing.T) {
+	re := require.New(t)
+	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	}()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+
+	_, err := client.Put(context.Background(), leaderPath, memberVal)
+	re.NoError(err)
+
+	// Case 1: check KeyspaceLabel starts allocation from 1025
+	t.Run("KeyspaceLabel should start allocation from 1025", func(t *testing.T) {
+		re := require.New(t)
+		keyspaceAllocator := NewAllocator(&AllocatorParams{
+			Client: client,
+			Label:  KeyspaceLabel,
+			Member: memberVal,
+			Step:   step,
+		})
+
+		firstID, _, err := keyspaceAllocator.Alloc(1)
+		re.NoError(err)
+		re.Equal(ReservedKeyspaceIDEnd+1, firstID)
+
+		secondID, _, err := keyspaceAllocator.Alloc(1)
+		re.NoError(err)
+		re.Equal(ReservedKeyspaceIDEnd+2, secondID)
+	})
+
+	// Case 2: check DefaultLabel starts allocation from 1
+	t.Run("DefaultLabel should start allocation from 1", func(t *testing.T) {
+		re := require.New(t)
+		defaultAllocator := NewAllocator(&AllocatorParams{
+			Client: client,
+			Label:  DefaultLabel,
+			Member: memberVal,
+			Step:   step,
+		})
+
+		firstID, _, err := defaultAllocator.Alloc(1)
+		re.NoError(err)
+		re.Equal(uint64(1), firstID)
+
+		secondID, _, err := defaultAllocator.Alloc(1)
+		re.NoError(err)
+		re.Equal(uint64(2), secondID)
+	})
 }

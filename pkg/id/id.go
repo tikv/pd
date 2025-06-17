@@ -27,11 +27,14 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 type label string
 
 const (
+	// ReservedKeyspaceIDEnd is the end of reserved keyspace IDs.
+	ReservedKeyspaceIDEnd = 1024
 	// DefaultLabel is the default label for id allocator.
 	DefaultLabel label = "idalloc"
 	// KeyspaceLabel is the label for keyspace id allocator.
@@ -154,6 +157,10 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		if value == nil {
 			// create the key
 			cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(key), "=", 0))
+			if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
+				// reserved for keyspace id allocator, 1 - 1024
+				end = ReservedKeyspaceIDEnd
+			}
 		} else {
 			// update the key
 			end, err = typeutil.BytesToUint64(value)

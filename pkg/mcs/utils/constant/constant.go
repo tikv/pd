@@ -47,6 +47,11 @@ const (
 	// 0 is reserved for default keyspace with the name "DEFAULT". It's initialized when PD bootstraps
 	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
+
+	// SystemKeyspaceID is the system keyspace ID.
+	SystemKeyspaceID = uint32(1)
+	// SystemKeyspaceName is the system keyspace name.
+	SystemKeyspaceName = "SYSTEM"
 	// ValidKeyspaceIDMask is the mask of valid bits for keyspace ID. If any bit outside the mask is set, the keyspace
 	// ID is considered invalid and regarded as the same as NullKeyspaceID.
 	ValidKeyspaceIDMask = uint32(0xFFFFFF)
