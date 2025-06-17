@@ -88,7 +88,7 @@ const (
 	resetBaseAllocIDName                    = "ResetBaseAllocID"
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
-	createMergeOperatorName                 = "CreateMergeOperator"
+	createOperators                         = "CreateOperators"
 	deleteOperators                         = "DeleteOperators"
 	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
 	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"

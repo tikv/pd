@@ -111,7 +111,7 @@ type Client interface {
 	/* Microservice interfaces */
 	GetMicroserviceMembers(context.Context, string) ([]MicroserviceMember, error)
 	GetMicroservicePrimary(context.Context, string) (string, error)
-	CreateMergeOperator(context.Context, uint64, uint64) error
+	CreateOperators(context.Context, map[string]any) error
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
@@ -1069,18 +1069,14 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 	return ver.Version, err
 }
 
-// CreateMergeOperator creates a merge operator.
-func (c *client) CreateMergeOperator(ctx context.Context, sourceRegionID, targetRegionID uint64) error {
-	inputJSON, err := json.Marshal(map[string]any{
-		"name":             "merge-region",
-		"source_region_id": sourceRegionID,
-		"target_region_id": targetRegionID,
-	})
+// CreateOperators creates the operators.
+func (c *client) CreateOperators(ctx context.Context, input map[string]any) error {
+	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName(createMergeOperatorName).
+		WithName(createOperators).
 		WithURI(operators).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))

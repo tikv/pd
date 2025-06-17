@@ -47,7 +47,7 @@ func TestCheckKey(t *testing.T) {
 	for _, tc := range testCases {
 		rootNode := N("key", tc.key)
 		rootNode.Expand()
-		re.Equal(tc.isValid, !hasInvalidPatternRecursive(rootNode), string(tc.key))
+		re.Equal(tc.isValid, !hasSpecialPatternRecursive(rootNode), string(tc.key))
 		tableID, found, err := extractTableIDRecursive(rootNode)
 		re.NoError(err)
 		re.True(found)

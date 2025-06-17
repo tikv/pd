@@ -34,7 +34,8 @@ const (
 	TestID ID = "test"
 
 	// TestComponent is used for test.
-	TestComponent Component = "test"
+	TestComponent  Component = "test"
+	PDCtlComponent Component = "pdctl"
 
 	// client-go component
 	CodecPDClient       Component = "CodecPdClient"

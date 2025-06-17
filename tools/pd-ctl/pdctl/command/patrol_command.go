@@ -31,18 +31,20 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
-const msgSize = 16 * units.MiB
-const defaultLimit = 8192
-
 const (
+	msgSize                = 16 * units.MiB
+	defaultLimit           = 8192
 	statusMergeFailed      = "merge_failed"
 	statusMergeSkipped     = "merge_skipped"
 	statusMergeRequestSent = "merge_request_sent"
+	maxMergeRetries        = 5
+	mergeRetryDelay        = 3 * time.Second
 )
 
 // PatrolResult defines the structure for JSON output of each processed region.
@@ -66,21 +68,18 @@ type PatrolResults struct {
 func NewPatrolCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "patrol",
-		Short:             "Patrol regions to find invalid keys and optionally merge them. Note that this command is temporary for tiflash#10147.",
+		Short:             "Patrol regions to find special keys and optionally merge them. Note that this command is temporary for tiflash#10147.",
 		PersistentPreRunE: requirePDClient,
 		Run:               patrolCommandFunc,
 	}
 	cmd.Flags().Int("limit", defaultLimit, "Limit of regions to scan per batch. If limit is not positive, it means no limit.")
-	cmd.Flags().Bool("enable-auto-merge", false, "Enable automatic region merge for regions with invalid keys.")
+	cmd.Flags().Bool("enable-auto-merge", false, "Enable automatic region merge for regions with special keys.")
 	return cmd
 }
 
 func patrolCommandFunc(cmd *cobra.Command, _ []string) {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
-
-	limit, _ := cmd.Flags().GetInt("limit")
-	enableAutoMerge, _ := cmd.Flags().GetBool("enable-auto-merge")
 
 	// Create a pd client
 	opts, err := getSecurityOpt(cmd)
@@ -97,27 +96,53 @@ func patrolCommandFunc(cmd *cobra.Command, _ []string) {
 	}
 	defer cli.Close()
 
-	// Scan regions
+	// Scan for special regions
+	startTime := time.Now()
+	specialRegions, scanCount, err := scanForSpecialKeys(ctx, cmd, cli)
+	if err != nil {
+		cmd.Printf("Error during region scan: %v\n", err)
+		return
+	}
+
+	// Process special regions
+	// If enableAutoMerge is true, we will try to merge regions with special keys.
+	// If it is false, we will skip the merge operation and just report the regions.
+	results := processSpecialRegions(ctx, cmd, specialRegions)
+
+	// Print final JSON output
+	patrolResults := &PatrolResults{
+		ScanCount:    scanCount,
+		ScanDuration: typeutil.NewDuration(time.Since(startTime)),
+		Count:        len(results),
+		Results:      results,
+	}
+	finalOutput, err := json.MarshalIndent(patrolResults, "", "  ")
+	if err != nil {
+		cmd.Printf("Failed to marshal patrol results to JSON: %v\n", err)
+		return
+	}
+	cmd.Println(string(finalOutput))
+}
+
+func scanForSpecialKeys(ctx context.Context, cmd *cobra.Command, cli pd.Client) (map[uint64]*router.Region, int, error) {
 	startKey := []byte{}
-	count, startTime := 0, time.Now()
-	results := make([]PatrolResult, 0)
-	invalidRegions := make(map[uint64]*router.Region)
+	count := 0
+	specialRegions := make(map[uint64]*router.Region)
+	limit, _ := cmd.Flags().GetInt("limit")
 	for {
 		select {
 		case <-ctx.Done():
-			cmd.Printf("Patrol command cancelled: %v\n", ctx.Err())
-			return
+			return nil, 0, ctx.Err()
 		default:
 		}
 		regions, err := cli.ScanRegions(ctx, startKey, nil, limit)
 		if err != nil {
-			cmd.Printf("Failed to scan regions: %v\n", err)
-			return
+			return nil, 0, ctx.Err()
 		}
 		for _, region := range regions {
 			found := checkRegion(cmd, region)
 			if found {
-				invalidRegions[region.Meta.GetId()] = region
+				specialRegions[region.Meta.GetId()] = region
 			}
 		}
 		count += len(regions)
@@ -130,67 +155,7 @@ func patrolCommandFunc(cmd *cobra.Command, _ []string) {
 		}
 		startKey = endKey
 	}
-
-	// Process invalid regions
-	for regionID, region := range invalidRegions {
-		endKeyHex := hex.EncodeToString(region.Meta.GetEndKey())
-		tableID, err := extractTableID(region)
-		result := PatrolResult{
-			RegionID: regionID,
-			Key:      endKeyHex,
-			TableID:  tableID,
-		}
-		if err != nil {
-			result.Status = statusMergeSkipped
-			result.Description = fmt.Sprintf("Failed to extract table ID from region %d: %v", regionID, err)
-			results = append(results, result)
-			continue
-		}
-		if !enableAutoMerge {
-			result.Status = statusMergeSkipped
-			results = append(results, result)
-			continue
-		}
-		// Create merge operator
-		siblingRegions, err := PDCli.GetRegionsSiblingByID(ctx, regionID)
-		if err != nil {
-			result.Status = statusMergeFailed
-			result.Description = fmt.Sprintf("Failed to get sibling regions for region %d: %v", regionID, err)
-			results = append(results, result)
-			continue
-		}
-		if siblingRegions.Count == 0 {
-			result.Status = statusMergeFailed
-			result.Description = fmt.Sprintf("No sibling regions found for region %d", regionID)
-			results = append(results, result)
-			continue
-		}
-		rightRegion := siblingRegions.Regions[siblingRegions.Count-1]
-		rightRegionID := uint64(rightRegion.ID)
-		err = PDCli.CreateMergeOperator(ctx, regionID, rightRegionID)
-		if err != nil {
-			result.Status = statusMergeFailed
-			result.Description = fmt.Sprintf("Failed to create merge operator for region %d: %v", regionID, err)
-		} else {
-			result.Status = statusMergeRequestSent
-			result.Description = fmt.Sprintf("Merge request sent for region %d and region %d", regionID, rightRegionID)
-		}
-		results = append(results, result)
-	}
-
-	// Print final JSON output
-	patrolResults := &PatrolResults{
-		ScanCount:    count,
-		ScanDuration: typeutil.NewDuration(time.Since(startTime)),
-		Count:        len(results),
-		Results:      results,
-	}
-	finalOutput, err := json.MarshalIndent(patrolResults, "", "  ")
-	if err != nil {
-		cmd.Printf("Failed to marshal patrol results to JSON: %v\n", err)
-		return
-	}
-	cmd.Println(string(finalOutput))
+	return specialRegions, count, nil
 }
 
 func checkRegion(cmd *cobra.Command, region *router.Region) bool {
@@ -208,7 +173,93 @@ func checkRegion(cmd *cobra.Command, region *router.Region) bool {
 	}()
 	rootNode := N("key", region.Meta.GetEndKey())
 	rootNode.Expand()
-	return hasInvalidPatternRecursive(rootNode)
+	return hasSpecialPatternRecursive(rootNode)
+}
+
+func processSpecialRegions(ctx context.Context, cmd *cobra.Command, specialRegions map[uint64]*router.Region) []PatrolResult {
+	enableAutoMerge, _ := cmd.Flags().GetBool("enable-auto-merge")
+	results := make([]PatrolResult, 0)
+	for regionID, region := range specialRegions {
+		// Prepare the result structure
+		endKeyHex := hex.EncodeToString(region.Meta.GetEndKey())
+		tableID, err := extractTableID(region)
+		result := PatrolResult{
+			RegionID: regionID,
+			Key:      endKeyHex,
+			TableID:  tableID,
+		}
+		if err != nil {
+			result.Status = statusMergeSkipped
+			result.Description = fmt.Sprintf("failed to extract table ID from region %d: %v", regionID, err)
+			results = append(results, result)
+			continue
+		}
+		if !enableAutoMerge {
+			result.Status = statusMergeSkipped
+			results = append(results, result)
+			continue
+		}
+		// Find the next region that matches the end key of the current region
+		nextRegion, err := findMatchingSiblingWithRetry(ctx, cmd, region)
+		if err != nil {
+			result.Status = statusMergeFailed
+			result.Description = err.Error()
+			results = append(results, result)
+			continue
+		}
+		// Create merge operator
+		input := map[string]any{
+			"name":             "merge-region",
+			"source_region_id": regionID,
+			"target_region_id": nextRegion.ID,
+		}
+		err = PDCli.CreateOperators(ctx, input)
+		if err != nil {
+			result.Status = statusMergeFailed
+			result.Description = fmt.Sprintf("failed to create merge operator for region %d: %v", regionID, err)
+		} else {
+			result.Status = statusMergeRequestSent
+			result.Description = fmt.Sprintf("merge request sent for region %d and region %d", regionID, nextRegion.ID)
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+// findMatchingSiblingWithRetry contains the complex retry logic for finding a stable sibling.
+func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, region *router.Region) (*http.RegionInfo, error) {
+	regionID := region.Meta.GetId()
+	ticker := time.NewTicker(mergeRetryDelay)
+	defer ticker.Stop()
+	for i := range maxMergeRetries {
+		siblingRegions, err := PDCli.GetRegionSiblingsByID(ctx, regionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get sibling regions for region %d: %v", regionID, err)
+		}
+		if siblingRegions.Count == 0 {
+			return nil, fmt.Errorf("no sibling regions found for region %d", regionID)
+		}
+
+		nextRegion := siblingRegions.Regions[siblingRegions.Count-1]
+		if bytes.Equal(region.Meta.GetEndKey(), []byte(nextRegion.GetStartKey())) {
+			return &nextRegion, nil // Success
+		}
+
+		if i == maxMergeRetries-1 {
+			break // Last attempt failed, break to return the final error
+		}
+
+		cmd.Printf("Region %d's endKey does not match sibling %d's startKey. Retrying... (Attempt %d/%d)\n",
+			region.Meta.GetId(), nextRegion.ID, i+1, maxMergeRetries)
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("merge cancelled during retry-wait: %w", ctx.Err())
+		}
+	}
+
+	return nil, fmt.Errorf("merge failed: sibling topology for region %d was not stable after %d retries", region.Meta.GetId(), maxMergeRetries)
 }
 
 func extractTableID(region *router.Region) (int64, error) {
@@ -218,8 +269,8 @@ func extractTableID(region *router.Region) (int64, error) {
 	return tableID, err
 }
 
-// hasInvalidPatternRecursive recursively searches the Node tree for the specific key pattern.
-func hasInvalidPatternRecursive(node *Node) bool {
+// hasSpecialPatternRecursive recursively searches the Node tree for the specific key pattern.
+func hasSpecialPatternRecursive(node *Node) bool {
 	for _, variant := range node.variants {
 		// Target pattern path:
 		// Node (rootNode or child of DecodeHex)
@@ -262,7 +313,7 @@ func hasInvalidPatternRecursive(node *Node) bool {
 		}
 
 		// We need to recursively check all children of the current variant.
-		if slices.ContainsFunc(variant.children, hasInvalidPatternRecursive) {
+		if slices.ContainsFunc(variant.children, hasSpecialPatternRecursive) {
 			return true
 		}
 	}

@@ -1108,7 +1108,7 @@ func TestGetSiblingsRegions(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(rg)
 
-	rgs, err := client.GetRegionsSiblingByID(ctx, 11)
+	rgs, err := client.GetRegionSiblingsByID(ctx, 11)
 	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
 	re.Equal(int64(10), rgs.Regions[0].ID)
@@ -1117,7 +1117,12 @@ func TestGetSiblingsRegions(t *testing.T) {
 	rightStartKey := rgs.Regions[rgs.Count-1].GetStartKey()
 	re.Zero(strings.Compare(rightStartKey, rg.EndKey))
 
-	err = client.CreateMergeOperator(ctx, 10, 11)
+	input := map[string]any{
+		"name":             "merge-region",
+		"source_region_id": 10,
+		"target_region_id": 11,
+	}
+	err = client.CreateOperators(ctx, input)
 	re.NoError(err)
 	ops := leaderServer.GetRaftCluster().GetOperatorController().GetOperators()
 	re.Len(ops, 2)
