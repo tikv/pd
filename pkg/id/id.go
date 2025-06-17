@@ -34,7 +34,8 @@ type label string
 
 const (
 	// ReservedKeyspaceIDEnd is the end of reserved keyspace IDs.
-	ReservedKeyspaceIDEnd = 1024
+	// Reserve keyspace ID range [1, 1024] for internal usage.
+	ReservedKeyspaceIDEnd = uint64(1024)
 	// DefaultLabel is the default label for id allocator.
 	DefaultLabel label = "idalloc"
 	// KeyspaceLabel is the label for keyspace id allocator.
