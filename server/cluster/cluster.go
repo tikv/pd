@@ -1757,13 +1757,6 @@ func (c *RaftCluster) setStore(store *core.StoreInfo, opts ...core.StoreCreateOp
 }
 
 func (c *RaftCluster) isStorePrepared() bool {
-	// nolint:staticcheck
-	if c.schedulingController.IsPrepared() {
-		return true
-	}
-	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-		return false
-	}
 	for _, store := range c.GetStores() {
 		if !store.IsPreparing() && !store.IsServing() {
 			continue
@@ -1777,8 +1770,6 @@ func (c *RaftCluster) isStorePrepared() bool {
 }
 
 func (c *RaftCluster) checkStores() {
-	c.UpdateAllStoreStatus()
-
 	var (
 		offlineStores []*metapb.Store
 		upStoreCount  int
@@ -1813,16 +1804,16 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 	defer c.storeStateLock.Unlock(uint32(storeID))
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing:
-		timeToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
+		readyToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
-		if !timeToServe && c.isStorePrepared() {
+		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			threshold = c.getThreshold(stores, store)
 			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
 				zap.Float64("threshold", threshold),
 				zap.Float64("region-size", regionSize))
-			timeToServe = regionSize >= threshold
+			readyToServe = regionSize >= threshold
 		}
-		if timeToServe {
+		if readyToServe {
 			if err := c.ReadyToServeLocked(storeID); err != nil {
 				log.Error("change store to serving failed",
 					zap.Stringer("store", store.GetMeta()),
@@ -1861,9 +1852,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 			log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
 		}
 	}
-	if c.isStorePrepared() {
-		c.progressManager.UpdateProgress(store, regionSize, threshold)
-	}
+	c.progressManager.UpdateProgress(store, regionSize, threshold)
 	return
 }
 

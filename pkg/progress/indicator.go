@@ -97,11 +97,11 @@ func newProgressIndicator(
 
 func (p *progressIndicator) adjustWindowLength(dur time.Duration) {
 	if dur < minSpeedCalculationWindow {
-		log.Warn("The window duration is too small, to ensure enough data to calculate progress, "+
+		log.Info("The window duration is too small, to ensure enough data to calculate progress, "+
 			"it will be reset to minSpeedCalculationWindow(10m). ", zap.Duration("duration", dur))
 		dur = minSpeedCalculationWindow
 	} else if dur > maxSpeedCalculationWindow {
-		log.Warn("The window duration is too large, it will be reset to maxSpeedCalculationWindow(2h). ",
+		log.Info("The window duration is too large, it will be reset to maxSpeedCalculationWindow(2h). ",
 			zap.Duration("duration", dur))
 		dur = maxSpeedCalculationWindow
 	}
