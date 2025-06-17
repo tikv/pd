@@ -26,17 +26,17 @@ type TestRequestInfo struct {
 	writeBytes  uint64
 	numReplicas int64
 	storeID     uint64
-	isCrossAZ   bool
+	accessType  AccessLocationType
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
-func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64, isCrossAZ bool) *TestRequestInfo {
+func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64, locationType AccessLocationType) *TestRequestInfo {
 	return &TestRequestInfo{
 		isWrite:     isWrite,
 		writeBytes:  writeBytes,
 		numReplicas: 1,
 		storeID:     storeID,
-		isCrossAZ:   isCrossAZ,
+		accessType:  locationType,
 	}
 }
 
@@ -65,9 +65,9 @@ func (tri *TestRequestInfo) RequestSize() uint64 {
 	return tri.writeBytes
 }
 
-// IsCrossAZ implements the IsCrossAZ interface.
-func (tri *TestRequestInfo) IsCrossAZ() bool {
-	return tri.isCrossAZ
+// AccessLocationType implements the AccessLocationType interface.
+func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
+	return tri.accessType
 }
 
 // TestResponseInfo is used to test the response info interface.

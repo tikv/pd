@@ -30,6 +30,19 @@ import (
 //   - WRU: write request unit
 type RequestUnit float64
 
+// AccessLocationType defines the network traffic type the request is sent.
+type AccessLocationType byte
+
+const (
+	// AccessUnknown means the access type is unknown because there is not "zone" lables in either
+	// the source or target instance, it is likely the cluster is not cross AZ deployed.
+	AccessUnknown AccessLocationType = iota
+	// AccessLocalZone means the source and target instance are in the same zone.
+	AccessLocalZone
+	// AccessCrossZone means the source and target instance are in differne zones.
+	AccessCrossZone
+)
+
 // RequestInfo is the interface of the request information provider. A request should be
 // able to tell whether it's a write request and if so, the written bytes would also be provided.
 type RequestInfo interface {
@@ -38,7 +51,7 @@ type RequestInfo interface {
 	ReplicaNumber() int64
 	StoreID() uint64
 	RequestSize() uint64
-	IsCrossAZ() bool
+	AccessLocationType() AccessLocationType
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
@@ -92,7 +105,7 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		// so we only add the base cost here.
 		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
 	}
-	if req.IsCrossAZ() {
+	if req.AccessLocationType() == AccessCrossZone {
 		if req.IsWrite() {
 			consumption.WriteCrossAzTrafficBytes += req.RequestSize()
 		} else {
@@ -112,7 +125,12 @@ func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req Re
 	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * float64(replicaNums)
 	// TODO: for a raft group with N replicas, we assume the cross AZ network traffic for raft replication
 	// is: writeBytes * (N - 1). This is not accurate, but the deviation should be small enough.
-	consumption.WriteCrossAzTrafficBytes += req.WriteBytes() * (replicaNums - 1)
+	//
+	// NOTE: if the access local type is "unknown", we don't count the write cross AZ traffic,
+	// as it's likely this cluster is not cross-AZ deployed.
+	if req.AccessLocationType() != AccessUnknown {
+		consumption.WriteCrossAzTrafficBytes += req.WriteBytes() * (replicaNums - 1)
+	}
 }
 
 // AfterKVRequest ...
@@ -149,7 +167,7 @@ func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res Resp
 }
 
 func calculateCrossAZTraffic(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
-	if req.IsCrossAZ() {
+	if req.AccessLocationType() == AccessCrossZone {
 		if req.IsWrite() {
 			consumption.WriteCrossAzTrafficBytes += res.ResponseSize()
 		} else {

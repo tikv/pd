@@ -88,6 +88,20 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 				isWrite:     true,
 				writeBytes:  100,
 				numReplicas: 3,
+				accessType:  AccessUnknown,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				succeed:   true,
+			},
+		},
+		// Write request local AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				accessType:  AccessLocalZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -100,7 +114,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 				isWrite:     true,
 				writeBytes:  100,
 				numReplicas: 3,
-				isCrossAZ:   true,
+				accessType:  AccessCrossZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -113,6 +127,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 				isWrite:     false,
 				writeBytes:  0,
 				numReplicas: 3,
+				accessType: AccessLocalZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -126,7 +141,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 				isWrite:     false,
 				writeBytes:  0,
 				numReplicas: 3,
-				isCrossAZ:   true,
+				accessType:  AccessCrossZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -145,7 +160,9 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		if testCase.req.IsWrite() {
 			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
-			re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
+			if testCase.req.AccessLocationType() != AccessUnknown {
+				re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
+			}
 		}
 		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
@@ -154,9 +171,9 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
-		if testCase.req.IsWrite() {
+		if testCase.req.IsWrite() && testCase.req.AccessLocationType() != AccessUnknown {
 			re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
-		} else if testCase.req.IsCrossAZ() {
+		} else if !testCase.req.IsWrite() && testCase.req.AccessLocationType() == AccessCrossZone {
 			re.Positive(expectedConsumption.ReadCrossAzTrafficBytes, caseNum)
 		} else {
 			re.Equal(expectedConsumption.ReadCrossAzTrafficBytes, uint64(0), caseNum)
@@ -392,7 +409,7 @@ func TestTryGetController(t *testing.T) {
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
-	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1, true), NewTestResponseInfo(1, time.Millisecond, true)
+	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1, AccessCrossZone), NewTestResponseInfo(1, time.Millisecond, true)
 	_, _, _, _, err = controller.OnRequestWait(ctx, "test-group", requestInfo)
 	re.NoError(err)
 	consumption, err := controller.OnResponse("test-group", requestInfo, responseInfo)
