@@ -127,7 +127,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 				isWrite:     false,
 				writeBytes:  0,
 				numReplicas: 3,
-				accessType: AccessLocalZone,
+				accessType:  AccessLocalZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
