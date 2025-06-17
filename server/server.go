@@ -179,6 +179,8 @@ type Server struct {
 	safePointV2Manager *gc.SafePointV2Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
+	// meta-service group manager
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -502,7 +504,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, s.cfg.Keyspace.MetaServiceGroups)
+	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager, s.metaServiceGroupManager)
 	if err != nil {
 		return err
 	}
@@ -939,6 +942,11 @@ func (s *Server) GetSafePointV1Manager() *gc.SafePointManager {
 // GetKeyspaceGroupManager returns the keyspace group manager of server.
 func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager
+}
+
+// GetMetaServiceGroupManager returns the etcd group manager of server.
+func (s *Server) GetMetaServiceGroupManager() *keyspace.MetaServiceGroupManager {
+	return s.metaServiceGroupManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.

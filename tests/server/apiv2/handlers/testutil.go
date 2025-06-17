@@ -23,6 +23,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -30,8 +31,9 @@ import (
 )
 
 const (
-	keyspacesPrefix      = "/pd/api/v2/keyspaces"
-	keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
+	keyspacesPrefix         = "/pd/api/v2/keyspaces"
+	keyspaceGroupsPrefix    = "/pd/api/v2/tso/keyspace-groups"
+	metaServiceGroupsPrefix = "/pd/api/v2/meta-service-groups"
 )
 
 func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, token, limit string) *handlers.LoadAllKeyspacesResponse {
@@ -95,7 +97,7 @@ func MustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 func checkCreateRequest(re *require.Assertions, request *handlers.CreateKeyspaceParams, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(request.Name, meta.Name)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.Config, meta.Config)
+	re.Equal(request.Config, keyspace.IgnoreMetaServiceGroup(meta.Config))
 }
 
 func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) *keyspacepb.KeyspaceMeta {
@@ -269,4 +271,42 @@ func MustMergeKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+func mustLoadMetaServiceGroups(re *require.Assertions, server *tests.TestServer) []*handlers.MetaServiceGroupStatus {
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+metaServiceGroupsPrefix, http.NoBody)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(data, &groups))
+	return groups
+}
+
+func mustAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, request []*handlers.AddMetaServiceGroupRequest) []*handlers.MetaServiceGroupStatus {
+	code, groups := tryAddMetaServiceGroups(re, server, request)
+	re.Equal(http.StatusOK, code)
+	return groups
+}
+
+func tryAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, request []*handlers.AddMetaServiceGroupRequest) (int, []*handlers.MetaServiceGroupStatus) {
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, nil
+	}
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(data, &groups))
+	return resp.StatusCode, groups
 }

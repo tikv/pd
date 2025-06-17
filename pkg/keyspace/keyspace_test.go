@@ -59,6 +59,7 @@ type mockConfig struct {
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
 	EnableGlobalSafePointV2  bool
+	MetaServiceGroups        map[string]string
 }
 
 func (m *mockConfig) SetEnableGlobalSafePointV2(isEnable bool) {
@@ -89,14 +90,23 @@ func (m *mockConfig) GetDisableRawKVRegionSplit() bool {
 	return m.DisableRawKVRegionSplit
 }
 
+func (m *mockConfig) GetMetaServiceGroups() map[string]string {
+	return m.MetaServiceGroups
+}
+
+func (m *mockConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
+	m.MetaServiceGroups = metaServiceGroups
+}
+
 func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	egm := NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
 	var err error
-	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
+	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, egm)
 	re.NoError(err)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
@@ -354,7 +364,9 @@ func checkCreateRequest(re *require.Assertions, request *CreateKeyspaceRequest, 
 	re.Equal(request.CreateTime, meta.GetCreatedAt())
 	re.Equal(request.CreateTime, meta.GetStateChangedAt())
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
-	re.Equal(request.Config, meta.GetConfig())
+	re.Equal(IgnoreMetaServiceGroup(request.Config), IgnoreMetaServiceGroup(meta.GetConfig()))
+	re.Contains(meta.GetConfig(), MetaServiceGroupIDKey)
+	re.Contains(meta.GetConfig(), MetaServiceGroupAddressesKey)
 }
 
 // checkMutations verifies that performing mutations on old config would result in new config.
@@ -372,7 +384,7 @@ func checkMutations(re *require.Assertions, oldConfig, newConfig map[string]stri
 			delete(expected, mutation.Key)
 		}
 	}
-	re.Equal(expected, newConfig)
+	re.Equal(IgnoreMetaServiceGroup(expected), IgnoreMetaServiceGroup(newConfig))
 }
 
 // updateKeyspaceConfig sequentially updates given keyspace's entry.

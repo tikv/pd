@@ -32,7 +32,7 @@ import (
 const (
 	spaceIDMax = ^uint32(0) >> 8 // 16777215 (Uint24Max) is the maximum value of spaceID.
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
-	// Name must be non-empty and contains only alphanumerical, `_` and `-`.
+	// ID must be non-empty and contains only alphanumerical, `_` and `-`.
 	namePattern = "^[-A-Za-z0-9_]+$"
 )
 
@@ -90,6 +90,9 @@ var (
 
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
 	ErrUnsupportedOperationInKeyspace = errors.New("it's a unsupported operation")
+
+	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
+	errUnknownMetaServiceGroup      = errors.New("unknown meta-service group")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
@@ -315,4 +318,16 @@ func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
 		return item.(*endpoint.KeyspaceGroup)
 	}
 	return nil
+}
+
+// IgnoreMetaServiceGroup removes the meta-service group related fields from the given map.
+// Exported for testing.
+func IgnoreMetaServiceGroup(m map[string]string) map[string]string {
+	c := make(map[string]string, len(m))
+	for k, v := range m {
+		if k != MetaServiceGroupIDKey && k != MetaServiceGroupAddressesKey {
+			c[k] = v
+		}
+	}
+	return c
 }

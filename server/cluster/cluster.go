@@ -131,6 +131,7 @@ type Server interface {
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
+	GetMetaServiceGroupManager() *keyspace.MetaServiceGroupManager
 	IsAPIServiceMode() bool
 	GetSafePointV2Manager() *gc.SafePointV2Manager
 }

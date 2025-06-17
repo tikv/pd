@@ -45,6 +45,7 @@ type Storage interface {
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
+	endpoint.MetaServiceGroupStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.

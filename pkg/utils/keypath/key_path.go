@@ -86,6 +86,9 @@ const (
 
 	// NativeBRServiceID is CSE native br service id.
 	NativeBRServiceID = "native_br"
+
+	metaServiceGroupPrefix = "meta_service_groups"
+	assignmentCountPath    = "assignment_count"
 )
 
 // PDRootPath returns the PD root path.
@@ -477,4 +480,10 @@ func ServicePath(serviceName string) string {
 // TSOPath returns the path to store TSO addresses.
 func TSOPath() string {
 	return ServicePath("tso")
+}
+
+// MetaServiceGroupAssignmentCountPath returns the path for the meta service group assignment count for the given etcd group:
+// meta_service_groups/{meta_service_group_id}/assignment_count in /pd/{cluster_id}/meta_service_groups/{meta_service_group_id}/assignment_count
+func MetaServiceGroupAssignmentCountPath(id string) string {
+	return path.Join(metaServiceGroupPrefix, id, assignmentCountPath)
 }

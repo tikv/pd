@@ -64,6 +64,10 @@ const (
 	SafePointVersion = "safe_point_version"
 	// KeyspaceGlobalSafePointVersionV2 is the safe point v2 value for keyspace safe point version.
 	KeyspaceGlobalSafePointVersionV2 = "v2"
+	// MetaServiceGroupIDKey is the key for meta-service group id in keyspace config.
+	MetaServiceGroupIDKey = "meta_service_group_id"
+	// MetaServiceGroupAddressesKey is the key for meta-service group addresses in keyspace config.
+	MetaServiceGroupAddressesKey = "meta_service_group_addrs"
 )
 
 // Config is the interface for keyspace config.
@@ -75,6 +79,8 @@ type Config interface {
 	GetCheckRegionSplitInterval() time.Duration
 	GetEnableGlobalSafePointV2() bool
 	SetEnableGlobalSafePointV2(isEnable bool)
+	SetMetaServiceGroups(map[string]string)
+	GetMetaServiceGroups() map[string]string
 }
 
 // Manager manages keyspace related data.
@@ -94,6 +100,8 @@ type Manager struct {
 	config Config
 	// kgm is the keyspace group manager of the server.
 	kgm *GroupManager
+	// mgm is the meta-service group manager of the server.
+	mgm *MetaServiceGroupManager
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 }
@@ -116,6 +124,7 @@ func NewKeyspaceManager(
 	idAllocator id.Allocator,
 	config Config,
 	kgm *GroupManager,
+	mgm *MetaServiceGroupManager,
 ) (*Manager, error) {
 	manager := &Manager{
 		ctx: ctx,
@@ -130,6 +139,7 @@ func NewKeyspaceManager(
 		cluster:           cluster,
 		config:            config,
 		kgm:               kgm,
+		mgm:               mgm,
 		nextPatrolStartID: constant.DefaultKeyspaceID,
 	}
 	if err := manager.SetGlobalSafePointV2(); err != nil {
@@ -228,6 +238,9 @@ func (manager *Manager) Bootstrap() error {
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) error {
 	manager.config = cfg
+	if manager.mgm != nil {
+		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
+	}
 	return manager.SetGlobalSafePointV2()
 }
 
@@ -261,6 +274,15 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		}
 		request.Config[SafePointVersion] = KeyspaceGlobalSafePointVersionV2
 	}
+	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	if assignToMetaServiceGroup {
+		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
+		if err != nil {
+			return nil, err
+		}
+		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
+	}
+
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
@@ -313,6 +335,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	}
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
+	}
+	if assignToMetaServiceGroup {
+		manager.mgm.AttachEndpoints(keyspace.GetConfig())
 	}
 	log.Info("[keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
@@ -460,6 +485,9 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		}
 		return nil
 	})
+	if manager.mgm != nil {
+		manager.mgm.AttachEndpoints(meta.GetConfig())
+	}
 	return meta, err
 }
 
@@ -480,6 +508,9 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		}
 		return nil
 	})
+	if manager.mgm != nil {
+		manager.mgm.AttachEndpoints(meta.GetConfig())
+	}
 	return meta, err
 }
 
@@ -510,7 +541,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		// First get KeyspaceID from Name.
+		// First get KeyspaceID from ID.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
 			return err
@@ -561,6 +592,14 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 				return err
 			}
 		}
+		// If the assigned meta-service group changed, need to update the meta-service group assignment count.
+		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
+		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
+		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
+			if err := manager.mgm.UpdateAssignment(oldMetaServiceGroup, newMetaServiceGroup); err != nil {
+				return err
+			}
+		}
 		// Save the updated keyspace meta.
 		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
 			if needUpdate {
@@ -579,6 +618,9 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 			zap.Error(err),
 		)
 		return nil, err
+	}
+	if manager.mgm != nil {
+		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
 	log.Info("[keyspace] keyspace config updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
@@ -600,7 +642,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		// First get KeyspaceID from Name.
+		// First get KeyspaceID from ID.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
 			return err
@@ -717,6 +759,11 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 	})
 	if err != nil {
 		return nil, err
+	}
+	if manager.mgm != nil {
+		for keyspace := range keyspaces {
+			manager.mgm.AttachEndpoints(keyspaces[keyspace].GetConfig())
+		}
 	}
 	return keyspaces, nil
 }

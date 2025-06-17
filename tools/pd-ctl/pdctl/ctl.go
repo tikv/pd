@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	shellwords "github.com/mattn/go-shellwords"
+	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -73,6 +73,7 @@ func GetRootCmd() *cobra.Command {
 		command.NewKeyspaceGroupCommand(),
 		command.NewKeyspaceCommand(),
 		command.NewResourceManagerCommand(),
+		command.NewMetaServiceGroupCommand(),
 	)
 
 	return rootCmd

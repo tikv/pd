@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -151,7 +152,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
 	for i := range count {
 		createRequest := &handlers.CreateKeyspaceParams{
-			Name:   fmt.Sprintf("test_keyspace_%d", i),
+			Name:   fmt.Sprintf("test_keyspace_%d_%d", time.Now().UnixNano(), i),
 			Config: testConfig,
 		}
 		resultMeta[i] = MustCreateKeyspace(re, server, createRequest)
