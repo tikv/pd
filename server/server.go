@@ -176,6 +176,8 @@ type Server struct {
 	keyspaceManager *keyspace.Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
+	// meta-service group manager
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager
 	// metering writer
 	meteringWriter *metering.Writer
 	// for basicCluster operation.
@@ -528,7 +530,16 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, s.cfg.Keyspace.MetaServiceGroups)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(
+		s.ctx,
+		s.storage,
+		s.cluster,
+		keyspaceIDAllocator,
+		&s.cfg.Keyspace,
+		s.keyspaceGroupManager,
+		s.metaServiceGroupManager,
+	)
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
 		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
@@ -970,6 +981,11 @@ func (s *Server) SetKeyspaceManager(keyspaceManager *keyspace.Manager) {
 // GetKeyspaceGroupManager returns the keyspace group manager of server.
 func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager
+}
+
+// GetMetaServiceGroupManager returns the meta-service group manager of server.
+func (s *Server) GetMetaServiceGroupManager() *keyspace.MetaServiceGroupManager {
+	return s.metaServiceGroupManager
 }
 
 // SetKeyspaceGroupManager sets the keyspace group manager of server.

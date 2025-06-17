@@ -68,6 +68,7 @@ type mockConfig struct {
 	WaitRegionSplit          bool
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
+	MetaServiceGroups        map[string]string
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -86,13 +87,21 @@ func (m *mockConfig) GetCheckRegionSplitInterval() time.Duration {
 	return m.CheckRegionSplitInterval.Duration
 }
 
+func (m *mockConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
+	m.MetaServiceGroups = metaServiceGroups
+}
+
+func (m *mockConfig) GetMetaServiceGroups() map[string]string {
+	return m.MetaServiceGroups
+}
+
 func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
+	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
 }
@@ -947,7 +956,7 @@ func TestIterateKeyspaces(t *testing.T) {
 		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 		allocator := mockid.NewIDAllocator()
 		kgm := NewKeyspaceGroupManager(ctx, store, nil)
-		manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm)
+		manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
 
 		re.NoError(kgm.Bootstrap(ctx))
 		re.NoError(manager.Bootstrap())
