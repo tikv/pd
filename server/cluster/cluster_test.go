@@ -580,6 +580,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 
 	// Bury the other store.
 	re.NoError(cluster.RemoveStore(3, true))
+	cluster.UpdateAllStoreStatus()
 	cluster.checkStores()
 	re.Equal("5.0.0", cluster.GetClusterVersion())
 }
@@ -3897,6 +3898,7 @@ func TestConcurrentStoreStats(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			cluster.UpdateAllStoreStatus()
 			cluster.checkStores()
 		}()
 		re.NoError(cluster.RemoveStore(storeID, false))

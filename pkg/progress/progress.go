@@ -161,6 +161,9 @@ func (m *Manager) UpdateProgress(
 	store *core.StoreInfo,
 	currentRegionSize, threshold float64,
 ) {
+	if m == nil || store == nil {
+		return
+	}
 	p := m.GetProgressByStoreID(store.GetID())
 	if p != nil && ((p.Action == preparingAction && !store.IsPreparing()) ||
 		(p.Action == removingAction && !store.IsRemoving())) {
