@@ -178,7 +178,11 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 	groupName := c.Param("name")
 	group, err := s.manager.GetResourceGroup(keyspaceID, groupName, withStats)
 	if err != nil {
-		c.String(http.StatusNotFound, err.Error())
+		if errs.ErrResourceGroupNotExists.Equal(err) || errs.ErrKeyspaceNotExists.Equal(err) {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	if group == nil {
@@ -208,7 +212,11 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	groups, err := s.manager.GetResourceGroupList(keyspaceID, withStats)
 	if err != nil {
-		c.String(http.StatusNotFound, err.Error())
+		if errs.ErrKeyspaceNotExists.Equal(err) {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.IndentedJSON(http.StatusOK, groups)
@@ -231,8 +239,14 @@ func (s *Service) deleteResourceGroup(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	if err := s.manager.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
-		c.String(http.StatusNotFound, err.Error())
+	groupName := c.Param("name")
+	err = s.manager.DeleteResourceGroup(keyspaceID, groupName)
+	if err != nil {
+		if errs.ErrResourceGroupNotExists.Equal(err) || errs.ErrKeyspaceNotExists.Equal(err) {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.String(http.StatusOK, "Success!")

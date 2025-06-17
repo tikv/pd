@@ -1683,9 +1683,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.Equal(rg.RUStats, testConsumption)
 
 	// Delete resource group without keyspace id
-	resp, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
-	re.NoError(err)
-	re.Contains(resp, "Success!")
+	_, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
+	re.Error(err)
+	re.EqualError(err, "rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the keyspace_test resource group does not exist")
 	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
 	re.NotNil(rg)
