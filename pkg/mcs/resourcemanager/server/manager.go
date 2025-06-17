@@ -133,7 +133,7 @@ func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
 // SetKeyspaceServiceLimit sets the service limit of the keyspace.
 func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float64) {
 	// If the keyspace is not found, create a new keyspace resource group manager.
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimiter(serviceLimit)
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimit(serviceLimit)
 }
 
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
@@ -221,6 +221,12 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 			log.Error("failed to set resource group state",
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name), zap.Error(err))
 		}
+	}); err != nil {
+		return err
+	}
+	// Load service limits from the storage.
+	if err := m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimit(serviceLimit)
 	}); err != nil {
 		return err
 	}
