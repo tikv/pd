@@ -119,8 +119,8 @@ func RegionsReplicatedByKeyRange(keyRange *KeyRange) string {
 		regionsReplicated, startKeyStr, endKeyStr)
 }
 
-// RegionsSiblingsByID returns the path of PD HTTP API to get sibling regions by ID.
-func RegionsSiblingsByID(regionID uint64) string {
+// RegionSiblingsByID returns the path of PD HTTP API to get sibling regions by ID.
+func RegionSiblingsByID(regionID uint64) string {
 	return fmt.Sprintf("%s/%d", regionsSiblings, regionID)
 }
 

@@ -44,7 +44,7 @@ type Client interface {
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetEmptyRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
-	GetRegionsSiblingByID(context.Context, uint64) (*RegionsInfo, error)
+	GetRegionSiblingsByID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
@@ -277,12 +277,12 @@ func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRan
 	return state, nil
 }
 
-// GetRegionsSiblingByID gets the regions sibling info by ID.
-func (c *client) GetRegionsSiblingByID(ctx context.Context, regionID uint64) (*RegionsInfo, error) {
+// GetRegionSiblingsByID gets the regions sibling info by ID.
+func (c *client) GetRegionSiblingsByID(ctx context.Context, regionID uint64) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName(getRegionsSiblingsByID).
-		WithURI(RegionsSiblingsByID(regionID)).
+		WithName(getRegionSiblingsByID).
+		WithURI(RegionSiblingsByID(regionID)).
 		WithMethod(http.MethodGet).
 		WithResp(&regions))
 	if err != nil {
