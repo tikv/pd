@@ -56,8 +56,8 @@ func (tri *TestRequestInfo) StoreID() uint64 {
 }
 
 // ReplicaNumber implements the RequestInfo interface.
-func (*TestRequestInfo) ReplicaNumber() int64 {
-	return 1
+func (tri *TestRequestInfo) ReplicaNumber() int64 {
+	return tri.numReplicas
 }
 
 // RequestSize implements the RequestSize interface.
