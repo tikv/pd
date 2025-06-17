@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/util/codec"
 
 	pd "github.com/tikv/pd/client"
@@ -229,7 +230,11 @@ func processSpecialRegions(ctx context.Context, cmd *cobra.Command, specialRegio
 // findMatchingSiblingWithRetry contains the complex retry logic for finding a stable sibling.
 func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, region *router.Region) (*http.RegionInfo, error) {
 	regionID := region.Meta.GetId()
-	ticker := time.NewTicker(mergeRetryDelay)
+	delay := mergeRetryDelay
+	failpoint.Inject("fastCheckRegion", func() {
+		delay = time.Millisecond * 100
+	})
+	ticker := time.NewTicker(delay)
 	defer ticker.Stop()
 	for i := range maxMergeRetries {
 		siblingRegions, err := PDCli.GetRegionSiblingsByID(ctx, regionID)

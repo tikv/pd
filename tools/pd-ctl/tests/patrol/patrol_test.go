@@ -22,10 +22,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
@@ -41,11 +41,7 @@ func TestPatrolTestSuite(t *testing.T) {
 }
 
 func (suite *patrolTestSuite) SetupSuite() {
-	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, _ string) {
-			conf.Replication.MaxReplicas = 2
-		},
-	)
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *patrolTestSuite) TearDownSuite() {
@@ -91,12 +87,14 @@ func (suite *patrolTestSuite) checkPatrol(cluster *pdTests.TestCluster) {
 
 	specialKey := "7480000000000AE1FFAB5F72F800000000FF052EEA0100000000FB"
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte(""), []byte(specialKey), core.SetPeers([]*metapb.Peer{
-		{Id: 1, StoreId: 1},
-		{Id: 2, StoreId: 2},
+		{Id: 10, StoreId: 1},
+		{Id: 11, StoreId: 2},
+		{Id: 12, StoreId: 3},
 	}))
 	pdTests.MustPutRegion(re, cluster, 3, 2, []byte(specialKey), []byte(""), core.SetPeers([]*metapb.Peer{
-		{Id: 3, StoreId: 1},
-		{Id: 4, StoreId: 2},
+		{Id: 13, StoreId: 1},
+		{Id: 14, StoreId: 2},
+		{Id: 15, StoreId: 3},
 	}))
 
 	// Test Patrol
@@ -142,7 +140,51 @@ func (suite *patrolTestSuite) checkPatrol(cluster *pdTests.TestCluster) {
 	re.Contains(operators[1], "admin-merge-region {merge: region 1 to 3}")
 
 	// Test limit
-	args = []string{"-u", pdAddr, "patrol", "limit", "1"}
+	args = []string{"-u", pdAddr, "patrol", "--limit", "1"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+}
+
+func (suite *patrolTestSuite) TestPatrolWithHollowRegion() {
+	// This tool is designed to run in a non-microservice environment.
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrolWithHollowRegion)
+}
+
+// checkPatrolWithHollowRegion tests the case where the next region's start key does not match the current region's end key.
+func (suite *patrolTestSuite) checkPatrolWithHollowRegion(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	failpoint.Enable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion", "return(true)")
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion")
+	}()
+
+	// Region 101: [ "", "key_A" )  <- This is the special region.
+	// HOLLOW REGION GAP: [ "key_A", "key_C" )
+	// Region 103: [ "key_C", "" )  <- This is the non-adjacent sibling.
+	// Define two keys that are NOT adjacent.
+	specialKeyA := "7480000000000AE1FFAB5F72F800000000FF052EEA0100000000FB"
+	nonAdjacentKeyC := "7480000000000AE1FFAB5F72F800000000FF052EEA0200000000FB"
+
+	specialKeyABytes, err := hex.DecodeString(specialKeyA)
+	re.NoError(err)
+	nonAdjacentKeyCBytes, err := hex.DecodeString(nonAdjacentKeyC)
+	re.NoError(err)
+
+	// Put the special region.
+	pdTests.MustPutRegion(re, cluster, 101, 1, []byte(""), specialKeyABytes, core.SetPeers([]*metapb.Peer{
+		{Id: 101, StoreId: 1},
+	}))
+	// Put the non-adjacent sibling region, creating a gap.
+	pdTests.MustPutRegion(re, cluster, 103, 1, nonAdjacentKeyCBytes, []byte(""), core.SetPeers([]*metapb.Peer{
+		{Id: 105, StoreId: 2},
+	}))
+
+	// Execute patrol with auto-merge enabled.
+	// It should find region 101, try to merge it, but fail after retries
+	args := []string{"-u", pdAddr, "patrol", "--enable-auto-merge"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "merge failed: no matching sibling found for region 101")
 }
