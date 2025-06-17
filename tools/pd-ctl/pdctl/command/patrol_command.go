@@ -43,8 +43,8 @@ const (
 	statusMergeFailed      = "merge_failed"
 	statusMergeSkipped     = "merge_skipped"
 	statusMergeRequestSent = "merge_request_sent"
-	maxMergeRetries        = 5
-	mergeRetryDelay        = 3 * time.Second
+	maxMergeRetries        = 10
+	mergeRetryDelay        = 6 * time.Second
 )
 
 // PatrolResult defines the structure for JSON output of each processed region.
@@ -88,7 +88,7 @@ func patrolCommandFunc(cmd *cobra.Command, _ []string) {
 		return
 	}
 	addr := getEndpoints(cmd)
-	cli, err := pd.NewClientWithContext(ctx, caller.TestComponent, addr, opts,
+	cli, err := pd.NewClientWithContext(ctx, caller.PDCtlComponent, addr, opts,
 		opt.WithGRPCDialOptions(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize))))
 	if err != nil {
 		cmd.Printf("Failed to create pd client: %v\n", err)
@@ -241,7 +241,11 @@ func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, regio
 		}
 
 		nextRegion := siblingRegions.Regions[siblingRegions.Count-1]
-		if bytes.Equal(region.Meta.GetEndKey(), []byte(nextRegion.GetStartKey())) {
+		nextRegionStartKeyBytes, err := hex.DecodeString(nextRegion.GetStartKey())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode sibling region's start key for region %d: %w", regionID, err)
+		}
+		if bytes.Equal(region.Meta.GetEndKey(), nextRegionStartKeyBytes) {
 			return &nextRegion, nil // Success
 		}
 
@@ -259,7 +263,7 @@ func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, regio
 		}
 	}
 
-	return nil, fmt.Errorf("merge failed: sibling topology for region %d was not stable after %d retries", region.Meta.GetId(), maxMergeRetries)
+	return nil, fmt.Errorf("merge failed: no matching sibling found for region %d", regionID)
 }
 
 func extractTableID(region *router.Region) (int64, error) {

@@ -129,7 +129,7 @@ func (suite *patrolTestSuite) checkPatrol(cluster *pdTests.TestCluster) {
 	result = results[0].(map[string]any)
 	re.Equal(1, int(result["region_id"].(float64)))
 	re.Equal("merge_request_sent", result["status"].(string))
-	re.Equal("Merge request sent for region 1 and region 3", result["description"].(string))
+	re.Equal("merge request sent for region 1 and region 3", result["description"].(string))
 
 	args = []string{"-u", pdAddr, "operator", "show"}
 	output, err = tests.ExecuteCommand(cmd, args...)
