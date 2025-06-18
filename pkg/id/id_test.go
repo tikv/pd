@@ -77,7 +77,7 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 	}
 }
 
-// TestIDAllocationEndValue tests the start value for different label allocators.
+// TestIDAllocationEndValue tests if keyspace allocator hits ErrIDExhausted when trying to allocate into reserved range.
 func TestIDAllocationEndValue(t *testing.T) {
 	re := require.New(t)
 	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)

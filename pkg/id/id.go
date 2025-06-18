@@ -108,7 +108,7 @@ func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	defer alloc.mu.Unlock()
 
 	for range count {
-		if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
+		if alloc.checkReservedID() {
 			// Check if the current base is already at or beyond the start of the reserved range.
 			// The last allocatable ID is ReservedKeyspaceIDStart - 1.
 			// So, if alloc.base is >= ReservedKeyspaceIDStart - 1, it's exhausted.
@@ -135,7 +135,7 @@ func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	defer alloc.mu.Unlock()
 
 	// Ensure the newBase doesn't fall into the reserved range from the end.
-	if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
+	if alloc.checkReservedID() {
 		if newBase >= ReservedKeyspaceIDStart {
 			return errs.ErrIDExhausted.FastGenByArgs()
 		}
@@ -193,7 +193,7 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	}
 
 	// The maximum value 'end' can take is ReservedKeyspaceIDStart - 1.
-	if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
+	if alloc.checkReservedID() {
 		if end+alloc.step >= ReservedKeyspaceIDStart { // Use >= because ReservedKeyspaceIDStart itself is reserved.
 			end = ReservedKeyspaceIDStart - 1
 		} else {
@@ -221,4 +221,8 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	log.Info("idAllocator allocates a new id", zap.Uint64("new-end", end), zap.Uint64("new-base", alloc.base),
 		zap.String("label", string(alloc.label)), zap.Bool("check-curr-end", checkCurrEnd))
 	return nil
+}
+
+func (alloc *allocatorImpl) checkReservedID() bool {
+	return kerneltype.IsNextGen() && alloc.label == KeyspaceLabel
 }
