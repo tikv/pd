@@ -637,7 +637,7 @@ func buildSplitKeyspaces(
 			if keyspace == constant.DefaultKeyspaceID {
 				return nil, nil, errs.ErrModifyDefaultKeyspace
 			}
-			if kerneltype.IsNextGen() && keyspace == constant.SystemKeyspaceID {
+			if checkReservedID(keyspace) {
 				return nil, nil, errs.ErrModifySystemKeyspace
 			}
 			if _, ok := oldKeyspaceMap[keyspace]; !ok {
@@ -676,7 +676,7 @@ func buildSplitKeyspaces(
 			// keyspace in the default keyspace group.
 			continue
 		}
-		if kerneltype.IsNextGen() && keyspace == constant.SystemKeyspaceID {
+		if checkReservedID(keyspace) {
 			// The source keyspace group must be the default keyspace group and we always keep
 			// the system keyspace in the default keyspace group.
 			continue

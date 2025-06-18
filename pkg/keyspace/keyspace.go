@@ -731,7 +731,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		)
 		return nil, errs.ErrModifyDefaultKeyspace
 	}
-	if kerneltype.IsNextGen() && id == constant.SystemKeyspaceID {
+	if checkReservedID(id) {
 		log.Warn("[keyspace] failed to update keyspace config",
 			errs.ZapError(errs.ErrModifySystemKeyspace),
 		)
