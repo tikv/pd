@@ -405,7 +405,7 @@ func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 	if err != nil {
 		return err
 	}
-	etcdServerID := uint64(etcd.Server.ID())
+	etcdServerID := uint64(etcd.Server.MemberID())
 	for _, m := range etcdMembers.Members {
 		if etcdServerID == m.ID {
 			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
