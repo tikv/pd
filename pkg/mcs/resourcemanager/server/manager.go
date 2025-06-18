@@ -355,12 +355,12 @@ func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*Re
 	return krgm.getResourceGroupList(withStats, true), nil
 }
 
-func (m *Manager) getRUTracker(keyspaceID uint32, name string) (*ruTracker, error) {
-	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
-	if err != nil {
-		return nil, err
+func (m *Manager) getRUTracker(keyspaceID uint32, name string) *ruTracker {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		return nil
 	}
-	return krgm.getOrCreateRUTracker(name), nil
+	return krgm.getOrCreateRUTracker(name)
 }
 
 func (m *Manager) persistLoop(ctx context.Context) {
@@ -520,13 +520,8 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					zap.String("resource-group-name", resourceGroupName),
 					zap.Error(err))
 			}
-			if rt, err := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
+			if rt := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
 				rt.sample(now, consumptionInfo.RRU+consumptionInfo.WRU, sinceLastRecord)
-			} else {
-				log.Error("failed to get RU tracker",
-					zap.Uint32("keyspace-id", keyspaceID),
-					zap.String("resource-group-name", resourceGroupName),
-					zap.Error(err))
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
