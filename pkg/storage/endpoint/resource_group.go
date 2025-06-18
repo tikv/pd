@@ -15,6 +15,9 @@
 package endpoint
 
 import (
+	"encoding/json"
+	"strconv"
+
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -34,6 +37,9 @@ type ResourceGroupStorage interface {
 	DeleteResourceGroupStates(keyspaceID uint32, name string) error
 	SaveControllerConfig(config any) error
 	LoadControllerConfig() (string, error)
+	LoadServiceLimit(keyspaceID uint32) (float64, error)
+	SaveServiceLimit(keyspaceID uint32, serviceLimit float64) error
+	LoadServiceLimits(f func(keyspaceID uint32, serviceLimit float64)) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
@@ -104,4 +110,37 @@ func (se *StorageEndpoint) SaveControllerConfig(config any) error {
 // LoadControllerConfig loads the resource controller config from storage.
 func (se *StorageEndpoint) LoadControllerConfig() (string, error) {
 	return se.Load(keypath.ControllerConfigPath())
+}
+
+// LoadServiceLimit loads the service limit for the given keyspace.
+func (se *StorageEndpoint) LoadServiceLimit(keyspaceID uint32) (float64, error) {
+	value, err := se.Load(keypath.KeyspaceServiceLimitPath(keyspaceID))
+	if err != nil || value == "" {
+		return 0, err
+	}
+	return loadJSON[float64](se, keypath.KeyspaceServiceLimitPath(keyspaceID))
+}
+
+// SaveServiceLimit stores the service limit for the given keyspace.
+func (se *StorageEndpoint) SaveServiceLimit(keyspaceID uint32, serviceLimit float64) error {
+	return se.saveJSON(keypath.KeyspaceServiceLimitPath(keyspaceID), serviceLimit)
+}
+
+// LoadServiceLimits loads all service limits from storage.
+func (se *StorageEndpoint) LoadServiceLimits(f func(keyspaceID uint32, serviceLimit float64)) error {
+	return se.loadRangeByPrefix(keypath.KeyspaceServiceLimitPrefix(), func(key, value string) {
+		keyspaceID, err := strconv.ParseUint(key, 10, 32)
+		if err != nil {
+			log.Error("failed to parse the keyspace ID from service limit path",
+				zap.String("key", key), zap.Error(err))
+			return
+		}
+		var serviceLimit float64
+		if err := json.Unmarshal([]byte(value), &serviceLimit); err != nil {
+			log.Error("failed to parse service limit value",
+				zap.Uint32("keyspace-id", uint32(keyspaceID)), zap.String("value", value), zap.Error(err))
+			return
+		}
+		f(uint32(keyspaceID), serviceLimit)
+	})
 }

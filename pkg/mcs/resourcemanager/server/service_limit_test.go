@@ -21,35 +21,72 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage"
 )
 
 func TestNewServiceLimiter(t *testing.T) {
 	re := require.New(t)
 
 	// Test creating a service limiter with positive limit
-	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	re.NotNil(limiter)
 	re.Equal(100.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
 
 	// Test creating a service limiter with zero limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0, nil)
 	re.NotNil(limiter)
 	re.Equal(0.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
 
 	// Test creating a service limiter with negative limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, -10.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, -10.0, nil)
 	re.NotNil(limiter)
 	re.Equal(0.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
+}
+
+func TestServiceLimiterPersistence(t *testing.T) {
+	re := require.New(t)
+
+	// Create a storage backend for testing
+	storage := storage.NewStorageWithMemoryBackend()
+
+	// Test persisting service limit
+	limiter := newServiceLimiter(1, 0.0, storage)
+	limiter.setServiceLimit(100.5)
+
+	// Verify the service limit was persisted
+	loadedLimit, err := storage.LoadServiceLimit(1)
+	re.NoError(err)
+	re.Equal(100.5, loadedLimit)
+
+	// Test updating the service limit
+	limiter.setServiceLimit(200.5)
+	loadedLimit, err = storage.LoadServiceLimit(1)
+	re.NoError(err)
+	re.Equal(200.5, loadedLimit)
+
+	// Test loading non-existent service limit
+	loadedLimit, err = storage.LoadServiceLimit(999)
+	re.NoError(err)            // No error should be returned for non-existent limit
+	re.Equal(0.0, loadedLimit) // Should return 0 for non-existent limit
+
+	// Test loading service limits from storage
+	for _, keyspaceID := range []uint32{1, 2, 3} {
+		storage.SaveServiceLimit(keyspaceID, float64(keyspaceID)*100.0)
+	}
+	err = storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+		re.Equal(float64(keyspaceID)*100.0, serviceLimit)
+	})
+	re.NoError(err)
 }
 
 func TestRefillTokensLocked(t *testing.T) {
 	re := require.New(t)
 
 	// Test refill with positive service limit
-	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	baseTime := time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 50.0
@@ -101,13 +138,13 @@ func TestApplyServiceLimit(t *testing.T) {
 	re.Equal(50.0, tokens)
 
 	// Test with zero service limit (no limit)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0, nil)
 	now := time.Now()
 	tokens = limiter.applyServiceLimit(now, 50.0)
 	re.Equal(50.0, tokens)
 
 	// Test request within available tokens (need to set available tokens first)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	limiter.AvailableTokens = 100.0 // Manually set available tokens
 	limiter.LastUpdate = now
 	tokens = limiter.applyServiceLimit(now, 50.0)
@@ -115,7 +152,7 @@ func TestApplyServiceLimit(t *testing.T) {
 	re.Equal(50.0, limiter.AvailableTokens) // 100 - 50 = 50
 
 	// Test request exactly equal to available tokens
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	limiter.AvailableTokens = 100.0 // Manually set available tokens
 	limiter.LastUpdate = now
 	tokens = limiter.applyServiceLimit(now, 100.0)
@@ -123,7 +160,7 @@ func TestApplyServiceLimit(t *testing.T) {
 	re.Equal(0.0, limiter.AvailableTokens)
 
 	// Test request exceeding available tokens
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	limiter.LastUpdate = now
 	limiter.AvailableTokens = 30.0
 	tokens = limiter.applyServiceLimit(now, 80.0)
@@ -135,7 +172,7 @@ func TestApplyServiceLimitWithRefill(t *testing.T) {
 	re := require.New(t)
 
 	// Test that refill happens before applying limit
-	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	baseTime := time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 20.0
@@ -148,7 +185,7 @@ func TestApplyServiceLimitWithRefill(t *testing.T) {
 	re.Equal(futureTime, limiter.LastUpdate)
 
 	// Test partial refill scenario
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 10.0
 
@@ -163,7 +200,7 @@ func TestServiceLimiterEdgeCases(t *testing.T) {
 	re := require.New(t)
 
 	// Test with very small service limit
-	limiter := newServiceLimiter(constant.NullKeyspaceID, 0.1)
+	limiter := newServiceLimiter(constant.NullKeyspaceID, 0.1, nil)
 	limiter.AvailableTokens = 0.1   // Manually set available tokens
 	limiter.LastUpdate = time.Now() // Set LastUpdate to current time to avoid refill
 	now := time.Now()
@@ -171,20 +208,20 @@ func TestServiceLimiterEdgeCases(t *testing.T) {
 	re.InDelta(0.1, tokens, 0.001) // Use InDelta to handle floating point precision
 
 	// Test with very large service limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 1000000.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 1000000.0, nil)
 	limiter.AvailableTokens = 1000000.0 // Manually set available tokens
 	tokens = limiter.applyServiceLimit(now, 500000.0)
 	re.Equal(500000.0, tokens)
 
 	// Test with zero requested tokens
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	limiter.AvailableTokens = 100.0 // Manually set available tokens
 	tokens = limiter.applyServiceLimit(now, 0.0)
 	re.Equal(0.0, tokens)
 	re.Equal(100.0, limiter.AvailableTokens) // Should remain unchanged
 
 	// Test with fractional tokens
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 10.5)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 10.5, nil)
 	limiter.LastUpdate = now
 	limiter.AvailableTokens = 5.25
 	tokens = limiter.applyServiceLimit(now, 7.75)
@@ -195,7 +232,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re := require.New(t)
 
 	// Test setting the same service limit (should be no-op)
-	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter := newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	originalTokens := limiter.AvailableTokens
 	originalUpdate := limiter.LastUpdate
 
@@ -205,7 +242,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.Equal(originalUpdate, limiter.LastUpdate)      // Should remain unchanged
 
 	// Test increasing service limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0, nil)
 	baseTime := time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 30.0
@@ -216,7 +253,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime))    // Should update time
 
 	// Test decreasing service limit with available tokens exceeding new limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 80.0
@@ -231,7 +268,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime))                             // Should update time
 
 	// Test decreasing service limit with available tokens below new limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 30.0
@@ -242,7 +279,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime))    // Should update time
 
 	// Test setting service limit to zero
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 50.0
@@ -253,7 +290,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime)) // Should update time
 
 	// Test setting service limit from zero to positive (should NOT initialize available tokens)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 0.0
@@ -264,7 +301,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime)) // Should update time
 
 	// Test setting negative service limit (should be treated as zero)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 50.0
@@ -275,7 +312,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime)) // Should update time
 
 	// Test setting service limit with time elapsed (should trigger refill)
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 50.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 20.0
@@ -290,7 +327,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime))      // Should update time
 
 	// Test setting a smaller service limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 1000.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 1000.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 500.0
@@ -302,7 +339,7 @@ func TestSetServiceLimit(t *testing.T) {
 	re.True(limiter.LastUpdate.After(baseTime))                       // Should update time
 
 	// Test setting a larger service limit
-	limiter = newServiceLimiter(constant.NullKeyspaceID, 10.0)
+	limiter = newServiceLimiter(constant.NullKeyspaceID, 10.0, nil)
 	baseTime = time.Now()
 	limiter.LastUpdate = baseTime
 	limiter.AvailableTokens = 5.0

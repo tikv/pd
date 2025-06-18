@@ -85,6 +85,8 @@ encryption_keys watch
 resource_group/controller get
 resource_group/controller save
 resource_group/controller watch
+resource_group/keyspace/service_limits/ get
+resource_group/keyspace/service_limits/ save
 resource_group/keyspace/settings/ get
 resource_group/keyspace/settings/ watch
 resource_group/keyspace/settings//default save
