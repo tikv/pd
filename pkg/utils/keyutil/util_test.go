@@ -87,37 +87,29 @@ func TestLess(t *testing.T) {
 func TestKeyCompare(t *testing.T) {
 	re := require.New(t)
 	TestData := []struct {
-		a   []byte
-		b   []byte
-		opt boundary
-		min []byte
-		max []byte
+		a        []byte
+		b        []byte
+		startKey []byte
+		endKey   []byte
 	}{
 		{
 			[]byte("a"),
 			[]byte("b"),
-			left,
-			[]byte("a"),
 			[]byte("b"),
-		},
-		{
-			[]byte("a"),
-			[]byte(""),
-			left,
-			[]byte(""),
 			[]byte("a"),
 		},
 		{
 			[]byte("a"),
 			[]byte(""),
-			right,
-			[]byte("a"),
 			[]byte(""),
+			[]byte("a"),
 		},
 	}
 	for _, data := range TestData {
-		re.Equal(data.min, MinKeyWithBoundary(data.a, data.b, data.opt))
-		re.Equal(data.max, MaxKeyWithBoundary(data.a, data.b, data.opt))
+		re.Equal(data.startKey, MaxStartKey(data.a, data.b))
+		re.Equal(data.startKey, MaxStartKey(data.b, data.a))
+		re.Equal(data.endKey, MinEndKey(data.a, data.b))
+		re.Equal(data.endKey, MinEndKey(data.b, data.a))
 	}
 }
 

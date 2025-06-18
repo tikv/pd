@@ -30,8 +30,8 @@ type KeyRange struct {
 // OverLapped return true if the two KeyRanges are overlapped.
 // if the two KeyRanges are continuous, it will also return true.
 func (kr *KeyRange) OverLapped(other *KeyRange) bool {
-	leftMax := MaxKeyWithBoundary(kr.StartKey, other.StartKey, left)
-	rightMin := MinKeyWithBoundary(kr.EndKey, other.EndKey, right)
+	leftMax := MaxStartKey(kr.StartKey, other.StartKey)
+	rightMin := MinEndKey(kr.EndKey, other.EndKey)
 	if len(leftMax) == 0 {
 		return true
 	}
@@ -131,8 +131,7 @@ func (rs *KeyRanges) SortAndDeduce() {
 	for i := 1; i < len(rs.krs); i++ {
 		last := res[len(res)-1]
 		if last.IsAdjacent(rs.krs[i]) {
-			last.StartKey = MinKeyWithBoundary(last.StartKey, rs.krs[i].StartKey, left)
-			last.EndKey = MaxKeyWithBoundary(last.EndKey, rs.krs[i].EndKey, right)
+			last.EndKey = rs.krs[i].EndKey
 		} else {
 			res = append(res, rs.krs[i])
 		}
@@ -149,11 +148,11 @@ func (rs *KeyRanges) Delete(base *KeyRange) {
 			continue
 		}
 		if less(r.StartKey, base.StartKey, left) {
-			res = append(res, &KeyRange{StartKey: r.StartKey, EndKey: MinKeyWithBoundary(r.EndKey, base.StartKey, right)})
+			res = append(res, &KeyRange{StartKey: r.StartKey, EndKey: MinEndKey(r.EndKey, base.StartKey)})
 		}
 
 		if less(base.EndKey, r.EndKey, right) {
-			startKey := MaxKeyWithBoundary(r.StartKey, base.EndKey, right)
+			startKey := MaxStartKey(r.StartKey, base.EndKey)
 			if len(r.StartKey) == 0 {
 				startKey = base.EndKey
 			}
@@ -174,13 +173,13 @@ func (rs *KeyRanges) SubtractKeyRanges(base *KeyRange) []KeyRange {
 		}
 		// add new key range if start<StartKey
 		if less(start, kr.StartKey, left) {
-			r := &KeyRange{StartKey: start, EndKey: MinKeyWithBoundary(kr.StartKey, base.EndKey, right)}
+			r := &KeyRange{StartKey: start, EndKey: MinEndKey(kr.StartKey, base.EndKey)}
 			res = append(res, *r)
 		}
 		if len(start) == 0 {
 			start = kr.EndKey
 		} else {
-			start = MaxKeyWithBoundary(start, kr.EndKey, right)
+			start = MaxStartKey(start, kr.EndKey)
 		}
 		// break if startKey<base.EndKey
 		if !less(start, base.EndKey, right) {
