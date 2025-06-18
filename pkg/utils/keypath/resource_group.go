@@ -75,12 +75,12 @@ func KeyspaceResourceGroupStatePrefix() string {
 
 // KeyspaceServiceLimitPath returns the path to save the keyspace service limit.
 func KeyspaceServiceLimitPath(keyspaceID uint32) string {
-	return fmt.Sprintf(keyspaceServiceLimitPathFormat, keyspaceID)
+	return fmt.Sprintf(keyspaceServiceLimitsPathFormat, keyspaceID)
 }
 
 // KeyspaceServiceLimitPrefix returns the prefix of the keyspace service limits.
 func KeyspaceServiceLimitPrefix() string {
-	return keyspaceServiceLimitPathPrefixFormat
+	return keyspaceServiceLimitsPathPrefixFormat
 }
 
 // ParseKeyspaceResourceGroupPath parses the keyspace ID and resource group name from the keyspace resource group path.
