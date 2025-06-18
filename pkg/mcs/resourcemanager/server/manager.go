@@ -512,13 +512,8 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			sinceLastRecord := m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig, now)
 			resourceGroupName := consumptionInfo.resourceGroupName
 			// TODO: maybe we need to distinguish background ru.
-			if rg, err := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
+			if rg, _ := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
-			} else {
-				log.Error("failed to get mutable resource group",
-					zap.Uint32("keyspace-id", keyspaceID),
-					zap.String("resource-group-name", resourceGroupName),
-					zap.Error(err))
 			}
 			if rt := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
 				rt.sample(now, consumptionInfo.RRU+consumptionInfo.WRU, sinceLastRecord)
