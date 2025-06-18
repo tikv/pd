@@ -15,6 +15,8 @@
 package id
 
 import (
+	"math"
+
 	"github.com/prometheus/client_golang/prometheus"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -33,9 +35,12 @@ import (
 type label string
 
 const (
-	// ReservedKeyspaceIDEnd is the end of reserved keyspace IDs.
-	// Reserve keyspace ID range [1, 1024] for internal usage.
-	ReservedKeyspaceIDEnd = uint64(1024)
+	// ReservedKeyspaceIDCount is the reserved count for keyspace id.
+	ReservedKeyspaceIDCount = uint64(1024)
+	// ReservedKeyspaceIDStart is the start id for reserved keyspace id.
+	// The reserved keyspace id range is [uint32.Max - 1024, uint32.Max)
+	ReservedKeyspaceIDStart = uint64(math.MaxUint32) - ReservedKeyspaceIDCount
+
 	// DefaultLabel is the default label for id allocator.
 	DefaultLabel label = "idalloc"
 	// KeyspaceLabel is the label for keyspace id allocator.
@@ -103,6 +108,15 @@ func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	defer alloc.mu.Unlock()
 
 	for range count {
+		if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
+			// Check if the current base is already at or beyond the start of the reserved range.
+			// The last allocatable ID is ReservedKeyspaceIDStart - 1.
+			// So, if alloc.base is >= ReservedKeyspaceIDStart - 1, it's exhausted.
+			if alloc.base >= ReservedKeyspaceIDStart-1 {
+				return 0, 0, errs.ErrIDExhausted.FastGenByArgs()
+			}
+		}
+
 		if alloc.base == alloc.end {
 			if err := alloc.rebaseLocked(true); err != nil {
 				return 0, 0, err
@@ -119,6 +133,13 @@ func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
+
+	// Ensure the newBase doesn't fall into the reserved range from the end.
+	if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
+		if newBase >= ReservedKeyspaceIDStart {
+			return errs.ErrIDExhausted.FastGenByArgs()
+		}
+	}
 
 	// set current end to new base, rebaseLocked will change it later.
 	alloc.end = newBase
@@ -158,10 +179,6 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		if value == nil {
 			// create the key
 			cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(key), "=", 0))
-			if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
-				// reserved for keyspace id allocator, 1 - 1024
-				end = ReservedKeyspaceIDEnd
-			}
 		} else {
 			// update the key
 			end, err = typeutil.BytesToUint64(value)
@@ -175,7 +192,17 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		end = alloc.end
 	}
 
-	end += alloc.step
+	// The maximum value 'end' can take is ReservedKeyspaceIDStart - 1.
+	if kerneltype.IsNextGen() && alloc.label == KeyspaceLabel {
+		if end+alloc.step >= ReservedKeyspaceIDStart { // Use >= because ReservedKeyspaceIDStart itself is reserved.
+			end = ReservedKeyspaceIDStart - 1
+		} else {
+			end += alloc.step
+		}
+	} else {
+		end += alloc.step
+	}
+
 	value := typeutil.Uint64ToBytes(end)
 	txn := kv.NewSlowLogTxn(alloc.client)
 	resp, err := txn.If(cmps...).Then(clientv3.OpPut(key, string(value))).Commit()

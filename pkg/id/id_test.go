@@ -23,6 +23,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
@@ -76,8 +77,8 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 	}
 }
 
-// TestIDAllocationStartValue tests the start value for different label allocators.
-func TestIDAllocationStartValue(t *testing.T) {
+// TestIDAllocationEndValue tests the start value for different label allocators.
+func TestIDAllocationEndValue(t *testing.T) {
 	re := require.New(t)
 	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
 	defer func() {
@@ -85,12 +86,39 @@ func TestIDAllocationStartValue(t *testing.T) {
 	}()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
 
-	// Case 1: check KeyspaceLabel starts allocation from 1025
-	t.Run("KeyspaceLabel should start allocation from 1025", func(t *testing.T) {
+	t.Run("KeyspaceLabel should hit ErrIDExhausted when trying to allocate into reserved range", func(t *testing.T) {
+		re := require.New(t)
+		for _, step := range []uint64{1, 10, 1024, 1025} {
+			keyspaceAllocator := NewAllocator(&AllocatorParams{
+				Client: client,
+				Label:  KeyspaceLabel,
+				Member: memberVal,
+				Step:   step,
+			})
+			initialBaseValue := ReservedKeyspaceIDStart - step*3
+
+			err = keyspaceAllocator.SetBase(initialBaseValue)
+			re.NoError(err)
+			var lastAllocatedID uint64
+			for {
+				var id uint64
+				id, _, err = keyspaceAllocator.Alloc(1)
+				if err != nil {
+					break
+				}
+				re.GreaterOrEqual(id, lastAllocatedID)
+				lastAllocatedID = id
+			}
+			re.Error(err)
+			re.True(errs.ErrIDExhausted.Equal(err))
+			re.Equal(ReservedKeyspaceIDStart-1, lastAllocatedID)
+		}
+	})
+
+	t.Run("SetBase should fail if newBase enters reserved range", func(t *testing.T) {
 		re := require.New(t)
 		keyspaceAllocator := NewAllocator(&AllocatorParams{
 			Client: client,
@@ -99,31 +127,15 @@ func TestIDAllocationStartValue(t *testing.T) {
 			Step:   step,
 		})
 
-		firstID, _, err := keyspaceAllocator.Alloc(1)
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 1)
 		re.NoError(err)
-		re.Equal(ReservedKeyspaceIDEnd+1, firstID)
 
-		secondID, _, err := keyspaceAllocator.Alloc(1)
-		re.NoError(err)
-		re.Equal(ReservedKeyspaceIDEnd+2, secondID)
-	})
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
 
-	// Case 2: check DefaultLabel starts allocation from 1
-	t.Run("DefaultLabel should start allocation from 1", func(t *testing.T) {
-		re := require.New(t)
-		defaultAllocator := NewAllocator(&AllocatorParams{
-			Client: client,
-			Label:  DefaultLabel,
-			Member: memberVal,
-			Step:   step,
-		})
-
-		firstID, _, err := defaultAllocator.Alloc(1)
-		re.NoError(err)
-		re.Equal(uint64(1), firstID)
-
-		secondID, _, err := defaultAllocator.Alloc(1)
-		re.NoError(err)
-		re.Equal(uint64(2), secondID)
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart + 10)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
 	})
 }
