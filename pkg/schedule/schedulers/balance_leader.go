@@ -430,7 +430,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // the best follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector) *operator.Operator {
 	rs := s.conf.getRanges()
-	if IsDefaultKeyRange(rs) {
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
 		km := solver.GetKeyRangeManager()
 		rs = km.GetNonOverlappingKeyRanges(&rs[0])
 	}
@@ -479,7 +479,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // the worst follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
 	rs := s.conf.getRanges()
-	if IsDefaultKeyRange(rs) {
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
 		km := solver.GetKeyRangeManager()
 		rs = km.GetNonOverlappingKeyRanges(&rs[0])
 	}

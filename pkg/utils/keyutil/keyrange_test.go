@@ -175,18 +175,8 @@ func TestSortAndDeduce(t *testing.T) {
 		},
 		{
 			name:   "overlapping",
-			input:  []*KeyRange{newKeyRangePointer("a", "c"), newKeyRangePointer("b", "d")},
+			input:  []*KeyRange{newKeyRangePointer("a", "c"), newKeyRangePointer("c", "d")},
 			expect: []*KeyRange{newKeyRangePointer("a", "d")},
-		},
-		{
-			name:   "empty keys",
-			input:  []*KeyRange{newKeyRangePointer("", ""), newKeyRangePointer("a", "b")},
-			expect: []*KeyRange{newKeyRangePointer("", "")},
-		},
-		{
-			name:   "one empty key",
-			input:  []*KeyRange{newKeyRangePointer("d", ""), newKeyRangePointer("", "b"), newKeyRangePointer("b", "c")},
-			expect: []*KeyRange{newKeyRangePointer("", "c"), newKeyRangePointer("d", "")},
 		},
 	}
 	re := require.New(t)

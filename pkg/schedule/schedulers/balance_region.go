@@ -138,7 +138,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	var sourceIndex int
 
 	rs := s.conf.Ranges
-	if IsDefaultKeyRange(rs) {
+	if s.GetName() == types.BalanceRegionScheduler.String() {
 		km := solver.GetKeyRangeManager()
 		rs = km.GetNonOverlappingKeyRanges(&rs[0])
 	}
