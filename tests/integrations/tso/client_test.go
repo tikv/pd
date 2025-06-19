@@ -504,6 +504,7 @@ func TestTSONotLeader(t *testing.T) {
 	re.NoError(err)
 	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func(client pd.Client) {
@@ -514,6 +515,7 @@ func TestTSONotLeader(t *testing.T) {
 	}(pdClient)
 
 	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
 }
 
