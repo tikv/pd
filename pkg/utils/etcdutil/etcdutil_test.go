@@ -69,7 +69,7 @@ func TestMemberHelpers(t *testing.T) {
 	re.NoError(err)
 	re.Len(listResp1.Members, 1)
 	// types.ID is an alias of uint64.
-	re.Equal(uint64(etcd1.Server.ID()), listResp1.Members[0].ID)
+	re.Equal(uint64(etcd1.Server.MemberID()), listResp1.Members[0].ID)
 
 	// Test AddEtcdMember
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
@@ -83,13 +83,13 @@ func TestMemberHelpers(t *testing.T) {
 	re.NoError(err)
 
 	// Test RemoveEtcdMember
-	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.ID()))
+	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.MemberID()))
 	re.NoError(err)
 
 	listResp3, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
-	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
+	re.Equal(uint64(etcd1.Server.MemberID()), listResp3.Members[0].ID)
 }
 
 func TestEtcdKVGet(t *testing.T) {
@@ -229,7 +229,7 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
 	// scale in etcd1
-	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.MemberID()))
 	re.NoError(err)
 	checkMembers(re, client2, []*embed.Etcd{etcd2})
 }
