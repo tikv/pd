@@ -45,6 +45,8 @@ const (
 	DefaultLabel label = "idalloc"
 	// KeyspaceLabel is the label for keyspace id allocator.
 	KeyspaceLabel label = "keyspace-idAlloc"
+
+	defaultAllocStep = uint64(1000)
 )
 
 // Allocator is the allocator to generate unique ID.
@@ -59,19 +61,18 @@ type Allocator interface {
 	Rebase() error
 }
 
-const defaultAllocStep = uint64(1000)
-
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
 	mu   syncutil.RWMutex
 	base uint64
 	end  uint64
 
-	client  *clientv3.Client
-	label   label
-	member  string
-	step    uint64
-	metrics *metrics
+	client       *clientv3.Client
+	label        label
+	member       string
+	step         uint64
+	metrics      *metrics
+	effectiveEnd uint64
 }
 
 // metrics is a collection of idAllocator's metrics.
@@ -99,6 +100,14 @@ func NewAllocator(params *AllocatorParams) Allocator {
 	if allocator.step == 0 {
 		allocator.step = defaultAllocStep
 	}
+	var effectiveEnd uint64
+	effectiveEnd = math.MaxUint64
+	if params.Label == KeyspaceLabel {
+		if kerneltype.IsNextGen() {
+			effectiveEnd = ReservedKeyspaceIDStart - 1 // Last allocable ID for NextGen
+		}
+	}
+	allocator.effectiveEnd = effectiveEnd
 	return allocator
 }
 
@@ -108,15 +117,11 @@ func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	defer alloc.mu.Unlock()
 
 	for range count {
-		if alloc.checkReservedID() {
-			// Check if the current base is already at or beyond the start of the reserved range.
-			// The last allocatable ID is ReservedKeyspaceIDStart - 1.
-			// So, if alloc.base is >= ReservedKeyspaceIDStart - 1, it's exhausted.
-			if alloc.base >= ReservedKeyspaceIDStart-1 {
-				return 0, 0, errs.ErrIDExhausted.FastGenByArgs()
-			}
+		// If current base is already at or beyond the effective end,
+		// we need to return an error.
+		if alloc.base >= alloc.effectiveEnd {
+			return 0, 0, errs.ErrIDExhausted.FastGenByArgs()
 		}
-
 		if alloc.base == alloc.end {
 			if err := alloc.rebaseLocked(true); err != nil {
 				return 0, 0, err
@@ -134,13 +139,10 @@ func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	// Ensure the newBase doesn't fall into the reserved range from the end.
-	if alloc.checkReservedID() {
-		if newBase >= ReservedKeyspaceIDStart {
-			return errs.ErrIDExhausted.FastGenByArgs()
-		}
+	// Ensure the newBase is valid.
+	if newBase >= alloc.effectiveEnd {
+		return errs.ErrIDExhausted.FastGenByArgs()
 	}
-
 	// set current end to new base, rebaseLocked will change it later.
 	alloc.end = newBase
 
@@ -192,13 +194,9 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		end = alloc.end
 	}
 
-	// The maximum value 'end' can take is ReservedKeyspaceIDStart - 1.
-	if alloc.checkReservedID() {
-		if end+alloc.step >= ReservedKeyspaceIDStart { // Use >= because ReservedKeyspaceIDStart itself is reserved.
-			end = ReservedKeyspaceIDStart - 1
-		} else {
-			end += alloc.step
-		}
+	// make sure the end is not beyond the effective end
+	if end+alloc.step > alloc.effectiveEnd {
+		end = alloc.effectiveEnd
 	} else {
 		end += alloc.step
 	}
@@ -221,8 +219,4 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	log.Info("idAllocator allocates a new id", zap.Uint64("new-end", end), zap.Uint64("new-base", alloc.base),
 		zap.String("label", string(alloc.label)), zap.Bool("check-curr-end", checkCurrEnd))
 	return nil
-}
-
-func (alloc *allocatorImpl) checkReservedID() bool {
-	return kerneltype.IsNextGen() && alloc.label == KeyspaceLabel
 }

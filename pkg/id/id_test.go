@@ -127,10 +127,10 @@ func TestIDAllocationEndValue(t *testing.T) {
 			Step:   step,
 		})
 
-		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 1)
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 2)
 		re.NoError(err)
 
-		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart)
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 1)
 		re.Error(err)
 		re.True(errs.ErrIDExhausted.Equal(err))
 
