@@ -55,7 +55,7 @@ func TestCheckKey(t *testing.T) {
 	}
 }
 
-func TestExpand_HexStackOverflow(t *testing.T) {
+func TestExpandHexStackOverflow(t *testing.T) {
 	// This is a valid hex string
 	hexStr := "616263646566" // "abcdef" in hex
 	n := N("key", []byte(hexStr))
@@ -70,7 +70,7 @@ func TestExpand_HexStackOverflow(t *testing.T) {
 	// If no panic occurs, it means there was no stack overflow
 }
 
-func TestExpand_StackOverflowFromLogKey(t *testing.T) {
+func TestExpandStackOverflowFromLogKey(t *testing.T) {
 	// Key from the logs
 	hexStr := "748000000000008cff065f698000000000ff00000b0380000000ff066a7b8603800000ff0000000002013739ff303200000000fb04ff19b6865c37000000ff03c000000000083eff0b00000000000000f8"
 
