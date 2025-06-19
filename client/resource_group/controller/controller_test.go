@@ -355,6 +355,7 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	c2.mu.Lock()
 	add(&totalConsumption, delta)
 	require.Equal(t, c2.mu.consumption, &totalConsumption)
+	c2.mu.Unlock()
 
 	// test report with unknown group
 	controller.ReportConsumption("unknown-name", delta)
