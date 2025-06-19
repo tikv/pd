@@ -110,6 +110,11 @@ func NewKeyRangesWithSize(size int) *KeyRanges {
 	}
 }
 
+// IsEmpty returns true if the KeyRanges is empty.
+func (rs *KeyRanges) IsEmpty() bool {
+	return len(rs.krs) == 0
+}
+
 // Append appends a KeyRange.
 func (rs *KeyRanges) Append(startKey, endKey []byte) {
 	rs.krs = append(rs.krs, &KeyRange{

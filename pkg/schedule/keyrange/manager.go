@@ -40,6 +40,13 @@ func (s *Manager) GetNonOverlappingKeyRanges(base *keyutil.KeyRange) []keyutil.K
 	return s.sortedKeyRanges.SubtractKeyRanges(base)
 }
 
+// IsEmpty returns true if the key ranges is empty
+func (s *Manager) IsEmpty() bool {
+	s.Lock()
+	defer s.Unlock()
+	return s.sortedKeyRanges.IsEmpty()
+}
+
 // Append appends the key ranges to the manager.
 func (s *Manager) Append(rs []keyutil.KeyRange) {
 	s.Lock()

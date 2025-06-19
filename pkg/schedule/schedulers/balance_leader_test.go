@@ -457,6 +457,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
+	suite.tc.Delete([]keyutil.KeyRange{kye})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {

@@ -432,7 +432,10 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	rs := s.conf.getRanges()
 	if s.GetName() == types.BalanceLeaderScheduler.String() {
 		km := solver.GetKeyRangeManager()
-		rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		if !km.IsEmpty() {
+			// todo: check all key ranges not only the first
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
 	}
 	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
@@ -481,7 +484,9 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	rs := s.conf.getRanges()
 	if s.GetName() == types.BalanceLeaderScheduler.String() {
 		km := solver.GetKeyRangeManager()
-		rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		if !km.IsEmpty() {
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
 	}
 	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
 		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
