@@ -333,6 +333,32 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	re.NoError(err)
 	re.Equal(testResourceGroup, c2.meta)
 
+	// test report ru consumption
+	var totalConsumption rmpb.Consumption
+	c2.mu.Lock()
+	totalConsumption = *c2.mu.consumption
+	c2.mu.Unlock()
+	delta := &rmpb.Consumption{
+		RRU:                      1.0,
+		WRU:                      2.0,
+		ReadBytes:                10,
+		WriteBytes:               20,
+		TotalCpuTimeMs:           30.0,
+		SqlLayerCpuTimeMs:        40.0,
+		KvReadRpcCount:           50,
+		KvWriteRpcCount:          60,
+		ReadCrossAzTrafficBytes:  100,
+		WriteCrossAzTrafficBytes: 200,
+	}
+	controller.ReportConsumption("test-group", delta)
+	// check the consumption
+	c2.mu.Lock()
+	add(&totalConsumption, delta)
+	require.Equal(t, c2.mu.consumption, &totalConsumption)
+
+	// test report with unknown group
+	controller.ReportConsumption("unknown-name", delta)
+
 	var expectResp []*rmpb.TokenBucketResponse
 	recTestGroupAcquireTokenRequest := make(chan bool)
 	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
