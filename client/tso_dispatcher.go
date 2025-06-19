@@ -305,7 +305,11 @@ tsoBatchLoop:
 					return
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
+<<<<<<< HEAD:client/tso_dispatcher.go
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+=======
+					log.Warn("[tso] create tso stream error", errs.ZapError(err))
+>>>>>>> 3bc8b2cab (log: degrade unless error log (#9358)):client/clients/tso/dispatcher.go
 					svcDiscovery.ScheduleCheckMemberChanged()
 					// Finish the collected requests if the stream is failed to be created.
 					td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(err))
