@@ -17,6 +17,8 @@ package patrol_test
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -187,4 +189,41 @@ func (suite *patrolTestSuite) checkPatrolWithHollowRegion(cluster *pdTests.TestC
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "merge failed: no matching sibling found for region 101")
+}
+
+func (suite *patrolTestSuite) TestPatrolWithLimit() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrolWithLimit)
+}
+
+func (suite *patrolTestSuite) checkPatrolWithLimit(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+
+	totalRegions := 500
+	for i := range totalRegions {
+		var startKey, endKey []byte
+		if i > 0 {
+			startKey = fmt.Appendf(nil, "key%03d", i)
+		}
+		if i < totalRegions-1 {
+			endKey = fmt.Appendf(nil, "key%03d", i+1)
+		}
+		pdTests.MustPutRegion(re, cluster, uint64(1000+i), 1, startKey, endKey)
+	}
+
+	for _, limit := range []int{-1, 1, 2, 5, 10, 11, 33, 1000} {
+		re := suite.Require()
+		args := []string{"-u", pdAddr, "patrol", "--limit", strconv.Itoa(limit)}
+		output, err := tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+
+		var res map[string]any
+		err = json.Unmarshal(output, &res)
+		re.NoError(err)
+
+		re.Equal(float64(totalRegions), res["scan_count"], "scan_count should equal total regions regardless of limit")
+		re.Empty(res["count"])
+		re.Empty(res["results"])
+	}
 }

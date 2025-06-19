@@ -21,20 +21,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/docker/go-units"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/util/codec"
 
-	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -82,24 +79,9 @@ func patrolCommandFunc(cmd *cobra.Command, _ []string) {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
-	// Create a pd client
-	opts, err := getSecurityOpt(cmd)
-	if err != nil {
-		cmd.Printf("Failed to parse TLS options: %v\n", err)
-		return
-	}
-	addr := getEndpoints(cmd)
-	cli, err := pd.NewClientWithContext(ctx, caller.PDCtlComponent, addr, opts,
-		opt.WithGRPCDialOptions(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize))))
-	if err != nil {
-		cmd.Printf("Failed to create pd client: %v\n", err)
-		return
-	}
-	defer cli.Close()
-
 	// Scan for special regions
 	startTime := time.Now()
-	specialRegions, scanCount, err := scanForSpecialKeys(ctx, cmd, cli)
+	specialRegions, scanCount, err := scanForSpecialKeys(ctx, cmd)
 	if err != nil {
 		cmd.Printf("Error during region scan: %v\n", err)
 		return
@@ -125,10 +107,10 @@ func patrolCommandFunc(cmd *cobra.Command, _ []string) {
 	cmd.Println(string(finalOutput))
 }
 
-func scanForSpecialKeys(ctx context.Context, cmd *cobra.Command, cli pd.Client) (map[uint64]*router.Region, int, error) {
+func scanForSpecialKeys(ctx context.Context, cmd *cobra.Command) (map[uint64]http.RegionInfo, int, error) {
 	startKey := []byte{}
 	count := 0
-	specialRegions := make(map[uint64]*router.Region)
+	specialRegions := make(map[uint64]http.RegionInfo)
 	limit, _ := cmd.Flags().GetInt("limit")
 	for {
 		select {
@@ -136,21 +118,30 @@ func scanForSpecialKeys(ctx context.Context, cmd *cobra.Command, cli pd.Client) 
 			return nil, 0, ctx.Err()
 		default:
 		}
-		regions, err := cli.ScanRegions(ctx, startKey, nil, limit)
+		res, err := PDCli.GetRegionsByKeyRange(ctx, &router.KeyRange{StartKey: startKey}, limit)
 		if err != nil {
-			return nil, 0, ctx.Err()
+			return nil, 0, err
 		}
-		for _, region := range regions {
-			found := checkRegion(cmd, region)
-			if found {
-				specialRegions[region.Meta.GetId()] = region
-			}
-		}
-		count += len(regions)
-		if len(regions) == 0 {
+		if res.Count == 0 {
 			break
 		}
-		endKey := regions[len(regions)-1].Meta.GetEndKey()
+		for _, region := range res.Regions {
+			found := checkRegion(cmd, region)
+			if found {
+				regionID := uint64(region.ID)
+				specialRegions[regionID] = region
+			}
+		}
+		count += int(res.Count)
+		lastRegion := res.Regions[res.Count-1]
+		endKeyHex := lastRegion.GetEndKey()
+		if len(endKeyHex) == 0 {
+			break
+		}
+		endKey, err := hex.DecodeString(endKeyHex)
+		if err != nil {
+			return nil, 0, err
+		}
 		if len(endKey) == 0 || bytes.Compare(startKey, endKey) >= 0 {
 			break
 		}
@@ -159,30 +150,32 @@ func scanForSpecialKeys(ctx context.Context, cmd *cobra.Command, cli pd.Client) 
 	return specialRegions, count, nil
 }
 
-func checkRegion(cmd *cobra.Command, region *router.Region) bool {
-	key := region.Meta.GetEndKey()
-	if len(key) == 0 {
+func checkRegion(cmd *cobra.Command, region http.RegionInfo) bool {
+	endKeyHex := region.GetEndKey()
+	if len(endKeyHex) == 0 {
+		return false
+	}
+	key, err := hex.DecodeString(endKeyHex)
+	if err != nil {
 		return false
 	}
 	// Add a panic recovery to ensure we don't crash the entire program
 	defer func() {
 		if r := recover(); r != nil {
-			regionID := region.Meta.GetId()
-			hexKeyStr := hex.EncodeToString(key)
-			cmd.Printf("Recovered from panic while processing region %d with key %s: %v\n", regionID, hexKeyStr, r)
+			cmd.Printf("Recovered from panic while processing region %d with key %s: %v\n", region.ID, endKeyHex, r)
 		}
 	}()
-	rootNode := N("key", region.Meta.GetEndKey())
+	rootNode := N("key", key)
 	rootNode.Expand()
 	return hasSpecialPatternRecursive(rootNode)
 }
 
-func processSpecialRegions(ctx context.Context, cmd *cobra.Command, specialRegions map[uint64]*router.Region) []PatrolResult {
+func processSpecialRegions(ctx context.Context, cmd *cobra.Command, specialRegions map[uint64]http.RegionInfo) []PatrolResult {
 	enableAutoMerge, _ := cmd.Flags().GetBool("enable-auto-merge")
 	results := make([]PatrolResult, 0)
 	for regionID, region := range specialRegions {
 		// Prepare the result structure
-		endKeyHex := hex.EncodeToString(region.Meta.GetEndKey())
+		endKeyHex := region.GetEndKey()
 		tableID, err := extractTableID(region)
 		result := PatrolResult{
 			RegionID: regionID,
@@ -228,8 +221,8 @@ func processSpecialRegions(ctx context.Context, cmd *cobra.Command, specialRegio
 }
 
 // findMatchingSiblingWithRetry contains the complex retry logic for finding a stable sibling.
-func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, region *router.Region) (*http.RegionInfo, error) {
-	regionID := region.Meta.GetId()
+func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, region http.RegionInfo) (*http.RegionInfo, error) {
+	regionID := uint64(region.ID)
 	delay := mergeRetryDelay
 	failpoint.Inject("fastCheckRegion", func() {
 		delay = time.Millisecond * 100
@@ -246,11 +239,7 @@ func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, regio
 		}
 
 		nextRegion := siblingRegions.Regions[siblingRegions.Count-1]
-		nextRegionStartKeyBytes, err := hex.DecodeString(nextRegion.GetStartKey())
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode sibling region's start key for region %d: %w", regionID, err)
-		}
-		if bytes.Equal(region.Meta.GetEndKey(), nextRegionStartKeyBytes) {
+		if strings.Compare(nextRegion.GetStartKey(), region.GetEndKey()) == 0 {
 			return &nextRegion, nil // Success
 		}
 
@@ -259,7 +248,7 @@ func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, regio
 		}
 
 		cmd.Printf("Region %d's endKey does not match sibling %d's startKey. Retrying... (Attempt %d/%d)\n",
-			region.Meta.GetId(), nextRegion.ID, i+1, maxMergeRetries)
+			region.ID, nextRegion.ID, i+1, maxMergeRetries)
 
 		select {
 		case <-ticker.C:
@@ -271,8 +260,13 @@ func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, regio
 	return nil, fmt.Errorf("merge failed: no matching sibling found for region %d", regionID)
 }
 
-func extractTableID(region *router.Region) (int64, error) {
-	rootNode := N("key", region.Meta.GetEndKey())
+func extractTableID(region http.RegionInfo) (int64, error) {
+	endKeyHex := region.GetEndKey()
+	key, err := hex.DecodeString(endKeyHex)
+	if err != nil {
+		return 0, err
+	}
+	rootNode := N("key", key)
 	rootNode.Expand()
 	tableID, _, err := extractTableIDRecursive(rootNode)
 	return tableID, err
@@ -364,26 +358,4 @@ func extractTableIDRecursive(node *Node) (tableID int64, found bool, err error) 
 		}
 	}
 	return 0, false, nil
-}
-
-func getSecurityOpt(cmd *cobra.Command) (opt pd.SecurityOption, err error) {
-	caPath, err := cmd.Flags().GetString("cacert")
-	if err != nil {
-		return opt, err
-	}
-	if caPath == "" {
-		return opt, nil
-	}
-	certPath, err := cmd.Flags().GetString("cert")
-	if err != nil {
-		return opt, err
-	}
-	keyPath, err := cmd.Flags().GetString("key")
-	if err != nil {
-		return opt, err
-	}
-	opt.CAPath = caPath
-	opt.CertPath = certPath
-	opt.KeyPath = keyPath
-	return opt, nil
 }
