@@ -98,7 +98,7 @@ func TestInitManager(t *testing.T) {
 	re.NotNil(rg)
 	// Verify the default resource group settings are updated. This is to ensure the default resource group
 	// can be loaded from the storage correctly rather than created as a new one.
-	re.Equal(defaultGroup.RUSettings.RU.Settings.FillRate, rg.RUSettings.RU.Settings.FillRate)
+	re.Equal(defaultGroup.RUSettings.RU.getFillRateSetting(), rg.RUSettings.RU.getFillRateSetting())
 }
 
 func TestBackgroundMetricsFlush(t *testing.T) {
@@ -221,7 +221,7 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 		re.NoError(err)
 		re.NotNil(rg)
 		return rg.Priority == group.Priority &&
-			rg.RUSettings.RU.Settings.BurstLimit == group.RUSettings.RU.Settings.BurstLimit
+			rg.RUSettings.RU.getBurstLimitSetting() == group.RUSettings.RU.Settings.BurstLimit
 	})
 }
 
@@ -369,4 +369,48 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(idValue)
 	re.Equal(uint32(2), idValue.Value)
+}
+
+func TestResourceGroupPersistence(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	// Prepare the resource group and service limit.
+	group := &rmpb.ResourceGroup{
+		Name:       "test_group",
+		Mode:       rmpb.GroupMode_RUMode,
+		Priority:   5,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+	}
+	err := m.AddResourceGroup(group)
+	re.NoError(err)
+	keyspaceID := ExtractKeyspaceID(group.KeyspaceId)
+	m.SetKeyspaceServiceLimit(keyspaceID, 100.0)
+
+	// Use the same storage to rebuild a manager.
+	storage := m.storage
+	m = NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = storage
+	// Initialize the manager.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = m.Init(ctx)
+	re.NoError(err)
+	// Check the resource group is loaded from the storage.
+	rg := m.GetResourceGroup(keyspaceID, group.Name, true)
+	re.NotNil(rg)
+	re.Equal(group.Name, rg.Name)
+	re.Equal(group.Mode, rg.Mode)
+	re.Equal(group.Priority, rg.Priority)
+	// Check the service limit is loaded from the storage.
+	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.NotNil(limiter)
+	re.Equal(100.0, limiter.ServiceLimit)
+	// Null keyspace ID should have a default zero service limit.
+	limiter = m.GetKeyspaceServiceLimiter(constant.NullKeyspaceID)
+	re.NotNil(limiter)
+	re.Equal(0.0, limiter.ServiceLimit)
+	// Non-existing keyspace should have a nil limiter.
+	limiter = m.GetKeyspaceServiceLimiter(2)
+	re.Nil(limiter)
 }

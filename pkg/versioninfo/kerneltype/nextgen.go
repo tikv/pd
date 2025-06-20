@@ -16,6 +16,10 @@
 
 package kerneltype
 
+import (
+	"github.com/pingcap/failpoint"
+)
+
 var (
 	// KernelType is the current kernel type, which is Next Generation in this case.
 	KernelType = "Next Generation"
@@ -24,5 +28,10 @@ var (
 // IsNextGen returns true if the current kernel type is Next Generation.
 // see doc.go for more info.
 func IsNextGen() bool {
+	failpoint.Inject("mockNextGenBuildFlag", func(val failpoint.Value) {
+		if v, ok := val.(bool); ok {
+			failpoint.Return(v)
+		}
+	})
 	return true
 }

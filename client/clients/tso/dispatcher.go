@@ -264,7 +264,7 @@ tsoBatchLoop:
 				exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, err)
 				stream = nil
 				if exit {
-					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
+					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(err))
 					return
 				}
 				continue
@@ -317,7 +317,7 @@ tsoBatchLoop:
 					// There should not be other kinds of errors.
 					log.Info("[tso] stop fetching the pending tso requests due to context canceled",
 						zap.Error(err))
-					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
+					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, err)
 					return
 				}
 			}
