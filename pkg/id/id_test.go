@@ -21,6 +21,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
@@ -72,4 +75,67 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 		re.NoError(err)
 		re.Equal(i, id)
 	}
+}
+
+// TestIDAllocationEndValue tests if keyspace allocator hits ErrIDExhausted when trying to allocate into reserved range.
+func TestIDAllocationEndValue(t *testing.T) {
+	re := require.New(t)
+	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	}()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	_, err := client.Put(context.Background(), leaderPath, memberVal)
+	re.NoError(err)
+
+	t.Run("KeyspaceLabel should hit ErrIDExhausted when trying to allocate into reserved range", func(t *testing.T) {
+		re := require.New(t)
+		for _, step := range []uint64{1, 10, 1024, 1025} {
+			keyspaceAllocator := NewAllocator(&AllocatorParams{
+				Client: client,
+				Label:  KeyspaceLabel,
+				Member: memberVal,
+				Step:   step,
+			})
+			initialBaseValue := ReservedKeyspaceIDStart - step*3
+
+			err = keyspaceAllocator.SetBase(initialBaseValue)
+			re.NoError(err)
+			var lastAllocatedID uint64
+			for {
+				var id uint64
+				id, _, err = keyspaceAllocator.Alloc(1)
+				if err != nil {
+					break
+				}
+				re.GreaterOrEqual(id, lastAllocatedID)
+				lastAllocatedID = id
+			}
+			re.Error(err)
+			re.True(errs.ErrIDExhausted.Equal(err))
+			re.Equal(ReservedKeyspaceIDStart-1, lastAllocatedID)
+		}
+	})
+
+	t.Run("SetBase should fail if newBase enters reserved range", func(t *testing.T) {
+		re := require.New(t)
+		keyspaceAllocator := NewAllocator(&AllocatorParams{
+			Client: client,
+			Label:  KeyspaceLabel,
+			Member: memberVal,
+			Step:   step,
+		})
+
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 2)
+		re.NoError(err)
+
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 1)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
+
+		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart + 10)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
+	})
 }

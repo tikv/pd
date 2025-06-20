@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -79,7 +80,14 @@ func validateName(name string) error {
 	if name == constant.DefaultKeyspaceName {
 		return errors.Errorf("illegal keyspace name %s, collides with default keyspace name", name)
 	}
+	if name == constant.SystemKeyspaceName {
+		return errors.Errorf("illegal keyspace name %s, collides with system keyspace name", name)
+	}
 	return nil
+}
+
+func checkReservedID(keyspaceID uint32) bool {
+	return kerneltype.IsNextGen() && keyspaceID == constant.SystemKeyspaceID
 }
 
 // MaskKeyspaceID is used to hash the spaceID inside the lockGroup.

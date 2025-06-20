@@ -149,32 +149,15 @@ func NewKeyspaceManager(
 
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
-	// Split Keyspace Region for default keyspace.
-	if err := manager.splitKeyspaceRegion(constant.DefaultKeyspaceID, false); err != nil {
-		return err
-	}
-	now := time.Now().Unix()
-	defaultKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:             constant.DefaultKeyspaceID,
-		Name:           constant.DefaultKeyspaceName,
-		State:          keyspacepb.KeyspaceState_ENABLED,
-		CreatedAt:      now,
-		StateChangedAt: now,
-	}
-
-	config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+	err := manager.initReserveKeyspace(constant.DefaultKeyspaceID, constant.DefaultKeyspaceName)
 	if err != nil {
 		return err
 	}
-	defaultKeyspaceMeta.Config = config
-	err = manager.saveNewKeyspace(defaultKeyspaceMeta)
-	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
-	// so we ignore the keyspaceExists error.
-	if err != nil && err != errs.ErrKeyspaceExists {
-		return err
-	}
-	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], defaultKeyspaceMeta.GetId(), opAdd); err != nil {
-		return err
+	if kerneltype.IsNextGen() {
+		err = manager.initReserveKeyspace(constant.SystemKeyspaceID, constant.SystemKeyspaceName)
+		if err != nil {
+			return err
+		}
 	}
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.GetPreAlloc()
@@ -187,7 +170,7 @@ func (manager *Manager) Bootstrap() error {
 			}
 			req := &CreateKeyspaceRequest{
 				Name:       keyspaceName,
-				CreateTime: now,
+				CreateTime: time.Now().Unix(),
 				Config:     config,
 			}
 			keyspace, err := manager.CreateKeyspace(req)
@@ -203,6 +186,34 @@ func (manager *Manager) Bootstrap() error {
 		}()
 	}
 	return nil
+}
+
+func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
+	// Split Keyspace Region for default/system keyspace.
+	if err := manager.splitKeyspaceRegion(id, false); err != nil {
+		return err
+	}
+	now := time.Now().Unix()
+	meta := &keyspacepb.KeyspaceMeta{
+		Id:             id,
+		Name:           name,
+		State:          keyspacepb.KeyspaceState_ENABLED,
+		CreatedAt:      now,
+		StateChangedAt: now,
+	}
+
+	config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+	if err != nil {
+		return err
+	}
+	meta.Config = config
+	err = manager.saveNewKeyspace(meta)
+	// It's possible that default/system keyspace already exists in the storage (e.g. PD restart/recover),
+	// so we ignore the keyspaceExists error.
+	if err != nil && err != errs.ErrKeyspaceExists {
+		return err
+	}
+	return manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], meta.GetId(), opAdd)
 }
 
 // UpdateConfig update keyspace manager's config.
@@ -662,6 +673,12 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		)
 		return nil, errs.ErrModifyDefaultKeyspace
 	}
+	if kerneltype.IsNextGen() && name == constant.SystemKeyspaceName {
+		log.Warn("[keyspace] failed to update keyspace config",
+			errs.ZapError(errs.ErrModifySystemKeyspace),
+		)
+		return nil, errs.ErrModifySystemKeyspace
+	}
 	var meta *keyspacepb.KeyspaceMeta
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
@@ -713,6 +730,12 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			errs.ZapError(errs.ErrModifyDefaultKeyspace),
 		)
 		return nil, errs.ErrModifyDefaultKeyspace
+	}
+	if checkReservedID(id) {
+		log.Warn("[keyspace] failed to update keyspace config",
+			errs.ZapError(errs.ErrModifySystemKeyspace),
+		)
+		return nil, errs.ErrModifySystemKeyspace
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
