@@ -41,8 +41,9 @@ const (
 	// The reserved keyspace id range is [uint32.Max - 1024, uint32.Max)
 	ReservedKeyspaceIDStart = uint64(math.MaxUint32) - ReservedKeyspaceIDCount
 	// NonNextGenKeyspaceIDLimit is the upper limit for keyspace IDs when not in NextGen mode.
-	// IDs should be less than or equal to math.MaxUint32.
-	NonNextGenKeyspaceIDLimit = uint64(math.MaxUint32)
+	// NullKeyspaceID is math.MaxUint32
+	// IDs should be less than or equal to math.MaxUint32 -1 .
+	NonNextGenKeyspaceIDLimit = uint64(math.MaxUint32) - 1
 
 	// DefaultLabel is the default label for id allocator.
 	DefaultLabel label = "idalloc"
