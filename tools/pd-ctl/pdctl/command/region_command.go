@@ -883,26 +883,29 @@ func hasSpecialPatternRecursive(node *Node) bool {
 		if variant.method == "decode mvcc key" {
 			for _, mvccBodyNode := range variant.children {
 				for _, tableRowVariant := range mvccBodyNode.variants {
-					if tableRowVariant.method == "table row key" {
-						// According to DecodeTableRow, it should have 2 children:
-						// children[0] is N("table_id", ...)
-						// children[1] is N(handleTyp, row_data_bytes) -> this is rowDataNode (Node_B)
-						if len(tableRowVariant.children) == 2 {
-							rowDataNode := tableRowVariant.children[1]
-							// Confirm if rowDataNode's type is as expected, which is determined by DecodeTableRow's handleTyp.
-							if rowDataNode.typ == "index_values" || rowDataNode.typ == "row_id" {
-								// Condition 1: Does row data end with non \x00?
-								// And we only care about the 9 bytes of the row data.
-								if len(rowDataNode.val) != 9 || rowDataNode.val[len(rowDataNode.val)-1] == '\x00' {
-									continue
-								}
-								// Condition 2: Does rowDataNode have extra output?
-								for _, rdnVariant := range rowDataNode.variants {
-									if rdnVariant.method == "decode index values" {
-										return true
-									}
-								}
-							}
+					if tableRowVariant.method != "table row key" {
+						continue
+					}
+					// According to DecodeTableRow, it should have 2 children:
+					// children[0] is N("table_id", ...)
+					// children[1] is N(handleTyp, row_data_bytes) -> this is rowDataNode (Node_B)
+					if len(tableRowVariant.children) != 2 {
+						continue
+					}
+					rowDataNode := tableRowVariant.children[1]
+					// Confirm if rowDataNode's type is as expected, which is determined by DecodeTableRow's handleTyp.
+					if rowDataNode.typ != "index_values" && rowDataNode.typ != "row_id" {
+						continue
+					}
+					// Condition 1: Does row data end with non \x00?
+					// And we only care about the 9 bytes of the row data.
+					if len(rowDataNode.val) != 9 || rowDataNode.val[len(rowDataNode.val)-1] == '\x00' {
+						continue
+					}
+					// Condition 2: Does rowDataNode have extra output?
+					for _, rdnVariant := range rowDataNode.variants {
+						if rdnVariant.method == "decode index values" {
+							return true
 						}
 					}
 				}
