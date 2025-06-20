@@ -397,7 +397,8 @@ func TestResourceGroupPersistence(t *testing.T) {
 	err = m.Init(ctx)
 	re.NoError(err)
 	// Check the resource group is loaded from the storage.
-	rg := m.GetResourceGroup(keyspaceID, group.Name, true)
+	rg, err := m.GetResourceGroup(keyspaceID, group.Name, true)
+	re.NoError(err)
 	re.NotNil(rg)
 	re.Equal(group.Name, rg.Name)
 	re.Equal(group.Mode, rg.Mode)
