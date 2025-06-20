@@ -35,6 +35,11 @@ import (
 type label string
 
 const (
+	// ReservedKeyspaceIDCount is the reserved count for keyspace id.
+	ReservedKeyspaceIDCount = uint64(1024)
+	// ReservedKeyspaceIDStart is the start id for reserved keyspace id.
+	// The reserved keyspace id range is [uint32.Max - 1024, uint32.Max)
+	ReservedKeyspaceIDStart = uint64(math.MaxUint32) - ReservedKeyspaceIDCount
 	// NonNextGenKeyspaceIDLimit is the upper limit for keyspace IDs when not in NextGen mode.
 	// IDs should be less than or equal to math.MaxUint32.
 	NonNextGenKeyspaceIDLimit = uint64(math.MaxUint32)
@@ -101,7 +106,9 @@ func NewAllocator(params *AllocatorParams) Allocator {
 	var effectiveEnd uint64
 	effectiveEnd = math.MaxUint64
 	if params.Label == KeyspaceLabel {
-		if !kerneltype.IsNextGen() {
+		if kerneltype.IsNextGen() {
+			effectiveEnd = ReservedKeyspaceIDStart - 1 // Last allocable ID for NextGen
+		} else {
 			effectiveEnd = NonNextGenKeyspaceIDLimit // Last allocable ID for non NextGen
 		}
 	}

@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
@@ -84,6 +86,11 @@ func TestIDAllocationEndValue(t *testing.T) {
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
 	checkIDAllocationEndValue(t, client, NonNextGenKeyspaceIDLimit)
+	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	}()
+	checkIDAllocationEndValue(t, client, ReservedKeyspaceIDStart-1)
 }
 
 func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint64) {
