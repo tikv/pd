@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
@@ -55,6 +56,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	*keyrange.Manager
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
@@ -73,6 +75,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		HotStat:                 statistics.NewHotStat(ctx, bc),
 		HotBucketCache:          buckets.NewBucketsCache(ctx),
 		PersistOptions:          opts,
+		Manager:                 keyrange.NewManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
 	}
@@ -212,6 +215,11 @@ func (mc *Cluster) initRuleManager() {
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
+}
+
+// GetKeyRangeManager returns the key range manager of the cluster.
+func (mc *Cluster) GetKeyRangeManager() *keyrange.Manager {
+	return mc.Manager
 }
 
 // GetRegionLabeler returns the region labeler of the cluster.

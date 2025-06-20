@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 )
 
 // KeyRange is a key range.
@@ -29,9 +30,21 @@ type KeyRange struct {
 // OverLapped return true if the two KeyRanges are overlapped.
 // if the two KeyRanges are continuous, it will also return true.
 func (kr *KeyRange) OverLapped(other *KeyRange) bool {
-	leftMax := MaxKey(kr.StartKey, other.StartKey)
-	rightMin := MinKey(kr.EndKey, other.EndKey)
-	return bytes.Compare(leftMax, rightMin) <= 0
+	leftMax := MaxStartKey(kr.StartKey, other.StartKey)
+	rightMin := MinEndKey(kr.EndKey, other.EndKey)
+	if len(leftMax) == 0 {
+		return true
+	}
+	if bytes.Equal(leftMax, rightMin) {
+		return true
+	}
+	return less(leftMax, rightMin, right)
+}
+
+// IsAdjacent returns true if the two KeyRanges are adjacent.
+func (kr *KeyRange) IsAdjacent(other *KeyRange) bool {
+	// Check if the end of one range is equal to the start of the other range
+	return bytes.Equal(kr.EndKey, other.StartKey) || bytes.Equal(other.EndKey, kr.StartKey)
 }
 
 var _ json.Marshaler = &KeyRange{}
@@ -97,12 +110,92 @@ func NewKeyRangesWithSize(size int) *KeyRanges {
 	}
 }
 
+// IsEmpty returns true if the KeyRanges is empty.
+func (rs *KeyRanges) IsEmpty() bool {
+	return len(rs.krs) == 0
+}
+
 // Append appends a KeyRange.
 func (rs *KeyRanges) Append(startKey, endKey []byte) {
 	rs.krs = append(rs.krs, &KeyRange{
 		StartKey: startKey,
 		EndKey:   endKey,
 	})
+}
+
+// SortAndDeduce sorts the KeyRanges and deduces the overlapped KeyRanges.
+func (rs *KeyRanges) SortAndDeduce() {
+	if len(rs.krs) <= 1 {
+		return
+	}
+	sort.Slice(rs.krs, func(i, j int) bool {
+		return less(rs.krs[i].StartKey, rs.krs[j].StartKey, left)
+	})
+	res := make([]*KeyRange, 0)
+	res = append(res, rs.krs[0])
+	for i := 1; i < len(rs.krs); i++ {
+		last := res[len(res)-1]
+		if last.IsAdjacent(rs.krs[i]) {
+			last.EndKey = rs.krs[i].EndKey
+		} else {
+			res = append(res, rs.krs[i])
+		}
+	}
+	rs.krs = res
+}
+
+// Delete deletes the KeyRange from the KeyRanges.
+func (rs *KeyRanges) Delete(base *KeyRange) {
+	res := make([]*KeyRange, 0)
+	for _, r := range rs.krs {
+		if !r.OverLapped(base) {
+			res = append(res, r)
+			continue
+		}
+		if less(r.StartKey, base.StartKey, left) {
+			res = append(res, &KeyRange{StartKey: r.StartKey, EndKey: MinEndKey(r.EndKey, base.StartKey)})
+		}
+
+		if less(base.EndKey, r.EndKey, right) {
+			startKey := MaxStartKey(r.StartKey, base.EndKey)
+			if len(r.StartKey) == 0 {
+				startKey = base.EndKey
+			}
+			res = append(res, &KeyRange{StartKey: startKey, EndKey: r.EndKey})
+		}
+	}
+	rs.krs = res
+}
+
+// SubtractKeyRanges returns the KeyRanges that are not overlapped with the given KeyRange.
+func (rs *KeyRanges) SubtractKeyRanges(base *KeyRange) []KeyRange {
+	res := make([]KeyRange, 0)
+	start := base.StartKey
+	for _, kr := range rs.krs {
+		// if the last range is not overlapped with the current range, we can skip it.
+		if !base.OverLapped(kr) {
+			continue
+		}
+		// add new key range if start<StartKey
+		if less(start, kr.StartKey, left) {
+			r := &KeyRange{StartKey: start, EndKey: MinEndKey(kr.StartKey, base.EndKey)}
+			res = append(res, *r)
+		}
+		if len(start) == 0 {
+			start = kr.EndKey
+		} else {
+			start = MaxStartKey(start, kr.EndKey)
+		}
+		// break if startKey<base.EndKey
+		if !less(start, base.EndKey, right) {
+			break
+		}
+	}
+	if less(start, base.EndKey, right) {
+		r := &KeyRange{StartKey: start, EndKey: base.EndKey}
+		res = append(res, *r)
+	}
+	return res
 }
 
 // Ranges returns the slice of KeyRange.

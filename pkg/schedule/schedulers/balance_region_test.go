@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -654,9 +655,16 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 		core.SetApproximateKeys(1),
 	)
 	tc.PutRegion(region)
+
+	tc.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
 	operators, _ := sb.Schedule(tc, false)
+	re.Empty(operators)
+	tc.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+
+	operators, _ = sb.Schedule(tc, false)
 	re.NotEmpty(operators)
 
+	// reject the empty regions if the cluster has more regions.
 	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
