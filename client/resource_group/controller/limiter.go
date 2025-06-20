@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 // Limit defines the maximum frequency of some events.
@@ -134,7 +135,7 @@ func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArg
 		lowTokensNotifyChan: lowTokensNotifyChan,
 	}
 	lim.metrics = &limiterMetricsCollection{
-		lowTokenNotifyCounter: lowTokenRequestNotifyCounter.WithLabelValues(lim.name),
+		lowTokenNotifyCounter: metrics.LowTokenRequestNotifyCounter.WithLabelValues(lim.name),
 	}
 	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim

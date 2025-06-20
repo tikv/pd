@@ -67,7 +67,7 @@ func (suite *ruleTestSuite) TearDownTest() {
 		def := placement.GroupBundle{
 			ID: "pd",
 			Rules: []*placement.Rule{
-				{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
 			},
 		}
 		data, err := json.Marshal([]placement.GroupBundle{def})

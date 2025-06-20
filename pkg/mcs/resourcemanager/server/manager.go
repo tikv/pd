@@ -17,11 +17,11 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"math"
+	"fmt"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -40,32 +40,36 @@ import (
 )
 
 const (
-	persistLoopInterval        = 1 * time.Minute
-	metricsCleanupInterval     = time.Minute
-	metricsCleanupTimeout      = 20 * time.Minute
-	metricsAvailableRUInterval = 1 * time.Second
-	defaultCollectIntervalSec  = 20
-	tickPerSecond              = time.Second
+	persistLoopInterval       = time.Minute
+	metricsCleanupInterval    = time.Minute
+	metricsCleanupTimeout     = 20 * time.Minute
+	defaultCollectIntervalSec = 20
+	tickPerSecond             = time.Second
 )
 
 // Manager is the manager of resource group.
 type Manager struct {
 	syncutil.RWMutex
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
 	srv              bs.Server
 	controllerConfig *ControllerConfig
 	krgms            map[uint32]*keyspaceResourceGroupManager
-	storage          endpoint.ResourceGroupStorage
+	storage          interface {
+		// Used to store the resource group settings and states.
+		endpoint.ResourceGroupStorage
+		// Used to get the keyspace meta info.
+		endpoint.KeyspaceStorage
+	}
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan *consumptionItem
-	// record update time of each resource group
-	consumptionRecord map[consumptionRecordKey]time.Time
-}
-
-type consumptionRecordKey struct {
-	keyspaceID uint32
-	name       string
-	ruType     string
+	// cached keyspace name for each keyspace ID.
+	keyspaceNameLookup map[uint32]string
+	// used to get the keyspace ID by name.
+	keyspaceIDLookup map[string]uint32
+	// metrics is the collection of metrics.
+	metrics *metrics
 }
 
 // ConfigProvider is used to get resource manager config from the given
@@ -81,7 +85,9 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 		controllerConfig:      srv.(T).GetControllerConfig(),
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
-		consumptionRecord:     make(map[consumptionRecordKey]time.Time),
+		keyspaceNameLookup:    make(map[uint32]string),
+		keyspaceIDLookup:      make(map[string]uint32),
+		metrics:               newMetrics(),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -97,6 +103,14 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	return m
 }
 
+// This is used for testing only now.
+func (m *Manager) close() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.wg.Wait()
+}
+
 // GetBasicServer returns the basic server.
 func (m *Manager) GetBasicServer() bs.Server {
 	return m.srv
@@ -107,13 +121,32 @@ func (m *Manager) GetStorage() endpoint.ResourceGroupStorage {
 	return m.storage
 }
 
-func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32) *keyspaceResourceGroupManager {
+// GetKeyspaceServiceLimiter returns the service limit of the keyspace.
+func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		return nil
+	}
+	return krgm.getServiceLimiter().Clone()
+}
+
+// SetKeyspaceServiceLimit sets the service limit of the keyspace.
+func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float64) {
+	// If the keyspace is not found, create a new keyspace resource group manager.
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimit(serviceLimit)
+}
+
+func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
-	defer m.Unlock()
 	krgm, ok := m.krgms[keyspaceID]
 	if !ok {
 		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage)
 		m.krgms[keyspaceID] = krgm
+	}
+	m.Unlock()
+	// Init the default resource group if needed.
+	if initDefault {
+		krgm.initDefaultResourceGroup()
 	}
 	return krgm
 }
@@ -145,6 +178,10 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 
+	// This context is derived from the leader/primary context, it will be canceled
+	// from the outside loop when the leader/primary step down.
+	ctx, m.cancel = context.WithCancel(ctx)
+	m.wg.Add(2)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
 	go func() {
@@ -162,7 +199,8 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.Unlock()
 	// Load keyspace resource group meta info from the storage.
 	if err := m.storage.LoadResourceGroupSettings(func(keyspaceID uint32, name string, rawValue string) {
-		err := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID).addResourceGroupFromRaw(name, rawValue)
+		// Since the default resource group might be loaded from the storage, we don't need to initialize it here.
+		err := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).addResourceGroupFromRaw(name, rawValue)
 		if err != nil {
 			log.Error("failed to add resource group to the keyspace resource group manager",
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name), zap.Error(err))
@@ -186,6 +224,12 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	}); err != nil {
 		return err
 	}
+	// Load service limits from the storage.
+	if err := m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimit(serviceLimit)
+	}); err != nil {
+		return err
+	}
 	// Initialize the reserved keyspace resource group manager and default resource groups.
 	m.initReserved()
 	return nil
@@ -193,11 +237,9 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 
 func (m *Manager) initReserved() {
 	// Initialize the null keyspace resource group manager if it doesn't exist.
-	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID)
-	// Initialize the default resource group respectively for each keyspace.
-	m.RLock()
-	defer m.RUnlock()
-	for _, krgm := range m.krgms {
+	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, true)
+	// Initialize the default resource group respectively for each keyspace if it doesn't exist.
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 		krgm.initDefaultResourceGroup()
 	}
 }
@@ -247,11 +289,10 @@ func (m *Manager) GetControllerConfig() *ControllerConfig {
 // NOTE: AddResourceGroup should also be idempotent because tidb depends
 // on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
-	keyspaceID := constant.NullKeyspaceID
-	if grouppb.KeyspaceId != nil {
-		keyspaceID = grouppb.KeyspaceId.GetValue()
-	}
-	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID)
+	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
+	// If the keyspace is not initialized, it means this is the first resource group created for this keyspace,
+	// so we need to initialize the default resource group for the keyspace as well.
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
@@ -260,10 +301,7 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 
 // ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
-	keyspaceID := constant.NullKeyspaceID
-	if grouppb.KeyspaceId != nil {
-		keyspaceID = grouppb.KeyspaceId.GetValue()
-	}
+	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
@@ -273,7 +311,6 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
-	// TODO: should we allow to delete default resource group?
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
@@ -308,7 +345,16 @@ func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) []*Res
 	return krgm.getResourceGroupList(withStats, true)
 }
 
+func (m *Manager) getRUTracker(keyspaceID uint32, name string) *ruTracker {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		return nil
+	}
+	return krgm.getOrCreateRUTracker(name)
+}
+
 func (m *Manager) persistLoop(ctx context.Context) {
+	defer m.wg.Done()
 	ticker := time.NewTicker(persistLoopInterval)
 	failpoint.Inject("fastPersist", func() {
 		ticker.Reset(100 * time.Millisecond)
@@ -317,6 +363,7 @@ func (m *Manager) persistLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("resource group manager persist loop exits")
 			return
 		case <-ticker.C:
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
@@ -342,12 +389,8 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	if isBackground && isTiFlash {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
-	keyspaceID := constant.NullKeyspaceID
-	if req.KeyspaceId != nil {
-		keyspaceID = req.KeyspaceId.GetValue()
-	}
 	m.consumptionDispatcher <- &consumptionItem{
-		keyspaceID:        keyspaceID,
+		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
 		isBackground:      isBackground,
@@ -356,206 +399,150 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	return nil
 }
 
+func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, error) {
+	if id == constant.NullKeyspaceID {
+		return "", nil
+	}
+	// Try to get the keyspace name from the cache first.
+	m.RLock()
+	name, ok := m.keyspaceNameLookup[id]
+	m.RUnlock()
+	if ok {
+		return name, nil
+	}
+	var loadedName string
+	// If the keyspace name is not in the cache, try to get it from the storage.
+	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		meta, err := m.storage.LoadKeyspaceMeta(txn, id)
+		if err != nil {
+			return err
+		}
+		loadedName = meta.GetName()
+		return nil
+	})
+	if err != nil {
+		log.Error("failed to get the keyspace name", zap.Uint32("keyspace-id", id), zap.Error(err))
+		return "", err
+	}
+	if len(loadedName) == 0 {
+		return "", fmt.Errorf("got an empty keyspace name by id %d", id)
+	}
+	// Update the cache.
+	m.updateKeyspaceNameLookup(id, loadedName)
+	return loadedName, nil
+}
+
+func (m *Manager) updateKeyspaceNameLookup(id uint32, name string) {
+	m.Lock()
+	defer m.Unlock()
+	m.keyspaceNameLookup[id] = name
+	m.keyspaceIDLookup[name] = id
+}
+
+// GetKeyspaceIDByName gets the keyspace ID by name.
+func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.KeyspaceIDValue, error) {
+	if len(name) == 0 {
+		return &rmpb.KeyspaceIDValue{Value: constant.NullKeyspaceID}, nil
+	}
+	m.RLock()
+	id, ok := m.keyspaceIDLookup[name]
+	m.RUnlock()
+	if ok {
+		return &rmpb.KeyspaceIDValue{Value: id}, nil
+	}
+	var (
+		loadedID uint32
+		err      error
+	)
+	err = m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		ok, loadedID, err = m.storage.LoadKeyspaceID(txn, name)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Error("failed to get the keyspace id", zap.String("keyspace-name", name), zap.Error(err))
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("keyspace not found with name: %s", name)
+	}
+	// Update the cache.
+	m.updateKeyspaceNameLookup(loadedID, name)
+	return &rmpb.KeyspaceIDValue{Value: loadedID}, nil
+}
+
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer logutil.LogPanic()
+	defer m.wg.Done()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
 	defer cleanUpTicker.Stop()
-	availableRUTicker := time.NewTicker(metricsAvailableRUInterval)
-	defer availableRUTicker.Stop()
-	recordMaxTicker := time.NewTicker(tickPerSecond)
-	defer recordMaxTicker.Stop()
+	metricsTicker := time.NewTicker(tickPerSecond)
+	defer metricsTicker.Stop()
+	failpoint.Inject("fastCleanupTicker", func() {
+		cleanUpTicker.Reset(100 * time.Millisecond)
+	})
 
-	maxPerSecTrackers := make(map[uint32]map[string]*maxPerSecCostTracker)
-	// getMaxPerSecTracker returns the max per sec tracker for the given keyspace ID and name.
-	// If the tracker doesn't exist, it will be created.
-	getMaxPerSecTracker := func(keyspaceID uint32, name string) *maxPerSecCostTracker {
-		trackers := maxPerSecTrackers[keyspaceID]
-		if trackers == nil {
-			trackers = make(map[string]*maxPerSecCostTracker)
-			maxPerSecTrackers[keyspaceID] = trackers
-		}
-		tracker, ok := trackers[name]
-		if !ok {
-			tracker = newMaxPerSecCostTracker(name, defaultCollectIntervalSec)
-			trackers[name] = tracker
-		}
-		return tracker
-	}
-	// deleteMaxPerSecTracker deletes the max per sec tracker for the given keyspace ID and name.
-	// If the tracker doesn't exist, it will do nothing.
-	deleteMaxPerSecTracker := func(keyspaceID uint32, name string) {
-		trackers := maxPerSecTrackers[keyspaceID]
-		if trackers == nil {
-			return
-		}
-		delete(trackers, name)
-	}
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("resource group manager background metrics flush loop exits")
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			consumption := consumptionInfo.Consumption
-			if consumption == nil {
+			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 				continue
 			}
-			ruLabelType := defaultTypeLabel
-			if consumptionInfo.isBackground {
-				ruLabelType = backgroundTypeLabel
+			keyspaceID := consumptionInfo.keyspaceID
+			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
+			if err != nil {
+				continue
 			}
-			if consumptionInfo.isTiFlash {
-				ruLabelType = tiflashTypeLabel
-			}
-
-			var (
-				// TODO: add keyspace name lable to the metrics.
-				keyspaceID               = consumptionInfo.keyspaceID
-				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
-				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name)
-				readByteMetrics          = readByteCost.WithLabelValues(name, name, ruLabelType)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name, name, ruLabelType)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, name, ruLabelType)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, name, ruLabelType)
-				readRequestCountMetrics  = requestCount.WithLabelValues(name, name, readTypeLabel)
-				writeRequestCountMetrics = requestCount.WithLabelValues(name, name, writeTypeLabel)
-			)
-			getMaxPerSecTracker(keyspaceID, name).CollectConsumption(consumption)
-
-			// RU info.
-			if consumption.RRU > 0 {
-				rruMetrics.Add(consumption.RRU)
-			}
-			if consumption.WRU > 0 {
-				wruMetrics.Add(consumption.WRU)
-			}
-			// Byte info.
-			if consumption.ReadBytes > 0 {
-				readByteMetrics.Add(consumption.ReadBytes)
-			}
-			if consumption.WriteBytes > 0 {
-				writeByteMetrics.Add(consumption.WriteBytes)
-			}
-			// CPU time info.
-			if consumption.TotalCpuTimeMs > 0 {
-				if consumption.SqlLayerCpuTimeMs > 0 {
-					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.controllerConfig.RequestUnit.CPUMsCost)
-					sqlCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
-				}
-				kvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
-			}
-			// RPC count info.
-			if consumption.KvReadRpcCount > 0 {
-				readRequestCountMetrics.Add(consumption.KvReadRpcCount)
-			}
-			if consumption.KvWriteRpcCount > 0 {
-				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
-			}
-
-			m.consumptionRecord[consumptionRecordKey{keyspaceID: keyspaceID, name: name, ruType: ruLabelType}] = time.Now()
-
+			now := time.Now()
+			sinceLastRecord := m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig, now)
+			resourceGroupName := consumptionInfo.resourceGroupName
 			// TODO: maybe we need to distinguish background ru.
-			if rg := m.GetMutableResourceGroup(keyspaceID, name); rg != nil {
+			if rg := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
+			}
+			if rt := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
+				rt.sample(now, consumptionInfo.RRU+consumptionInfo.WRU, sinceLastRecord)
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.consumptionRecord {
+			for r, lastTime := range m.metrics.consumptionRecordMap {
 				if time.Since(lastTime) <= metricsCleanupTimeout {
 					continue
 				}
-				readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-				writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-				sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-				readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-				writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-				kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-				sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-				requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
-				requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
-				availableRUCounter.DeleteLabelValues(r.name, r.name)
-				delete(m.consumptionRecord, r)
-				deleteMaxPerSecTracker(r.keyspaceID, r.name)
-				readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
-				writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
-				resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: r.name})
+				keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
+				if err != nil {
+					continue
+				}
+				m.metrics.cleanupAllMetrics(r, keyspaceName)
 			}
-		case <-availableRUTicker.C:
+		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
-				for _, group := range krgm.getResourceGroupList(true, false) {
-					ru := math.Max(group.getRUToken(), 0)
-					availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
-					resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(group.getPriority())
-					resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(group.getFillRate())
-					resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacityLabel).Set(group.getBurstLimit())
+				keyspaceName, err := m.getKeyspaceNameByID(ctx, krgm.keyspaceID)
+				if err != nil {
+					continue
 				}
-			}
-		case <-recordMaxTicker.C:
-			// Record the sum of RRU and WRU every second.
-			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
-				names := krgm.getResourceGroupNames(true)
-				for _, name := range names {
-					getMaxPerSecTracker(krgm.keyspaceID, name).FlushMetrics()
+				for _, group := range krgm.getResourceGroupList(true, true) {
+					groupName := group.Name
+					// Record the sum of RRU and WRU every second.
+					m.metrics.getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, groupName).flushMetrics()
+					// Skip the default resource group for the later metrics.
+					if groupName == DefaultResourceGroupName {
+						continue
+					}
+					metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
+					metrics.setGroup(group)
+					// Record the tracked RU per second.
+					if rt := krgm.getRUTracker(groupName); rt != nil {
+						metrics.setSampledRUPerSec(rt.getRUPerSec())
+					}
 				}
 			}
 		}
-	}
-}
-
-type maxPerSecCostTracker struct {
-	name          string
-	maxPerSecRRU  float64
-	maxPerSecWRU  float64
-	rruSum        float64
-	wruSum        float64
-	lastRRUSum    float64
-	lastWRUSum    float64
-	flushPeriod   int
-	cnt           int
-	rruMaxMetrics prometheus.Gauge
-	wruMaxMetrics prometheus.Gauge
-}
-
-func newMaxPerSecCostTracker(name string, flushPeriod int) *maxPerSecCostTracker {
-	return &maxPerSecCostTracker{
-		name:          name,
-		flushPeriod:   flushPeriod,
-		rruMaxMetrics: readRequestUnitMaxPerSecCost.WithLabelValues(name),
-		wruMaxMetrics: writeRequestUnitMaxPerSecCost.WithLabelValues(name),
-	}
-}
-
-// CollectConsumption collects the consumption info.
-func (t *maxPerSecCostTracker) CollectConsumption(consume *rmpb.Consumption) {
-	t.rruSum += consume.RRU
-	t.wruSum += consume.WRU
-}
-
-// FlushMetrics and set the maxPerSecRRU and maxPerSecWRU to the metrics.
-func (t *maxPerSecCostTracker) FlushMetrics() {
-	if t.lastRRUSum == 0 && t.lastWRUSum == 0 {
-		t.lastRRUSum = t.rruSum
-		t.lastWRUSum = t.wruSum
-		return
-	}
-	deltaRRU := t.rruSum - t.lastRRUSum
-	deltaWRU := t.wruSum - t.lastWRUSum
-	t.lastRRUSum = t.rruSum
-	t.lastWRUSum = t.wruSum
-	if deltaRRU > t.maxPerSecRRU {
-		t.maxPerSecRRU = deltaRRU
-	}
-	if deltaWRU > t.maxPerSecWRU {
-		t.maxPerSecWRU = deltaWRU
-	}
-	t.cnt++
-	// flush to metrics in every flushPeriod.
-	if t.cnt%t.flushPeriod == 0 {
-		t.rruMaxMetrics.Set(t.maxPerSecRRU)
-		t.wruMaxMetrics.Set(t.maxPerSecWRU)
-		t.maxPerSecRRU = 0
-		t.maxPerSecWRU = 0
 	}
 }

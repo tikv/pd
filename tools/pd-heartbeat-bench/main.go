@@ -65,7 +65,7 @@ var (
 )
 
 func newClient(ctx context.Context, cfg *config.Config) (pdpb.PDClient, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
+	tlsConfig, err := cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
