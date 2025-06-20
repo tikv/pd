@@ -157,6 +157,21 @@ func (m *Manager) getKeyspaceResourceGroupManager(keyspaceID uint32) *keyspaceRe
 	return m.krgms[keyspaceID]
 }
 
+func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupName string) (*keyspaceResourceGroupManager, error) {
+	var krgm *keyspaceResourceGroupManager
+	if groupName == DefaultResourceGroupName {
+		// For the default resource group, if the keyspace manager doesn't exist yet
+		// and the group name is the default resource group name, we try to get or create it.
+		krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+	} else {
+		krgm = m.getKeyspaceResourceGroupManager(keyspaceID)
+	}
+	if krgm == nil {
+		return nil, errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
+	}
+	return krgm, nil
+}
+
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
 	v, err := m.storage.LoadControllerConfig()
@@ -302,15 +317,16 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 // ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
+	if err != nil {
+		return err
 	}
 	return krgm.modifyResourceGroup(grouppb)
 }
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
+	// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
@@ -319,30 +335,30 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 }
 
 // GetResourceGroup returns a copy of a resource group.
-func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats bool) *ResourceGroup {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return nil
+func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats bool) (*ResourceGroup, error) {
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
+	if err != nil {
+		return nil, err
 	}
-	return krgm.getResourceGroup(name, withStats)
+	return krgm.getResourceGroup(name, withStats), nil
 }
 
 // GetMutableResourceGroup returns a mutable resource group.
-func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) *ResourceGroup {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return nil
+func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
+	if err != nil {
+		return nil, err
 	}
-	return krgm.getMutableResourceGroup(name)
+	return krgm.getMutableResourceGroup(name), nil
 }
 
 // GetResourceGroupList returns copies of resource group list.
-func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) []*ResourceGroup {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return nil
+func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*ResourceGroup, error) {
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
+	if err != nil {
+		return nil, err
 	}
-	return krgm.getResourceGroupList(withStats, true)
+	return krgm.getResourceGroupList(withStats, true), nil
 }
 
 func (m *Manager) getRUTracker(keyspaceID uint32, name string) *ruTracker {
@@ -502,7 +518,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			sinceLastRecord := m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig, now)
 			resourceGroupName := consumptionInfo.resourceGroupName
 			// TODO: maybe we need to distinguish background ru.
-			if rg := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
+			if rg, _ := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 			if rt := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {

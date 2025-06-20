@@ -93,7 +93,8 @@ func TestInitManager(t *testing.T) {
 	re.NoError(err)
 	re.Len(m.getKeyspaceResourceGroupManagers(), 2)
 	// Get the default resource group.
-	rg := m.GetResourceGroup(1, DefaultResourceGroupName, true)
+	rg, err := m.GetResourceGroup(1, DefaultResourceGroupName, true)
+	re.NoError(err)
 	re.NotNil(rg)
 	// Verify the default resource group settings are updated. This is to ensure the default resource group
 	// can be loaded from the storage correctly rather than created as a new one.
@@ -149,7 +150,8 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	// Verify consumption was added to the resource group.
 	testutil.Eventually(re, func() bool {
-		updatedGroup := manager.GetResourceGroup(keyspaceID, req.GetResourceGroupName(), true)
+		updatedGroup, err := manager.GetResourceGroup(keyspaceID, req.GetResourceGroupName(), true)
+		re.NoError(err)
 		re.NotNil(updatedGroup)
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
@@ -215,7 +217,8 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 
 	keyspaceID := ExtractKeyspaceID(keyspaceIDValue)
 	testutil.Eventually(re, func() bool {
-		rg := manager.GetResourceGroup(keyspaceID, group.Name, true)
+		rg, err := manager.GetResourceGroup(keyspaceID, group.Name, true)
+		re.NoError(err)
 		re.NotNil(rg)
 		return rg.Priority == group.Priority &&
 			rg.RUSettings.RU.getBurstLimitSetting() == group.RUSettings.RU.Settings.BurstLimit
@@ -394,7 +397,8 @@ func TestResourceGroupPersistence(t *testing.T) {
 	err = m.Init(ctx)
 	re.NoError(err)
 	// Check the resource group is loaded from the storage.
-	rg := m.GetResourceGroup(keyspaceID, group.Name, true)
+	rg, err := m.GetResourceGroup(keyspaceID, group.Name, true)
+	re.NoError(err)
 	re.NotNil(rg)
 	re.Equal(group.Name, rg.Name)
 	re.Equal(group.Mode, rg.Mode)
