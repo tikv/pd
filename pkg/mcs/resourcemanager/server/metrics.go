@@ -145,6 +145,14 @@ var (
 			Name:      "sampled_request_unit_per_sec",
 			Help:      "Gauge of the sampled RU/s for all resource groups.",
 		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+
+	overrideFillRate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "override_fill_rate",
+			Help:      "Gauge of the override fill rate for all resource groups.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
 )
 
 type metrics struct {
@@ -189,6 +197,7 @@ func init() {
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
 	prometheus.MustRegister(sampledRequestUnitPerSec)
+	prometheus.MustRegister(overrideFillRate)
 }
 
 func newMetrics() *metrics {
@@ -346,6 +355,7 @@ type gaugeMetrics struct {
 	ruPerSecResourceGroupConfigGauge   prometheus.Gauge
 	ruCapacityResourceGroupConfigGauge prometheus.Gauge
 	sampledRequestUnitPerSecGauge      prometheus.Gauge
+	overrideFillRateGauge              prometheus.Gauge
 }
 
 func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
@@ -355,6 +365,7 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 		ruPerSecResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, ruPerSecLabel, keyspaceName),
 		ruCapacityResourceGroupConfigGauge: resourceGroupConfigGauge.WithLabelValues(groupName, ruCapacityLabel, keyspaceName),
 		sampledRequestUnitPerSecGauge:      sampledRequestUnitPerSec.WithLabelValues(groupName, keyspaceName),
+		overrideFillRateGauge:              overrideFillRate.WithLabelValues(groupName, keyspaceName),
 	}
 }
 
@@ -362,8 +373,9 @@ func (m *gaugeMetrics) setGroup(group *ResourceGroup) {
 	ru := math.Max(group.getRUToken(), 0)
 	m.availableRUCounter.Set(ru)
 	m.priorityResourceGroupConfigGauge.Set(group.getPriority())
-	m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRate())
-	m.ruCapacityResourceGroupConfigGauge.Set(group.getBurstLimit())
+	m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRateSetting())
+	m.ruCapacityResourceGroupConfigGauge.Set(group.getBurstLimitSetting())
+	m.overrideFillRateGauge.Set(group.getOverrideFillRate())
 }
 
 func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
@@ -386,6 +398,7 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
+	overrideFillRate.DeleteLabelValues(groupName, keyspaceName)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
 }
 
