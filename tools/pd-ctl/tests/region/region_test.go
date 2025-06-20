@@ -16,12 +16,17 @@ package region_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -315,4 +320,199 @@ func TestRegionNoLeader(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 	_, err = tests.ExecuteCommand(cmd, "-u", url, "region", "100")
 	re.NoError(err)
+}
+
+type patrolTestSuite struct {
+	suite.Suite
+	env *pdTests.SchedulingTestEnvironment
+}
+
+func TestPatrolTestSuite(t *testing.T) {
+	suite.Run(t, new(patrolTestSuite))
+}
+
+func (suite *patrolTestSuite) SetupSuite() {
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *patrolTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *patrolTestSuite) TestPatrol() {
+	// This tool is designed to run in a non-microservice environment.
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrol)
+}
+
+func (suite *patrolTestSuite) checkPatrol(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().Add(-time.Minute * 20).UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store)
+	}
+
+	specialKey := "7480000000000AE1FFAB5F72F800000000FF052EEA0100000000FB"
+	pdTests.MustPutRegion(re, cluster, 1, 1, []byte(""), []byte(specialKey), core.SetPeers([]*metapb.Peer{
+		{Id: 10, StoreId: 1},
+		{Id: 11, StoreId: 2},
+		{Id: 12, StoreId: 3},
+	}))
+	pdTests.MustPutRegion(re, cluster, 3, 2, []byte(specialKey), []byte(""), core.SetPeers([]*metapb.Peer{
+		{Id: 13, StoreId: 1},
+		{Id: 14, StoreId: 2},
+		{Id: 15, StoreId: 3},
+	}))
+
+	// Test Patrol
+	args := []string{"-u", pdAddr, "region", "invalid-tiflash-key"}
+	var res map[string]any
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &res))
+	re.Equal(2, int(res["scan_count"].(float64)))
+	re.Len(res["results"], 1)
+	results := res["results"].([]any)
+	re.Len(results, 1)
+	result := results[0].(map[string]any)
+	re.Equal("merge_skipped", result["status"].(string))
+	re.Equal(713131, int(result["table_id"].(float64)))
+	hexKey, err := hex.DecodeString(result["key"].(string))
+	re.NoError(err)
+	re.Equal(specialKey, string(hexKey))
+
+	// Test Merge
+	args = []string{"-u", pdAddr, "region", "invalid-tiflash-key", "--auto-fix"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	err = json.Unmarshal(output, &res)
+	re.NoError(err)
+	re.Equal(2, int(res["scan_count"].(float64)))
+	re.Equal(1, int(res["count"].(float64)))
+	results = res["results"].([]any)
+	re.Len(results, 1)
+	result = results[0].(map[string]any)
+	re.Equal(1, int(result["region_id"].(float64)))
+	re.Equal("merge_request_sent", result["status"].(string))
+	re.Equal("merge request sent for region 1 and region 3", result["description"].(string))
+
+	args = []string{"-u", pdAddr, "operator", "show"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	var operators []string
+	err = json.Unmarshal(output, &operators)
+	re.NoError(err)
+	re.Len(operators, 2)
+	re.Contains(operators[0], "admin-merge-region {merge: region 1 to 3}")
+	re.Contains(operators[1], "admin-merge-region {merge: region 1 to 3}")
+
+	// Test limit
+	args = []string{"-u", pdAddr, "region", "invalid-tiflash-key", "--limit", "1"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+}
+
+func (suite *patrolTestSuite) TestPatrolWithHollowRegion() {
+	// This tool is designed to run in a non-microservice environment.
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrolWithHollowRegion)
+}
+
+// checkPatrolWithHollowRegion tests the case where the next region's start key does not match the current region's end key.
+func (suite *patrolTestSuite) checkPatrolWithHollowRegion(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	failpoint.Enable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion", "return(true)")
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion")
+	}()
+
+	// Region 101: [ "", "key_A" )  <- This is the special region.
+	// HOLLOW REGION GAP: [ "key_A", "key_C" )
+	// Region 103: [ "key_C", "" )  <- This is the non-adjacent sibling.
+	// Define two keys that are NOT adjacent.
+	specialKeyA := "7480000000000AE1FFAB5F72F800000000FF052EEA0100000000FB"
+	nonAdjacentKeyC := "7480000000000AE1FFAB5F72F800000000FF052EEA0200000000FB"
+
+	specialKeyABytes, err := hex.DecodeString(specialKeyA)
+	re.NoError(err)
+	nonAdjacentKeyCBytes, err := hex.DecodeString(nonAdjacentKeyC)
+	re.NoError(err)
+
+	// Put the special region.
+	pdTests.MustPutRegion(re, cluster, 101, 1, []byte(""), specialKeyABytes, core.SetPeers([]*metapb.Peer{
+		{Id: 101, StoreId: 1},
+	}))
+	// Put the non-adjacent sibling region, creating a gap.
+	pdTests.MustPutRegion(re, cluster, 103, 1, nonAdjacentKeyCBytes, []byte(""), core.SetPeers([]*metapb.Peer{
+		{Id: 105, StoreId: 2},
+	}))
+
+	// Execute patrol with auto-merge enabled.
+	// It should find region 101, try to merge it, but fail after retries
+	args := []string{"-u", pdAddr, "region", "invalid-tiflash-key", "--auto-fix"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "merge failed: no matching sibling found for region 101")
+}
+
+func (suite *patrolTestSuite) TestPatrolWithLimit() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkPatrolWithLimit)
+}
+
+func (suite *patrolTestSuite) checkPatrolWithLimit(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+
+	totalRegions := 500
+	for i := range totalRegions {
+		var startKey, endKey []byte
+		if i > 0 {
+			startKey = fmt.Appendf(nil, "key%03d", i)
+		}
+		if i < totalRegions-1 {
+			endKey = fmt.Appendf(nil, "key%03d", i+1)
+		}
+		pdTests.MustPutRegion(re, cluster, uint64(1000+i), 1, startKey, endKey)
+	}
+
+	for _, limit := range []int{-1, 1, 2, 5, 10, 11, 33, 1000} {
+		re := suite.Require()
+		args := []string{"-u", pdAddr, "region", "invalid-tiflash-key", "--limit", strconv.Itoa(limit)}
+		output, err := tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+
+		var res map[string]any
+		err = json.Unmarshal(output, &res)
+		re.NoError(err)
+
+		re.Equal(float64(totalRegions), res["scan_count"], "scan_count should equal total regions regardless of limit")
+		re.Empty(res["count"])
+		re.Empty(res["results"])
+	}
 }

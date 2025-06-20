@@ -44,6 +44,7 @@ type Client interface {
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetEmptyRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
+	GetRegionSiblingsByID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
@@ -110,6 +111,7 @@ type Client interface {
 	/* Microservice interfaces */
 	GetMicroserviceMembers(context.Context, string) ([]MicroserviceMember, error)
 	GetMicroservicePrimary(context.Context, string) (string, error)
+	CreateOperators(context.Context, map[string]any) error
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
@@ -273,6 +275,20 @@ func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRan
 		return "", err
 	}
 	return state, nil
+}
+
+// GetRegionSiblingsByID gets the regions sibling info by ID.
+func (c *client) GetRegionSiblingsByID(ctx context.Context, regionID uint64) (*RegionsInfo, error) {
+	var regions RegionsInfo
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionSiblingsByID).
+		WithURI(RegionSiblingsByID(regionID)).
+		WithMethod(http.MethodGet).
+		WithResp(&regions))
+	if err != nil {
+		return nil, err
+	}
+	return &regions, nil
 }
 
 // GetHotReadRegions gets the hot read region statistics info.
@@ -1051,6 +1067,19 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 		WithMethod(http.MethodGet).
 		WithResp(&ver))
 	return ver.Version, err
+}
+
+// CreateOperators creates the operators.
+func (c *client) CreateOperators(ctx context.Context, input map[string]any) error {
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createOperators).
+		WithURI(operators).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
 }
 
 // DeleteOperators deletes the running operators.

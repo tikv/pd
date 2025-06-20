@@ -102,7 +102,7 @@ linters:
             - ""
         - name: context-as-argument
           arguments:
-            - allowTypesBefore: '*testing.T,*github.com/user/repo/testing.Harness'
+            - allowTypesBefore: "*testing.T,*github.com/user/repo/testing.Harness"
           severity: warning
           disabled: false
           exclude:
@@ -287,6 +287,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - tools/pd-ctl/pdctl/command/mok_helper.go # It is a copy from mok.
 formatters:
   enable:
     - gci

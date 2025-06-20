@@ -40,12 +40,14 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -1050,4 +1052,80 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
 	re.NoError(err)
 	re.Equal("Delete service GC safepoint successfully.", msg)
+}
+
+func TestGetSiblingsRegions(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2, func(conf *config.Config, _ string) {
+		conf.Replication.MaxReplicas = 1
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	leaderServer := cluster.GetLeaderServer()
+
+	err = leaderServer.BootstrapCluster()
+	// Add 2 more stores to the cluster.
+	for i := 2; i <= 4; i++ {
+		tests.MustPutStore(re, cluster, &metapb.Store{
+			Id:            uint64(i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		})
+	}
+	re.NoError(err)
+	for _, region := range []*core.RegionInfo{
+		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
+		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+		core.NewTestRegionInfo(12, 1, []byte("a3"), []byte("a4")),
+	} {
+		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
+	var (
+		testServers = cluster.GetServers()
+		endpoints   = make([]string, 0, len(testServers))
+	)
+	for _, s := range testServers {
+		addr := s.GetConfig().AdvertiseClientUrls
+		url, err := url.Parse(addr)
+		re.NoError(err)
+		endpoints = append(endpoints, url.Host)
+	}
+	client := pd.NewClient("pd-http-client-it-http", endpoints)
+	defer client.Close()
+	rg, err := client.GetRegionByID(ctx, 11)
+	re.NoError(err)
+	re.NotNil(rg)
+
+	rgs, err := client.GetRegionSiblingsByID(ctx, 11)
+	re.NoError(err)
+	re.Equal(int64(2), rgs.Count)
+	re.Equal(int64(10), rgs.Regions[0].ID)
+	re.Equal(int64(12), rgs.Regions[1].ID)
+
+	rightStartKey := rgs.Regions[rgs.Count-1].GetStartKey()
+	re.Zero(strings.Compare(rightStartKey, rg.EndKey))
+
+	input := map[string]any{
+		"name":             "merge-region",
+		"source_region_id": 10,
+		"target_region_id": 11,
+	}
+	err = client.CreateOperators(ctx, input)
+	re.NoError(err)
+	ops := leaderServer.GetRaftCluster().GetOperatorController().GetOperators()
+	re.Len(ops, 2)
+	re.NotZero(ops[0].Kind() & operator.OpMerge)
+	re.NotZero(ops[1].Kind() & operator.OpMerge)
 }
