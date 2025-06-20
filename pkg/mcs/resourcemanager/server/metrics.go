@@ -100,6 +100,13 @@ var (
 			Name:      "write_byte_sum",
 			Help:      "Counter of the write byte cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	crossAZTrafficCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: resourceSubsystem,
+			Name:      "cross_az_traffic_byte_sum",
+			Help:      "Counter of the cross AZ traffic byte cost for all resource groups.",
+		}, []string{newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	kvCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -181,6 +188,7 @@ func init() {
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)
+	prometheus.MustRegister(crossAZTrafficCost)
 	prometheus.MustRegister(kvCPUCost)
 	prometheus.MustRegister(sqlCPUCost)
 	prometheus.MustRegister(requestCount)
@@ -283,28 +291,32 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 }
 
 type counterMetrics struct {
-	RRUMetrics               prometheus.Counter
-	WRUMetrics               prometheus.Counter
-	SQLLayerRUMetrics        prometheus.Counter
-	ReadByteMetrics          prometheus.Counter
-	WriteByteMetrics         prometheus.Counter
-	KvCPUMetrics             prometheus.Counter
-	SQLCPUMetrics            prometheus.Counter
-	ReadRequestCountMetrics  prometheus.Counter
-	WriteRequestCountMetrics prometheus.Counter
+	RRUMetrics                 prometheus.Counter
+	WRUMetrics                 prometheus.Counter
+	SQLLayerRUMetrics          prometheus.Counter
+	ReadByteMetrics            prometheus.Counter
+	WriteByteMetrics           prometheus.Counter
+	ReadCrossAZTrafficMetrics  prometheus.Counter
+	WriteCrossAZTrafficMetrics prometheus.Counter
+	KvCPUMetrics               prometheus.Counter
+	SQLCPUMetrics              prometheus.Counter
+	ReadRequestCountMetrics    prometheus.Counter
+	WriteRequestCountMetrics   prometheus.Counter
 }
 
 func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetrics {
 	return &counterMetrics{
-		RRUMetrics:               readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		WRUMetrics:               writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		SQLLayerRUMetrics:        sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName),
-		ReadByteMetrics:          readByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		WriteByteMetrics:         writeByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		KvCPUMetrics:             kvCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		SQLCPUMetrics:            sqlCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		ReadRequestCountMetrics:  requestCount.WithLabelValues(groupName, groupName, readTypeLabel, keyspaceName),
-		WriteRequestCountMetrics: requestCount.WithLabelValues(groupName, groupName, writeTypeLabel, keyspaceName),
+		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		SQLLayerRUMetrics:          sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName),
+		ReadByteMetrics:            readByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		WriteByteMetrics:           writeByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ReadCrossAZTrafficMetrics:  crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName),
+		WriteCrossAZTrafficMetrics: crossAZTrafficCost.WithLabelValues(groupName, "write", keyspaceName),
+		KvCPUMetrics:               kvCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		SQLCPUMetrics:              sqlCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ReadRequestCountMetrics:    requestCount.WithLabelValues(groupName, groupName, readTypeLabel, keyspaceName),
+		WriteRequestCountMetrics:   requestCount.WithLabelValues(groupName, groupName, writeTypeLabel, keyspaceName),
 	}
 }
 
@@ -337,6 +349,12 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 	}
 	if consumption.KvWriteRpcCount > 0 {
 		m.WriteRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+	}
+	if consumption.ReadCrossAzTrafficBytes > 0 {
+		m.ReadCrossAZTrafficMetrics.Add(float64(consumption.ReadCrossAzTrafficBytes))
+	}
+	if consumption.WriteCrossAzTrafficBytes > 0 {
+		m.WriteCrossAZTrafficMetrics.Add(float64(consumption.WriteCrossAzTrafficBytes))
 	}
 }
 

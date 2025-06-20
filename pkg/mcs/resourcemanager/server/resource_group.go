@@ -308,6 +308,8 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 	rc.SqlLayerCpuTimeMs += c.SqlLayerCpuTimeMs
 	rc.KvReadRpcCount += c.KvReadRpcCount
 	rc.KvWriteRpcCount += c.KvWriteRpcCount
+	rc.ReadCrossAzTrafficBytes += c.ReadCrossAzTrafficBytes
+	rc.WriteCrossAzTrafficBytes += c.WriteCrossAzTrafficBytes
 }
 
 // persistStates persists the resource group tokens.

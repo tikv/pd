@@ -85,8 +85,36 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Write request
 		{
 			req: &TestRequestInfo{
-				isWrite:    true,
-				writeBytes: 100,
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				accessType:  AccessUnknown,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				succeed:   true,
+			},
+		},
+		// Write request local AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				accessType:  AccessLocalZone,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				succeed:   true,
+			},
+		},
+		// Write request cross AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				accessType:  AccessCrossZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -96,8 +124,24 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Read request
 		{
 			req: &TestRequestInfo{
-				isWrite:    false,
-				writeBytes: 0,
+				isWrite:     false,
+				writeBytes:  0,
+				numReplicas: 3,
+				accessType:  AccessLocalZone,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				kvCPU:     100 * time.Millisecond,
+				succeed:   true,
+			},
+		},
+		// Read request cross AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:     false,
+				writeBytes:  0,
+				numReplicas: 3,
+				accessType:  AccessCrossZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -116,13 +160,25 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		if testCase.req.IsWrite() {
 			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
+			if testCase.req.AccessLocationType() != AccessUnknown {
+				re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
+			}
 		}
 		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
 		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
 		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
+		calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
+		if testCase.req.IsWrite() && testCase.req.AccessLocationType() != AccessUnknown {
+			re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
+		} else if !testCase.req.IsWrite() && testCase.req.AccessLocationType() == AccessCrossZone {
+			re.Positive(expectedConsumption.ReadCrossAzTrafficBytes, caseNum)
+		} else {
+			re.Equal(expectedConsumption.ReadCrossAzTrafficBytes, uint64(0), caseNum)
+			re.Equal(expectedConsumption.WriteCrossAzTrafficBytes, uint64(0), caseNum)
+		}
 	}
 }
 
@@ -277,6 +333,33 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	re.NoError(err)
 	re.Equal(testResourceGroup, c2.meta)
 
+	// test report ru consumption
+	var totalConsumption rmpb.Consumption
+	c2.mu.Lock()
+	totalConsumption = *c2.mu.consumption
+	c2.mu.Unlock()
+	delta := &rmpb.Consumption{
+		RRU:                      1.0,
+		WRU:                      2.0,
+		ReadBytes:                10,
+		WriteBytes:               20,
+		TotalCpuTimeMs:           30.0,
+		SqlLayerCpuTimeMs:        40.0,
+		KvReadRpcCount:           50,
+		KvWriteRpcCount:          60,
+		ReadCrossAzTrafficBytes:  100,
+		WriteCrossAzTrafficBytes: 200,
+	}
+	controller.ReportConsumption("test-group", delta)
+	// check the consumption
+	c2.mu.Lock()
+	add(&totalConsumption, delta)
+	require.Equal(t, c2.mu.consumption, &totalConsumption)
+	c2.mu.Unlock()
+
+	// test report with unknown group
+	controller.ReportConsumption("unknown-name", delta)
+
 	var expectResp []*rmpb.TokenBucketResponse
 	recTestGroupAcquireTokenRequest := make(chan bool)
 	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -353,7 +436,7 @@ func TestTryGetController(t *testing.T) {
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
-	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1), NewTestResponseInfo(1, time.Millisecond, true)
+	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1, AccessCrossZone), NewTestResponseInfo(1, time.Millisecond, true)
 	_, _, _, _, err = controller.OnRequestWait(ctx, "test-group", requestInfo)
 	re.NoError(err)
 	consumption, err := controller.OnResponse("test-group", requestInfo, responseInfo)
