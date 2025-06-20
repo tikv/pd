@@ -14,7 +14,10 @@
 
 package constant
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 const (
 	// RetryInterval is the interval to retry.
@@ -48,10 +51,6 @@ const (
 	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
 
-	// SystemKeyspaceID is the system keyspace ID.
-	SystemKeyspaceID = uint32(1)
-	// SystemKeyspaceName is the system keyspace name.
-	SystemKeyspaceName = "SYSTEM"
 	// ValidKeyspaceIDMask is the mask of valid bits for keyspace ID. If any bit outside the mask is set, the keyspace
 	// ID is considered invalid and regarded as the same as NullKeyspaceID.
 	ValidKeyspaceIDMask = uint32(0xFFFFFF)
@@ -94,4 +93,12 @@ const (
 	// Among multiple replicas of a keyspace group, the higher the priority, the more likely
 	// the replica is to be elected as primary.
 	DefaultKeyspaceGroupReplicaPriority = 0
+)
+
+// only for next gen
+const (
+	// SystemKeyspaceID is the system keyspace ID.
+	SystemKeyspaceID = uint32(math.MaxUint32 - 1)
+	// SystemKeyspaceName is the system keyspace name.
+	SystemKeyspaceName = "SYSTEM"
 )
