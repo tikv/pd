@@ -516,6 +516,11 @@ error = '''
 write HTTP body failed
 '''
 
+["PD:idalloc:ErrIDExhausted"]
+error = '''
+id exhausted
+'''
+
 ["PD:ioutil:ErrIORead"]
 error = '''
 IO read error
