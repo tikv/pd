@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -720,10 +720,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 		go func(startID int) {
 			defer wg.Done()
 
-			endID := startID + step
-			if endID > numberOfKeyspaceGroupsToAdd {
-				endID = numberOfKeyspaceGroupsToAdd
-			}
+			endID := min(startID+step, numberOfKeyspaceGroupsToAdd)
 
 			randomGen := rand.New(rand.NewSource(time.Now().UnixNano()))
 			for j := startID; j < endID; j++ {
@@ -762,9 +759,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 
 	// Verify the keyspace group assignment.
 	// Sort the keyspaces in ascending order
-	sort.Slice(expectedGroupIDs, func(i, j int) bool {
-		return expectedGroupIDs[i] < expectedGroupIDs[j]
-	})
+	slices.Sort(expectedGroupIDs)
 	assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
 	re.Equal(expectedGroupIDs, assignedGroupIDs)
 }

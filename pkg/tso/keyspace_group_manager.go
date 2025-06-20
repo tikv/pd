@@ -21,7 +21,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -804,9 +804,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	oldLen, newLen := len(oldKeyspaces), len(newKeyspaces)
 
 	// Sort the keyspaces in ascending order
-	sort.Slice(newKeyspaces, func(i, j int) bool {
-		return newKeyspaces[i] < newKeyspaces[j]
-	})
+	slices.Sort(newKeyspaces)
 
 	// Mostly, the membership has no change, so optimize for this case.
 	sameMembership := true

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand"
 	"net/http"
@@ -1160,9 +1161,7 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.RateLimitConfig.LimiterConfig {
-		rateLimitCfg[label] = item
-	}
+	maps.Copy(rateLimitCfg, cfg.RateLimitConfig.LimiterConfig)
 	rateLimitCfg[label] = value
 	return s.UpdateRateLimit(&cfg.RateLimitConfig, key, &rateLimitCfg)
 }
@@ -1209,9 +1208,7 @@ func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
 func (s *Server) UpdateGRPCRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.GRPCRateLimitConfig.LimiterConfig {
-		rateLimitCfg[label] = item
-	}
+	maps.Copy(rateLimitCfg, cfg.GRPCRateLimitConfig.LimiterConfig)
 	rateLimitCfg[label] = value
 	return s.UpdateGRPCRateLimit(&cfg.GRPCRateLimitConfig, key, &rateLimitCfg)
 }

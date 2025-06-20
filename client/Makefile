@@ -45,6 +45,8 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c ../.golangci.yml --verbose ./... --allow-parallel-runners
+	@ echo "modernize ..."
+	@ go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.18.1 -test ./...
 
 tidy:
 	@ go mod tidy

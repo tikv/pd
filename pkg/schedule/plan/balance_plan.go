@@ -132,11 +132,7 @@ func BalancePlanSummary(plans []Plan) (map[uint64]Status, bool, error) {
 		if !ok {
 			return nil, false, errs.ErrDiagnosticLoadPlan
 		}
-		step := p.GetStep()
-		// We can simply think of createOperator as a filtering step for target in BalancePlanSummary.
-		if step > pickTarget {
-			step = pickTarget
-		}
+		step := min(p.GetStep(), pickTarget)
 		var store uint64
 		// `step == pickRegion` is a special processing in summary, because we want to exclude the factor of region
 		// and consider the failure as the status of source store.
