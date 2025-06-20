@@ -2488,6 +2488,9 @@ func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 
 // GetProgressByID returns the progress details for a given store ID.
 func (c *RaftCluster) GetProgressByID(storeID uint64) (*progress.Progress, error) {
+	if c == nil || c.progressManager == nil {
+		return nil, errs.ErrProgressNotFound.FastGenByArgs("progress manager is not initialized")
+	}
 	p := c.progressManager.GetProgressByStoreID(storeID)
 	if p == nil {
 		return nil, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the given store ID: %d", storeID))
@@ -2497,6 +2500,9 @@ func (c *RaftCluster) GetProgressByID(storeID uint64) (*progress.Progress, error
 
 // GetProgressByAction returns the progress details for a given action.
 func (c *RaftCluster) GetProgressByAction(action string) (*progress.Progress, error) {
+	if c == nil || c.progressManager == nil {
+		return nil, errs.ErrProgressNotFound.FastGenByArgs("progress manager is not initialized")
+	}
 	p := c.progressManager.GetAverageProgressByAction(progress.Action(action))
 	if p == nil {
 		return nil, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the action: %s", action))
