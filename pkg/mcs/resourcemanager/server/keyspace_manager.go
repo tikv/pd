@@ -76,7 +76,7 @@ func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.Resourc
 		ruTrackers: make(map[string]*ruTracker),
 		keyspaceID: keyspaceID,
 		storage:    storage,
-		sl:         newServiceLimiter(keyspaceID, 0),
+		sl:         newServiceLimiter(keyspaceID, 0, storage),
 	}
 }
 
@@ -239,7 +239,7 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 	}
 }
 
-func (krgm *keyspaceResourceGroupManager) setServiceLimiter(serviceLimit float64) {
+func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) {
 	krgm.RLock()
 	sl := krgm.sl
 	krgm.RUnlock()

@@ -532,6 +532,10 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	for retryCount = range maxTSORetryTimes {
 		resp := c.GetTSAsync(ctx)
 		if physical, logical, err = resp.Wait(); err != nil {
+			failpoint.Inject("skipRetry", func() {
+				failpoint.Return(physical, logical, err)
+			})
+
 			if !errs.IsLeaderChange(err) {
 				break
 			}
