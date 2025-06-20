@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -30,7 +31,6 @@ import (
 // Since the client will request tokens with a 5-second period by default, the burst factor is 5.0 here.
 const serviceLimiterBurstFactor = 5.0
 
-// TODO: persist the service limit to the storage and reload it when the service starts.
 type serviceLimiter struct {
 	syncutil.RWMutex
 	// ServiceLimit is the configured service limit for this limiter.
@@ -42,15 +42,18 @@ type serviceLimiter struct {
 	LastUpdate time.Time `json:"last_update"`
 	// KeyspaceID is the keyspace ID of the keyspace that this limiter belongs to.
 	keyspaceID uint32
+	// storage is used to persist the service limit.
+	storage endpoint.ResourceGroupStorage
 }
 
-func newServiceLimiter(keyspaceID uint32, serviceLimit float64) *serviceLimiter {
+func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint.ResourceGroupStorage) *serviceLimiter {
 	// The service limit should be non-negative.
 	serviceLimit = math.Max(0, serviceLimit)
 	return &serviceLimiter{
 		ServiceLimit: serviceLimit,
 		LastUpdate:   time.Now(),
 		keyspaceID:   keyspaceID,
+		storage:      storage,
 	}
 }
 
@@ -75,6 +78,16 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 		// service limit setting was not too high, so that many available tokens
 		// are not left unused, causing the new service limit to become invalid.
 		krl.refillTokensLocked(now)
+	}
+
+	// Persist the service limit to storage
+	if krl.storage != nil {
+		if err := krl.storage.SaveServiceLimit(krl.keyspaceID, newServiceLimit); err != nil {
+			log.Error("failed to persist service limit",
+				zap.Uint32("keyspace-id", krl.keyspaceID),
+				zap.Float64("service-limit", newServiceLimit),
+				zap.Error(err))
+		}
 	}
 }
 

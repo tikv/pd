@@ -33,6 +33,7 @@ const (
 	regionsByKey              = "/pd/api/v1/regions/key"
 	RegionsByStoreIDPrefix    = "/pd/api/v1/regions/store"
 	regionsReplicated         = "/pd/api/v1/regions/replicated"
+	regionsSiblings           = "/pd/api/v1/regions/sibling"
 	EmptyRegions              = "/pd/api/v1/regions/check/empty-region"
 	AccelerateSchedule        = "/pd/api/v1/regions/accelerate-schedule"
 	AccelerateScheduleInBatch = "/pd/api/v1/regions/accelerate-schedule/batch"
@@ -116,6 +117,11 @@ func RegionsReplicatedByKeyRange(keyRange *KeyRange) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsHexStr()
 	return fmt.Sprintf("%s?startKey=%s&endKey=%s",
 		regionsReplicated, startKeyStr, endKeyStr)
+}
+
+// RegionSiblingsByID returns the path of PD HTTP API to get sibling regions by ID.
+func RegionSiblingsByID(regionID uint64) string {
+	return fmt.Sprintf("%s/%d", regionsSiblings, regionID)
 }
 
 // RegionStatsByKeyRange returns the path of PD HTTP API to get region stats by start key and end key.
