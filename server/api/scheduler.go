@@ -134,7 +134,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		defaultTimeout := "1h"
+		defaultTimeout := "30m"
 		if err := apiutil.CollectStringOption("timeout", input, collector); err != nil {
 			if errors.ErrorEqual(err, errs.ErrOptionNotExist) {
 				collector(defaultTimeout)
