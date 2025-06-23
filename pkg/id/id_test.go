@@ -85,12 +85,12 @@ func TestIDAllocationEndValue(t *testing.T) {
 	defer clean()
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
-	checkIDAllocationEndValue(t, client, NonNextGenKeyspaceIDLimit)
+	checkIDAllocationEndValue(t, client, nonNextGenKeyspaceIDLimit)
 	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
 	defer func() {
 		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
 	}()
-	checkIDAllocationEndValue(t, client, ReservedKeyspaceIDStart-1)
+	checkIDAllocationEndValue(t, client, reservedKeyspaceIDStart-1)
 }
 
 func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint64) {
