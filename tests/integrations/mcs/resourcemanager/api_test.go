@@ -192,12 +192,68 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 		suite.mustDeleteResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
 		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
 		re.NotNil(group)
+		suite.mustDeleteResourceGroup(re, groupToAdd.Name+"_err", keyspaceName)
+		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
+		re.NotNil(group)
 		suite.mustDeleteResourceGroup(re, groupToAdd.Name, keyspaceName)
 		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
 		re.Nil(group)
 		groups = suite.mustGetResourceGroupList(re, keyspaceName)
 		re.Len(groups, 1)
 		re.Equal(server.DefaultResourceGroupName, groups[0].Name)
+	}
+}
+
+func (suite *resourceManagerAPITestSuite) TestResourceGroupAPIInit() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	testFuncs := []func(keyspaceID uint32, keyspaceName string){
+		func(_ uint32, keyspaceName string) {
+			group := suite.mustGetResourceGroup(re, "group", keyspaceName)
+			re.Nil(group)
+			group = suite.mustGetResourceGroup(re, "default", keyspaceName)
+			re.NotNil(group)
+		},
+		func(_ uint32, keyspaceName string) {
+			groups := suite.mustGetResourceGroupList(re, keyspaceName)
+			re.Len(groups, 1)
+			re.Equal(server.DefaultResourceGroupName, groups[0].Name)
+		},
+		func(keyspaceID uint32, _ string) {
+			groupToUpdate := &rmpb.ResourceGroup{
+				Name:     server.DefaultResourceGroupName,
+				Mode:     rmpb.GroupMode_RUMode,
+				Priority: 5,
+				RUSettings: &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate:   200,
+							BurstLimit: 200,
+						},
+					},
+				},
+				KeyspaceId: &rmpb.KeyspaceIDValue{
+					Value: keyspaceID,
+				},
+			}
+			suite.mustUpdateResourceGroup(re, groupToUpdate)
+		},
+	}
+	for i, testFunc := range testFuncs {
+		// Create keyspace
+		keyspaceName := fmt.Sprint("test_keyspace_", i)
+		leaderServer := suite.cluster.GetLeaderServer()
+		meta, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
+			&keyspace.CreateKeyspaceRequest{
+				Name: keyspaceName,
+			},
+		)
+		re.NoError(err)
+		// Run test
+		testFunc(meta.GetId(), keyspaceName)
 	}
 }
 

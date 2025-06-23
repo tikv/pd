@@ -79,6 +79,8 @@ var (
 	TSOBatchSize prometheus.Histogram
 	// TSOBatchSendLatency is the histogram of the latency of sending TSO requests.
 	TSOBatchSendLatency prometheus.Histogram
+	// TSORetryCount is the histogram of the retry count for TSO requests.
+	TSORetryCount prometheus.Histogram
 	// RequestForwarded is the gauge to indicate if the request is forwarded.
 	RequestForwarded *prometheus.GaugeVec
 	// OngoingRequestCountGauge is the gauge to indicate the count of ongoing TSO requests.
@@ -174,6 +176,16 @@ func initMetrics(constLabels prometheus.Labels) {
 			ConstLabels: constLabels,
 			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
 			Help:        "tso batch send latency",
+		})
+
+	TSORetryCount = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "request",
+			Name:        "tso_retry",
+			ConstLabels: constLabels,
+			Help:        "Counter of retry time for TSO request.",
+			Buckets:     []float64{1, 2, 4, 8, 12, 16, 20},
 		})
 
 	RequestForwarded = prometheus.NewGaugeVec(
@@ -414,6 +426,7 @@ func registerMetrics() {
 	prometheus.MustRegister(requestDuration)
 	prometheus.MustRegister(TSOBestBatchSize)
 	prometheus.MustRegister(TSOBatchSize)
+	prometheus.MustRegister(TSORetryCount)
 	prometheus.MustRegister(TSOBatchSendLatency)
 	prometheus.MustRegister(RequestForwarded)
 	prometheus.MustRegister(EstimateTSOLatencyGauge)
