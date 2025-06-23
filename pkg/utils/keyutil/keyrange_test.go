@@ -15,6 +15,7 @@
 package keyutil
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -23,7 +24,6 @@ import (
 
 func TestCodecKeyRange(t *testing.T) {
 	re := require.New(t)
-
 	testCases := []struct {
 		ks KeyRange
 	}{
@@ -45,41 +45,44 @@ func TestCodecKeyRange(t *testing.T) {
 }
 
 func TestOverLap(t *testing.T) {
+	re := require.New(t)
 	for _, tc := range []struct {
-		name   string
-		a, b   KeyRange
-		expect bool
+		name       string
+		a, b       KeyRange
+		expect     bool
+		isAdjacent bool
 	}{
 		{
-			name:   "overlap",
-			a:      NewKeyRange("a", "c"),
-			b:      NewKeyRange("b", "d"),
-			expect: true,
+			name:       "overlap",
+			a:          NewKeyRange("a", "c"),
+			b:          NewKeyRange("b", "d"),
+			expect:     true,
+			isAdjacent: false,
 		},
 		{
-			name:   "no overlap",
-			a:      NewKeyRange("a", "b"),
-			b:      NewKeyRange("c", "d"),
-			expect: false,
+			name:       "no overlap",
+			a:          NewKeyRange("a", "b"),
+			b:          NewKeyRange("c", "d"),
+			expect:     false,
+			isAdjacent: false,
 		},
 		{
-			name:   "continuous",
-			a:      NewKeyRange("a", "b"),
-			b:      NewKeyRange("b", "d"),
-			expect: true,
+			name:       "continuous",
+			a:          NewKeyRange("a", "b"),
+			b:          NewKeyRange("b", "d"),
+			expect:     true,
+			isAdjacent: true,
 		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
-			re.Equal(tc.expect, tc.a.OverLapped(&tc.b))
-			re.Equal(tc.expect, tc.b.OverLapped(&tc.a))
-		})
+		re.Equal(tc.expect, tc.a.OverLapped(&tc.b))
+		re.Equal(tc.expect, tc.b.OverLapped(&tc.a))
+		re.Equal(tc.isAdjacent, tc.b.IsAdjacent(&tc.a))
+		re.Equal(tc.isAdjacent, tc.a.IsAdjacent(&tc.b))
 	}
 }
 
 func TestMergeKeyRanges(t *testing.T) {
 	re := require.New(t)
-
 	testCases := []struct {
 		name   string
 		input  []*KeyRange
@@ -147,4 +150,134 @@ func TestMergeKeyRanges(t *testing.T) {
 		rs.Merge()
 		re.Equal(tc.expect, rs.Ranges(), tc.name)
 	}
+}
+
+func TestSortAndDeduce(t *testing.T) {
+	testCases := []struct {
+		name   string
+		input  []*KeyRange
+		expect []*KeyRange
+	}{
+		{
+			name:   "empty",
+			input:  []*KeyRange{},
+			expect: []*KeyRange{},
+		},
+		{
+			name:   "single",
+			input:  []*KeyRange{newKeyRangePointer("a", "b")},
+			expect: []*KeyRange{newKeyRangePointer("a", "b")},
+		},
+		{
+			name:   "non-overlapping",
+			input:  []*KeyRange{newKeyRangePointer("a", "b"), newKeyRangePointer("c", "d")},
+			expect: []*KeyRange{newKeyRangePointer("a", "b"), newKeyRangePointer("c", "d")},
+		},
+		{
+			name:   "overlapping",
+			input:  []*KeyRange{newKeyRangePointer("a", "c"), newKeyRangePointer("c", "d")},
+			expect: []*KeyRange{newKeyRangePointer("a", "d")},
+		},
+	}
+	re := require.New(t)
+	for _, tc := range testCases {
+		rs := &KeyRanges{krs: tc.input}
+		rs.SortAndDeduce()
+		re.Equal(tc.expect, rs.Ranges(), tc.name)
+	}
+}
+
+func TestSubtractKeyRanges(t *testing.T) {
+	testCases := []struct {
+		name   string
+		ks     []*KeyRange
+		base   *KeyRange
+		expect []*KeyRange
+	}{
+		{
+			name:   "empty",
+			ks:     []*KeyRange{},
+			base:   &KeyRange{},
+			expect: []*KeyRange{},
+		},
+		{
+			name:   "single",
+			ks:     []*KeyRange{newKeyRangePointer("a", "d"), newKeyRangePointer("e", "f")},
+			base:   &KeyRange{},
+			expect: []*KeyRange{newKeyRangePointer("", "a"), newKeyRangePointer("d", "e"), newKeyRangePointer("f", "")},
+		},
+		{
+			name:   "non-overlapping",
+			ks:     []*KeyRange{newKeyRangePointer("a", "d"), newKeyRangePointer("e", "f")},
+			base:   newKeyRangePointer("g", "h"),
+			expect: []*KeyRange{newKeyRangePointer("g", "h")},
+		},
+		{
+			name:   "overlapping",
+			ks:     []*KeyRange{newKeyRangePointer("a", "d"), newKeyRangePointer("e", "f")},
+			base:   newKeyRangePointer("c", "g"),
+			expect: []*KeyRange{newKeyRangePointer("d", "e"), newKeyRangePointer("f", "g")},
+		},
+	}
+	re := require.New(t)
+	for _, tc := range testCases {
+		rs := &KeyRanges{krs: tc.ks}
+		res := rs.SubtractKeyRanges(tc.base)
+		expectData, _ := json.Marshal(tc.expect)
+		actualData, _ := json.Marshal(res)
+		re.Equal(expectData, actualData, tc.name)
+	}
+}
+
+func TestDeleteKeyRanges(t *testing.T) {
+	testData := []struct {
+		name   string
+		input  []*KeyRange
+		base   *KeyRange
+		expect []*KeyRange
+	}{
+		{
+			name:   "empty",
+			input:  []*KeyRange{},
+			base:   &KeyRange{},
+			expect: []*KeyRange{},
+		},
+		{
+			name:   "no-overlapping",
+			input:  []*KeyRange{newKeyRangePointer("a", "b"), newKeyRangePointer("c", "d")},
+			base:   &KeyRange{StartKey: []byte("f"), EndKey: []byte("g")},
+			expect: []*KeyRange{newKeyRangePointer("a", "b"), newKeyRangePointer("c", "d")},
+		},
+		{
+			name:   "overlapping",
+			input:  []*KeyRange{newKeyRangePointer("", "c"), newKeyRangePointer("e", "")},
+			base:   &KeyRange{StartKey: []byte("b"), EndKey: []byte("d")},
+			expect: []*KeyRange{newKeyRangePointer("", "b"), newKeyRangePointer("e", "")},
+		},
+		{
+			name:   "between",
+			input:  []*KeyRange{newKeyRangePointer("", "")},
+			base:   &KeyRange{StartKey: []byte("b"), EndKey: []byte("d")},
+			expect: []*KeyRange{newKeyRangePointer("", "b"), newKeyRangePointer("d", "")},
+		},
+		{
+			name:   "equal",
+			input:  []*KeyRange{newKeyRangePointer("", "a"), newKeyRangePointer("b", "d")},
+			base:   &KeyRange{StartKey: []byte("b"), EndKey: []byte("d")},
+			expect: []*KeyRange{newKeyRangePointer("", "a")},
+		},
+	}
+	re := require.New(t)
+	for _, tc := range testData {
+		rs := &KeyRanges{krs: tc.input}
+		rs.Delete(tc.base)
+		expectData, _ := json.Marshal(tc.expect)
+		actualData, _ := json.Marshal(rs.krs)
+		re.Equal(expectData, actualData, tc.name)
+	}
+}
+
+func newKeyRangePointer(a, b string) *KeyRange {
+	ks := NewKeyRange(a, b)
+	return &ks
 }
