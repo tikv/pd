@@ -973,7 +973,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", g.Name))
+				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name))
 			}
 
 			// to test the deletion of persistence
@@ -1620,7 +1620,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 
 	// Get and List resource group without keyspace id
 	rg, err := cli.GetResourceGroup(suite.ctx, group.Name)
-	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", group.Name))
+	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name))
 	re.Nil(rg)
 	rgs, err := cli.ListResourceGroups(suite.ctx)
 	re.NoError(err)
@@ -1683,9 +1683,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.Equal(rg.RUStats, testConsumption)
 
 	// Delete resource group without keyspace id
-	resp, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
-	re.NoError(err)
-	re.Contains(resp, "Success!")
+	_, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
+	re.Error(err)
+	re.EqualError(err, "rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the keyspace_test resource group does not exist")
 	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
 	re.NotNil(rg)
@@ -1695,7 +1695,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", group.Name))
+	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name))
 	re.Nil(rg)
 }
 
