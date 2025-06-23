@@ -15,7 +15,6 @@
 package apis
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -28,6 +27,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -175,9 +175,19 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	group := s.manager.GetResourceGroup(keyspaceID, c.Param("name"), withStats)
+	groupName := c.Param("name")
+	group, err := s.manager.GetResourceGroup(keyspaceID, groupName, withStats)
+	if err != nil {
+		if errs.ErrResourceGroupNotExists.Equal(err) || errs.ErrKeyspaceNotExists.Equal(err) {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
 	if group == nil {
-		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
+		c.String(http.StatusNotFound, errs.ErrResourceGroupNotExists.FastGenByArgs(groupName).Error())
+		return
 	}
 	c.IndentedJSON(http.StatusOK, group)
 }
@@ -200,7 +210,15 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	groups := s.manager.GetResourceGroupList(keyspaceID, withStats)
+	groups, err := s.manager.GetResourceGroupList(keyspaceID, withStats)
+	if err != nil {
+		if errs.ErrKeyspaceNotExists.Equal(err) {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
 	c.IndentedJSON(http.StatusOK, groups)
 }
 
@@ -221,8 +239,15 @@ func (s *Service) deleteResourceGroup(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	if err := s.manager.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
-		c.String(http.StatusNotFound, err.Error())
+	groupName := c.Param("name")
+	err = s.manager.DeleteResourceGroup(keyspaceID, groupName)
+	if err != nil {
+		if errs.ErrResourceGroupNotExists.Equal(err) || errs.ErrKeyspaceNotExists.Equal(err) {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
 	}
 	c.String(http.StatusOK, "Success!")
 }

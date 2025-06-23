@@ -176,6 +176,12 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 	if name == DefaultResourceGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
+	krgm.RLock()
+	_, ok := krgm.groups[name]
+	krgm.RUnlock()
+	if !ok {
+		return errs.ErrResourceGroupNotExists.FastGenByArgs(name)
+	}
 	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
 		return err
 	}
