@@ -14,8 +14,6 @@ dev-basic: build check basic-test
 
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
-BUILD_CGO_ENABLED := 0
-BUILD_TOOL_CGO_ENABLED := 0
 BUILD_GOEXPERIMENT ?=
 PD_EDITION ?= Community
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
@@ -32,7 +30,7 @@ endif
 ifeq ($(DASHBOARD), 0)
 	BUILD_TAGS += without_dashboard
 else
-	BUILD_CGO_ENABLED := 1
+	BUILD_CGO_ENABLED_DEFAULT := 1
 endif
 
 ifeq ($(FAILPOINT), 1)
@@ -41,7 +39,7 @@ endif
 
 ifeq ("$(WITH_RACE)", "1")
 	BUILD_FLAGS += -race
-	BUILD_CGO_ENABLED := 1
+	BUILD_CGO_ENABLED_DEFAULT := 1
 endif
 
 ifeq ($(PLUGIN), 1)
@@ -51,9 +49,17 @@ endif
 ifeq ($(ENABLE_FIPS), 1)
 	BUILD_TAGS += boringcrypto
 	BUILD_GOEXPERIMENT = boringcrypto
-	BUILD_CGO_ENABLED := 1
-	BUILD_TOOL_CGO_ENABLED := 1
+	BUILD_CGO_ENABLED_DEFAULT := 1
+	BUILD_TOOL_CGO_ENABLED_DEFAULT := 1
 endif
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S), Darwin)
+    BUILD_TOOL_CGO_ENABLED_DEFAULT := 1
+endif
+
+BUILD_CGO_ENABLED ?= $(BUILD_CGO_ENABLED_DEFAULT)
+BUILD_TOOL_CGO_ENABLED ?= $(BUILD_TOOL_CGO_ENABLED_DEFAULT)
 
 ifeq ($(NEXT_GEN), 1)
 	BUILD_TAGS += nextgen
@@ -115,23 +121,23 @@ pd-server-basic:
 pd-ctl:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
 pd-tso-bench:
-	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench pd-tso-bench/main.go
+	cd tools && CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -o $(BUILD_BIN_PATH)/pd-tso-bench pd-tso-bench/main.go
 pd-api-bench:
-	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench pd-api-bench/main.go
+	cd tools && CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -o $(BUILD_BIN_PATH)/pd-api-bench pd-api-bench/main.go
 pd-region-bench:
-	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-region-bench pd-region-bench/main.go
+	cd tools && CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -o $(BUILD_BIN_PATH)/pd-region-bench pd-region-bench/main.go
 pd-recover:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover pd-recover/main.go
 pd-analysis:
-	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis pd-analysis/main.go
+	cd tools && CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis pd-analysis/main.go
 pd-heartbeat-bench:
-	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench pd-heartbeat-bench/main.go
+	cd tools && CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench pd-heartbeat-bench/main.go
 simulator:
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-simulator pd-simulator/main.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-simulator pd-simulator/main.go
 regions-dump:
-	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/regions-dump regions-dump/main.go
+	cd tools && CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/regions-dump regions-dump/main.go
 stores-dump:
-	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
+	cd tools && CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
 pd-ut: pd-xprog
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
 pd-xprog:
