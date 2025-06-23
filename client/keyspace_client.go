@@ -28,9 +28,12 @@ import (
 )
 
 const (
-	KeyspaceConfigGCManagementType              = "gc_management_type"
+	// KeyspaceConfigGCManagementType is the key for GC management type in keyspace config.
+	KeyspaceConfigGCManagementType = "gc_management_type"
+	// KeyspaceConfigGCManagementTypeKeyspaceLevel is the value representing keyspace level GC in keyspace config.
 	KeyspaceConfigGCManagementTypeKeyspaceLevel = "keyspace_level"
-	KeyspaceConfigGCManagementTypeUnified       = "unified"
+	// KeyspaceConfigGCManagementTypeUnified is the value representing unified GC in keyspace config.
+	KeyspaceConfigGCManagementTypeUnified = "unified"
 )
 
 // KeyspaceClient manages keyspace metadata.
