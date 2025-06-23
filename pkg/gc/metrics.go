@@ -24,8 +24,17 @@ var (
 			Name:      "gc_safepoint",
 			Help:      "The ts of gc safepoint",
 		}, []string{"type"})
+
+	gcBarrierGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "gc",
+			Name:      "barrier",
+			Help:      "The ts of gc barrier",
+		}, []string{"keyspace_id", "barrier"})
 )
 
 func init() {
 	prometheus.MustRegister(gcSafePointGauge)
+	prometheus.MustRegister(gcBarrierGauge)
 }
