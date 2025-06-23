@@ -35,12 +35,6 @@ import (
 type label string
 
 const (
-	// ReservedKeyspaceIDCount is the reserved count for keyspace id.
-	ReservedKeyspaceIDCount = uint64(1024)
-	// ReservedKeyspaceIDStart is the start id for reserved keyspace id.
-	// The reserved keyspace id range is [uint32.Max - 1024, uint32.Max)
-	ReservedKeyspaceIDStart = uint64(math.MaxUint32) - ReservedKeyspaceIDCount
-
 	// DefaultLabel is the default label for id allocator.
 	DefaultLabel label = "idalloc"
 	// KeyspaceLabel is the label for keyspace id allocator.
