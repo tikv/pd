@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
 
@@ -80,16 +81,20 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 // TestIDAllocationEndValue tests if keyspace allocator hits ErrIDExhausted when trying to allocate into reserved range.
 func TestIDAllocationEndValue(t *testing.T) {
 	re := require.New(t)
-	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
-	defer func() {
-		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
-	}()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
+	checkIDAllocationEndValue(t, client, nonNextGenKeyspaceIDLimit)
+	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	}()
+	checkIDAllocationEndValue(t, client, reservedKeyspaceIDStart-1)
+}
 
-	t.Run("KeyspaceLabel should hit ErrIDExhausted when trying to allocate into reserved range", func(t *testing.T) {
+func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint64) {
+	t.Run("KeyspaceLabel should hit ErrIDExhausted when trying to allocate into unavailable range", func(t *testing.T) {
 		re := require.New(t)
 		for _, step := range []uint64{1, 10, 1024, 1025} {
 			keyspaceAllocator := NewAllocator(&AllocatorParams{
@@ -98,9 +103,9 @@ func TestIDAllocationEndValue(t *testing.T) {
 				Member: memberVal,
 				Step:   step,
 			})
-			initialBaseValue := ReservedKeyspaceIDStart - step*3
+			initialBaseValue := endID - step*3
 
-			err = keyspaceAllocator.SetBase(initialBaseValue)
+			err := keyspaceAllocator.SetBase(initialBaseValue)
 			re.NoError(err)
 			var lastAllocatedID uint64
 			for {
@@ -114,11 +119,11 @@ func TestIDAllocationEndValue(t *testing.T) {
 			}
 			re.Error(err)
 			re.True(errs.ErrIDExhausted.Equal(err))
-			re.Equal(ReservedKeyspaceIDStart-1, lastAllocatedID)
+			re.Equal(endID, lastAllocatedID)
 		}
 	})
 
-	t.Run("SetBase should fail if newBase enters reserved range", func(t *testing.T) {
+	t.Run("SetBase should fail if newBase enters unavailable range", func(t *testing.T) {
 		re := require.New(t)
 		keyspaceAllocator := NewAllocator(&AllocatorParams{
 			Client: client,
@@ -127,14 +132,14 @@ func TestIDAllocationEndValue(t *testing.T) {
 			Step:   step,
 		})
 
-		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 2)
+		err := keyspaceAllocator.SetBase(endID - 1)
 		re.NoError(err)
 
-		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart - 1)
+		err = keyspaceAllocator.SetBase(endID)
 		re.Error(err)
 		re.True(errs.ErrIDExhausted.Equal(err))
 
-		err = keyspaceAllocator.SetBase(ReservedKeyspaceIDStart + 10)
+		err = keyspaceAllocator.SetBase(endID + 10)
 		re.Error(err)
 		re.True(errs.ErrIDExhausted.Equal(err))
 	})
