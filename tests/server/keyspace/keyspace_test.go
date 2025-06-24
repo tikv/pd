@@ -176,12 +176,12 @@ func TestSystemKeyspace(t *testing.T) {
 	re.NoError(err)
 	re.Equal(constant.SystemKeyspaceID, systemKeyspace.GetId())
 	// Update system keyspace.
-	// Changing state of DEFAULT keyspace is not allowed.
+	// Changing state of SYSTEM keyspace is not allowed.
 	newTime := time.Now().Unix()
-	_, err = manager.UpdateKeyspaceState(constant.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+	_, err = manager.UpdateKeyspaceState(constant.SystemKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 	re.Error(err)
-	// Changing config of DEFAULT keyspace is allowed.
+	// Changing config of SYSTEM keyspace is allowed.
 	mutations := makeMutations()
-	_, err = manager.UpdateKeyspaceConfig(constant.DefaultKeyspaceName, mutations)
+	_, err = manager.UpdateKeyspaceConfig(constant.SystemKeyspaceName, mutations)
 	re.NoError(err)
 }

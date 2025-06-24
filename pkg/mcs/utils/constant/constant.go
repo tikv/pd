@@ -45,11 +45,12 @@ const (
 	DefaultKeyspaceName = "DEFAULT"
 
 	// DefaultKeyspaceID is the default key space id.
-	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
 	// 0 is reserved for default keyspace with the name "DEFAULT". It's initialized when PD bootstraps
 	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
 	// MaxValidKeyspaceID is the max valid keyspace id.
+	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
+	// In kv encode, the first byte is represented by r/x, which means txn kv/raw kv, so there are 24 bits left.
 	MaxValidKeyspaceID = uint32(0xFFFFFF)
 
 	// ValidKeyspaceIDMask is the mask of valid bits for keyspace ID. If any bit outside the mask is set, the keyspace
