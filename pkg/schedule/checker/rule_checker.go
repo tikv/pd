@@ -227,7 +227,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			return op, nil
 		}
 	}
-	return c.fixBetterLocation(region, rf)
+	return c.fixBetterLocation(region, fit, rf)
 }
 
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
@@ -420,7 +420,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	return false
 }
 
-func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
+func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	if len(rf.Rule.LocationLabels) == 0 {
 		return nil, nil
 	}
@@ -436,8 +436,11 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	var coLocationStores []*core.StoreInfo
 	regionStores := c.cluster.GetRegionStores(region)
 	for _, s := range regionStores {
-		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
-			coLocationStores = append(coLocationStores, s)
+		for _, r := range fit.GetRules() {
+			if placement.MatchLabelConstraints(s, r.LabelConstraints) {
+				coLocationStores = append(coLocationStores, s)
+				break
+			}
 		}
 	}
 
