@@ -621,6 +621,11 @@ error = '''
 default keyspace group cannot be modified
 '''
 
+["PD:keyspace:ErrModifySystemKeyspace"]
+error = '''
+cannot modify system keyspace's state
+'''
+
 ["PD:keyspace:ErrNoAvailableNode"]
 error = '''
 no available node
