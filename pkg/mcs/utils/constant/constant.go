@@ -15,7 +15,6 @@
 package constant
 
 import (
-	"math"
 	"time"
 )
 
@@ -50,6 +49,8 @@ const (
 	// 0 is reserved for default keyspace with the name "DEFAULT". It's initialized when PD bootstraps
 	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
+	// MaxValidKeyspaceID is the max valid keyspace id.
+	MaxValidKeyspaceID = uint32(0xFFFFFF)
 
 	// ValidKeyspaceIDMask is the mask of valid bits for keyspace ID. If any bit outside the mask is set, the keyspace
 	// ID is considered invalid and regarded as the same as NullKeyspaceID.
@@ -98,7 +99,7 @@ const (
 // only for next gen
 const (
 	// SystemKeyspaceID is the system keyspace ID.
-	SystemKeyspaceID = uint32(math.MaxUint32 - 1)
+	SystemKeyspaceID = MaxValidKeyspaceID - 1
 	// SystemKeyspaceName is the system keyspace name.
 	SystemKeyspaceName = "SYSTEM"
 )
