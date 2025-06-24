@@ -207,7 +207,6 @@ func DecodeIndexValues(n *Node) *Variant {
 	}()
 
 	for key := n.val; len(key) > 0; {
-
 		// Attempt to decode safely
 		var remain []byte
 		var e error

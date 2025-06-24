@@ -186,14 +186,6 @@ func (ec ErrClass) NewStdErr(code ErrCode, message *mysql.ErrMessage) *Error {
 	return err
 }
 
-// NewStd calls New using the standard message for the error code
-// Attention:
-// this method is not goroutine-safe and
-// usually be used in global variable initializer
-func (ec ErrClass) NewStd(code ErrCode) *Error {
-	return ec.NewStdErr(code, mysql.MySQLErrName[uint16(code)])
-}
-
 // Synthesize synthesizes an *Error in the air
 // it didn't register error into ErrClassToMySQLCodes
 // so it's goroutine-safe
@@ -203,38 +195,6 @@ func (ec ErrClass) Synthesize(code ErrCode, message string) *Error {
 		message, errors.MySQLErrorCode(int(code)),
 		errors.RFCCodeText(fmt.Sprintf("%s:%d", errClass2Desc[ec], code)),
 	)
-}
-
-// ToSQLError convert Error to mysql.SQLError.
-func ToSQLError(e *Error) *mysql.SQLError {
-	code := getMySQLErrorCode(e)
-	return mysql.NewErrf(code, "%s", nil, e.GetMsg())
-}
-
-var defaultMySQLErrorCode uint16
-
-func getMySQLErrorCode(e *Error) uint16 {
-	rfcCode := e.RFCCode()
-	var class ErrClass
-	if index := strings.Index(string(rfcCode), ":"); index > 0 {
-		ec, has := rfcCode2errClass.Get(string(rfcCode)[:index])
-		if !has {
-			log.Warn("Unknown error class", zap.String("class", string(rfcCode)[:index]))
-			return defaultMySQLErrorCode
-		}
-		class = ec
-	}
-	codeMap, ok := ErrClassToMySQLCodes[class]
-	if !ok {
-		log.Warn("Unknown error class", zap.Int("class", int(class)))
-		return defaultMySQLErrorCode
-	}
-	_, ok = codeMap[ErrCode(e.Code())]
-	if !ok {
-		log.Debug("Unknown error code", zap.Int("class", int(class)), zap.Int("code", int(e.Code())))
-		return defaultMySQLErrorCode
-	}
-	return uint16(e.Code())
 }
 
 var (
@@ -248,10 +208,6 @@ var (
 		mysql.Message("execution result undetermined", nil),
 	)
 )
-
-func init() {
-	defaultMySQLErrorCode = mysql.ErrUnknown
-}
 
 // ErrorEqual returns a boolean indicating whether err1 is equal to err2.
 func ErrorEqual(err1, err2 error) bool {
