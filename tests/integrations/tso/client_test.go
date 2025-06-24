@@ -652,6 +652,10 @@ func checkTSO(
 
 func TestRetryGetTSNotLeader(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockMaxTSORetryTimes", "return(1000)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/mockMaxTSORetryTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
