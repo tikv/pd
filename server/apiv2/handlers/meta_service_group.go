@@ -15,21 +15,20 @@
 package handlers
 
 import (
-	"fmt"
+	"maps"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
 const (
 	metaServiceGroupUninitializedErr = "meta-service groups manager is not initialized"
-	metaServiceGroupAlreadyExistsErr = "meta-service group %s already exists"
 )
 
 // RegisterMetaServiceGroup registers meta-service group related handlers to router paths.
@@ -37,35 +36,31 @@ func RegisterMetaServiceGroup(r *gin.RouterGroup) {
 	router := r.Group("meta-service-groups")
 	router.Use(middlewares.BootstrapChecker())
 	router.GET("", GetMetaServiceGroups)
-	router.POST("", AddMetaServiceGroups)
+	router.PATCH("", PatchMetaServiceGroups)
 }
 
 // MetaServiceGroupStatus represents the status of a meta-service group.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MetaServiceGroupStatus struct {
-	ID                string `json:"id"`
-	Addresses         string `json:"addresses"`
-	AssignedKeyspaces int    `json:"assigned_keyspaces"`
-}
-
-// AddMetaServiceGroupRequest represents a request to add a meta-service group.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type AddMetaServiceGroupRequest struct {
-	ID        string `json:"id"`
+	// ID is the unique identifier of the meta-service group.
+	ID string `json:"id"`
+	// Addresses is a comma-separated list of addresses for the meta-service group.
 	Addresses string `json:"addresses"`
+	// AssignedKeyspaces is the number of keyspaces assigned to this meta-service group.
+	AssignedKeyspaces int `json:"assigned_keyspaces"`
 }
 
-// AddMetaServiceGroups adds one or more meta-service groups as specified in the request.
+// PatchMetaServiceGroups applies a JSON Merge Patch to the meta-service groups.
 //
 // @Tags     meta-service-groups
-// @Summary  Adds new meta-service groups.
-// @Param    body  body  []AddMetaServiceGroupRequest  true  "List of meta-service groups to add"
+// @Summary  Patch meta-service groups using JSON Merge Patch.
+// @Param    body  body  object  true  "JSON Merge Patch for meta-service groups (string values for add/update, null for delete)"
 // @Produce  json
-// @Success  200  {object}  []MetaServiceGroupStatus  "List of newly added plus existing groups"
-// @Failure  400  {string}  string                    "Bad request (invalid JSON or duplicate group)"
+// @Success  200  {object}  []MetaServiceGroupStatus  "List of all meta-service groups after patch"
+// @Failure  400  {string}  string                    "Bad request (invalid JSON or invalid operation)"
 // @Failure  500  {string}  string                    "Internal server error"
-// @Router   /meta-service-groups [post]
-func AddMetaServiceGroups(c *gin.Context) {
+// @Router   /meta-service-groups [patch]
+func PatchMetaServiceGroups(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetMetaServiceGroupManager()
 	if manager == nil {
@@ -73,57 +68,40 @@ func AddMetaServiceGroups(c *gin.Context) {
 		return
 	}
 
-	var requests []AddMetaServiceGroupRequest
-	err := c.ShouldBindJSON(&requests)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+	var patch map[string]*string
+	if err := c.BindJSON(&patch); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
+
+	currentGroups := manager.GetGroups()
+	newGroups := make(map[string]string)
+	maps.Copy(newGroups, currentGroups)
+
+	for id, addresses := range patch {
+		if addresses == nil {
+			// Remove operation
+			delete(newGroups, id)
+		} else {
+			// Add or update operation
+			newGroups[id] = *addresses
+		}
+	}
+
 	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
 	newCfg := oldCfg.Clone()
-	currentGroups := newCfg.GetMetaServiceGroups()
-	newGroups := make(map[string]string, len(currentGroups)+len(requests))
-	for _, request := range requests {
-		request.ID = strings.TrimSpace(request.ID)
-		request.Addresses = strings.TrimSpace(request.Addresses)
-		if request.ID == "" || request.Addresses == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, "id and addresses must be non-empty")
-			return
-		}
-		if _, exists := newGroups[request.ID]; exists {
-			c.AbortWithStatusJSON(http.StatusBadRequest, fmt.Sprintf("meta-service group %s is duplicated in request", request.ID))
-			return
-		}
-		// Update existing newGroups is not allowed via the post-method.
-		if _, exists := currentGroups[request.ID]; exists {
-			c.AbortWithStatusJSON(http.StatusBadRequest, fmt.Sprintf(metaServiceGroupAlreadyExistsErr, request.ID))
-			return
-		}
-		newGroups[request.ID] = request.Addresses
-	}
-	for id, addresses := range currentGroups {
-		newGroups[id] = addresses
-	}
 	newCfg.MetaServiceGroups = newGroups
-	if err = svr.SetKeyspaceConfig(oldCfg, newCfg); err != nil {
+	if err := svr.SetKeyspaceConfig(oldCfg, newCfg); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
+	status, err := buildMetaServiceGroupStatus(c, manager)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	response := make([]MetaServiceGroupStatus, 0, len(newGroups))
-	for id, addresses := range newGroups {
-		response = append(response, MetaServiceGroupStatus{
-			ID:                id,
-			Addresses:         addresses,
-			AssignedKeyspaces: assignmentCounts[id],
-		})
-	}
-	c.IndentedJSON(http.StatusOK, response)
+	c.IndentedJSON(http.StatusOK, status)
 }
 
 // GetMetaServiceGroups returns a list of all meta-service groups and their assignment counts.
@@ -142,24 +120,32 @@ func GetMetaServiceGroups(c *gin.Context) {
 		return
 	}
 
-	groups := manager.GetGroups()
-	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
+	status, err := buildMetaServiceGroupStatus(c, manager)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	c.IndentedJSON(http.StatusOK, status)
+}
 
-	response := make([]MetaServiceGroupStatus, 0, len(groups))
-	for id, addresses := range groups {
-		response = append(response, MetaServiceGroupStatus{
+func buildMetaServiceGroupStatus(c *gin.Context, manager *keyspace.MetaServiceGroupManager) ([]MetaServiceGroupStatus, error) {
+	currentGroups := manager.GetGroups()
+	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
+	if err != nil {
+		return nil, err
+	}
+
+	status := make([]MetaServiceGroupStatus, 0, len(currentGroups))
+	for id, addresses := range currentGroups {
+		status = append(status, MetaServiceGroupStatus{
 			ID:                id,
 			Addresses:         addresses,
 			AssignedKeyspaces: assignmentCounts[id],
 		})
 	}
 	// sort for deterministic output
-	sort.Slice(response, func(i, j int) bool {
-		return response[i].ID < response[j].ID
+	sort.Slice(status, func(i, j int) bool {
+		return status[i].ID < status[j].ID
 	})
-	c.IndentedJSON(http.StatusOK, response)
+	return status, nil
 }
