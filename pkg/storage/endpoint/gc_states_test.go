@@ -16,6 +16,7 @@ package endpoint
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -109,29 +110,29 @@ func TestGlobalGCBarriersConversions(t *testing.T) {
 
 	// Check t3 & t4 are rounded
 	t3Rounded := time.Date(2025, 2, 20, 15, 30, 01, 0, time.Local)
-	re.Equal(t3Rounded, *gcBarriers[3].ExpirationTime)
-	re.Equal(t3Rounded, *gcBarriers[4].ExpirationTime)
+	re.Equal(t3Rounded, *gcBarriers[3].ExpiredAt.Time)
+	re.Equal(t3Rounded, *gcBarriers[4].ExpiredAt.Time)
 
-	serviceSafePoints := []*ServiceSafePoint{
-		{ServiceID: "a", ExpiredAt: math.MaxInt64, SafePoint: 1},
-		{ServiceID: "b", ExpiredAt: t1.Unix(), SafePoint: 2},
-		{ServiceID: "c", ExpiredAt: t2.Unix(), SafePoint: uint64(t1.UnixMilli()) << 18},
-		{ServiceID: "d", ExpiredAt: t3Rounded.Unix(), SafePoint: math.MaxUint64 - 1},
-		{ServiceID: "e", ExpiredAt: t3Rounded.Unix(), SafePoint: 456139133457530881},
+	// Test Marshal & Unmarshal for GlobalGCBarrier
+	expected := []string{
+		`{"barrier_id":"a","barrier_ts":1,"expired_at":0}`,
+		`{"barrier_id":"b","barrier_ts":2,"expired_at":1740036600}`,
+		`{"barrier_id":"c","barrier_ts":456140154470400000,"expired_at":1740036660}`,
+		`{"barrier_id":"d","barrier_ts":18446744073709551614,"expired_at":1740036601}`,
+		`{"barrier_id":"e","barrier_ts":456139133457530881,"expired_at":1740036601}`,
 	}
 
-	// Test representing GC barriers by service safe points.
 	for i, gcBarrier := range gcBarriers {
-		expectedServiceSafePoint := serviceSafePoints[i]
-		serviceSafePoint := gcBarrier.ToServiceSafePoint()
-		re.Equal(expectedServiceSafePoint, serviceSafePoint)
+		res, err := json.Marshal(gcBarrier)
+		re.NoError(err)
+		re.Equal(expected[i], string(res))
 	}
 
-	var dec globalGCBarrierDecoder
-	for i, serviceSafePoint := range serviceSafePoints {
-		expectedGCBarrier := gcBarriers[i]
-		dec.decode(serviceSafePoint)
-		re.Equal(expectedGCBarrier, dec.barriers[i])
+	for i, str := range expected {
+		var barrier GlobalGCBarrier
+		err := json.Unmarshal([]byte(str), &barrier)
+		re.NoError(err)
+		re.Equal(barrier, *gcBarriers[i])
 	}
 }
 
@@ -571,9 +572,9 @@ func TestGlobalGCBarrier(t *testing.T) {
 	expirationTime := time.Unix(1740127928, 0)
 
 	gcBarriers := []*GlobalGCBarrier{
-		{BarrierID: "1", BarrierTS: 1, ExpirationTime: &expirationTime},
-		{BarrierID: "2", BarrierTS: 2, ExpirationTime: nil},
-		{BarrierID: "3", BarrierTS: 3, ExpirationTime: &expirationTime},
+		{BarrierID: "1", BarrierTS: 1, ExpiredAt: TimeOptional{&expirationTime}},
+		{BarrierID: "2", BarrierTS: 2, ExpiredAt: TimeOptional{nil}},
+		{BarrierID: "3", BarrierTS: 3, ExpiredAt: TimeOptional{&expirationTime}},
 	}
 
 	// Empty.
@@ -611,7 +612,7 @@ func TestGlobalGCBarrier(t *testing.T) {
 	for i, barrier := range loadedBarriers {
 		re.Equal(gcBarriers[i].BarrierID, barrier.BarrierID)
 		re.Equal(gcBarriers[i].BarrierTS, barrier.BarrierTS)
-		re.Equal(gcBarriers[i].ExpirationTime, barrier.ExpirationTime)
+		re.Equal(gcBarriers[i].ExpiredAt, barrier.ExpiredAt)
 
 		// Check key matches.
 		b, err := provider.LoadGlobalGCBarrier(barrier.BarrierID)
