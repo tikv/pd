@@ -34,11 +34,12 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/tidb/pkg/util/codec"
 
 	"github.com/tikv/pd/client/clients/router"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/tools/pd-ctl/helper/mok"
+	"github.com/tikv/pd/tools/pd-ctl/helper/tidb/codec"
 )
 
 var (
@@ -759,7 +760,7 @@ func checkRegion(cmd *cobra.Command, region pd.RegionInfo) bool {
 			cmd.Printf("Recovered from panic while processing region %d with key %s: %v\n", region.ID, endKeyHex, r)
 		}
 	}()
-	rootNode := N("key", key)
+	rootNode := mok.N("key", key)
 	rootNode.Expand()
 	return hasSpecialPatternRecursive(rootNode)
 }
@@ -860,15 +861,15 @@ func extractTableID(region pd.RegionInfo) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	rootNode := N("key", key)
+	rootNode := mok.N("key", key)
 	rootNode.Expand()
 	tableID, _, err := extractTableIDRecursive(rootNode)
 	return tableID, err
 }
 
 // hasSpecialPatternRecursive recursively searches the Node tree for the specific key pattern.
-func hasSpecialPatternRecursive(node *Node) bool {
-	for _, variant := range node.variants {
+func hasSpecialPatternRecursive(node *mok.Node) bool {
+	for _, variant := range node.GetVariants() {
 		// Target pattern path:
 		// Node (rootNode or child of DecodeHex)
 		//  -> Variant (method: "decode hex key") [It has been finished in Expand()]
@@ -880,31 +881,31 @@ func hasSpecialPatternRecursive(node *Node) bool {
 		//                -> Node (typ: "index_values" or "row_id", val: row_data, call as rowDataNode)
 		//                   -> Variant (method: "decode index values")
 
-		if variant.method == "decode mvcc key" {
-			for _, mvccBodyNode := range variant.children {
-				for _, tableRowVariant := range mvccBodyNode.variants {
-					if tableRowVariant.method != "table row key" {
+		if variant.GetMethod() == "decode mvcc key" {
+			for _, mvccBodyNode := range variant.GetChildren() {
+				for _, tableRowVariant := range mvccBodyNode.GetVariants() {
+					if tableRowVariant.GetMethod() != "table row key" {
 						continue
 					}
 					// According to DecodeTableRow, it should have 2 children:
 					// children[0] is N("table_id", ...)
 					// children[1] is N(handleTyp, row_data_bytes) -> this is rowDataNode (Node_B)
-					if len(tableRowVariant.children) != 2 {
+					if len(tableRowVariant.GetChildren()) != 2 {
 						continue
 					}
-					rowDataNode := tableRowVariant.children[1]
+					rowDataNode := tableRowVariant.GetChildren()[1]
 					// Confirm if rowDataNode's type is as expected, which is determined by DecodeTableRow's handleTyp.
-					if rowDataNode.typ != "index_values" && rowDataNode.typ != "row_id" {
+					if rowDataNode.GetType() != "index_values" && rowDataNode.GetType() != "row_id" {
 						continue
 					}
 					// Condition 1: Does row data end with non \x00?
 					// And we only care about the 9 bytes of the row data.
-					if len(rowDataNode.val) != 9 || rowDataNode.val[len(rowDataNode.val)-1] == '\x00' {
+					if len(rowDataNode.GetValue()) != 9 || rowDataNode.GetValue()[len(rowDataNode.GetValue())-1] == '\x00' {
 						continue
 					}
 					// Condition 2: Does rowDataNode have extra output?
-					for _, rdnVariant := range rowDataNode.variants {
-						if rdnVariant.method == "decode index values" {
+					for _, rdnVariant := range rowDataNode.GetVariants() {
+						if rdnVariant.GetMethod() == "decode index values" {
 							return true
 						}
 					}
@@ -913,7 +914,7 @@ func hasSpecialPatternRecursive(node *Node) bool {
 		}
 
 		// We need to recursively check all children of the current variant.
-		if slices.ContainsFunc(variant.children, hasSpecialPatternRecursive) {
+		if slices.ContainsFunc(variant.GetChildren(), hasSpecialPatternRecursive) {
 			return true
 		}
 	}
@@ -921,22 +922,22 @@ func hasSpecialPatternRecursive(node *Node) bool {
 }
 
 // extractTableIDRecursive recursively searches the expanded Node tree to try and extract and decode the table ID.
-func extractTableIDRecursive(node *Node) (tableID int64, found bool, err error) {
-	for _, variant := range node.variants {
-		if variant.method == "decode mvcc key" {
-			for _, mvccChildNode := range variant.children {
-				for _, detailVariant := range mvccChildNode.variants {
-					if detailVariant.method == "table prefix" || detailVariant.method == "table row key" {
+func extractTableIDRecursive(node *mok.Node) (tableID int64, found bool, err error) {
+	for _, variant := range node.GetVariants() {
+		if variant.GetMethod() == "decode mvcc key" {
+			for _, mvccChildNode := range variant.GetChildren() {
+				for _, detailVariant := range mvccChildNode.GetVariants() {
+					if detailVariant.GetMethod() == "table prefix" || detailVariant.GetMethod() == "table row key" {
 						// Both of these variant types should have a child Node with typ "table_id".
 						// its `.val` contains bytes decodable by `codec.DecodeInt()`.
-						for _, childOfDetail := range detailVariant.children {
-							if childOfDetail.typ == "table_id" {
-								_, id, decodeErr := codec.DecodeInt(childOfDetail.val)
+						for _, childOfDetail := range detailVariant.GetChildren() {
+							if childOfDetail.GetType() == "table_id" {
+								_, id, decodeErr := codec.DecodeInt(childOfDetail.GetValue())
 								if decodeErr == nil {
 									return id, true, nil
 								}
 								return 0, false, fmt.Errorf("failed to decode table_id node (type: %s, value_hex: %x): %w",
-									childOfDetail.typ, childOfDetail.val, decodeErr)
+									childOfDetail.GetType(), childOfDetail.GetValue(), decodeErr)
 							}
 						}
 					}
@@ -944,7 +945,7 @@ func extractTableIDRecursive(node *Node) (tableID int64, found bool, err error) 
 			}
 		}
 
-		for _, childNode := range variant.children {
+		for _, childNode := range variant.GetChildren() {
 			id, found, err := extractTableIDRecursive(childNode)
 			if err != nil {
 				return 0, false, err

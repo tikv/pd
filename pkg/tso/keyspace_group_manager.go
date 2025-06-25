@@ -53,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -550,14 +551,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 
 	if !defaultKGConfigured {
 		log.Info("initializing default keyspace group")
-		group := &endpoint.KeyspaceGroup{
-			ID: constant.DefaultKeyspaceGroupID,
-			Members: []endpoint.KeyspaceGroupMember{{
-				Address:  kgm.tsoServiceID.ServiceAddr,
-				Priority: constant.DefaultKeyspaceGroupReplicaPriority,
-			}},
-			Keyspaces: []uint32{constant.DefaultKeyspaceID},
-		}
+		group := kgm.genDefaultKeyspaceGroupMeta()
 		kgm.updateKeyspaceGroup(group)
 	}
 	return nil
@@ -859,22 +853,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				j++
 			}
 		}
-		if groupID == constant.DefaultKeyspaceGroupID {
-			if _, ok := newGroup.KeyspaceLookupTable[constant.DefaultKeyspaceID]; !ok {
-				log.Warn("default keyspace is not in default keyspace group. add it back")
-				kgm.keyspaceLookupTable[constant.DefaultKeyspaceID] = groupID
-				newGroup.KeyspaceLookupTable[constant.DefaultKeyspaceID] = struct{}{}
-				newGroup.Keyspaces = make([]uint32, 1+len(newKeyspaces))
-				newGroup.Keyspaces[0] = constant.DefaultKeyspaceID
-				copy(newGroup.Keyspaces[1:], newKeyspaces)
-			}
-		} else {
-			if _, ok := newGroup.KeyspaceLookupTable[constant.DefaultKeyspaceID]; ok {
-				log.Warn("default keyspace is in non-default keyspace group. remove it")
-				kgm.keyspaceLookupTable[constant.DefaultKeyspaceID] = constant.DefaultKeyspaceGroupID
-				delete(newGroup.KeyspaceLookupTable, constant.DefaultKeyspaceID)
-				newGroup.Keyspaces = newKeyspaces[1:]
-			}
+		kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.DefaultKeyspaceID)
+		if kerneltype.IsNextGen() {
+			kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.SystemKeyspaceID)
 		}
 	}
 	// Check the split state.
@@ -899,6 +880,26 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	kgm.kgs[groupID] = newGroup
 }
 
+func (kgm *KeyspaceGroupManager) checkReserveKeyspace(newGroup *endpoint.KeyspaceGroup, newKeyspaces []uint32, reserveKeyspace uint32) {
+	if newGroup.ID == constant.DefaultKeyspaceGroupID {
+		if _, ok := newGroup.KeyspaceLookupTable[reserveKeyspace]; !ok {
+			log.Warn("this keyspace is not in default keyspace group. add it back", zap.Uint32("keyspace", reserveKeyspace))
+			kgm.keyspaceLookupTable[reserveKeyspace] = newGroup.ID
+			newGroup.KeyspaceLookupTable[reserveKeyspace] = struct{}{}
+			newGroup.Keyspaces = make([]uint32, 1+len(newKeyspaces))
+			newGroup.Keyspaces[0] = reserveKeyspace
+			copy(newGroup.Keyspaces[1:], newKeyspaces)
+		}
+	} else {
+		if _, ok := newGroup.KeyspaceLookupTable[reserveKeyspace]; ok {
+			log.Warn("this keyspace is in non-default keyspace group. remove it", zap.Uint32("keyspace", reserveKeyspace))
+			kgm.keyspaceLookupTable[reserveKeyspace] = constant.DefaultKeyspaceGroupID
+			delete(newGroup.KeyspaceLookupTable, reserveKeyspace)
+			newGroup.Keyspaces = newKeyspaces[1:]
+		}
+	}
+}
+
 // deleteKeyspaceGroup deletes the given keyspace group.
 func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	log.Info("delete keyspace group", zap.Uint32("keyspace-group-id", groupID))
@@ -906,14 +907,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	if groupID == constant.DefaultKeyspaceGroupID {
 		log.Info("removed default keyspace group meta config from the storage. " +
 			"now every tso node/pod will initialize it")
-		group := &endpoint.KeyspaceGroup{
-			ID: constant.DefaultKeyspaceGroupID,
-			Members: []endpoint.KeyspaceGroupMember{{
-				Address:  kgm.tsoServiceID.ServiceAddr,
-				Priority: constant.DefaultKeyspaceGroupReplicaPriority,
-			}},
-			Keyspaces: []uint32{constant.DefaultKeyspaceID},
-		}
+		group := kgm.genDefaultKeyspaceGroupMeta()
 		kgm.updateKeyspaceGroup(group)
 		return
 	}
@@ -943,6 +937,21 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	}
 
 	kgm.deletedGroups[groupID] = struct{}{}
+}
+
+func (kgm *KeyspaceGroupManager) genDefaultKeyspaceGroupMeta() *endpoint.KeyspaceGroup {
+	keyspaces := []uint32{constant.DefaultKeyspaceID}
+	if kerneltype.IsNextGen() {
+		keyspaces = append(keyspaces, constant.SystemKeyspaceID)
+	}
+	return &endpoint.KeyspaceGroup{
+		ID: constant.DefaultKeyspaceGroupID,
+		Members: []endpoint.KeyspaceGroupMember{{
+			Address:  kgm.tsoServiceID.ServiceAddr,
+			Priority: constant.DefaultKeyspaceGroupReplicaPriority,
+		}},
+		Keyspaces: keyspaces,
+	}
 }
 
 // exitElectionMembership exits the election membership of the given keyspace group by
