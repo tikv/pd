@@ -27,11 +27,13 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 )
@@ -83,8 +85,36 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Write request
 		{
 			req: &TestRequestInfo{
-				isWrite:    true,
-				writeBytes: 100,
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				accessType:  AccessUnknown,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				succeed:   true,
+			},
+		},
+		// Write request local AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				accessType:  AccessLocalZone,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				succeed:   true,
+			},
+		},
+		// Write request cross AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:     true,
+				writeBytes:  100,
+				numReplicas: 3,
+				accessType:  AccessCrossZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -94,8 +124,24 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		// Read request
 		{
 			req: &TestRequestInfo{
-				isWrite:    false,
-				writeBytes: 0,
+				isWrite:     false,
+				writeBytes:  0,
+				numReplicas: 3,
+				accessType:  AccessLocalZone,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				kvCPU:     100 * time.Millisecond,
+				succeed:   true,
+			},
+		},
+		// Read request cross AZ
+		{
+			req: &TestRequestInfo{
+				isWrite:     false,
+				writeBytes:  0,
+				numReplicas: 3,
+				accessType:  AccessCrossZone,
 			},
 			resp: &TestResponseInfo{
 				readBytes: 100,
@@ -114,13 +160,25 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		if testCase.req.IsWrite() {
 			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
+			if testCase.req.AccessLocationType() != AccessUnknown {
+				re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
+			}
 		}
 		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
 		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
 		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
+		calculateCrossAZTraffic(expectedConsumption, testCase.req, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
+		if testCase.req.IsWrite() && testCase.req.AccessLocationType() != AccessUnknown {
+			re.Positive(expectedConsumption.WriteCrossAzTrafficBytes, caseNum)
+		} else if !testCase.req.IsWrite() && testCase.req.AccessLocationType() == AccessCrossZone {
+			re.Positive(expectedConsumption.ReadCrossAzTrafficBytes, caseNum)
+		} else {
+			re.Equal(expectedConsumption.ReadCrossAzTrafficBytes, uint64(0), caseNum)
+			re.Equal(expectedConsumption.WriteCrossAzTrafficBytes, uint64(0), caseNum)
+		}
 	}
 }
 
@@ -191,6 +249,14 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 }
 
 func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+	var err error
+	failpoint.Inject("gerResourceGroupError", func() {
+		err = errors.New("fake get resource group error")
+	})
+	if err != nil {
+		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+	}
+
 	args := m.Called(ctx, resourceGroupName, opts)
 	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
 }
@@ -210,7 +276,7 @@ func (m *MockResourceGroupProvider) ModifyResourceGroup(ctx context.Context, met
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string, _ ...pd.DeleteResourceGroupOption) (string, error) {
+func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
 	args := m.Called(ctx, resourceGroupName)
 	return args.String(0), args.Error(1)
 }
@@ -251,7 +317,7 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport")
 
 	mockProvider := newMockResourceGroupProvider()
-	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
 	controller.Start(ctx)
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
@@ -266,6 +332,33 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	c2, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, c2.meta)
+
+	// test report ru consumption
+	var totalConsumption rmpb.Consumption
+	c2.mu.Lock()
+	totalConsumption = *c2.mu.consumption
+	c2.mu.Unlock()
+	delta := &rmpb.Consumption{
+		RRU:                      1.0,
+		WRU:                      2.0,
+		ReadBytes:                10,
+		WriteBytes:               20,
+		TotalCpuTimeMs:           30.0,
+		SqlLayerCpuTimeMs:        40.0,
+		KvReadRpcCount:           50,
+		KvWriteRpcCount:          60,
+		ReadCrossAzTrafficBytes:  100,
+		WriteCrossAzTrafficBytes: 200,
+	}
+	controller.ReportConsumption("test-group", delta)
+	// check the consumption
+	c2.mu.Lock()
+	add(&totalConsumption, delta)
+	require.Equal(t, c2.mu.consumption, &totalConsumption)
+	c2.mu.Unlock()
+
+	// test report with unknown group
+	controller.ReportConsumption("unknown-name", delta)
 
 	var expectResp []*rmpb.TokenBucketResponse
 	recTestGroupAcquireTokenRequest := make(chan bool)
@@ -325,7 +418,7 @@ func TestTryGetController(t *testing.T) {
 	defer cancel()
 
 	mockProvider := newMockResourceGroupProvider()
-	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
 	controller.Start(ctx)
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
@@ -343,7 +436,7 @@ func TestTryGetController(t *testing.T) {
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
-	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1), NewTestResponseInfo(1, time.Millisecond, true)
+	requestInfo, responseInfo := NewTestRequestInfo(true, 1, 1, AccessCrossZone), NewTestResponseInfo(1, time.Millisecond, true)
 	_, _, _, _, err = controller.OnRequestWait(ctx, "test-group", requestInfo)
 	re.NoError(err)
 	consumption, err := controller.OnResponse("test-group", requestInfo, responseInfo)
@@ -381,4 +474,76 @@ func TestTryGetController(t *testing.T) {
 	consumption, err = controller.OnResponse(defaultResourceGroupName, requestInfo, responseInfo)
 	re.NoError(err)
 	re.NotEmpty(consumption)
+}
+
+func TestGetResourceGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Enable the failpoint to simulate an error when getting the resource group.
+	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
+	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+
+	mockProvider := newMockResourceGroupProvider()
+
+	expectResourceGroupName := "test-group"
+	expectRUSettings := &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   uint64(50),
+				BurstLimit: int64(100),
+			},
+		},
+	}
+	expectResourceGroup := &rmpb.ResourceGroup{
+		Name:       expectResourceGroupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: expectRUSettings,
+	}
+
+	opts := []ResourceControlCreateOption{WithDegradedRUSettings(expectRUSettings)}
+
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, opts...)
+	controller.Start(ctx)
+
+	testResourceGroup := &rmpb.ResourceGroup{
+		Name: "test-group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 1000000,
+				},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+
+	// case1: when GetResourceGroup return error, it should return the expectResourceGroup.
+	gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+	re.NoError(err)
+	re.Equal(expectResourceGroup, gc.getMeta())
+
+	// case2: when GetResourceGroup return error again, It should still return the expectResourceGroup.
+	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
+	re.NoError(err)
+	re.Equal(expectResourceGroup, gc.getMeta())
+
+	// case3: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
+	failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
+	re.NoError(err)
+	re.Equal(testResourceGroup, gc.getMeta())
+
+	// case4: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
+	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
+	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+
+	controller02, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	controller02.Start(ctx)
+
+	gc02, err := controller02.tryGetResourceGroupController(ctx, "test-group", false)
+	re.Error(err)
+	re.Nil(gc02)
 }

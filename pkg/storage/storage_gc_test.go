@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -71,7 +72,9 @@ func TestSaveLoadServiceSafePoint(t *testing.T) {
 
 func TestLoadMinServiceSafePoint(t *testing.T) {
 	re := require.New(t)
-	storage := NewStorageWithMemoryBackend()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	storage := NewStorageWithEtcdBackend(client)
 	currentTime := time.Now()
 	expireAt1 := currentTime.Add(1000 * time.Second).Unix()
 	expireAt2 := currentTime.Add(2000 * time.Second).Unix()
@@ -84,6 +87,11 @@ func TestLoadMinServiceSafePoint(t *testing.T) {
 		{KeyspaceID: testKeyspaceID, ServiceID: "2", ExpiredAt: expireAt3, SafePoint: 500},
 	}
 
+	err := storage.GetGCStateProvider().RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		return wb.SetTxnSafePoint(testKeyspaceID, 100)
+	})
+	re.NoError(err)
+
 	for _, serviceSafePoint := range serviceSafePoints {
 		re.NoError(storage.SaveServiceSafePointV2(serviceSafePoint))
 	}
@@ -91,7 +99,7 @@ func TestLoadMinServiceSafePoint(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys", "return(true)"))
 	minSafePoint, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime)
 	re.NoError(err)
-	re.Equal(serviceSafePoints[0].SafePoint, minSafePoint.SafePoint)
+	re.Equal(uint64(100), minSafePoint.SafePoint)
 
 	// gc_worker service safepoint will not be removed.
 	ssp, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime.Add(5000*time.Second))

@@ -28,6 +28,8 @@
 /pd//keyspaces/gc_safe_point/ save
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
+/pd//keyspaces/id/SYSTEM get
+/pd//keyspaces/id/SYSTEM save
 /pd//keyspaces/id/ks get
 /pd//keyspaces/id/ks save
 /pd//keyspaces/id/pre-alloc get
@@ -75,6 +77,7 @@ encryption_keys get
 encryption_keys watch
 resource_group/controller get
 resource_group/controller save
+resource_group/keyspace/service_limits/ get
 resource_group/keyspace/settings/ get
 resource_group/keyspace/states/ get
 resource_group/settings/ get

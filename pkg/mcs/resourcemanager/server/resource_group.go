@@ -56,7 +56,7 @@ func (rus *RequestUnitSettings) Clone() *RequestUnitSettings {
 	}
 	var ru *GroupTokenBucket
 	if rus.RU != nil {
-		ru = rus.RU.Clone()
+		ru = rus.RU.clone()
 	}
 	return &RequestUnitSettings{
 		RU: ru,
@@ -119,13 +119,13 @@ func (rg *ResourceGroup) getPriority() float64 {
 func (rg *ResourceGroup) getFillRate() float64 {
 	rg.RLock()
 	defer rg.RUnlock()
-	return float64(rg.RUSettings.RU.Settings.FillRate)
+	return rg.RUSettings.RU.getFillRateSetting()
 }
 
 func (rg *ResourceGroup) getBurstLimit() float64 {
 	rg.RLock()
 	defer rg.RUnlock()
-	return float64(rg.RUSettings.RU.Settings.BurstLimit)
+	return float64(rg.RUSettings.RU.getBurstLimitSetting())
 }
 
 // PatchSettings patches the resource group settings.
@@ -189,6 +189,7 @@ func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
+	sl *serviceLimiter,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
@@ -196,7 +197,18 @@ func (rg *ResourceGroup) RequestRU(
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
+	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
+	// Then, try to apply the service limit.
+	grantedTokens := tb.GetTokens()
+	limitedTokens := sl.applyServiceLimit(now, grantedTokens)
+	if limitedTokens < grantedTokens {
+		tb.Tokens = limitedTokens
+		// Retain the unused tokens for the later requests if it has a burst limit.
+		if rg.RUSettings.RU.getBurstLimitSetting() > 0 {
+			rg.RUSettings.RU.lastLimitedTokens += grantedTokens - limitedTokens
+		}
+	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
@@ -257,7 +269,7 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 	case rmpb.GroupMode_RUMode: // RU mode
 		consumption := *rg.RUConsumption
 		tokens := &GroupStates{
-			RU:            rg.RUSettings.RU.GroupTokenBucketState.Clone(),
+			RU:            rg.RUSettings.RU.GroupTokenBucketState.clone(),
 			RUConsumption: &consumption,
 		}
 		return tokens
@@ -296,6 +308,8 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 	rc.SqlLayerCpuTimeMs += c.SqlLayerCpuTimeMs
 	rc.KvReadRpcCount += c.KvReadRpcCount
 	rc.KvWriteRpcCount += c.KvWriteRpcCount
+	rc.ReadCrossAzTrafficBytes += c.ReadCrossAzTrafficBytes
+	rc.WriteCrossAzTrafficBytes += c.WriteCrossAzTrafficBytes
 }
 
 // persistStates persists the resource group tokens.

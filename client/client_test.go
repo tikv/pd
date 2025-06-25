@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
@@ -89,4 +91,29 @@ func TestSaturatingStdDurationFromSeconds(t *testing.T) {
 	re.Equal(9223372036*time.Second, saturatingStdDurationFromSeconds(9223372036))
 	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(9223372037))
 	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(math.MaxInt64))
+}
+
+func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
+	re := require.New(t)
+
+	// Default to false when the meta or the config map is nil.
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(nil))
+	meta := &keyspacepb.KeyspaceMeta{}
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta = &keyspacepb.KeyspaceMeta{
+		Config: map[string]string{"gc_management_type": "keyspace_level"},
+	}
+	re.True(IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta = &keyspacepb.KeyspaceMeta{
+		Config: map[string]string{"gc_management_type": "unified"},
+	}
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	// Invalid values interpreted as false.
+	meta = &keyspacepb.KeyspaceMeta{
+		Config: map[string]string{"gc_management_type": "111111"},
+	}
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
 }

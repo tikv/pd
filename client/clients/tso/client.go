@@ -305,7 +305,7 @@ func (c *Cli) updateConnectionCtxs(ctx context.Context) bool {
 		createTSOConnection = c.tryConnectToTSOWithProxy
 	}
 	if err := createTSOConnection(ctx); err != nil {
-		log.Error("[tso] update connection contexts failed", errs.ZapError(err))
+		log.Warn("[tso] update connection contexts failed", errs.ZapError(err))
 		return false
 	}
 	return true

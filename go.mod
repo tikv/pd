@@ -35,10 +35,10 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250604040614-03ba9a7536b7
+	github.com/pingcap/kvproto v0.0.0-20250616075548-d951fb623bb3
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20250219061340-d62018124ae2
+	github.com/pingcap/tidb-dashboard v0.0.0-20250612034343-251c34dd9f3d
 	github.com/prometheus/client_golang v1.20.5
 	github.com/sasha-s/go-deadlock v0.3.5
 	github.com/shirou/gopsutil/v3 v3.23.3

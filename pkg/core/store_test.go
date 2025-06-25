@@ -147,54 +147,81 @@ func TestLowSpaceScoreV2(t *testing.T) {
 		bigger *StoreInfo
 		small  *StoreInfo
 		delta  int64
-	}{{
-		// store1 and store2 has same store available ratio and store1 less 50 GB
-		bigger: newStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4),
-		small:  newStoreInfoWithAvailable(2, 200*units.GiB, 1000*units.GiB, 1.4),
-	}, {
-		// store1 and store2 has same available space and less than 50 GB
-		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 1000*units.GiB, 1.4),
-		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
-	}, {
-		// store1 and store2 has same available ratio less than 0.2
-		bigger: newStoreInfoWithAvailable(1, 20*units.GiB, 1000*units.GiB, 1.4),
-		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 500*units.GiB, 1.4),
-	}, {
-		// store1 and store2 has same available ratio
-		// but the store1 ratio less than store2 ((50-10)/50=0.8<(200-100)/200=0.5)
-		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.4),
-		small:  newStoreInfoWithAvailable(2, 100*units.GiB, 1000*units.GiB, 1.4),
-	}, {
-		// store1 and store2 has same usedSize and capacity
-		// but the bigger's amp is bigger
-		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.5),
-		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
-	}, {
-		// store1 and store2 has same capacity and regionSize (40g)
-		// but store1 has less available space size
-		bigger: newStoreInfoWithAvailable(1, 60*units.GiB, 100*units.GiB, 1),
-		small:  newStoreInfoWithAvailable(2, 80*units.GiB, 100*units.GiB, 2),
-	}, {
-		// store1 and store2 has same capacity and store2 (40g) has twice usedSize than store1 (20g)
-		// but store1 has higher amp, so store1(60g) has more regionSize (40g)
-		bigger: newStoreInfoWithAvailable(1, 80*units.GiB, 100*units.GiB, 3),
-		small:  newStoreInfoWithAvailable(2, 60*units.GiB, 100*units.GiB, 1),
-	}, {
-		// store1's capacity is less than store2's capacity, but store2 has more available space,
-		bigger: newStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
-		small:  newStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
-	}, {
-		// store2 has extra file size (70GB), it can balance region from store1 to store2.
-		// See https://github.com/tikv/pd/issues/5790
-		small:  newStoreInfoWithDisk(1, 400*units.MiB, 6930*units.GiB, 7000*units.GiB, 400),
-		bigger: newStoreInfoWithAvailable(2, 1500*units.GiB, 7000*units.GiB, 1.32),
-		delta:  37794,
-	}}
+	}{
+		{
+			// store1 and store2 has same store available ratio and store1 less 50 GB
+			bigger: newStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4),
+			small:  newStoreInfoWithAvailable(2, 200*units.GiB, 1000*units.GiB, 1.4),
+		},
+		{
+			// store1 and store2 has same available space and less than 50 GB
+			bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 1000*units.GiB, 1.4),
+			small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
+		},
+		{
+			// store1 and store2 has same available ratio less than 0.2
+			bigger: newStoreInfoWithAvailable(1, 20*units.GiB, 1000*units.GiB, 1.4),
+			small:  newStoreInfoWithAvailable(2, 10*units.GiB, 500*units.GiB, 1.4),
+		},
+		{
+			// store1 and store2 has same available ratio
+			// but the store1 ratio less than store2 ((50-10)/50=0.8<(200-100)/200=0.5)
+			bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.4),
+			small:  newStoreInfoWithAvailable(2, 100*units.GiB, 1000*units.GiB, 1.4),
+		},
+		{
+			// store1 and store2 has same usedSize and capacity
+			// but the bigger's amp is bigger
+			bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.5),
+			small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
+		},
+		{
+			// store1 and store2 has same capacity and regionSize (40g)
+			// but store1 has less available space size
+			bigger: newStoreInfoWithAvailable(1, 60*units.GiB, 100*units.GiB, 1),
+			small:  newStoreInfoWithAvailable(2, 80*units.GiB, 100*units.GiB, 2),
+		},
+		{
+			// store1 and store2 has same capacity and store2 (40g) has twice usedSize than store1 (20g)
+			// but store1 has higher amp, so store1(60g) has more regionSize (40g)
+			bigger: newStoreInfoWithAvailable(1, 80*units.GiB, 100*units.GiB, 3),
+			small:  newStoreInfoWithAvailable(2, 60*units.GiB, 100*units.GiB, 1),
+		},
+		{
+			// store1's capacity is less than store2's capacity, but store2 has more available space,
+			bigger: newStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
+			small:  newStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
+		},
+		{
+			// store2 has extra file size (70GB), it can balance region from store1 to store2.
+			// See https://github.com/tikv/pd/issues/5790
+			small:  newStoreInfoWithDisk(1, 400*units.MiB, 6930*units.GiB, 7000*units.GiB, 400),
+			bigger: newStoreInfoWithAvailable(2, 1500*units.GiB, 7000*units.GiB, 1.32),
+			delta:  37794,
+		},
+	}
 	for _, v := range testdata {
 		score1 := v.bigger.regionScoreV2(-v.delta, 0.8)
 		score2 := v.small.regionScoreV2(v.delta, 0.8)
 		re.Greater(score1, score2)
 	}
+}
+
+// TestNewStore tests the new store in big cluster
+// See https://github.com/tikv/pd/issues/9145
+func TestNewStore(t *testing.T) {
+	// The amp of the new store is small
+	small := newStoreInfoWithAvailable(1, 2900*units.GiB, 3000*units.GiB, 0.03)
+	bigger := newStoreInfoWithAvailable(2, 2000*units.GiB, 3000*units.GiB, 3)
+	delta := int64(80000)
+	score1 := small.regionScoreV2(delta, 0.8)
+	score2 := bigger.regionScoreV2(-delta, 0.8)
+	require.Less(t, score1, score2)
+
+	// The amp of the new store is recovered
+	small = newStoreInfoWithAvailable(1, 2000*units.GiB, 3000*units.GiB, 3)
+	score1 = small.regionScoreV2(delta, 0.8)
+	require.Greater(t, score1, score2)
 }
 
 // newStoreInfoWithAvailable is created with available and capacity
@@ -203,6 +230,7 @@ func newStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *Sto
 	stats.Capacity = capacity
 	stats.Available = available
 	usedSize := capacity - available
+	stats.UsedSize = usedSize
 	regionSize := (float64(usedSize) * amp) / units.MiB
 	store := NewStoreInfo(
 		&metapb.Store{

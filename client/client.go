@@ -519,10 +519,50 @@ func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
 }
 
+const (
+	// maxTSORetryTimes is the max retry times for TSO request.
+	maxTSORetryTimes = 20
+	// retryInterval is the interval between two TSO requests.
+	retryInterval = 100 * time.Millisecond
+)
+
 // GetTS implements the TSOClient interface.
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
-	resp := c.GetTSAsync(ctx)
-	return resp.Wait()
+	var retryCount int
+	maxRetries := maxTSORetryTimes
+	failpoint.Inject("mockMaxTSORetryTimes", func(val failpoint.Value) {
+		if newMax, ok := val.(int); ok {
+			maxRetries = newMax
+		}
+	})
+
+	for retryCount = range maxRetries {
+		resp := c.GetTSAsync(ctx)
+		if physical, logical, err = resp.Wait(); err != nil {
+			failpoint.Inject("skipRetry", func() {
+				failpoint.Return(physical, logical, err)
+			})
+
+			if !errs.IsLeaderChange(err) {
+				break
+			}
+
+			// If the leader changes, we need to retry.
+			// For the first time, we retry immediately to avoid impacting the latency.
+			var interval time.Duration
+			if retryCount != 0 {
+				interval = retryInterval
+			}
+			select {
+			case <-ctx.Done():
+				return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
+			case <-time.After(interval):
+				continue
+			}
+		}
+	}
+	metrics.TSORetryCount.Observe(float64(retryCount))
+	return physical, logical, err
 }
 
 // GetLocalTS implements the TSOClient interface.

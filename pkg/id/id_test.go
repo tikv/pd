@@ -20,7 +20,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
@@ -72,4 +76,71 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 		re.NoError(err)
 		re.Equal(i, id)
 	}
+}
+
+// TestIDAllocationEndValue tests if keyspace allocator hits ErrIDExhausted when trying to allocate into reserved range.
+func TestIDAllocationEndValue(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	_, err := client.Put(context.Background(), leaderPath, memberVal)
+	re.NoError(err)
+	checkIDAllocationEndValue(t, client, nonNextGenKeyspaceIDLimit)
+	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	}()
+	checkIDAllocationEndValue(t, client, reservedKeyspaceIDStart-1)
+}
+
+func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint64) {
+	t.Run("KeyspaceLabel should hit ErrIDExhausted when trying to allocate into unavailable range", func(t *testing.T) {
+		re := require.New(t)
+		for _, step := range []uint64{1, 10, 1024, 1025} {
+			keyspaceAllocator := NewAllocator(&AllocatorParams{
+				Client: client,
+				Label:  KeyspaceLabel,
+				Member: memberVal,
+				Step:   step,
+			})
+			initialBaseValue := endID - step*3
+
+			err := keyspaceAllocator.SetBase(initialBaseValue)
+			re.NoError(err)
+			var lastAllocatedID uint64
+			for {
+				var id uint64
+				id, _, err = keyspaceAllocator.Alloc(1)
+				if err != nil {
+					break
+				}
+				re.GreaterOrEqual(id, lastAllocatedID)
+				lastAllocatedID = id
+			}
+			re.Error(err)
+			re.True(errs.ErrIDExhausted.Equal(err))
+			re.Equal(endID, lastAllocatedID)
+		}
+	})
+
+	t.Run("SetBase should fail if newBase enters unavailable range", func(t *testing.T) {
+		re := require.New(t)
+		keyspaceAllocator := NewAllocator(&AllocatorParams{
+			Client: client,
+			Label:  KeyspaceLabel,
+			Member: memberVal,
+			Step:   step,
+		})
+
+		err := keyspaceAllocator.SetBase(endID - 1)
+		re.NoError(err)
+
+		err = keyspaceAllocator.SetBase(endID)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
+
+		err = keyspaceAllocator.SetBase(endID + 10)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
+	})
 }

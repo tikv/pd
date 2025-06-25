@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 const (
@@ -87,7 +88,7 @@ type ResourceGroupProvider interface {
 	ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
-	DeleteResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.DeleteResourceGroupOption) (string, error)
+	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 
@@ -132,6 +133,13 @@ func WithDegradedModeWaitDuration(d time.Duration) ResourceControlCreateOption {
 	}
 }
 
+// WithDegradedRUSettings is the option to set the degraded RU settings for the resource group.
+func WithDegradedRUSettings(degradedRUSettings *rmpb.GroupRequestUnitSettings) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.degradedRUSettings = degradedRUSettings
+	}
+}
+
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
@@ -140,6 +148,7 @@ type ResourceGroupsController struct {
 	provider         ResourceGroupProvider
 	groupsController sync.Map
 	ruConfig         *RUConfig
+	keyspaceID       uint32
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -166,6 +175,8 @@ type ResourceGroupsController struct {
 
 	// a cache for ru config and make concurrency safe.
 	safeRuConfig atomic.Pointer[RUConfig]
+
+	degradedRUSettings *rmpb.GroupRequestUnitSettings
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -174,6 +185,7 @@ func NewResourceGroupController(
 	clientUniqueID uint64,
 	provider ResourceGroupProvider,
 	requestUnitConfig *RequestUnitConfig,
+	keyspaceID uint32,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
 	config, err := loadServerConfig(ctx, provider)
@@ -188,6 +200,7 @@ func NewResourceGroupController(
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
+		keyspaceID:            keyspaceID,
 		ruConfig:              ruConfig,
 		lowTokenNotifyChan:    make(chan notifyMsg, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
@@ -197,7 +210,7 @@ func NewResourceGroupController(
 	for _, opt := range opts {
 		opt(controller)
 	}
-	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig))
+	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig), zap.Uint32("keyspace-id", keyspaceID))
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	controller.safeRuConfig.Store(controller.ruConfig)
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
@@ -272,7 +285,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
+			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
@@ -299,7 +313,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-watchRetryTimer.C:
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
 					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
+					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -319,7 +334,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
 			case <-c.loopCtx.Done():
-				resourceGroupStatusGauge.Reset()
+				metrics.ResourceGroupStatusGauge.Reset()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
@@ -460,6 +475,15 @@ func NewResourceGroupNotExistErr(name string) error {
 	return errors.Errorf("%s does not exist", name)
 }
 
+func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
+	group := &rmpb.ResourceGroup{
+		Name:       resourceGroupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: c.degradedRUSettings,
+	}
+	return group
+}
+
 // tryGetResourceGroupController will try to get the resource group controller from local cache first.
 // If the local cache misses, it will then call gRPC to fetch the resource group info from the remote server.
 // If `useTombstone` is true, it will return the resource group controller even if it is marked as tombstone.
@@ -474,10 +498,17 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		}
 		return gc, nil
 	}
+
+	isUseDegradedResourceGroup := false
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		return nil, err
+		if c.degradedRUSettings != nil {
+			isUseDegradedResourceGroup = true
+			group = c.getDegradedResourceGroup(name)
+		} else {
+			return nil, err
+		}
 	}
 	if group == nil {
 		return nil, NewResourceGroupNotExistErr(name)
@@ -491,11 +522,13 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	if err != nil {
 		return nil, err
 	}
-	// Check again to prevent initializing the same resource group concurrently.
-	gc, loaded := c.loadOrStoreGroupController(name, gc)
-	if !loaded {
-		resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
-		log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
+	if !isUseDegradedResourceGroup {
+		// Check again to prevent initializing the same resource group concurrently.
+		_, loaded := c.loadOrStoreGroupController(name, gc)
+		if !loaded {
+			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
+			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
+		}
 	}
 	return gc, nil
 }
@@ -532,7 +565,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 	gc.tombstone.Store(true)
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
-	resourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
+	metrics.ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
 	log.Info("[resource group controller] default resource group controller cost created for tombstone",
 		zap.String("name", name))
 }
@@ -548,7 +581,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
-				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true
 			}
 			gc.inactive = true
@@ -625,9 +658,9 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 				log.Error("[resource group controller] token bucket rpc error", zap.Error(err))
 			}
 			resp = nil
-			failedTokenRequestDuration.Observe(latency.Seconds())
+			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
-			successfulTokenRequestDuration.Observe(latency.Seconds())
+			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))
@@ -711,6 +744,20 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 		return nil, err
 	}
 	return gc.getMeta(), nil
+}
+
+// ReportConsumption is used to report ru consumption directly.
+//
+// Currently, this interface is used to report the consumption for TiFlash MPP cost
+// after the query is finished.
+func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, consumption *rmpb.Consumption) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
+		return
+	}
+
+	gc.addRUConsumption(consumption)
 }
 
 type groupCostController struct {
@@ -797,14 +844,14 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		throttledType = "throttled"
 	)
 	return &groupMetricsCollection{
-		successfulRequestDuration:         successfulRequestDuration.WithLabelValues(oldName, name),
-		failedLimitReserveDuration:        failedLimitReserveDuration.WithLabelValues(oldName, name),
-		failedRequestCounterWithOthers:    failedRequestCounter.WithLabelValues(oldName, name, otherType),
-		failedRequestCounterWithThrottled: failedRequestCounter.WithLabelValues(oldName, name, throttledType),
-		requestRetryCounter:               requestRetryCounter.WithLabelValues(oldName, name),
-		tokenRequestCounter:               resourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
-		runningKVRequestCounter:           groupRunningKVRequestCounter.WithLabelValues(name),
-		consumeTokenHistogram:             tokenConsumedHistogram.WithLabelValues(name),
+		successfulRequestDuration:         metrics.SuccessfulRequestDuration.WithLabelValues(oldName, name),
+		failedLimitReserveDuration:        metrics.FailedLimitReserveDuration.WithLabelValues(oldName, name),
+		failedRequestCounterWithOthers:    metrics.FailedRequestCounter.WithLabelValues(oldName, name, otherType),
+		failedRequestCounterWithThrottled: metrics.FailedRequestCounter.WithLabelValues(oldName, name, throttledType),
+		requestRetryCounter:               metrics.RequestRetryCounter.WithLabelValues(oldName, name),
+		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
+		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
+		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 	}
 }
 
@@ -1519,6 +1566,12 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Unlock()
 
 	return delta, waitDuration, nil
+}
+
+func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
+	gc.mu.Lock()
+	add(gc.mu.consumption, consumption)
+	gc.mu.Unlock()
 }
 
 // GetActiveResourceGroup is used to get active resource group.

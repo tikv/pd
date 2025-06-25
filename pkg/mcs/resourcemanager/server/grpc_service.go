@@ -31,7 +31,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
@@ -94,13 +93,12 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	keyspaceID := constant.NullKeyspaceID
-	if req.KeyspaceId != nil {
-		keyspaceID = req.KeyspaceId.GetValue()
+	rg, err := s.manager.GetResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName, req.WithRuStats)
+	if err != nil {
+		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
 	if rg == nil {
-		return nil, errors.New("resource group not found")
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
 	}
 	return &rmpb.GetResourceGroupResponse{
 		Group: rg.IntoProtoResourceGroup(),
@@ -112,11 +110,10 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	keyspaceID := constant.NullKeyspaceID
-	if req.KeyspaceId != nil {
-		keyspaceID = req.KeyspaceId.GetValue()
+	groups, err := s.manager.GetResourceGroupList(ExtractKeyspaceID(req.GetKeyspaceId()), req.WithRuStats)
+	if err != nil {
+		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
@@ -143,11 +140,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	keyspaceID := constant.NullKeyspaceID
-	if req.KeyspaceId != nil {
-		keyspaceID = req.KeyspaceId.GetValue()
-	}
-	err := s.manager.DeleteResourceGroup(keyspaceID, req.ResourceGroupName)
+	err := s.manager.DeleteResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
 		return nil, err
 	}
@@ -187,19 +180,27 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err := s.checkServing(); err != nil {
 			return err
 		}
-		targetPeriodMs := request.GetTargetRequestPeriodMs()
-		clientUniqueID := request.GetClientUniqueId()
-		resps := &rmpb.TokenBucketsResponse{}
+		var (
+			targetPeriodMs = request.GetTargetRequestPeriodMs()
+			clientUniqueID = request.GetClientUniqueId()
+			resps          = &rmpb.TokenBucketsResponse{}
+			logFields      = make([]zap.Field, 2)
+		)
 		for _, req := range request.Requests {
+			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
-			keyspaceID := constant.NullKeyspaceID
-			if req.KeyspaceId != nil {
-				keyspaceID = req.KeyspaceId.GetValue()
+			logFields[0] = zap.Uint32("keyspace-id", keyspaceID)
+			logFields[1] = zap.String("resource-group", resourceGroupName)
+			// Get keyspace resource group manager to apply service limit later.
+			krgm := s.manager.getKeyspaceResourceGroupManager(keyspaceID)
+			if krgm == nil {
+				log.Warn("keyspace resource group manager not found", logFields...)
+				continue
 			}
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
+			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
 			if rg == nil {
-				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
+				log.Warn("resource group not found", append(logFields, zap.Error(err))...)
 				continue
 			}
 			// Send the consumption to update the metrics.
@@ -219,7 +220,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID)
+						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
 					}
 					if tokens == nil {
 						continue
@@ -227,10 +228,11 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
 			case rmpb.GroupMode_RawMode:
-				log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
+				log.Warn("not supports the resource type",
+					append(logFields, zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))...)
 				continue
 			}
-			log.Debug("finish token request from", zap.String("resource-group", resourceGroupName))
+			log.Debug("finish token request from", logFields...)
 			resps.Responses = append(resps.Responses, resp)
 		}
 		if err := stream.Send(resps); err != nil {
