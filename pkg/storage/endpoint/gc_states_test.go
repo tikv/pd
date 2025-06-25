@@ -125,7 +125,7 @@ func TestGlobalGCBarriersConversions(t *testing.T) {
 	for i, gcBarrier := range gcBarriers {
 		res, err := json.Marshal(gcBarrier)
 		re.NoError(err)
-		re.Equal(expected[i], string(res))
+		re.JSONEq(expected[i], string(res))
 	}
 
 	for i, str := range expected {
@@ -598,11 +598,11 @@ func TestGlobalGCBarrier(t *testing.T) {
 
 	// Check the raw data.
 	pathPrefix := keypath.GlobalGCBarrierPrefix()
-	re.JSONEq(`{"service_id":"1","expired_at":1740127928,"safe_point":1,"keyspace_id":0}`,
+	re.JSONEq(`{"barrier_id":"1","expired_at":1740127928,"barrier_ts":1}`,
 		loadValue(re, se, pathPrefix+"1"))
-	re.JSONEq(`{"service_id":"2","expired_at":9223372036854775807,"safe_point":2,"keyspace_id":0}`,
+	re.JSONEq(`{"barrier_id":"2","expired_at":0,"barrier_ts":2}`,
 		loadValue(re, se, pathPrefix+"2"))
-	re.JSONEq(`{"service_id":"3","expired_at":1740127928,"safe_point":3,"keyspace_id":0}`,
+	re.JSONEq(`{"barrier_id":"3","expired_at":1740127928,"barrier_ts":3}`,
 		loadValue(re, se, pathPrefix+"3"))
 
 	// Check with the GC barrier API.
