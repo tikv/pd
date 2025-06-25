@@ -116,10 +116,10 @@ func TestGlobalGCBarriersConversions(t *testing.T) {
 	// Test Marshal & Unmarshal for GlobalGCBarrier
 	expected := []string{
 		`{"barrier_id":"a","barrier_ts":1,"expired_at":0}`,
-		`{"barrier_id":"b","barrier_ts":2,"expired_at":1740036600}`,
-		`{"barrier_id":"c","barrier_ts":456140154470400000,"expired_at":1740036660}`,
-		`{"barrier_id":"d","barrier_ts":18446744073709551614,"expired_at":1740036601}`,
-		`{"barrier_id":"e","barrier_ts":456139133457530881,"expired_at":1740036601}`,
+		`{"barrier_id":"b","barrier_ts":2,"expired_at":1740036600000000000}`,
+		`{"barrier_id":"c","barrier_ts":456140154470400000,"expired_at":1740036660000000000}`,
+		`{"barrier_id":"d","barrier_ts":18446744073709551614,"expired_at":1740036601000000000}`,
+		`{"barrier_id":"e","barrier_ts":456139133457530881,"expired_at":1740036601000000000}`,
 	}
 
 	for i, gcBarrier := range gcBarriers {

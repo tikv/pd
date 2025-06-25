@@ -127,7 +127,7 @@ type TimeOptional struct {
 
 func (t *TimeOptional) int64() int64 {
 	if t.Time != nil {
-		return t.Unix()
+		return t.UnixNano()
 	}
 	return 0
 }
@@ -144,7 +144,7 @@ func (t *TimeOptional) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	if expireAt < math.MaxInt64 && expireAt > 0 {
-		val := time.Unix(expireAt, 0)
+		val := time.Unix(0, expireAt)
 		t.Time = &val
 	} else {
 		t.Time = nil

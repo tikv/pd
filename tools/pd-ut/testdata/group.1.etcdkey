@@ -28,6 +28,7 @@
 /pd//gc/global_gc_barriers/b get
 /pd//gc/global_gc_barriers/b remove
 /pd//gc/global_gc_barriers/b save
+/pd//gc/global_gc_barriers/native_br save
 /pd//gc/safe_point get
 /pd//gc/safe_point save
 /pd//gc/safe_point/service/ get
