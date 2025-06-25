@@ -24,6 +24,8 @@
 /pd//keyspaces/gc_safe_point/ save
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
+/pd//keyspaces/id/SYSTEM get
+/pd//keyspaces/id/SYSTEM save
 /pd//keyspaces/id/ks get
 /pd//keyspaces/id/ks save
 /pd//keyspaces/id/pre-alloc get

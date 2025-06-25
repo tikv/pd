@@ -26,10 +26,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/config"
@@ -130,4 +132,56 @@ func (suite *keyspaceTestSuite) TestPreAlloc() {
 		// Check pre-allocated keyspaces also have the correct region label.
 		checkLabelRule(re, meta.GetId(), regionLabeler)
 	}
+}
+
+func makeMutations() []*keyspace.Mutation {
+	return []*keyspace.Mutation{
+		{
+			Op:    keyspace.OpPut,
+			Key:   "config_entry_1",
+			Value: "new val",
+		},
+		{
+			Op:    keyspace.OpPut,
+			Key:   "new config",
+			Value: "new val",
+		},
+		{
+			Op:  keyspace.OpDel,
+			Key: "config_entry_2",
+		},
+	}
+}
+
+func TestSystemKeyspace(t *testing.T) {
+	re := require.New(t)
+	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	server := cluster.GetLeaderServer()
+	re.NoError(server.BootstrapCluster())
+	manager := server.GetKeyspaceManager()
+	// Load system keyspace.
+	systemKeyspace, err := manager.LoadKeyspace(constant.SystemKeyspaceName)
+	re.NoError(err)
+	re.Equal(constant.SystemKeyspaceID, systemKeyspace.GetId())
+	// Update system keyspace.
+	// Changing state of SYSTEM keyspace is not allowed.
+	newTime := time.Now().Unix()
+	_, err = manager.UpdateKeyspaceState(constant.SystemKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+	re.Error(err)
+	// Changing config of SYSTEM keyspace is allowed.
+	mutations := makeMutations()
+	_, err = manager.UpdateKeyspaceConfig(constant.SystemKeyspaceName, mutations)
+	re.NoError(err)
 }
