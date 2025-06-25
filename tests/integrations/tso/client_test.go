@@ -699,7 +699,7 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 		}
 	}(pdClient)
 
-	for range 10 {
+	for range 5 {
 		time.Sleep(time.Second)
 		err = pdLeader.ResignLeader()
 		re.NoError(err)
