@@ -679,7 +679,7 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	ctx1, cancel1 := context.WithCancel(ctx)
-	var lastTS atomic.Uint64
+	var lastTS uint64
 	go func(client pd.Client) {
 		defer wg.Done()
 		for {
@@ -694,12 +694,13 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 				continue
 			}
 			ts := tsoutil.ComposeTS(physical, logical)
-			re.Less(lastTS.Load(), ts)
-			lastTS.Store(ts)
+			re.Less(lastTS, ts)
+			lastTS = ts
 		}
 	}(pdClient)
 
 	for range 10 {
+		time.Sleep(time.Second)
 		err = pdLeader.ResignLeader()
 		re.NoError(err)
 		leaderName = pdCluster.WaitLeader()
@@ -707,10 +708,8 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 		pdLeader = pdCluster.GetServer(leaderName)
 	}
 
-	// Make sure the lastTS is not empty
-	testutil.Eventually(re, func() bool {
-		return lastTS.Load() != 0
-	})
 	cancel1()
 	wg.Wait()
+	// Make sure the lastTS is not empty
+	re.NotZero(lastTS)
 }
