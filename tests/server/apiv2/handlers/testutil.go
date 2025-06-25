@@ -287,26 +287,18 @@ func mustLoadMetaServiceGroups(re *require.Assertions, server *tests.TestServer)
 	return groups
 }
 
-func mustAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, request []*handlers.AddMetaServiceGroupRequest) []*handlers.MetaServiceGroupStatus {
-	code, groups := tryAddMetaServiceGroups(re, server, request)
-	re.Equal(http.StatusOK, code)
-	return groups
-}
-
-func tryAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, request []*handlers.AddMetaServiceGroupRequest) (int, []*handlers.MetaServiceGroupStatus) {
-	data, err := json.Marshal(request)
+func mustAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, patch map[string]*string) []*handlers.MetaServiceGroupStatus {
+	data, err := json.Marshal(patch)
 	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(data))
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(data))
 	re.NoError(err)
 	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
-	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode, nil
-	}
+	re.Equal(http.StatusOK, resp.StatusCode)
 	var groups []*handlers.MetaServiceGroupStatus
 	re.NoError(json.Unmarshal(data, &groups))
-	return resp.StatusCode, groups
+	return groups
 }

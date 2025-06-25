@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/apiv2/handlers"
 )
 
 const (
@@ -36,7 +35,8 @@ func NewMetaServiceGroupCommand() *cobra.Command {
 		Short: "meta-service group commands",
 	}
 	cmd.AddCommand(newListMetaServiceGroupCommand())
-	cmd.AddCommand(newAddMetaServiceGroupCommand())
+	cmd.AddCommand(newUpdateMetaServiceGroupCommand())
+	cmd.AddCommand(newDeleteMetaServiceGroupCommand())
 	return cmd
 }
 
@@ -62,54 +62,77 @@ func listMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(resp)
 }
 
-func newAddMetaServiceGroupCommand() *cobra.Command {
+func newUpdateMetaServiceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "add",
-		Short: "add one or more meta-service groups",
-		Run:   newAddMetaServiceGroupFunc,
+		Use:   "update",
+		Short: "add or update one or more meta-service groups",
+		Run:   newUpdateMetaServiceGroupFunc,
 	}
-	r.Flags().StringArrayP(nmGroup, "g", nil, "meta-service group in format id=addr1,addr2,...")
+	r.Flags().StringArrayP(nmGroup, "g", nil, "meta-service group in format id=addr1,addr2,... (for add/update)")
 	_ = r.MarkFlagRequired(nmGroup)
 	return r
 }
 
-func newAddMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
-	// Parse the new groups.
+func newUpdateMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 	metaServiceGroups, err := cmd.Flags().GetStringArray("group")
 	if err != nil {
 		cmd.PrintErrln("Failed to read --group flag:", err)
 		return
 	}
-
 	if len(metaServiceGroups) == 0 {
 		cmd.PrintErrln("At least one --group must be specified")
 		cmd.Usage()
 		return
 	}
-	var params []handlers.AddMetaServiceGroupRequest
+	patch := make(map[string]*string)
 	for _, group := range metaServiceGroups {
 		parts := strings.SplitN(group, "=", 2)
 		if len(parts) != 2 {
-			cmd.PrintErrf("Invalid --group format: %q (expected id=addr1,addr2,...)\n", group)
+			cmd.PrintErrf("Invalid --group format: %q (expected id=addr1,addr2,...)", group)
 			return
 		}
-		params = append(params, handlers.AddMetaServiceGroupRequest{
-			ID:        strings.TrimSpace(parts[0]),
-			Addresses: strings.TrimSpace(parts[1]),
-		})
+		addr := strings.TrimSpace(parts[1])
+		patch[strings.TrimSpace(parts[0])] = &addr
 	}
-
-	body, err := json.Marshal(params)
+	body, err := json.Marshal(patch)
 	if err != nil {
 		cmd.PrintErrln("Failed to marshal request:", err)
 		return
 	}
-	resp, err := doRequest(cmd, metaServiceGroupPrefix, http.MethodPost,
+	resp, err := doRequest(cmd, metaServiceGroupPrefix, http.MethodPatch,
 		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(body)))
 	if err != nil {
-		cmd.PrintErrln("Failed to add meta-service group:", err)
+		cmd.PrintErrln("Failed to update meta-service group:", err)
 		return
 	}
+	cmd.Println(resp)
+}
 
+func newDeleteMetaServiceGroupCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "delete <id> [<id> ...]",
+		Short: "delete one or more meta-service groups by id",
+		Args:  cobra.MinimumNArgs(1),
+		Run:   newDeleteMetaServiceGroupFunc,
+	}
+	return r
+}
+
+func newDeleteMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
+	patch := make(map[string]*string)
+	for _, id := range args {
+		patch[strings.TrimSpace(id)] = nil
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		cmd.PrintErrln("Failed to marshal request:", err)
+		return
+	}
+	resp, err := doRequest(cmd, metaServiceGroupPrefix, http.MethodPatch,
+		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(body)))
+	if err != nil {
+		cmd.PrintErrln("Failed to delete meta-service group:", err)
+		return
+	}
 	cmd.Println(resp)
 }

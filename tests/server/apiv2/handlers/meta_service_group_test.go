@@ -16,7 +16,6 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	"github.com/pingcap/failpoint"
@@ -114,18 +113,15 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		re.InDelta(collectedStatus.AssignedKeyspaces, len(keyspaces)/len(groups), 1)
 	}
 	// Add two more meta-service groups.
-	newGroups := []*handlers.AddMetaServiceGroupRequest{
-		{
-			ID:        "etcd-group-4",
-			Addresses: "etcd-group-4.tidb-serverless.cluster.svc.local",
-		},
-		{
-			ID:        "etcd-group-5",
-			Addresses: "etcd-group-5.tidb-serverless.cluster.svc.local",
-		},
+	addr4 := "etcd-group-4.tidb-serverless.cluster.svc.local"
+	addr5 := "etcd-group-5.tidb-serverless.cluster.svc.local"
+	patch := map[string]*string{
+		"etcd-group-4": &addr4,
+		"etcd-group-5": &addr5,
 	}
-	groups = mustAddMetaServiceGroups(re, suite.server, newGroups)
-	re.Equal(len(groups), len(mockMetaServiceGroups())+len(newGroups))
+
+	groups = mustAddMetaServiceGroups(re, suite.server, patch)
+	re.Equal(len(groups), len(mockMetaServiceGroups())+len(patch))
 	// Newly assigned meta-service group should have no assigned keyspace.
 	for _, group := range groups {
 		if collectedGroups[group.ID] == nil {
@@ -144,7 +140,27 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		// Make sure keyspaces are relatively evenly distributed among meta-service groups.
 		re.InDelta(collectedStatus.AssignedKeyspaces, len(keyspaces)/len(groups), 1)
 	}
-	// Add the same keyspace group should result in error.
-	code, _ := tryAddMetaServiceGroups(re, suite.server, newGroups)
-	re.Equal(http.StatusBadRequest, code)
+	// Modify address of etcd-group-1
+	newAddr := "etcd-group-1-modified.tidb-serverless.cluster.svc.local"
+	modifyPatch := map[string]*string{
+		"etcd-group-1": &newAddr,
+	}
+	groups = mustAddMetaServiceGroups(re, suite.server, modifyPatch)
+	found := false
+	for _, group := range groups {
+		if group.ID == "etcd-group-1" {
+			found = true
+			re.Equal(newAddr, group.Addresses)
+		}
+	}
+	re.True(found, "etcd-group-1 should exist after modify")
+
+	// Delete etcd-group-2
+	deletePatch := map[string]*string{
+		"etcd-group-2": nil,
+	}
+	groups = mustAddMetaServiceGroups(re, suite.server, deletePatch)
+	for _, group := range groups {
+		re.NotEqual("etcd-group-2", group.ID, "etcd-group-2 should be deleted")
+	}
 }
