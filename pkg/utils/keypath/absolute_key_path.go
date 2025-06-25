@@ -27,6 +27,8 @@ import (
 const (
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
+	// NativeBRServiceSafePointID is the service id of native BR.
+	NativeBRServiceSafePointID = "native_br"
 )
 
 // Leader and primary are the same thing in this context.

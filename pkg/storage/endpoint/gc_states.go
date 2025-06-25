@@ -125,13 +125,16 @@ type TimeOptional struct {
 	*time.Time
 }
 
+func (t TimeOptional) int64() int64 {
+	if t.Time != nil {
+		return t.Time.Unix()
+	}
+	return 0
+}
+
 // MarshalJSON implements json.Marshaler for TimeOptional
 func (t TimeOptional) MarshalJSON() ([]byte, error) {
-	expireAt := int64(0)
-	if t.Time != nil {
-		expireAt = t.Time.Unix()
-	}
-	return json.Marshal(expireAt)
+	return json.Marshal(t.int64())
 }
 
 // UnmarshalJSON implements json.Marshaler for TimeOptional
@@ -406,10 +409,10 @@ func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier
 // LoadGlobalGCBarriers loads all global GC barriers.
 func (p GCStateProvider) LoadAllGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
-	return p.loadAllGCBarriersImpl(prefix)
+	return p.loadAllGlobalGCBarriersImpl(prefix)
 }
 
-func (p GCStateProvider) loadAllGCBarriersImpl(prefix string) ([]*GlobalGCBarrier, error) {
+func (p GCStateProvider) loadAllGlobalGCBarriersImpl(prefix string) ([]*GlobalGCBarrier, error) {
 	// TODO: Limit the count for each call.
 	_, barriers, err := loadJSONByPrefix[*GlobalGCBarrier](p.storage, prefix, 0)
 	if err != nil {
@@ -522,6 +525,22 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*Se
 	keys, ssps, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	prefix = keypath.GlobalGCBarrierPrefix()
+	keys1, barriers, err := loadJSONByPrefix[*GlobalGCBarrier](p.storage, prefix, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for i, barrier := range barriers {
+		keys = append(keys, keys1[i])
+		ssps = append(ssps, &ServiceSafePoint{
+			ServiceID:  barrier.BarrierID,
+			SafePoint:  barrier.BarrierTS,
+			ExpiredAt:  barrier.ExpiredAt.int64(),
+			KeyspaceID: constant.NullKeyspaceID,
+		})
 	}
 	if len(keys) == 0 {
 		return []string{}, []*ServiceSafePoint{}, nil

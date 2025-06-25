@@ -441,12 +441,14 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"
+	nativeBRServiceID := "native_br"
 	cdcServiceSafePoint := uint64(10)
 	gcWorkerSafePoint := uint64(8)
+	nativeBRSafePoint := uint64(14)
 	brSafePoint := uint64(15)
 
 	wg := sync.WaitGroup{}
-	wg.Add(5)
+	wg.Add(6)
 	// Updating the service safe point for cdc to 10 should success
 	go func() {
 		defer wg.Done()
@@ -475,6 +477,17 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 		re.True(updated)
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
 		re.Equal(gcWorkerSafePoint, min.SafePoint)
+		re.Equal(gcWorkerServiceID, min.ServiceID)
+	}()
+
+	// Updating the service safe point to 14 for native_br should succeed
+	go func() {
+		defer wg.Done()
+		// update with valid ttl for native_br should succeed
+		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(nativeBRServiceID, nativeBRSafePoint, math.MaxInt64, time.Now())
+		re.NoError(err)
+		re.True(updated)
+		// the current min safepoint should be 8 for gc_worker(cdc 10)
 		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
@@ -1373,6 +1386,37 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.NoError(err)
 	re.Equal(uint64(15), res.NewTxnSafePoint)
 	re.Empty(res.BlockerDescription)
+
+	// Test CompatibleUpdateServiceGCSafePoint for native_br
+	// delete svc1's service safepoint before test
+	// gcworker's service safepoint cannot be deleted because it's mapping to txn safe point rather than a barrier
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 0, -1, now)
+	re.NoError(err)
+
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 32, math.MaxInt64, now)
+	re.NoError(err)
+	re.True(updated)
+	re.Equal(uint64(25), minSsp.SafePoint)
+	re.Equal("gc_worker", minSsp.ServiceID)
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
+	re.NoError(err)
+	re.Len(allSsp, 2)
+	re.Equal("gc_worker", allSsp[0].ServiceID)
+	re.Equal(uint64(25), allSsp[0].SafePoint)
+	re.Equal("native_br", allSsp[1].ServiceID)
+	re.Equal(uint64(32), allSsp[1].SafePoint)
+
+	res, err = s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 33, now)
+	re.NoError(err)
+	re.Equal(uint64(32), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, `BarrierID: "native_br"`)
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
+	re.NoError(err)
+	re.Len(allSsp, 2)
+	re.Equal("gc_worker", allSsp[0].ServiceID)
+	re.Equal(uint64(32), allSsp[1].SafePoint)
+	re.Equal("native_br", allSsp[1].ServiceID)
+	re.Equal(uint64(32), allSsp[1].SafePoint)
 }
 
 func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
