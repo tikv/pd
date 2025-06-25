@@ -791,8 +791,8 @@ func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.Keys
 // LoadRangeKeyspace load up to limit keyspaces starting from keyspace with startID.
 func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
 	// Load Start should fall within acceptable ID range.
-	if startID > spaceIDMax {
-		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, spaceIDMax)
+	if startID > constant.MaxValidKeyspaceID {
+		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, constant.MaxValidKeyspaceID)
 	}
 	var (
 		keyspaces []*keyspacepb.KeyspaceMeta

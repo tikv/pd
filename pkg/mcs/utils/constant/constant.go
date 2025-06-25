@@ -99,6 +99,11 @@ const (
 
 // only for next gen
 const (
+	// ReservedKeyspaceIDCount is the reserved count for keyspace id.
+	ReservedKeyspaceIDCount = uint64(1024)
+	// ReservedKeyspaceIDStart is the start id for reserved keyspace id.
+	// The reserved keyspace id range is [0xFFFFFF - 1024, 0xFFFFFF)
+	ReservedKeyspaceIDStart = uint64(MaxValidKeyspaceID) - ReservedKeyspaceIDCount
 	// SystemKeyspaceID is the system keyspace ID.
 	SystemKeyspaceID = MaxValidKeyspaceID - 1
 	// SystemKeyspaceName is the system keyspace name.

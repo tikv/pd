@@ -32,7 +32,6 @@ import (
 )
 
 const (
-	spaceIDMax = ^uint32(0) >> 8 // 16777215 (Uint24Max) is the maximum value of spaceID.
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
 	// Valid name must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 	// numbers (0-9), hyphens (-), and underscores (_).
@@ -57,11 +56,16 @@ var (
 // It throws errIllegalID when input id is our of range,
 // or if it collides with reserved id.
 func validateID(id uint32) error {
-	if id > spaceIDMax {
-		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, spaceIDMax)
+	if id > constant.MaxValidKeyspaceID {
+		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, constant.MaxValidKeyspaceID)
 	}
 	if id == constant.DefaultKeyspaceID {
 		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", id)
+	}
+	if kerneltype.IsNextGen() {
+		if checkReservedID(id) {
+			return errors.Errorf("illegal keyspace id %d, collides with reserved system keyspace id", id)
+		}
 	}
 	return nil
 }

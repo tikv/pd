@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
@@ -85,12 +86,12 @@ func TestIDAllocationEndValue(t *testing.T) {
 	defer clean()
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
-	checkIDAllocationEndValue(t, client, nonNextGenKeyspaceIDLimit)
+	checkIDAllocationEndValue(t, client, uint64(constant.MaxValidKeyspaceID))
 	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
 	defer func() {
 		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
 	}()
-	checkIDAllocationEndValue(t, client, reservedKeyspaceIDStart-1)
+	checkIDAllocationEndValue(t, client, constant.ReservedKeyspaceIDStart-1)
 }
 
 func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint64) {
