@@ -576,7 +576,7 @@ func (s *gcStateManagerTestSuite) getGlobalGCBarrier(barrierID string) *endpoint
 
 func (s *gcStateManagerTestSuite) getGlobalGCBarriers() []*endpoint.GlobalGCBarrier {
 	re := s.Require()
-	barriers, err := s.manager.gcMetaStorage.LoadGlobalGCBarriers()
+	barriers, err := s.manager.gcMetaStorage.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	return barriers
 }

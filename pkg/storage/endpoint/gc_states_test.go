@@ -577,7 +577,7 @@ func TestGlobalGCBarrier(t *testing.T) {
 	}
 
 	// Empty.
-	loadedBarriers, err := provider.LoadGlobalGCBarriers()
+	loadedBarriers, err := provider.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	re.Empty(loadedBarriers)
 
@@ -605,7 +605,7 @@ func TestGlobalGCBarrier(t *testing.T) {
 		loadValue(re, se, pathPrefix+"3"))
 
 	// Check with the GC barrier API.
-	loadedBarriers, err = provider.LoadGlobalGCBarriers()
+	loadedBarriers, err = provider.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	re.Len(loadedBarriers, 3)
 	for i, barrier := range loadedBarriers {
@@ -633,7 +633,7 @@ func TestGlobalGCBarrier(t *testing.T) {
 	}
 
 	// After deletion, reading range returns empty again.
-	loadedBarriers, err = provider.LoadGlobalGCBarriers()
+	loadedBarriers, err = provider.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	re.Empty(loadedBarriers)
 }

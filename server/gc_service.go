@@ -293,8 +293,8 @@ func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.Gl
 	// After rounding, the actual TTL might be not exactly the same as the specified value. Recalculate it anyway.
 	// MaxInt64 represents that the expiration time is not specified and it never expires.
 	var resultTTL int64 = math.MaxInt64
-	if b.ExpirationTime != nil {
-		resultTTL = int64(max(math.Floor(b.ExpirationTime.Sub(now).Seconds()), 0))
+	if b.ExpiredAt.Time != nil {
+		resultTTL = int64(max(math.Floor(b.ExpiredAt.Time.Sub(now).Seconds()), 0))
 	}
 
 	return &pdpb.GlobalGCBarrierInfo{

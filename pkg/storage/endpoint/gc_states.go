@@ -120,13 +120,43 @@ var (
 	_ json.Unmarshaler = (*ServiceSafePoint)(nil)
 )
 
+// TimeOptional is time.Time or nil
+type TimeOptional struct {
+	*time.Time
+}
+
+// MarshalJSON implements json.Marshaler for TimeOptional
+func (t TimeOptional) MarshalJSON() ([]byte, error) {
+	expireAt := int64(0)
+	if t.Time != nil {
+		expireAt = t.Time.Unix()
+	}
+	return json.Marshal(expireAt)
+}
+
+// UnmarshalJSON implements json.Marshaler for TimeOptional
+func (t *TimeOptional) UnmarshalJSON(b []byte) error {
+	var expireAt int64
+	if err := json.Unmarshal(b, &expireAt); err != nil {
+		return err
+	}
+	if expireAt < math.MaxInt64 && expireAt > 0 {
+		val := time.Unix(expireAt, 0)
+		t.Time = &val
+	} else {
+		t.Time = nil
+	}
+	return nil
+}
+
 // GlobalGCBarrier represents a global GC barrier.
 // It looks like a GCBarrier now but the struct might change with the code evolve.
+// A more important reason is to distinguish from GC barrier by the type system,
+// avoiding potential misuse between them in code.
 type GlobalGCBarrier struct {
-	BarrierID string
-	BarrierTS uint64
-	// Nil means never expiring.
-	ExpirationTime *time.Time
+	BarrierID string       `json:"barrier_id"`
+	BarrierTS uint64       `json:"barrier_ts"`
+	ExpiredAt TimeOptional `json:"expired_at"`
 }
 
 // NewGlobalGCBarrier creates a new GlobalGCBarrier. The given expirationTime will be rounded up to the next second if it's
@@ -139,70 +169,25 @@ func NewGlobalGCBarrier(barrierID string, barrierTS uint64, expirationTime *time
 		*expirationTime = rounded
 	}
 	return &GlobalGCBarrier{
-		BarrierID:      barrierID,
-		BarrierTS:      barrierTS,
-		ExpirationTime: expirationTime,
+		BarrierID: barrierID,
+		BarrierTS: barrierTS,
+		ExpiredAt: TimeOptional{expirationTime},
 	}
-}
-
-// globalGCBarrierFromServiceSafePoint returns the GCBarrier that's synonymous to the given service safe point.
-func globalGCBarrierFromServiceSafePoint(s *ServiceSafePoint) *GlobalGCBarrier {
-	if s == nil {
-		return nil
-	}
-
-	res := &GlobalGCBarrier{
-		BarrierID:      s.ServiceID,
-		BarrierTS:      s.SafePoint,
-		ExpirationTime: nil,
-	}
-	if s.ExpiredAt < math.MaxInt64 && s.ExpiredAt > 0 {
-		expirationTime := new(time.Time)
-		*expirationTime = time.Unix(s.ExpiredAt, 0)
-		res.ExpirationTime = expirationTime
-	}
-	return res
-}
-
-// ToServiceSafePoint converts the global GCBarrier to a synonymous ServiceSafePoint for storing physically.
-// This method should never be used unless handling the physical data, which needs to be compatible with service safe
-// points.
-// This method is public only for keeping some old HTTP API compatible.
-func (b *GlobalGCBarrier) ToServiceSafePoint() *ServiceSafePoint {
-	res := &ServiceSafePoint{
-		ServiceID: b.BarrierID,
-		ExpiredAt: math.MaxInt64,
-		SafePoint: b.BarrierTS,
-	}
-	if b.ExpirationTime != nil {
-		res.ExpiredAt = b.ExpirationTime.Unix()
-	}
-	return res
 }
 
 // IsExpired checks whether the GlobalGCBarrier is expired at the given time.
 func (b *GlobalGCBarrier) IsExpired(now time.Time) bool {
-	return b.ExpirationTime != nil && now.After(*b.ExpirationTime)
+	return b.ExpiredAt.Time != nil && now.After(*b.ExpiredAt.Time)
 }
 
 // String implements fmt.Stringer.
 func (b *GlobalGCBarrier) String() string {
 	expirationTime := "<nil>"
-	if b.ExpirationTime != nil {
-		expirationTime = b.ExpirationTime.String()
+	if b.ExpiredAt.Time != nil {
+		expirationTime = b.ExpiredAt.String()
 	}
 	return fmt.Sprintf("GlobalGCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
 		b.BarrierID, b.BarrierTS, expirationTime)
-}
-
-type globalGCBarrierDecoder struct {
-	barriers []*GlobalGCBarrier
-}
-
-func (d *globalGCBarrierDecoder) decode(v *ServiceSafePoint) {
-	if v != nil {
-		d.barriers = append(d.barriers, globalGCBarrierFromServiceSafePoint(v))
-	}
 }
 
 // GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
@@ -248,16 +233,6 @@ func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 		res.ExpirationTime = expirationTime
 	}
 	return res
-}
-
-type gcBarrierDecoder struct {
-	barriers []*GCBarrier
-}
-
-func (d *gcBarrierDecoder) decode(v *ServiceSafePoint) {
-	if v != nil {
-		d.barriers = append(d.barriers, gcBarrierFromServiceSafePoint(v))
-	}
 }
 
 // ToServiceSafePoint converts the GCBarrier to a synonymous ServiceSafePoint for storing physically.
@@ -403,49 +378,44 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 // LoadAllGCBarriers loads all GC barriers of the given keyspace.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix(keyspaceID)
-	var dec gcBarrierDecoder
-	err := p.loadAllGCBarriersImpl(prefix, dec.decode)
+	// TODO: Limit the count for each call.
+	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, err
 	}
-	return dec.barriers, nil
+	if len(serviceSafePoints) == 0 {
+		return nil, nil
+	}
+	barriers := make([]*GCBarrier, 0, len(serviceSafePoints))
+	for _, serviceSafePoint := range serviceSafePoints {
+		barriers = append(barriers, gcBarrierFromServiceSafePoint(serviceSafePoint))
+	}
+	return barriers, nil
 }
 
 // LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
 func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier, error) {
 	key := keypath.GlobalGCBarrierPath(barrierID)
-	serviceSafePoint, err := loadJSON[*ServiceSafePoint](p.storage, key)
+	barrier, err := loadJSON[*GlobalGCBarrier](p.storage, key)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	barrier := globalGCBarrierFromServiceSafePoint(serviceSafePoint)
 	return barrier, nil
 }
 
 // LoadGlobalGCBarriers loads all global GC barriers.
-func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
+func (p GCStateProvider) LoadAllGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
-	var dec globalGCBarrierDecoder
-	err := p.loadAllGCBarriersImpl(prefix, dec.decode)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return dec.barriers, nil
+	return p.loadAllGCBarriersImpl(prefix)
 }
 
-func (p GCStateProvider) loadAllGCBarriersImpl(prefix string, decoder func(*ServiceSafePoint)) error {
+func (p GCStateProvider) loadAllGCBarriersImpl(prefix string) ([]*GlobalGCBarrier, error) {
 	// TODO: Limit the count for each call.
-	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
+	_, barriers, err := loadJSONByPrefix[*GlobalGCBarrier](p.storage, prefix, 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(serviceSafePoints) == 0 {
-		return nil
-	}
-	for _, serviceSafePoint := range serviceSafePoints {
-		decoder(serviceSafePoint)
-	}
-	return nil
+	return barriers, err
 }
 
 // CompatibleLoadTiDBMinStartTS loads the minStartTS reported to etcd directly by TiDB.
@@ -617,7 +587,7 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 // SetGlobalGCBarrier sets a global GCBarrier.
 func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GlobalGCBarrier) error {
 	key := keypath.GlobalGCBarrierPath(barrier.BarrierID)
-	return wb.writeJSON(key, barrier.ToServiceSafePoint())
+	return wb.writeJSON(key, barrier)
 }
 
 // DeleteGlobalGCBarrier deletes the global GCBarrier with the given barrierID.
