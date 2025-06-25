@@ -1390,7 +1390,7 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	// Test CompatibleUpdateServiceGCSafePoint for native_br
 	// delete svc1's service safepoint before test
 	// gcworker's service safepoint cannot be deleted because it's mapping to txn safe point rather than a barrier
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 0, -1, now)
+	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 0, -1, now)
 	re.NoError(err)
 
 	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 32, math.MaxInt64, now)

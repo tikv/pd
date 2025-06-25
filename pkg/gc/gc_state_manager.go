@@ -734,7 +734,8 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if serviceID == keypath.GCWorkerServiceSafePointID {
+	switch serviceID {
+	case keypath.GCWorkerServiceSafePointID:
 		if ttl != math.MaxInt64 {
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
 		}
@@ -757,7 +758,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 			}
 		}
 		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
-	} else if serviceID == keypath.NativeBRServiceSafePointID {
+	case keypath.NativeBRServiceSafePointID:
 		if ttl > 0 {
 			_, err = m.setGlobalGCBarrierImpl(context.Background(), serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
 		} else {
@@ -779,7 +780,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 			SafePoint: txnSafePoint,
 		}
 		updated = ttl > 0 && txnSafePoint <= newServiceSafePoint
-	} else {
+	default:
 		if ttl > 0 {
 			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
 		} else {

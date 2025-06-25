@@ -125,15 +125,15 @@ type TimeOptional struct {
 	*time.Time
 }
 
-func (t TimeOptional) int64() int64 {
+func (t *TimeOptional) int64() int64 {
 	if t.Time != nil {
-		return t.Time.Unix()
+		return t.Unix()
 	}
 	return 0
 }
 
 // MarshalJSON implements json.Marshaler for TimeOptional
-func (t TimeOptional) MarshalJSON() ([]byte, error) {
+func (t *TimeOptional) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.int64())
 }
 
@@ -406,7 +406,7 @@ func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier
 	return barrier, nil
 }
 
-// LoadGlobalGCBarriers loads all global GC barriers.
+// LoadAllGlobalGCBarriers loads all global GC barriers.
 func (p GCStateProvider) LoadAllGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
 	return p.loadAllGlobalGCBarriersImpl(prefix)
