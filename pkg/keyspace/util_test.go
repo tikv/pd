@@ -51,6 +51,7 @@ func TestValidateName(t *testing.T) {
 		hasErr bool
 	}{
 		{constant.DefaultKeyspaceName, true}, // Reserved name should result in error.
+		{constant.SystemKeyspaceName, true},  // Reserved name should result in error.
 		{"keyspaceName1", false},
 		{"keyspace_name_1", false},
 		{"10", false},

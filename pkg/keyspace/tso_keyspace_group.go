@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -119,10 +120,14 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
 	// to every tso node/pod by default.
+	keyspaces := []uint32{constant.DefaultKeyspaceID}
+	if kerneltype.IsNextGen() {
+		keyspaces = append(keyspaces, constant.SystemKeyspaceID)
+	}
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
 		ID:        constant.DefaultKeyspaceGroupID,
 		UserKind:  endpoint.Basic.String(),
-		Keyspaces: []uint32{constant.DefaultKeyspaceID},
+		Keyspaces: keyspaces,
 	}
 
 	m.Lock()
@@ -632,6 +637,9 @@ func buildSplitKeyspaces(
 			if keyspace == constant.DefaultKeyspaceID {
 				return nil, nil, errs.ErrModifyDefaultKeyspace
 			}
+			if checkReservedID(keyspace) {
+				return nil, nil, errs.ErrModifySystemKeyspace
+			}
 			if _, ok := oldKeyspaceMap[keyspace]; !ok {
 				return nil, nil, errs.ErrKeyspaceNotInKeyspaceGroup
 			}
@@ -666,6 +674,11 @@ func buildSplitKeyspaces(
 		if keyspace == constant.DefaultKeyspaceID {
 			// The source keyspace group must be the default keyspace group and we always keep the default
 			// keyspace in the default keyspace group.
+			continue
+		}
+		if checkReservedID(keyspace) {
+			// The source keyspace group must be the default keyspace group and we always keep
+			// the system keyspace in the default keyspace group.
 			continue
 		}
 		if startKeyspaceID <= keyspace && keyspace <= endKeyspaceID {

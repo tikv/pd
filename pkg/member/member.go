@@ -95,6 +95,14 @@ func (m *EmbeddedEtcdMember) MemberValue() string {
 	return m.memberValue
 }
 
+// MemberString returns the member string.
+func (m *EmbeddedEtcdMember) MemberString() string {
+	if m.member == nil {
+		return ""
+	}
+	return m.member.String()
+}
+
 // Member returns the member.
 func (m *EmbeddedEtcdMember) Member() *pdpb.Member {
 	return m.member

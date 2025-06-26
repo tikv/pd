@@ -529,9 +529,20 @@ const (
 // GetTS implements the TSOClient interface.
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	var retryCount int
-	for retryCount = range maxTSORetryTimes {
+	maxRetries := maxTSORetryTimes
+	failpoint.Inject("mockMaxTSORetryTimes", func(val failpoint.Value) {
+		if newMax, ok := val.(int); ok {
+			maxRetries = newMax
+		}
+	})
+
+	for retryCount = range maxRetries {
 		resp := c.GetTSAsync(ctx)
 		if physical, logical, err = resp.Wait(); err != nil {
+			failpoint.Inject("skipRetry", func() {
+				failpoint.Return(physical, logical, err)
+			})
+
 			if !errs.IsLeaderChange(err) {
 				break
 			}
