@@ -94,6 +94,8 @@ resource_group/keyspace/settings//keyspace_test remove
 resource_group/keyspace/settings//keyspace_test save
 resource_group/keyspace/settings//keyspace_test_ remove
 resource_group/keyspace/settings//keyspace_test_ save
+resource_group/keyspace/settings//rg_multi_ remove
+resource_group/keyspace/settings//rg_multi_ save
 resource_group/keyspace/settings//test_group remove
 resource_group/keyspace/settings//test_group save
 resource_group/keyspace/states/ get
