@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 type etcdKeySuite struct {
@@ -122,7 +123,7 @@ func (s *etcdKeySuite) TestEtcdKey() {
 
 	if s.mode == "ms" {
 		testutil.Eventually(re, func() bool {
-			keys, err := getEtcdKey(endpoints[0], "/ms")
+			keys, err := getEtcdKey(endpoints[0], constant.MicroserviceRootPath)
 			if err != nil {
 				return false
 			}

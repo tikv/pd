@@ -39,10 +39,11 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -50,7 +51,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs/utils"
 )
 
 func TestMain(m *testing.M) {
@@ -193,7 +194,7 @@ func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
 	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
+	cli := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
 	defer cli.Close()
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
@@ -260,7 +261,7 @@ func (suite *PDServiceForward) ShutDown() {
 
 	etcdClient := suite.pdLeader.GetEtcdClient()
 	testutil.Eventually(re, func() bool {
-		endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
+		endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
 		re.NoError(err)
 		return len(endpoints) == 0
 	})
@@ -297,15 +298,15 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	tc.WaitForDefaultPrimaryServing(re)
 
 	// can use the tso-related interface with old primary
-	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist)
 	suite.checkAvailableTSO(re)
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
-	time.Sleep(time.Duration(constant.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
+	time.Sleep(time.Duration(mcs.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -319,8 +320,8 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 		}
 	}
 	tc.WaitForDefaultPrimaryServing(re)
-	time.Sleep(time.Duration(constant.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	time.Sleep(time.Duration(mcs.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -434,8 +435,8 @@ func (suite *PDServiceForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 	re.NotEmpty(follower)
 
 	// write follower's address to cache to simulate cache is not updated.
-	suite.pdLeader.GetServer().SetServicePrimaryAddr(constant.TSOServiceName, follower)
-	errorAddr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	suite.pdLeader.GetServer().SetServicePrimaryAddr(mcs.TSOServiceName, follower)
+	errorAddr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(ok)
 	re.Equal(follower, errorAddr)
 
@@ -444,7 +445,7 @@ func (suite *PDServiceForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 
 	// test tso request will success after cache is updated
 	suite.checkAvailableTSO(re)
-	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist2)
 	re.NotEqual(errorAddr, newPrimary)
 	re.Equal(oldPrimary, newPrimary)
@@ -477,7 +478,7 @@ func (suite *PDServiceForward) checkUnavailableTSO(re *require.Assertions) {
 }
 
 func (suite *PDServiceForward) checkAvailableTSO(re *require.Assertions) {
-	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
+	utils.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.NoError(err)
@@ -618,10 +619,10 @@ func (suite *CommonTestSuite) TearDownSuite() {
 	re := suite.Require()
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
+	endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
 	re.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, constant.TSOServiceName)
+		endpoints, err = discovery.Discover(etcdClient, mcs.TSOServiceName)
 		re.NoError(err)
 		re.Empty(endpoints)
 	}

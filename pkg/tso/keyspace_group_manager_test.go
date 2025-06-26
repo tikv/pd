@@ -34,8 +34,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -84,9 +85,9 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		BackendEndpoints:          suite.backendEndpoints,
 		ListenAddr:                addr,
 		AdvertiseListenAddr:       addr,
-		LeaderLease:               constant.DefaultLeaderLease,
+		LeaderLease:               mcs.DefaultLeaderLease,
 		TSOUpdatePhysicalInterval: 50 * time.Millisecond,
-		TSOSaveInterval:           time.Duration(constant.DefaultLeaderLease) * time.Second,
+		TSOSaveInterval:           time.Duration(mcs.DefaultLeaderLease) * time.Second,
 		MaxResetTSGap:             time.Hour * 24,
 		TLSConfig:                 nil,
 	}
@@ -165,9 +166,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	allocator, err := kgm.GetAllocator(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, allocator.keyspaceGroupID)
-	re.Equal(constant.DefaultLeaderLease, allocator.cfg.GetLeaderLease())
+	re.Equal(mcs.DefaultLeaderLease, allocator.cfg.GetLeaderLease())
 	re.Equal(time.Hour*24, allocator.cfg.GetMaxResetTSGap())
-	re.Equal(time.Duration(constant.DefaultLeaderLease)*time.Second, allocator.cfg.GetTSOSaveInterval())
+	re.Equal(time.Duration(mcs.DefaultLeaderLease)*time.Second, allocator.cfg.GetTSOSaveInterval())
 	re.Equal(time.Duration(50)*time.Millisecond, allocator.cfg.GetTSOUpdatePhysicalInterval())
 }
 
@@ -1018,7 +1019,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	}()
 
 	var err error
-	defaultPriority := constant.DefaultKeyspaceGroupReplicaPriority
+	defaultPriority := mcs.DefaultKeyspaceGroupReplicaPriority
 	cfg1 := suite.createConfig()
 	cfg2 := suite.createConfig()
 	svcAddr1 := cfg1.GetAdvertiseListenAddr()
@@ -1033,7 +1034,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	}()
 
 	// Create three keyspace groups on two TSO servers with default replica priority.
-	ids := []uint32{0, constant.MaxKeyspaceGroupCountInUse / 2, constant.MaxKeyspaceGroupCountInUse - 1}
+	ids := []uint32{0, mcs.MaxKeyspaceGroupCountInUse / 2, mcs.MaxKeyspaceGroupCountInUse - 1}
 	for _, id := range ids {
 		re.NoError(addKeyspaceGroupAssignment(
 			suite.ctx, suite.etcdClient, id,
@@ -1126,14 +1127,14 @@ func (suite *keyspaceGroupManagerTestSuite) registerTSOServer(
 	serviceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr(), Name: cfg.Name}
 	serializedEntry, err := serviceID.Serialize()
 	re.NoError(err)
-	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
+	serviceKey := keypath.RegistryPath(mcs.TSOServiceName, svcAddr)
 	_, err = suite.etcdClient.Put(suite.ctx, serviceKey, serializedEntry)
 	return err
 }
 
 // Deregister TSO server.
 func (suite *keyspaceGroupManagerTestSuite) deregisterTSOServer(svcAddr string) error {
-	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
+	serviceKey := keypath.RegistryPath(mcs.TSOServiceName, svcAddr)
 	if _, err := suite.etcdClient.Delete(suite.ctx, serviceKey); err != nil {
 		return err
 	}
