@@ -937,18 +937,26 @@ func TestRemovingProgress(t *testing.T) {
 		if p.LeftSeconds < 21.25 {
 			return false
 		}
+
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusOK)
+		re.NoError(json.Unmarshal(output, &p))
+		re.Equal("removing", p.Action)
+		t.Logf("progress for store 2: %v", p)
+		// store 2: (30-10)/(30+40) ~= 0.285
+		// average progress ~= (0.36+0.28)/2 = 0.32
+		if p.Progress > 0.3 {
+			return false
+		}
+		// store 2: 20/10s = 2
+		if p.CurrentSpeed > 2.0 {
+			return false
+		}
+		// store 2: (10+40)/2 = 25s
+		if p.LeftSeconds < 25.0 {
+			return false
+		}
 		return true
 	})
-
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusOK)
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("removing", p.Action)
-	// store 2: (30-10)/(30+40) ~= 0.285
-	re.Equal("0.29", fmt.Sprintf("%.2f", p.Progress))
-	// store 2: 20/10s = 2
-	re.LessOrEqual(p.CurrentSpeed, 2.0)
-	// store 2: (10+40)/2 = 25s
-	re.GreaterOrEqual(p.LeftSeconds, 25.0)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
@@ -1120,6 +1128,7 @@ func TestPreparingProgress(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 		re.NoError(json.Unmarshal(output, &p))
+		t.Logf("progress: %v", p)
 		if p.Action != "preparing" {
 			return false
 		}
@@ -1147,6 +1156,7 @@ func TestPreparingProgress(t *testing.T) {
 
 		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
 		re.NoError(json.Unmarshal(output, &p))
+		t.Logf("progress for store 4: %v", p)
 		if p.Action != "preparing" {
 			return false
 		}
