@@ -30,7 +30,8 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -168,7 +169,7 @@ func (s *GrpcServer) handleTSOForwarding(
 	tsDeadlineCh chan<- *tsoutil.TSDeadline,
 ) (tsoStreamErr, sendErr error) {
 	// Get the latest TSO primary address.
-	targetHost, ok := s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+	targetHost, ok := s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 	if !ok || len(targetHost) == 0 {
 		return errors.WithStack(errs.ErrNotFoundTSOAddr), nil
 	}
@@ -434,7 +435,7 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if !s.IsServiceIndependent(constant.TSOServiceName) {
+	if !s.IsServiceIndependent(mcs.TSOServiceName) {
 		return s.tsoAllocator.GenerateTSO(ctx, 1)
 	}
 	request := &tsopb.TsoRequest{
@@ -471,7 +472,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		if i > 0 {
 			time.Sleep(retryIntervalRequestTSOServer)
 		}
-		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 		if !ok || forwardedHost == "" {
 			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}

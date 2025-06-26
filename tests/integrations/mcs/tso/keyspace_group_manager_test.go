@@ -36,7 +36,8 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -47,7 +48,7 @@ import (
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs/utils"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
 
@@ -162,10 +163,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	// Create a client for each keyspace and make sure they can successfully discover the service
 	// provided by the default keyspace group.
 	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
-	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
+	clients := utils.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Len(keyspaceIDs, len(clients))
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	utils.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 	for _, client := range clients {
@@ -222,7 +223,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// for loading/saving timestamp from/to etcd and the right primary path
 						// for primary election.
 						primaryPath := keypath.LeaderPath(&keypath.MsParam{
-							ServiceName: constant.TSOServiceName,
+							ServiceName: mcs.TSOServiceName,
 							GroupID:     param.keyspaceGroupID,
 						})
 						re.Equal(primaryPath, allocator.GetMember().GetLeaderPath())
@@ -245,10 +246,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 		keyspaceIDs = append(keyspaceIDs, param.keyspaceIDs...)
 	}
 
-	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
+	clients := utils.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Len(keyspaceIDs, len(clients))
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	utils.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 	for _, client := range clients {
@@ -527,7 +528,7 @@ func waitFinishAllocNodes(re *require.Assertions, server *tests.TestServer, grou
 	testutil.Eventually(re, func() bool {
 		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, groupID)
 		re.Equal(groupID, kg.ID)
-		return len(kg.Members) == constant.DefaultKeyspaceGroupReplicaCount
+		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 }
 

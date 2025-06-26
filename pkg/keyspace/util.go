@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"

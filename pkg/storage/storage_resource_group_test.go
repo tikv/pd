@@ -22,7 +22,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 func TestResourceGroupStorage(t *testing.T) {

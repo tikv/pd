@@ -39,10 +39,11 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
@@ -155,7 +156,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	if s.serviceID, s.serviceRegister, err = utils.Register(s, constant.TSOServiceName); err != nil {
+	if s.serviceID, s.serviceRegister, err = utils.Register(s, mcs.TSOServiceName); err != nil {
 		return err
 	}
 

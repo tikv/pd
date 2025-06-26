@@ -26,7 +26,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
