@@ -24,8 +24,9 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -206,7 +207,7 @@ func (tc *TestTSOCluster) GetKeyspaceGroupMember() (members []endpoint.KeyspaceG
 	for _, server := range tc.servers {
 		members = append(members, endpoint.KeyspaceGroupMember{
 			Address:  server.GetAddr(),
-			Priority: constant.DefaultKeyspaceGroupReplicaPriority,
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
 		})
 	}
 	return
