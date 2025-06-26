@@ -82,11 +82,11 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 		var e error
 		m.BinaryVersion, e = svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+			log.Warn("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		m.DeployPath, e = svr.GetMember().GetMemberDeployPath(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+			log.Warn("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
 		if svr.GetMember().GetEtcdLeader() == 0 {
 			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
@@ -94,13 +94,13 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 		}
 		leaderPriority, e := svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+			log.Warn("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)
 		m.GitHash, e = svr.GetMember().GetMemberGitHash(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+			log.Warn("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
 		for dcLocation, serverIDs := range dclocationDistribution {

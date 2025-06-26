@@ -620,7 +620,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
 			if !errors.ErrorEqual(err, context.Canceled) {
-				log.Error("[resource group controller] token bucket rpc error", zap.Error(err))
+				log.Warn("[resource group controller] token bucket rpc error", zap.Error(err))
 			}
 			resp = nil
 			failedTokenRequestDuration.Observe(latency.Seconds())
