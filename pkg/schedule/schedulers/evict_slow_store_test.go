@@ -115,6 +115,47 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
+func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	storeInfo := suite.tc.GetStore(1)
+	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().NetworkSlowScore = 100
+	})
+	suite.tc.PutStore(newStoreInfo)
+
+	// NetworkSlowStore works
+	suite.es.Schedule(suite.tc, false)
+	_, ok := suite.es.(*evictSlowStoreScheduler).conf.NetworkSlowStores[1]
+	re.True(ok)
+	re.False(suite.tc.BasicCluster.GetStore(1).AllowLeaderTransferIn())
+
+	es2, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+
+	// check the value from storage.
+	var persistValue evictSlowStoreSchedulerConfig
+	re.NoError(es2.conf.load(&persistValue))
+	_, ok = persistValue.NetworkSlowStores[1]
+	re.True(ok)
+
+	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().NetworkSlowScore = 1
+	})
+	suite.tc.PutStore(newStoreInfo)
+	suite.es.Schedule(suite.tc, false)
+	_, ok = suite.es.(*evictSlowStoreScheduler).conf.NetworkSlowStores[1]
+	re.False(ok)
+	re.True(suite.tc.BasicCluster.GetStore(1).AllowLeaderTransferIn())
+
+	// check the value from storage.
+	persistValue = evictSlowStoreSchedulerConfig{}
+	re.NoError(es2.conf.load(&persistValue))
+	_, ok = persistValue.NetworkSlowStores[1]
+	re.False(ok)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	re := suite.Require()
 	es2, ok := suite.es.(*evictSlowStoreScheduler)

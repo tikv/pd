@@ -207,6 +207,13 @@ func (s *StoreInfo) GetSlowScore() uint64 {
 	return s.rawStats.GetSlowScore()
 }
 
+// GetNetworkSlowScore returns the network slow score of the store.
+func (s *StoreInfo) GetNetworkSlowScore() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetNetworkSlowScore()
+}
+
 // WitnessScore returns the store's witness score.
 func (s *StoreInfo) WitnessScore(delta int64) float64 {
 	return float64(int64(s.GetWitnessCount()) + delta)
