@@ -4073,3 +4073,50 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 		c.HandleRegionHeartbeat(region)
 	}
 }
+
+// generateTestStores creates n stores with different labels for testing
+func generateTestStores(n int) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, n)
+	for i := range n {
+		store := core.NewStoreInfo(&metapb.Store{
+			Id: uint64(i),
+			Labels: []*metapb.StoreLabel{
+				{Key: "zone", Value: "zone" + string(rune('a'+i%3))},
+				{Key: "rack", Value: "rack" + string(rune('a'+i%5))},
+				{Key: "host", Value: "host" + string(rune('a'+i%7))},
+			},
+		})
+		stores = append(stores, store)
+	}
+	return stores
+}
+
+func BenchmarkBuildTopology(b *testing.B) {
+	testCases := []struct {
+		name       string
+		storeCount int
+	}{
+		{"Small-10-Stores", 10},
+		{"Medium-100-Stores", 100},
+		{"Large-1000-Stores", 1000},
+	}
+
+	locationLabels := []string{"zone", "rack", "host"}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			stores := generateTestStores(tc.storeCount)
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for range b.N {
+				buildTopology(
+					stores[0],
+					stores,
+					locationLabels,
+					3,
+				)
+			}
+		})
+	}
+}
