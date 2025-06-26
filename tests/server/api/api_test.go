@@ -913,6 +913,7 @@ func TestRemovingProgress(t *testing.T) {
 		output, err := io.ReadAll(resp.Body)
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &p))
+		t.Logf("progress: %v", p)
 		if p.Action != "removing" {
 			return false
 		}
