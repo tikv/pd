@@ -3041,8 +3041,16 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 		// Remove peers to make sst recovery physically delete files in TiKV.
 		err := s.GetHandler().AddRemovePeerOperator(regionID, stats.GetStoreId())
 		if err != nil {
-			log.Error("store damaged but can't add remove peer operator",
-				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()), zap.String("error", err.Error()))
+			if strings.Contains(err.Error(), "region has no peer in store") {
+				log.Warn("store damaged but can't add remove peer operator",
+					zap.Uint64("region-id", regionID),
+					zap.Uint64("store-id", stats.GetStoreId()),
+					zap.String("error", err.Error()))
+			} else {
+				log.Error("store damaged but can't add remove peer operator",
+					zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()),
+					zap.String("error", err.Error()))
+			}
 		} else {
 			log.Info("added remove peer operator due to damaged region",
 				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()))
