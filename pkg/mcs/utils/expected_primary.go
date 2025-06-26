@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -47,13 +48,20 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) s
 	return string(primary)
 }
 
+// leaderData is used to store the leader data.
+// The raw value is used to write to etcd, while the output string is used for logging and debugging purposes.
+type leaderData struct {
+	raw    string
+	output string
+}
+
 // markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
+func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, leader *leaderData, leaseID clientv3.LeaseID) (int64, error) {
 	path := keypath.ExpectedPrimaryPath(msParam)
-	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("leader-raw", leaderRaw))
+	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("leader", leader.output))
 	// write a flag to indicate the expected primary.
 	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(path, leaderRaw, clientv3.WithLease(leaseID))).
+		Then(clientv3.OpPut(path, leader.raw, clientv3.WithLease(leaseID))).
 		Commit()
 	if err != nil || !resp.Succeeded {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
@@ -74,16 +82,19 @@ func KeepExpectedPrimaryAlive(
 	exitPrimary chan<- struct{},
 	leaseTimeout int64,
 	msParam *keypath.MsParam,
-	memberValue string) (*election.Lease, error) {
+	member member.ElectionMember) (*election.Lease, error) {
 	log.Info("primary start to watch the expected primary",
-		zap.String("service", msParam.ServiceName), zap.String("primary-value", memberValue))
+		zap.String("service", msParam.ServiceName), zap.String("primary-value", member.MemberString()))
 	service := fmt.Sprintf("%s expected primary", msParam.ServiceName)
 	lease := election.NewLease(cli, service)
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
 	}
-
-	revision, err := markExpectedPrimaryFlag(cli, msParam, memberValue, lease.ID.Load().(clientv3.LeaseID))
+	leader := &leaderData{
+		raw:    member.MemberValue(),
+		output: member.MemberString(),
+	}
+	revision, err := markExpectedPrimaryFlag(cli, msParam, leader, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
 		return nil, err
@@ -162,10 +173,15 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("failed to revoke current primary's lease: %v", err)
 	}
 
-	_, err = markExpectedPrimaryFlag(client, &keypath.MsParam{
+	msParam := &keypath.MsParam{
 		ServiceName: serviceName,
 		GroupID:     keyspaceGroupID,
-	}, primaryIDs[nextPrimaryID], grantResp.ID)
+	}
+	leader := &leaderData{
+		raw:    primaryIDs[nextPrimaryID],
+		output: primaryIDs[nextPrimaryID],
+	}
+	_, err = markExpectedPrimaryFlag(client, msParam, leader, grantResp.ID)
 	if err != nil {
 		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}

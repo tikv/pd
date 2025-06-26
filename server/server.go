@@ -59,10 +59,11 @@ import (
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
@@ -1397,7 +1398,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
 	if s.isKeyspaceGroupEnabled && !s.IsClosed() {
-		if name == constant.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+		if name == mcs.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			return true
 		}
 		return s.cluster.IsServiceIndependent(name)
@@ -1748,7 +1749,7 @@ func (s *Server) campaignLeader() {
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info("PD leader is ready to serve", zap.String("leader-name", s.Name()))
 
-	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
+	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -1991,9 +1992,9 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 }
 
 func (s *Server) initTSOPrimaryWatcher() {
-	serviceName := constant.TSOServiceName
+	serviceName := mcs.TSOServiceName
 	tsoServicePrimaryKey := keypath.LeaderPath(&keypath.MsParam{
-		ServiceName: constant.TSOServiceName,
+		ServiceName: mcs.TSOServiceName,
 		GroupID:     constant.DefaultKeyspaceGroupID,
 	})
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
@@ -2001,9 +2002,9 @@ func (s *Server) initTSOPrimaryWatcher() {
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
-	serviceName := constant.SchedulingServiceName
+	serviceName := mcs.SchedulingServiceName
 	primaryKey := keypath.LeaderPath(&keypath.MsParam{
-		ServiceName: constant.SchedulingServiceName,
+		ServiceName: mcs.SchedulingServiceName,
 	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()

@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -59,7 +60,7 @@ type tsoObject struct {
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
 	keyspaceGroupID uint32
-	member          ElectionMember
+	member          member.ElectionMember
 	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration

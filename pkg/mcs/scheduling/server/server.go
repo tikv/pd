@@ -264,7 +264,7 @@ func (s *Server) primaryElectionLoop() {
 				zap.String("server-name", s.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("member-id", s.participant.ID()),
-				zap.String("cur-member-value", s.participant.MemberValue()))
+				zap.String("cur-member-value", s.participant.MemberString()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -317,7 +317,7 @@ func (s *Server) campaignLeader() {
 	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
 		s.cfg.LeaderLease, &keypath.MsParam{
 			ServiceName: constant.SchedulingServiceName,
-		}, s.participant.MemberValue())
+		}, s.participant)
 	if err != nil {
 		log.Error("prepare scheduling primary watch error", errs.ZapError(err))
 		return

@@ -29,7 +29,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
@@ -792,8 +792,8 @@ func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.Keys
 // It will not load the NullKeyspace meta data.
 func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
 	// Load Start should fall within acceptable ID range.
-	if startID > spaceIDMax {
-		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, spaceIDMax)
+	if startID > constant.MaxValidKeyspaceID {
+		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, constant.MaxValidKeyspaceID)
 	}
 	var (
 		keyspaces []*keyspacepb.KeyspaceMeta
