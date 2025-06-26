@@ -280,7 +280,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 
 func (s *state) getNextPrimaryToReset(
 	groupID int, localAddress string,
-) (member ElectionMember, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
+) (member member.ElectionMember, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -998,7 +998,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 // GetElectionMember returns the election member of the keyspace group serving the given keyspace.
 func (kgm *KeyspaceGroupManager) GetElectionMember(
 	keyspaceID, keyspaceGroupID uint32,
-) (ElectionMember, error) {
+) (member.ElectionMember, error) {
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
