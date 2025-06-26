@@ -1772,20 +1772,23 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 	}
 
 	// Verify state change using the keyspace-specific clients
-	time.Sleep(20 * time.Millisecond)
 	for i := range numKeyspaces {
 		client := clients[i]
 		groupName := groups[i].Name
 		expectedConsumption := consumptions[i]
-		rg, err := client.GetResourceGroup(ctx, groupName, pd.WithRUStats)
-		re.NoError(err)
-		re.NotNil(rg)
-		re.Equal(expectedConsumption.RRU, rg.RUStats.RRU)
-		re.Equal(expectedConsumption.WRU, rg.RUStats.WRU)
+		testutil.Eventually(re, func() bool {
+			rg, err := client.GetResourceGroup(ctx, groupName, pd.WithRUStats)
+			re.NoError(err)
+			re.NotNil(rg)
+			return expectedConsumption.RRU == rg.RUStats.RRU &&
+				expectedConsumption.WRU == rg.RUStats.WRU
+		})
 	}
 
 	// Clean up
 	for i := range numKeyspaces {
+		_, err = clients[i].DeleteResourceGroup(ctx, groups[i].Name)
+		re.NoError(err)
 		clients[i].Close()
 	}
 }
