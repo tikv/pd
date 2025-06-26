@@ -127,7 +127,7 @@ type TimeOptional struct {
 
 func (t *TimeOptional) int64() int64 {
 	if t.Time != nil {
-		return t.UnixNano()
+		return t.Unix()
 	}
 	return 0
 }
@@ -144,7 +144,7 @@ func (t *TimeOptional) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	if expireAt < math.MaxInt64 && expireAt > 0 {
-		val := time.Unix(0, expireAt)
+		val := time.Unix(expireAt, 0)
 		t.Time = &val
 	} else {
 		t.Time = nil
@@ -157,9 +157,9 @@ func (t *TimeOptional) UnmarshalJSON(b []byte) error {
 // A more important reason is to distinguish from GC barrier by the type system,
 // avoiding potential misuse between them in code.
 type GlobalGCBarrier struct {
-	BarrierID string       `json:"barrier_id"`
-	BarrierTS uint64       `json:"barrier_ts"`
-	ExpiredAt TimeOptional `json:"expired_at"`
+	BarrierID      string       `json:"barrier_id"`
+	BarrierTS      uint64       `json:"barrier_ts"`
+	ExpirationTime TimeOptional `json:"expiration_time"`
 }
 
 // NewGlobalGCBarrier creates a new GlobalGCBarrier. The given expirationTime will be rounded up to the next second if it's
@@ -172,22 +172,22 @@ func NewGlobalGCBarrier(barrierID string, barrierTS uint64, expirationTime *time
 		*expirationTime = rounded
 	}
 	return &GlobalGCBarrier{
-		BarrierID: barrierID,
-		BarrierTS: barrierTS,
-		ExpiredAt: TimeOptional{expirationTime},
+		BarrierID:      barrierID,
+		BarrierTS:      barrierTS,
+		ExpirationTime: TimeOptional{expirationTime},
 	}
 }
 
 // IsExpired checks whether the GlobalGCBarrier is expired at the given time.
 func (b *GlobalGCBarrier) IsExpired(now time.Time) bool {
-	return b.ExpiredAt.Time != nil && now.After(*b.ExpiredAt.Time)
+	return b.ExpirationTime.Time != nil && now.After(*b.ExpirationTime.Time)
 }
 
 // String implements fmt.Stringer.
 func (b *GlobalGCBarrier) String() string {
 	expirationTime := "<nil>"
-	if b.ExpiredAt.Time != nil {
-		expirationTime = b.ExpiredAt.String()
+	if b.ExpirationTime.Time != nil {
+		expirationTime = b.ExpirationTime.String()
 	}
 	return fmt.Sprintf("GlobalGCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
 		b.BarrierID, b.BarrierTS, expirationTime)
@@ -538,7 +538,7 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*Se
 		ssps = append(ssps, &ServiceSafePoint{
 			ServiceID:  barrier.BarrierID,
 			SafePoint:  barrier.BarrierTS,
-			ExpiredAt:  barrier.ExpiredAt.int64(),
+			ExpiredAt:  barrier.ExpirationTime.int64(),
 			KeyspaceID: constant.NullKeyspaceID,
 		})
 	}

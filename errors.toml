@@ -448,7 +448,7 @@ trying to update GC safe point to a too large value that exceeds the txn safe po
 
 ["PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"]
 error = '''
-trying to set a global GC barrier on ts %d which is already behind the txn safe point %d
+trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace {name: "%s", keyspace id: %d}
 '''
 
 ["PD:gc:ErrReservedGCBarrierID"]
