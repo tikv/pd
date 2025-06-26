@@ -287,7 +287,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
-      - tools/pd-ctl/pdctl/command/mok_helper.go # It is a copy from mok.
+      - tools/pd-ctl/helper/.* # It is a copy from tidb and mok.
 formatters:
   enable:
     - gci

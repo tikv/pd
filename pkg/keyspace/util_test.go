@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 )
 
@@ -34,9 +34,9 @@ func TestValidateID(t *testing.T) {
 	}{
 		{constant.DefaultKeyspaceID, true}, // Reserved id should result in error.
 		{100, false},
-		{spaceIDMax - 1, false},
-		{spaceIDMax, false},
-		{spaceIDMax + 1, true},
+		{constant.MaxValidKeyspaceID - 1, false},
+		{constant.MaxValidKeyspaceID, false},
+		{constant.MaxValidKeyspaceID + 1, true},
 		{math.MaxUint32, true},
 	}
 	for _, testCase := range testCases {
@@ -51,6 +51,7 @@ func TestValidateName(t *testing.T) {
 		hasErr bool
 	}{
 		{constant.DefaultKeyspaceName, true}, // Reserved name should result in error.
+		{constant.SystemKeyspaceName, true},  // Reserved name should result in error.
 		{"keyspaceName1", false},
 		{"keyspace_name_1", false},
 		{"10", false},

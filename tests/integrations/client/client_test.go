@@ -63,7 +63,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs/utils"
 )
 
 const (
@@ -375,7 +375,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	time.Sleep(100 * time.Millisecond)
-	cli := mcs.SetupClientWithKeyspaceID(ctx, re, constants.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
+	cli := utils.SetupClientWithKeyspaceID(ctx, re, constants.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
 	re.NotNil(cli)
 	defer cli.Close()
 	// TSO service does not support the follower proxy, so enabling it should fail.

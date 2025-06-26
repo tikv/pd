@@ -39,10 +39,11 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
@@ -56,7 +57,7 @@ import (
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ tso.ElectionMember = (*member.Participant)(nil)
+var _ member.ElectionMember = (*member.Participant)(nil)
 
 const serviceName = "TSO Service"
 
@@ -155,7 +156,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	if s.serviceID, s.serviceRegister, err = utils.Register(s, constant.TSOServiceName); err != nil {
+	if s.serviceID, s.serviceRegister, err = utils.Register(s, mcs.TSOServiceName); err != nil {
 		return err
 	}
 
@@ -230,7 +231,7 @@ func (s *Server) GetLeaderListenUrls() []string {
 }
 
 // GetMember returns the election member of the given keyspace and keyspace group.
-func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMember, error) {
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.ElectionMember, error) {
 	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
