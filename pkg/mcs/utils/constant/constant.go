@@ -14,7 +14,9 @@
 
 package constant
 
-import "time"
+import (
+	"time"
+)
 
 const (
 	// RetryInterval is the interval to retry.
@@ -43,10 +45,14 @@ const (
 	DefaultKeyspaceName = "DEFAULT"
 
 	// DefaultKeyspaceID is the default key space id.
-	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
 	// 0 is reserved for default keyspace with the name "DEFAULT". It's initialized when PD bootstraps
 	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
+	// MaxValidKeyspaceID is the max valid keyspace id.
+	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
+	// In kv encode, the first byte is represented by r/x, which means txn kv/raw kv, so there are 24 bits left.
+	MaxValidKeyspaceID = uint32(0xFFFFFF)
+
 	// ValidKeyspaceIDMask is the mask of valid bits for keyspace ID. If any bit outside the mask is set, the keyspace
 	// ID is considered invalid and regarded as the same as NullKeyspaceID.
 	ValidKeyspaceIDMask = uint32(0xFFFFFF)
@@ -89,4 +95,12 @@ const (
 	// Among multiple replicas of a keyspace group, the higher the priority, the more likely
 	// the replica is to be elected as primary.
 	DefaultKeyspaceGroupReplicaPriority = 0
+)
+
+// only for next gen
+const (
+	// SystemKeyspaceID is the system keyspace ID.
+	SystemKeyspaceID = MaxValidKeyspaceID - 1
+	// SystemKeyspaceName is the system keyspace name.
+	SystemKeyspaceName = "SYSTEM"
 )

@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/tools/pd-ctl/helper/mok"
 )
 
 func TestCheckKey(t *testing.T) {
@@ -45,7 +47,7 @@ func TestCheckKey(t *testing.T) {
 		{[]byte("7480000000000001FFD75F728000000000FF0000140130FF0000FD"), true, 471}, // end with 0x0130FF
 	}
 	for _, tc := range testCases {
-		rootNode := N("key", tc.key)
+		rootNode := mok.N("key", tc.key)
 		rootNode.Expand()
 		re.Equal(tc.isValid, !hasSpecialPatternRecursive(rootNode), string(tc.key))
 		tableID, found, err := extractTableIDRecursive(rootNode)
@@ -58,7 +60,7 @@ func TestCheckKey(t *testing.T) {
 func TestExpandHexStackOverflow(t *testing.T) {
 	// This is a valid hex string
 	hexStr := "616263646566" // "abcdef" in hex
-	n := N("key", []byte(hexStr))
+	n := mok.N("key", []byte(hexStr))
 	// Due to infinite recursion, this would theoretically cause a stack overflow
 	// When running the actual test, use go test -timeout to prevent hanging
 	defer func() {
@@ -81,9 +83,9 @@ func TestExpandStackOverflowFromLogKey(t *testing.T) {
 	}
 
 	// Create node
-	n := N("key", oriBytes)
+	n := mok.N("key", oriBytes)
 
-	var expandedNode *Node
+	var expandedNode *mok.Node
 
 	// Limit execution time to avoid infinite loop
 	done := make(chan bool)
@@ -103,9 +105,8 @@ func TestExpandStackOverflowFromLogKey(t *testing.T) {
 		// Print node structure
 		t.Log("Node structure:")
 		// Use direct method to capture output
-		keyFormat = "proto" // Ensure proto format output
 		t.Logf("Original key: %s", expandedNode.String())
-		t.Logf("First level variants count: %d", len(expandedNode.variants))
+		t.Logf("First level variants count: %d", len(expandedNode.GetVariants()))
 	case <-time.After(5 * time.Second):
 		t.Fatal("Test timed out after 5 seconds - possible infinite recursion")
 	}

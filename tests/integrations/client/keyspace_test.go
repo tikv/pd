@@ -23,9 +23,11 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 )
 
@@ -168,4 +170,48 @@ func (suite *clientStatelessTestSuite) TestUpdateKeyspaceState() {
 			index++
 		}
 	}
+}
+
+func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
+	re := s.Require()
+
+	meta, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks1",
+		Config:     nil,
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	// By the time this test is writte, only for next-gen deployment we enable keyspace level GC by default.
+	// Update this test when this
+	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: "ks2",
+		Config: map[string]string{
+			keyspace.GCManagementType: keyspace.KeyspaceLevelGC,
+		},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.True(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: "ks3",
+		Config: map[string]string{
+			keyspace.GCManagementType: keyspace.UnifiedGC,
+		},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: "ks4",
+		Config: map[string]string{
+			keyspace.GCManagementType: "",
+		},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
 }

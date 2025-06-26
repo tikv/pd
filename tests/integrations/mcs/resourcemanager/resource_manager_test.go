@@ -368,11 +368,11 @@ type tokenConsumptionPerSecond struct {
 }
 
 func (tokenConsumptionPerSecond) makeReadRequest() *controller.TestRequestInfo {
-	return controller.NewTestRequestInfo(false, 0, 0)
+	return controller.NewTestRequestInfo(false, 0, 0, controller.AccessUnknown)
 }
 
 func (t tokenConsumptionPerSecond) makeWriteRequest() *controller.TestRequestInfo {
-	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1), 0)
+	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1), 0, controller.AccessUnknown)
 }
 
 func (t tokenConsumptionPerSecond) makeReadResponse() *controller.TestResponseInfo {
@@ -682,7 +682,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 
 	resourceGroupName := groupNames[0]
 	// init
-	req := controller.NewTestRequestInfo(false, 0, 2 /* store2 */)
+	req := controller.NewTestRequestInfo(false, 0, 2 /* store2 */, controller.AccessLocalZone)
 	resp := controller.NewTestResponseInfo(0, time.Duration(30), true)
 	_, penalty, _, _, err := c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
@@ -691,7 +691,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
 
-	req = controller.NewTestRequestInfo(true, 60, 1 /* store1 */)
+	req = controller.NewTestRequestInfo(true, 60, 1 /* store1 */, controller.AccessLocalZone)
 	resp = controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
@@ -701,7 +701,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	re.NoError(err)
 
 	// failed request, shouldn't be counted in penalty
-	req = controller.NewTestRequestInfo(true, 20, 1 /* store1 */)
+	req = controller.NewTestRequestInfo(true, 20, 1 /* store1 */, controller.AccessLocalZone)
 	resp = controller.NewTestResponseInfo(0, time.Duration(0), false)
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
@@ -711,7 +711,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	re.NoError(err)
 
 	// from same store, should be zero
-	req1 := controller.NewTestRequestInfo(false, 0, 1 /* store1 */)
+	req1 := controller.NewTestRequestInfo(false, 0, 1 /* store1 */, controller.AccessLocalZone)
 	resp1 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req1)
 	re.NoError(err)
@@ -720,7 +720,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	re.NoError(err)
 
 	// from different store, should be non-zero
-	req2 := controller.NewTestRequestInfo(true, 50, 2 /* store2 */)
+	req2 := controller.NewTestRequestInfo(true, 50, 2 /* store2 */, controller.AccessLocalZone)
 	resp2 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
 	re.NoError(err)
@@ -730,7 +730,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	re.NoError(err)
 
 	// from new store, should be zero
-	req3 := controller.NewTestRequestInfo(true, 0, 3 /* store3 */)
+	req3 := controller.NewTestRequestInfo(true, 0, 3 /* store3 */, controller.AccessLocalZone)
 	resp3 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req3)
 	re.NoError(err)
@@ -740,7 +740,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 
 	// from different group, should be zero
 	resourceGroupName = groupNames[1]
-	req4 := controller.NewTestRequestInfo(true, 50, 1 /* store2 */)
+	req4 := controller.NewTestRequestInfo(true, 50, 1 /* store2 */, controller.AccessLocalZone)
 	resp4 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req4)
 	re.NoError(err)
@@ -973,7 +973,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", g.Name))
+				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name))
 			}
 
 			// to test the deletion of persistence
@@ -1620,7 +1620,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 
 	// Get and List resource group without keyspace id
 	rg, err := cli.GetResourceGroup(suite.ctx, group.Name)
-	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", group.Name))
+	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name))
 	re.Nil(rg)
 	rgs, err := cli.ListResourceGroups(suite.ctx)
 	re.NoError(err)
@@ -1683,9 +1683,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.Equal(rg.RUStats, testConsumption)
 
 	// Delete resource group without keyspace id
-	resp, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
-	re.NoError(err)
-	re.Contains(resp, "Success!")
+	_, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
+	re.Error(err)
+	re.EqualError(err, "rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the keyspace_test resource group does not exist")
 	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
 	re.NotNil(rg)
@@ -1695,7 +1695,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	rg, err = clientKeyspace.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", group.Name))
+	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", group.Name, group.Name))
 	re.Nil(rg)
 }
 

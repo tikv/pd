@@ -516,6 +516,11 @@ error = '''
 write HTTP body failed
 '''
 
+["PD:idalloc:ErrIDExhausted"]
+error = '''
+id exhausted
+'''
+
 ["PD:ioutil:ErrIORead"]
 error = '''
 IO read error
@@ -614,6 +619,11 @@ cannot modify default keyspace's state
 ["PD:keyspace:ErrModifyDefaultKeyspaceGroup"]
 error = '''
 default keyspace group cannot be modified
+'''
+
+["PD:keyspace:ErrModifySystemKeyspace"]
+error = '''
+cannot modify system keyspace's state
 '''
 
 ["PD:keyspace:ErrNoAvailableNode"]
