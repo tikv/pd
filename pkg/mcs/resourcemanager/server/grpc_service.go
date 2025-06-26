@@ -214,6 +214,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
+				KeyspaceId:        &rmpb.KeyspaceIDValue{Value: keyspaceID},
 			}
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:
