@@ -57,7 +57,7 @@ import (
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ tso.ElectionMember = (*member.Participant)(nil)
+var _ member.ElectionMember = (*member.Participant)(nil)
 
 const serviceName = "TSO Service"
 
@@ -231,7 +231,7 @@ func (s *Server) GetLeaderListenUrls() []string {
 }
 
 // GetMember returns the election member of the given keyspace and keyspace group.
-func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMember, error) {
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.ElectionMember, error) {
 	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err

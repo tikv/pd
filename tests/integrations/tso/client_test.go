@@ -652,6 +652,12 @@ func checkTSO(
 
 func TestRetryGetTSNotLeader(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockMaxTSORetryTimes", "return(2000)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/mockMaxTSORetryTimes"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -673,27 +679,23 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	ctx1, cancel1 := context.WithCancel(ctx)
+	var lastTS uint64
 	go func(client pd.Client) {
 		defer wg.Done()
 		for {
-			var ts, lastTS uint64
-			for {
-				select {
-				case <-ctx1.Done():
-					// Make sure the lastTS is not empty
-					re.NotEmpty(lastTS)
-					return
-				default:
-				}
-				physical, logical, err := client.GetTS(ctx1)
-				if err != nil {
-					re.ErrorContains(err, context.Canceled.Error())
-					continue
-				}
-				ts = tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
-				lastTS = ts
+			select {
+			case <-ctx1.Done():
+				return
+			default:
 			}
+			physical, logical, err := client.GetTS(ctx1)
+			if err != nil {
+				re.ErrorContains(err, context.Canceled.Error())
+				continue
+			}
+			ts := tsoutil.ComposeTS(physical, logical)
+			re.Less(lastTS, ts)
+			lastTS = ts
 		}
 	}(pdClient)
 
@@ -701,8 +703,13 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 		time.Sleep(time.Second)
 		err = pdLeader.ResignLeader()
 		re.NoError(err)
+		leaderName = pdCluster.WaitLeader()
+		re.NotEmpty(leaderName)
+		pdLeader = pdCluster.GetServer(leaderName)
 	}
 
 	cancel1()
 	wg.Wait()
+	// Make sure the lastTS is not empty
+	re.NotZero(lastTS)
 }
