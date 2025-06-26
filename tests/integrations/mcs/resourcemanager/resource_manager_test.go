@@ -1733,7 +1733,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		_, err = cli.AddResourceGroup(ctx, groups[i])
 		re.NoError(err)
 		// Create a specific client for this keyspace
-		client := mcs.SetupClientWithKeyspaceID(
+		client := utils.SetupClientWithKeyspaceID(
 			ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs(),
 		)
 		clients[i] = client
