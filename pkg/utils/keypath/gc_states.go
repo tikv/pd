@@ -17,7 +17,7 @@ package keypath
 import (
 	"fmt"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 // GCStateRevisionPath returns the key path for storing the revision of GC state data.

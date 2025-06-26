@@ -46,7 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs/utils"
 
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"
@@ -1582,7 +1582,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re := suite.Require()
 	cli := suite.client
 	keyspaceID := uint32(1)
-	clientKeyspace := mcs.SetupClientWithKeyspaceID(
+	clientKeyspace := utils.SetupClientWithKeyspaceID(
 		suite.ctx,
 		re,
 		keyspaceID,
@@ -1725,7 +1725,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 			clients[keyspace] = suite.client
 			continue
 		}
-		cli := mcs.SetupClientWithKeyspaceID(
+		cli := utils.SetupClientWithKeyspaceID(
 			suite.ctx,
 			re,
 			keyspace,

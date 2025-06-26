@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 // ControllerConfigPath returns the path to save the controller config.
