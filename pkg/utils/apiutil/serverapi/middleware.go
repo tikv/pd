@@ -189,6 +189,15 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		clientUrls = leader.GetClientUrls()
+<<<<<<< HEAD
+=======
+		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
+	} else {
+		// Prevent more than one redirection among PD.
+		log.Warn("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
+		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
+		return
+>>>>>>> 2ee5b4507 (log: degrade error log (#9418))
 	}
 	urls := make([]url.URL, 0, len(clientUrls))
 	for _, item := range clientUrls {
