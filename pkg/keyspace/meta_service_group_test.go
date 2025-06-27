@@ -45,7 +45,7 @@ func mockMetaServiceGroups() map[string]string {
 func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	suite.manager = NewMetaServiceGroupManager(suite.ctx, store, true, mockMetaServiceGroups())
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
@@ -149,7 +149,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpoints() {
 	newMap := map[string]string{
 		"foo": "foo.bar.local",
 	}
-	suite.manager.updateGroups(newMap)
+	suite.manager.updateConfig(true, newMap)
 	config := map[string]string{MetaServiceGroupIDKey: "foo"}
 	suite.manager.AttachEndpoints(config)
 	re.Equal("foo.bar.local", config[MetaServiceGroupAddressesKey], "should read from updated metaServiceGroups map")
@@ -168,7 +168,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 	// Add a new group "etcd-group-3"
 	newMap := mockMetaServiceGroups()
 	newMap["etcd-group-3"] = "etcd-group-3.tidb-serverless.cluster.svc.local"
-	suite.manager.updateGroups(newMap)
+	suite.manager.updateConfig(true, newMap)
 
 	// Move the assignment from the originally assigned group to "etcd-group-3"
 	err = suite.manager.UpdateAssignment(assigned, "etcd-group-3")

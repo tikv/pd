@@ -79,6 +79,8 @@ type Config interface {
 	GetCheckRegionSplitInterval() time.Duration
 	GetEnableGlobalSafePointV2() bool
 	SetEnableGlobalSafePointV2(isEnable bool)
+	SetAutoAssignMetaServiceGroups(bool)
+	GetAutoAssignMetaServiceGroups() bool
 	SetMetaServiceGroups(map[string]string)
 	GetMetaServiceGroups() map[string]string
 }
@@ -239,7 +241,10 @@ func (manager *Manager) Bootstrap() error {
 func (manager *Manager) UpdateConfig(cfg Config) error {
 	manager.config = cfg
 	if manager.mgm != nil {
-		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
+		manager.mgm.updateConfig(
+			cfg.GetAutoAssignMetaServiceGroups(),
+			cfg.GetMetaServiceGroups(),
+		)
 	}
 	return manager.SetGlobalSafePointV2()
 }
@@ -274,7 +279,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		}
 		request.Config[SafePointVersion] = KeyspaceGlobalSafePointVersionV2
 	}
-	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	assignToMetaServiceGroup := manager.mgm != nil &&
+		manager.mgm.GetAutoAssign() &&
+		len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
 		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
 		if err != nil {

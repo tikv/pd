@@ -885,6 +885,8 @@ type KeyspaceConfig struct {
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
 	// EnableGlobalSafePointV2 is to set new keyspace safe point version to v2.
 	EnableGlobalSafePointV2 bool `toml:"enable-global-safe-point-v2" json:"enable-global-safe-point-v2,string"`
+	// AutoAssignMetaServiceGroups indicates whether to auto assgin keyspace to meta-service groups.
+	AutoAssignMetaServiceGroups bool `toml:"auto-assign-meta-service-groups" json:"auto-assign-meta-service-groups,string"`
 	// MetaServiceGroups is the available external meta-service groups.
 	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
 }
@@ -965,6 +967,16 @@ func (c *KeyspaceConfig) GetEnableGlobalSafePointV2() bool {
 // SetEnableGlobalSafePointV2 set whether to enable global safe point v2.
 func (c *KeyspaceConfig) SetEnableGlobalSafePointV2(isEnable bool) {
 	c.EnableGlobalSafePointV2 = isEnable
+}
+
+// GetAutoAssignMetaServiceGroups returns whether to auto assign keyspace to meta-service groups.
+func (c *KeyspaceConfig) GetAutoAssignMetaServiceGroups() bool {
+	return c.AutoAssignMetaServiceGroups
+}
+
+// SetAutoAssignMetaServiceGroups sets whether to auto assign keyspace to meta-service groups.
+func (c *KeyspaceConfig) SetAutoAssignMetaServiceGroups(autoAssign bool) {
+	c.AutoAssignMetaServiceGroups = autoAssign
 }
 
 // GetMetaServiceGroups returns the current meta-service group configuration map.

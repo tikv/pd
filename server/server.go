@@ -504,7 +504,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, s.cfg.Keyspace.MetaServiceGroups)
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, s.cfg.Keyspace.AutoAssignMetaServiceGroups, s.cfg.Keyspace.MetaServiceGroups)
 	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager, s.metaServiceGroupManager)
 	if err != nil {
 		return err

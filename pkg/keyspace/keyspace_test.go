@@ -53,13 +53,14 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 type mockConfig struct {
-	PreAlloc                 []string
-	WaitRegionSplit          bool
-	DisableRawKVRegionSplit  bool
-	WaitRegionSplitTimeout   typeutil.Duration
-	CheckRegionSplitInterval typeutil.Duration
-	EnableGlobalSafePointV2  bool
-	MetaServiceGroups        map[string]string
+	PreAlloc                    []string
+	WaitRegionSplit             bool
+	DisableRawKVRegionSplit     bool
+	WaitRegionSplitTimeout      typeutil.Duration
+	CheckRegionSplitInterval    typeutil.Duration
+	EnableGlobalSafePointV2     bool
+	AutoAssignMetaServiceGroups bool
+	MetaServiceGroups           map[string]string
 }
 
 func (m *mockConfig) SetEnableGlobalSafePointV2(isEnable bool) {
@@ -90,6 +91,14 @@ func (m *mockConfig) GetDisableRawKVRegionSplit() bool {
 	return m.DisableRawKVRegionSplit
 }
 
+func (m *mockConfig) GetAutoAssignMetaServiceGroups() bool {
+	return m.AutoAssignMetaServiceGroups
+}
+
+func (m *mockConfig) SetAutoAssignMetaServiceGroups(autoAssign bool) {
+	m.AutoAssignMetaServiceGroups = autoAssign
+}
+
 func (m *mockConfig) GetMetaServiceGroups() map[string]string {
 	return m.MetaServiceGroups
 }
@@ -104,7 +113,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	egm := NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	egm := NewMetaServiceGroupManager(suite.ctx, store, true, mockMetaServiceGroups())
 	var err error
 	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, egm)
 	re.NoError(err)

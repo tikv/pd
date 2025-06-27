@@ -53,6 +53,7 @@ func (suite *metaServiceGroupTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.AutoAssignMetaServiceGroups = true
 		conf.Keyspace.MetaServiceGroups = mockMetaServiceGroups()
 	})
 	suite.cluster = cluster

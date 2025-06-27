@@ -28,6 +28,7 @@ type MetaServiceGroupManager struct {
 	ctx   context.Context
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
+	autoAssign        bool
 	metaServiceGroups map[string]string
 }
 
@@ -35,11 +36,13 @@ type MetaServiceGroupManager struct {
 func NewMetaServiceGroupManager(
 	ctx context.Context,
 	store endpoint.MetaServiceGroupStorage,
+	autoAssign bool,
 	metaServiceGroups map[string]string,
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
 		ctx:               ctx,
 		store:             store,
+		autoAssign:        autoAssign,
 		metaServiceGroups: metaServiceGroups,
 	}
 }
@@ -134,9 +137,17 @@ func (m *MetaServiceGroupManager) GetGroups() map[string]string {
 	return m.metaServiceGroups
 }
 
-// updateGroups updates currently available meta-service groups.
-func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]string) {
+// GetAutoAssign returns whether auto-assigning keyspaces to meta-service groups is enabled.
+func (m *MetaServiceGroupManager) GetAutoAssign() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.autoAssign
+}
+
+// updateConfig updates currently available meta-service groups.
+func (m *MetaServiceGroupManager) updateConfig(autoAssign bool, metaServiceGroups map[string]string) {
 	m.Lock()
 	defer m.Unlock()
+	m.autoAssign = autoAssign
 	m.metaServiceGroups = metaServiceGroups
 }
