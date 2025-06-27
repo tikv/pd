@@ -713,3 +713,29 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 	// Make sure the lastTS is not empty
 	re.NotZero(lastTS)
 }
+
+func TestGetTSRetry(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdCluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/checkRetry", "return(1)"))
+	_, _, err = pdClient.GetTS(ctx)
+	re.NoError(err)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/checkRetry"))
+}
