@@ -424,7 +424,7 @@ func (suite *PDServiceForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 
 	// get follower's address
 	servers := tc.GetServers()
-	oldPrimary := tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr()
+	oldPrimary := tc.GetPrimaryServer(constant.DefaultKeyspaceID).GetAddr()
 	var follower string
 	for addr := range servers {
 		if addr != oldPrimary {
@@ -612,7 +612,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(constant.DefaultKeyspaceID)
 }
 
 func (suite *CommonTestSuite) TearDownSuite() {
