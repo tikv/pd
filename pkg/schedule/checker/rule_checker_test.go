@@ -743,6 +743,124 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement2() {
 	re.Nil(op)
 }
 
+func (suite *ruleCheckerTestSuite) TestBetterReplacement3() {
+	re := suite.Require()
+	cfg := suite.cluster.GetReplicationConfig().Clone()
+	cfg.LocationLabels = []string{"region", "zone", "host"}
+	suite.cluster.SetReplicationConfig(cfg)
+	suite.cluster.AddLabelsStore(1, 10, map[string]string{"region": "R1", "host": "host-1", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(2, 10, map[string]string{"region": "R1", "host": "host-2", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(3, 10, map[string]string{"region": "R1", "host": "host-3", "zone": "z2", "type": "ap"})
+	suite.cluster.AddLabelsStore(4, 10, map[string]string{"region": "R1", "host": "host-4", "zone": "z2", "type": "ap"})
+	suite.cluster.AddLabelsStore(5, 10, map[string]string{"region": "R1", "host": "host-5", "zone": "z3", "type": "tp"})
+	suite.cluster.AddLabelsStore(6, 10, map[string]string{"region": "R1", "host": "host-6", "zone": "z3", "type": "tp"})
+	suite.cluster.AddLeaderRegionWithRange(10, "a", "b", 1, 2, 6)
+	rule1 := &placement.Rule{
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_0",
+		Index:          40,
+		Role:           placement.Leader,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule2 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_1",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule3 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_2",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"tp"}},
+		},
+	}
+	suite.ruleManager.SetRule(rule1)
+	suite.ruleManager.SetRule(rule2)
+	suite.ruleManager.SetRule(rule3)
+	suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	region := suite.cluster.GetRegion(10)
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("move-to-better-location", op.Desc())
+	if op.Step(0).(operator.AddLearner).ToStore != 4 {
+		re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
+	}
+}
+
+func (suite *ruleCheckerTestSuite) TestBetterReplacement4() {
+	re := suite.Require()
+	cfg := suite.cluster.GetReplicationConfig().Clone()
+	cfg.LocationLabels = []string{"region", "zone", "host"}
+	suite.cluster.SetReplicationConfig(cfg)
+	suite.cluster.AddLabelsStore(1, 10, map[string]string{"region": "R1", "host": "host-1", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(2, 10, map[string]string{"region": "R1", "host": "host-2", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(3, 10, map[string]string{"region": "R1", "host": "host-3", "zone": "z2", "type": "ap"})
+	suite.cluster.AddLabelsStore(4, 10, map[string]string{"region": "R1", "host": "host-4", "zone": "z2", "type": "tp"})
+	suite.cluster.AddLabelsStore(5, 10, map[string]string{"region": "R1", "host": "host-5", "zone": "z3", "type": "ap"})
+	suite.cluster.AddLabelsStore(6, 10, map[string]string{"region": "R1", "host": "host-6", "zone": "z3", "type": "tp"})
+	suite.cluster.AddLeaderRegionWithRange(10, "a", "b", 2, 3, 4)
+	rule1 := &placement.Rule{
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_0",
+		Index:          40,
+		Role:           placement.Leader,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule2 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_1",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule3 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_2",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"tp"}},
+		},
+	}
+	suite.ruleManager.SetRule(rule1)
+	suite.ruleManager.SetRule(rule2)
+	suite.ruleManager.SetRule(rule3)
+	suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	region := suite.cluster.GetRegion(10)
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("move-to-better-location", op.Desc())
+	re.Equal(uint64(5), op.Step(0).(operator.AddLearner).ToStore)
+}
+
 func (suite *ruleCheckerTestSuite) TestNoBetterReplacement() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
