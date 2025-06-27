@@ -539,16 +539,12 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	for retryCount = range maxRetries {
 		resp := c.GetTSAsync(ctx)
 		physical, logical, err = resp.Wait()
-		if err == nil {
+		if !errs.IsLeaderChange(err) {
 			break
 		}
 		failpoint.Inject("skipRetry", func() {
 			failpoint.Return(physical, logical, err)
 		})
-
-		if !errs.IsLeaderChange(err) {
-			break
-		}
 
 		// If the leader changes, we need to retry.
 		// For the first time, we retry immediately to avoid impacting the latency.
@@ -562,6 +558,13 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 		case <-time.After(interval):
 		}
 	}
+	failpoint.Inject("checkRetry", func(val failpoint.Value) {
+		if maxRetry, ok := val.(int); ok {
+			if retryCount >= maxRetry {
+				failpoint.Return(0, 0, errors.Errorf("retry count %d exceeds max retry times %d", retryCount, maxRetry))
+			}
+		}
+	})
 	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
 }
