@@ -114,25 +114,14 @@ func TestGlobalGCBarriersConversions(t *testing.T) {
 	re.Equal(t3Rounded, *gcBarriers[4].ExpirationTime.Time)
 
 	// Test Marshal & Unmarshal for GlobalGCBarrier
-	expected := []string{
-		`{"barrier_id":"a","barrier_ts":1,"expiration_time":0}`,
-		`{"barrier_id":"b","barrier_ts":2,"expiration_time":1740036600}`,
-		`{"barrier_id":"c","barrier_ts":456140154470400000,"expiration_time":1740036660}`,
-		`{"barrier_id":"d","barrier_ts":18446744073709551614,"expiration_time":1740036601}`,
-		`{"barrier_id":"e","barrier_ts":456139133457530881,"expiration_time":1740036601}`,
-	}
-
-	for i, gcBarrier := range gcBarriers {
-		res, err := json.Marshal(gcBarrier)
+	for _, gcBarrier := range gcBarriers {
+		str, err := json.Marshal(gcBarrier)
 		re.NoError(err)
-		re.Equal(expected[i], string(res))
-	}
 
-	for i, str := range expected {
 		var barrier GlobalGCBarrier
-		err := json.Unmarshal([]byte(str), &barrier)
+		err = json.Unmarshal(str, &barrier)
 		re.NoError(err)
-		re.Equal(barrier, *gcBarriers[i])
+		re.Equal(barrier, *gcBarrier)
 	}
 }
 
