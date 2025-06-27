@@ -125,7 +125,7 @@ func TestGlobalGCBarriersConversions(t *testing.T) {
 	for i, gcBarrier := range gcBarriers {
 		res, err := json.Marshal(gcBarrier)
 		re.NoError(err)
-		re.JSONEq(expected[i], string(res))
+		re.Equal(expected[i], string(res))
 	}
 
 	for i, str := range expected {
