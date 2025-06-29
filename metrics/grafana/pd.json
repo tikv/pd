@@ -12,15 +12,15 @@
   "__requires": [
     {
       "type": "panel",
-      "id": "bargauge",
-      "name": "Bar gauge",
+      "id": "gauge",
+      "name": "Gauge",
       "version": ""
     },
     {
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "7.1.5"
+      "version": "7.5.17"
     },
     {
       "type": "panel",
@@ -42,8 +42,20 @@
     },
     {
       "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
       "id": "table",
       "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table-old",
+      "name": "Table (old)",
       "version": ""
     }
   ],
@@ -63,8 +75,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 1,
-  "id": 25,
-  "iteration": 1618283470402,
+  "id": null,
+  "iteration": 1750676781271,
   "links": [],
   "panels": [
     {
@@ -81,6 +93,10 @@
       "description": "The total capacity size of the cluster",
       "editable": true,
       "error": false,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "format": "decbytes",
       "gauge": {
         "maxValue": 100,
@@ -166,6 +182,10 @@
       "description": "The current storage size of the cluster",
       "editable": true,
       "error": false,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "format": "decbytes",
       "gauge": {
         "maxValue": 100,
@@ -251,6 +271,10 @@
       "description": "The current storage size and used ratio of the cluster",
       "editable": true,
       "error": false,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "format": "percentunit",
       "gauge": {
         "maxValue": 1,
@@ -334,6 +358,10 @@
       ],
       "datasource": "${DS_TEST-CLUSTER}",
       "description": "The count of healthy stores",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -420,6 +448,10 @@
       "description": "The total number of Regions without replicas",
       "editable": true,
       "error": false,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -504,6 +536,10 @@
       "description": "The current peer count of the cluster",
       "editable": true,
       "error": false,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -586,6 +622,10 @@
       "datasource": "${DS_TEST-CLUSTER}",
       "editable": true,
       "error": false,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "fontSize": "100%",
       "gridPos": {
         "h": 7,
@@ -690,7 +730,7 @@
       "timeFrom": "1s",
       "title": "Abnormal stores",
       "transform": "timeseries_aggregations",
-      "type": "table"
+      "type": "table-old"
     },
     {
       "alert": {
@@ -735,6 +775,10 @@
       "datasource": "${DS_TEST-CLUSTER}",
       "decimals": null,
       "description": "It records the unusual Regions' count which may include pending peers, down peers, extra peers, offline peers, missing peers or learner peers",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -760,8 +804,12 @@
       "linewidth": 1,
       "links": [],
       "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
       "paceLength": 10,
       "percentage": false,
+      "pluginVersion": "7.5.17",
       "pointradius": 5,
       "points": false,
       "renderer": "flot",
@@ -792,7 +840,8 @@
           "fill": true,
           "line": true,
           "op": "gt",
-          "value": 100
+          "value": 100,
+          "visible": true
         }
       ],
       "timeFrom": null,
@@ -839,6 +888,29 @@
       "cacheTimeout": null,
       "datasource": "${DS_TEST-CLUSTER}",
       "description": "It indicates the current leader/primary of services",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -852,6 +924,7 @@
       "options": {
         "showHeader": true
       },
+      "pluginVersion": "7.5.17",
       "tableColumn": "instance",
       "targets": [
         {
@@ -875,17 +948,17 @@
           "options": {
             "filters": [
               {
-                "fieldName": "Value",
                 "config": {
                   "id": "notEqual",
                   "options": {
                     "value": "0"
                   }
-                }
+                },
+                "fieldName": "Value"
               }
             ],
-            "type": "include",
-            "match": "all"
+            "match": "all",
+            "type": "include"
           }
         },
         {
@@ -954,7 +1027,7 @@
         "showThresholdMarkers": false,
         "text": {}
       },
-      "pluginVersion": "7.5.11",
+      "pluginVersion": "7.5.17",
       "targets": [
         {
           "exemplar": true,
@@ -1011,7 +1084,7 @@
         "showThresholdMarkers": false,
         "text": {}
       },
-      "pluginVersion": "7.5.11",
+      "pluginVersion": "7.5.17",
       "targets": [
         {
           "exemplar": true,
@@ -1029,6 +1102,39 @@
     },
     {
       "datasource": "${DS_TEST-CLUSTER}",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "filterable": false
+          },
+          "mappings": [
+            {
+              "from": "",
+              "id": 1,
+              "text": "N/A",
+              "to": "",
+              "type": 1,
+              "value": "1.7976931348623157e+308"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
       "gridPos": {
         "h": 6,
         "w": 4,
@@ -1039,40 +1145,21 @@
       "options": {
         "showHeader": false
       },
-      "pluginVersion": "7.5.11",
+      "pluginVersion": "7.5.17",
       "targets": [
         {
-          "expr": "pd_cluster_eta{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
-          "legendFormat": "{{action}}-{{store}}",
-          "interval": "",
           "exemplar": true,
+          "expr": "pd_cluster_eta{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "{{action}}-{{store}}",
           "queryType": "randomWalk",
-          "refId": "A",
-          "instant": true
+          "refId": "A"
         }
       ],
+      "timeFrom": null,
+      "timeShift": null,
       "title": "Left time",
-      "type": "table",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "left",
-            "filterable": false
-          },
-          "mappings": [
-            {
-              "id": 1,
-              "type": 1,
-              "from": "",
-              "to": "",
-              "text": "N/A",
-              "value": "1.7976931348623157e+308"
-            }
-          ],
-          "unit": "s"
-        },
-        "overrides": []
-      },
       "transformations": [
         {
           "id": "reduce",
@@ -1083,34 +1170,10 @@
           }
         }
       ],
-      "timeFrom": null,
-      "timeShift": null
+      "type": "table"
     },
     {
-      "type": "table",
-      "title": "Current scaling speed",
       "datasource": "${DS_TEST-CLUSTER}",
-      "gridPos": {
-        "h": 6,
-        "w": 4,
-        "x": 12,
-        "y": 13
-      },
-      "id": 112,
-      "targets": [
-        {
-          "expr": "pd_cluster_speed{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
-          "legendFormat": "{{action}}-{{store}}",
-          "interval": "",
-          "exemplar": true,
-          "refId": "A",
-          "queryType": "randomWalk",
-          "instant": true
-        }
-      ],
-      "options": {
-        "showHeader": false
-      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1118,10 +1181,48 @@
             "filterable": false
           },
           "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
           "unit": "MBs"
         },
         "overrides": []
       },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 12,
+        "y": 13
+      },
+      "id": 112,
+      "options": {
+        "showHeader": false
+      },
+      "pluginVersion": "7.5.17",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "pd_cluster_speed{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "{{action}}-{{store}}",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Current scaling speed",
       "transformations": [
         {
           "id": "reduce",
@@ -1132,10 +1233,10 @@
           }
         }
       ],
-      "timeFrom": null,
-      "timeShift": null
+      "type": "table"
     },
     {
+      "aliasColors": {},
       "bars": false,
       "cacheTimeout": null,
       "dashLength": 10,
@@ -1177,7 +1278,7 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.10",
+      "pluginVersion": "7.5.17",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
@@ -1240,6 +1341,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1310,7 +1412,7 @@
           "timeFrom": "1s",
           "title": "PD scheduler config",
           "transform": "timeseries_aggregations",
-          "type": "table"
+          "type": "table-old"
         },
         {
           "columns": [],
@@ -1433,7 +1535,7 @@
           "timeShift": null,
           "title": "Store limit",
           "transform": "table",
-          "type": "table"
+          "type": "table-old"
         },
         {
           "cacheTimeout": null,
@@ -1498,7 +1600,7 @@
           "timeShift": null,
           "title": "Cluster ID",
           "transform": "timeseries_aggregations",
-          "type": "table"
+          "type": "table-old"
         },
         {
           "columns": [
@@ -1578,7 +1680,7 @@
           "timeShift": null,
           "title": "Region label isolation level",
           "transform": "timeseries_aggregations",
-          "type": "table"
+          "type": "table-old"
         },
         {
           "columns": [
@@ -1673,7 +1775,7 @@
           "timeFrom": "1s",
           "title": "Label distribution",
           "transform": "timeseries_aggregations",
-          "type": "table"
+          "type": "table-old"
         },
         {
           "cacheTimeout": null,
@@ -2623,6 +2725,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -3591,6 +3694,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -4794,6 +4898,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -6052,6 +6157,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -7035,6 +7141,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -7902,9 +8009,9 @@
           "targets": [
             {
               "expr": "max(max(pd_checker_patrol_regions_time{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"})by(instance))",
-              "legendFormat": "{{instance}}",
               "format": "time_series",
               "intervalFactor": 1,
+              "legendFormat": "{{instance}}",
               "refId": "A"
             }
           ],
@@ -8423,6 +8530,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -8637,6 +8745,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -8940,11 +9049,20 @@
         },
         {
           "aliasColors": {},
+          "bars": false,
           "dashLength": 10,
+          "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
           "description": "The rate of received each kind of gRPC commands",
           "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 8,
@@ -8952,6 +9070,7 @@
             "x": 12,
             "y": 127
           },
+          "hiddenSeries": false,
           "id": 904,
           "legend": {
             "alignAsTable": true,
@@ -8971,24 +9090,34 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "options": {
+            "alertThreshold": true
+          },
           "paceLength": 10,
+          "percentage": false,
+          "pluginVersion": "7.5.17",
           "pointradius": 5,
+          "points": false,
           "renderer": "flot",
           "seriesOverrides": [],
           "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(grpc_server_msg_received_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, grpc_method)",
-              "legendFormat": "{{instance}}-{{grpc_method}}",
-              "interval": "",
               "exemplar": true,
+              "expr": "sum(rate(grpc_server_msg_received_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, grpc_method)",
+              "interval": "",
               "intervalFactor": 2,
+              "legendFormat": "{{instance}}-{{grpc_method}}",
               "refId": "A",
               "step": 4
             }
           ],
           "thresholds": [],
+          "timeFrom": null,
           "timeRegions": [],
+          "timeShift": null,
           "title": "gRPC Received commands rate",
           "tooltip": {
             "msResolution": false,
@@ -9025,39 +9154,24 @@
           "yaxis": {
             "align": false,
             "alignLevel": null
-          },
-          "options": {
-            "alertThreshold": true
-          },
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": []
-          },
-          "pluginVersion": "7.5.17",
-          "bars": false,
-          "dashes": false,
-          "decimals": null,
-          "error": false,
-          "percentage": false,
-          "points": false,
-          "stack": false,
-          "steppedLine": false,
-          "timeFrom": null,
-          "timeShift": null,
-          "fillGradient": 0,
-          "hiddenSeries": false
+          }
         },
         {
           "aliasColors": {},
+          "bars": false,
           "dashLength": 10,
+          "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
           "description": "The error rate of handled gRPC commands.Note: It can't catch the error hide in the header, like this https://github.com/tikv/pd/blob/2d970a619a8917c35d306f401326141481c133e0/server/grpc_service.go#L2071",
           "editable": true,
+          "error": false,
           "fieldConfig": {
             "defaults": {},
             "overrides": []
           },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 8,
@@ -9065,6 +9179,7 @@
             "x": 0,
             "y": 135
           },
+          "hiddenSeries": false,
           "id": 905,
           "legend": {
             "alignAsTable": true,
@@ -9088,24 +9203,30 @@
             "alertThreshold": true
           },
           "paceLength": 10,
+          "percentage": false,
           "pluginVersion": "7.5.17",
           "pointradius": 5,
+          "points": false,
           "renderer": "flot",
           "seriesOverrides": [],
           "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(grpc_server_handled_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", grpc_type=\"unary\", grpc_code!=\"OK\"}[1m])) by (grpc_method)",
-              "legendFormat": "{{grpc_method}}",
-              "interval": "",
               "exemplar": true,
+              "expr": "sum(rate(grpc_server_handled_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", grpc_type=\"unary\", grpc_code!=\"OK\"}[1m])) by (grpc_method)",
+              "interval": "",
               "intervalFactor": 2,
+              "legendFormat": "{{grpc_method}}",
               "refId": "A",
               "step": 4
             }
           ],
           "thresholds": [],
+          "timeFrom": null,
           "timeRegions": [],
+          "timeShift": null,
           "title": "gRPC Error rate",
           "tooltip": {
             "msResolution": false,
@@ -9123,52 +9244,45 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:132",
               "format": "ops",
               "label": null,
               "logBase": 10,
               "max": null,
               "min": null,
-              "show": true,
-              "$$hashKey": "object:132"
+              "show": true
             },
             {
+              "$$hashKey": "object:133",
               "format": "short",
               "label": null,
               "logBase": 1,
               "max": null,
               "min": null,
-              "show": true,
-              "$$hashKey": "object:133"
+              "show": true
             }
           ],
           "yaxis": {
             "align": false,
             "alignLevel": null
-          },
-          "bars": false,
-          "dashes": false,
-          "decimals": null,
-          "error": false,
-          "fillGradient": 0,
-          "hiddenSeries": false,
-          "percentage": false,
-          "points": false,
-          "stack": false,
-          "steppedLine": false,
-          "timeFrom": null,
-          "timeShift": null
+          }
         },
         {
           "aliasColors": {},
+          "bars": false,
           "dashLength": 10,
+          "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
           "description": "The region request from different source.",
           "editable": true,
+          "error": false,
           "fieldConfig": {
             "defaults": {},
             "overrides": []
           },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 8,
@@ -9176,6 +9290,7 @@
             "x": 12,
             "y": 135
           },
+          "hiddenSeries": false,
           "id": 906,
           "legend": {
             "alignAsTable": true,
@@ -9199,24 +9314,30 @@
             "alertThreshold": true
           },
           "paceLength": 10,
+          "percentage": false,
           "pluginVersion": "7.5.17",
           "pointradius": 5,
+          "points": false,
           "renderer": "flot",
           "seriesOverrides": [],
           "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", event=\"success\"}[1m])) by (request, caller_id, caller_component)",
-              "legendFormat": "{{request}}-{{caller_id}}-{{caller_component}}",
-              "interval": "",
               "exemplar": true,
+              "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", event=\"success\"}[1m])) by (request, caller_id, caller_component)",
+              "interval": "",
               "intervalFactor": 2,
+              "legendFormat": "{{request}}-{{caller_id}}-{{caller_component}}",
               "refId": "A",
               "step": 4
             }
           ],
           "thresholds": [],
+          "timeFrom": null,
           "timeRegions": [],
+          "timeShift": null,
           "title": "Success Region Request(1% sample)",
           "tooltip": {
             "msResolution": false,
@@ -9234,52 +9355,45 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:132",
               "format": "ops",
               "label": null,
               "logBase": 10,
               "max": null,
               "min": null,
-              "show": true,
-              "$$hashKey": "object:132"
+              "show": true
             },
             {
+              "$$hashKey": "object:133",
               "format": "short",
               "label": null,
               "logBase": 1,
               "max": null,
               "min": null,
-              "show": true,
-              "$$hashKey": "object:133"
+              "show": true
             }
           ],
           "yaxis": {
             "align": false,
             "alignLevel": null
-          },
-          "bars": false,
-          "dashes": false,
-          "decimals": null,
-          "error": false,
-          "fillGradient": 0,
-          "hiddenSeries": false,
-          "percentage": false,
-          "points": false,
-          "stack": false,
-          "steppedLine": false,
-          "timeFrom": null,
-          "timeShift": null
+          }
         },
         {
           "aliasColors": {},
+          "bars": false,
           "dashLength": 10,
+          "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
           "description": "The region request from different source.",
           "editable": true,
+          "error": false,
           "fieldConfig": {
             "defaults": {},
             "overrides": []
           },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 8,
@@ -9287,6 +9401,7 @@
             "x": 0,
             "y": 143
           },
+          "hiddenSeries": false,
           "id": 907,
           "legend": {
             "alignAsTable": true,
@@ -9310,24 +9425,30 @@
             "alertThreshold": true
           },
           "paceLength": 10,
+          "percentage": false,
           "pluginVersion": "7.5.17",
           "pointradius": 5,
+          "points": false,
           "renderer": "flot",
           "seriesOverrides": [],
           "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", event=\"failed\"}[1m])) by (request, caller_id, caller_component)",
-              "legendFormat": "{{request}}-{{caller_id}}-{{caller_component}}",
-              "interval": "",
               "exemplar": true,
+              "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", event=\"failed\"}[1m])) by (request, caller_id, caller_component)",
+              "interval": "",
               "intervalFactor": 2,
+              "legendFormat": "{{request}}-{{caller_id}}-{{caller_component}}",
               "refId": "A",
               "step": 4
             }
           ],
           "thresholds": [],
+          "timeFrom": null,
           "timeRegions": [],
+          "timeShift": null,
           "title": "Failed Region Request",
           "tooltip": {
             "msResolution": false,
@@ -9345,40 +9466,28 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:132",
               "format": "ops",
               "label": null,
               "logBase": 10,
               "max": null,
               "min": null,
-              "show": true,
-              "$$hashKey": "object:132"
+              "show": true
             },
             {
+              "$$hashKey": "object:133",
               "format": "short",
               "label": null,
               "logBase": 1,
               "max": null,
               "min": null,
-              "show": true,
-              "$$hashKey": "object:133"
+              "show": true
             }
           ],
           "yaxis": {
             "align": false,
             "alignLevel": null
-          },
-          "bars": false,
-          "dashes": false,
-          "decimals": null,
-          "error": false,
-          "fillGradient": 0,
-          "hiddenSeries": false,
-          "percentage": false,
-          "points": false,
-          "stack": false,
-          "steppedLine": false,
-          "timeFrom": null,
-          "timeShift": null
+          }
         }
       ],
       "repeat": null,
@@ -9387,6 +9496,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -9695,6 +9805,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -9823,15 +9934,15 @@
             "alignAsTable": true,
             "avg": false,
             "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": true,
             "min": false,
             "rightSide": true,
             "show": true,
             "sideWidth": 300,
             "total": false,
-            "values": true,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": true
           },
           "lines": true,
           "linewidth": 1,
@@ -9920,15 +10031,15 @@
             "alignAsTable": true,
             "avg": false,
             "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": true,
             "min": false,
             "rightSide": true,
             "show": true,
             "sideWidth": 300,
             "total": false,
-            "values": true,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": true
           },
           "lines": true,
           "linewidth": 1,
@@ -10247,14 +10358,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": true,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": true,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": true
           },
           "lines": true,
           "linewidth": 1,
@@ -10445,14 +10556,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": true,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": true,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": true
           },
           "lines": true,
           "linewidth": 1,
@@ -10981,6 +11092,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -10998,14 +11110,20 @@
           "description": "The server-side time consumed of handling the TSO requests",
           "editable": true,
           "error": false,
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 114
+            "y": 30
           },
+          "hiddenSeries": false,
           "id": 1201,
           "legend": {
             "alignAsTable": true,
@@ -11027,8 +11145,12 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "options": {
+            "alertThreshold": true
+          },
           "paceLength": 10,
           "percentage": false,
+          "pluginVersion": "7.5.17",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -11143,14 +11265,20 @@
           "description": "The client-side time consumed of handling the TSO requests",
           "editable": true,
           "error": false,
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 114
+            "y": 30
           },
+          "hiddenSeries": false,
           "id": 1202,
           "legend": {
             "alignAsTable": true,
@@ -11172,8 +11300,12 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "options": {
+            "alertThreshold": true
+          },
           "paceLength": 10,
           "percentage": false,
+          "pluginVersion": "7.5.17",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -11265,14 +11397,20 @@
           "description": "The count of TSO gRPC requests",
           "editable": true,
           "error": false,
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 123
+            "y": 39
           },
+          "hiddenSeries": false,
           "id": 1203,
           "legend": {
             "alignAsTable": true,
@@ -11290,8 +11428,12 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
           "paceLength": 10,
           "percentage": false,
+          "pluginVersion": "7.5.17",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -11312,10 +11454,10 @@
             {
               "expr": "sum(rate(pd_tso_events{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (type,dc)",
               "format": "time_series",
+              "hide": true,
               "interval": "",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-{{dc}}",
-              "hide": true,
               "refId": "B",
               "step": 2
             },
@@ -11380,14 +11522,20 @@
           "description": "The batch size of the TSO requests",
           "editable": true,
           "error": false,
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
           "fill": 1,
+          "fillGradient": 0,
           "grid": {},
           "gridPos": {
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 123
+            "y": 39
           },
+          "hiddenSeries": false,
           "id": 1204,
           "legend": {
             "alignAsTable": true,
@@ -11405,8 +11553,12 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
           "paceLength": 10,
           "percentage": false,
+          "pluginVersion": "7.5.17",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -11505,7 +11657,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 132
+            "y": 48
           },
           "hiddenSeries": false,
           "id": 1626,
@@ -11672,7 +11824,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 132
+            "y": 48
           },
           "hiddenSeries": false,
           "id": 1627,
@@ -11812,7 +11964,7 @@
             "h": 9,
             "w": 12,
             "x": 0,
-            "y": 141
+            "y": 57
           },
           "hiddenSeries": false,
           "id": 1628,
@@ -11930,7 +12082,7 @@
             "h": 9,
             "w": 12,
             "x": 12,
-            "y": 141
+            "y": 57
           },
           "hiddenSeries": false,
           "id": 1629,
@@ -12033,6 +12185,116 @@
             "align": false,
             "alignLevel": null
           }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "Display the GC Barriers, no data if there is no barrier",
+          "editable": true,
+          "error": false,
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "fill": 1,
+          "fillGradient": 0,
+          "grid": {},
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 66
+          },
+          "hiddenSeries": false,
+          "id": 1631,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": false,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sideWidth": 300,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "paceLength": 10,
+          "percentage": false,
+          "pluginVersion": "7.5.17",
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "exemplar": true,
+              "expr": "max by (keyspace_id, barrier) (pd_gc_barrier{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"} / (2^18))",
+              "hide": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "{{keyspace_id}}-{{barrier}}",
+              "refId": "A"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "GC Barrier",
+          "tooltip": {
+            "msResolution": false,
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:174",
+              "format": "dateTimeAsIso",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": false
+            },
+            {
+              "$$hashKey": "object:175",
+              "format": "dateTimeAsIso",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         }
       ],
       "repeat": null,
@@ -12041,6 +12303,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -13802,11 +14065,12 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 31
       },
       "id": 1500,
       "panels": [
@@ -13983,11 +14247,12 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 32
       },
       "id": 1600,
       "panels": [
@@ -14113,14 +14378,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": true,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": true
           },
           "lines": true,
           "linewidth": 1,
@@ -14215,14 +14480,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -14317,14 +14582,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -14419,14 +14684,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -14521,14 +14786,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -14603,6 +14868,7 @@
     },
     {
       "collapsed": true,
+      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -14637,14 +14903,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": true,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": true
           },
           "lines": true,
           "linewidth": 1,
@@ -14795,14 +15061,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -14897,14 +15163,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -15016,14 +15282,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -15134,14 +15400,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -15249,14 +15515,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -15436,14 +15702,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -15565,14 +15831,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -15753,14 +16019,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -15942,14 +16208,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -16079,14 +16345,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -16180,14 +16446,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -16298,14 +16564,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -16430,14 +16696,14 @@
             "alignAsTable": true,
             "avg": false,
             "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
             "max": false,
             "min": false,
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false,
-            "hideEmpty": true,
-            "hideZero": true
+            "values": false
           },
           "lines": true,
           "linewidth": 1,
@@ -16547,7 +16813,7 @@
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 18,
+  "schemaVersion": 27,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -16556,15 +16822,22 @@
         "allValue": null,
         "current": {},
         "datasource": "${DS_TEST-CLUSTER}",
+        "definition": "",
+        "description": null,
+        "error": null,
         "hide": 2,
         "includeAll": false,
         "label": "K8s-cluster",
         "multi": false,
         "name": "k8s_cluster",
         "options": [],
-        "query": "label_values(pd_cluster_status, k8s_cluster)",
+        "query": {
+          "query": "label_values(pd_cluster_status, k8s_cluster)",
+          "refId": "Test-Cluster-k8s_cluster-Variable-Query"
+        },
         "refresh": 2,
         "regex": "",
+        "skipUrlSync": false,
         "sort": 1,
         "tagValuesQuery": "",
         "tags": [],
@@ -16574,20 +16847,21 @@
       },
       {
         "allValue": null,
-        "current": {
-          "isNone": true,
-          "text": "None",
-          "value": ""
-        },
+        "current": {},
         "datasource": "${DS_TEST-CLUSTER}",
         "definition": "",
+        "description": null,
+        "error": null,
         "hide": 2,
         "includeAll": false,
         "label": "tidb_cluster",
         "multi": false,
         "name": "tidb_cluster",
         "options": [],
-        "query": "label_values(pd_cluster_status{k8s_cluster=\"$k8s_cluster\"}, tidb_cluster)",
+        "query": {
+          "query": "label_values(pd_cluster_status{k8s_cluster=\"$k8s_cluster\"}, tidb_cluster)",
+          "refId": "Test-Cluster-tidb_cluster-Variable-Query"
+        },
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
@@ -16600,19 +16874,21 @@
       },
       {
         "allValue": ".*",
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        },
+        "current": {},
         "datasource": "${DS_TEST-CLUSTER}",
         "definition": "",
+        "description": null,
+        "error": null,
         "hide": 0,
         "includeAll": true,
         "label": "PD instance",
         "multi": false,
         "name": "instance",
         "options": [],
-        "query": "label_values(pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}, instance)",
+        "query": {
+          "query": "label_values(pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}, instance)",
+          "refId": "Test-Cluster-instance-Variable-Query"
+        },
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
@@ -16625,19 +16901,21 @@
       },
       {
         "allValue": ".*",
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        },
+        "current": {},
         "datasource": "${DS_TEST-CLUSTER}",
         "definition": "label_values(pd_scheduler_store_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}, store)",
+        "description": null,
+        "error": null,
         "hide": 0,
         "includeAll": true,
         "label": "store",
         "multi": true,
         "name": "store",
         "options": [],
-        "query": "label_values(pd_scheduler_store_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}, store)",
+        "query": {
+          "query": "label_values(pd_scheduler_store_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}, store)",
+          "refId": "Test-Cluster-store-Variable-Query"
+        },
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
