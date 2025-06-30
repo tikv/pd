@@ -182,7 +182,7 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 			for _, keyspaceID := range keyspaceGroup.keyspaceIDs {
 				served := false
 				for _, server := range suite.tsoCluster.GetServers() {
-					if server.IsKeyspaceServing(keyspaceID, keyspaceGroup.keyspaceGroupID) {
+					if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroup.keyspaceGroupID) {
 						served = true
 						break
 					}
@@ -407,9 +407,10 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			for _, keyspaceID := range keyspaceIDs {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
+					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID)
 					err := suite.tsoCluster.ResignPrimary(keyspaceID, constant.DefaultKeyspaceGroupID)
 					re.NoError(err)
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, 0)
+					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID)
 				}(keyspaceID)
 			}
 			wg.Wait()

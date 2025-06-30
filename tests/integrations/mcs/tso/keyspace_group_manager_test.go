@@ -127,7 +127,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 		for _, keyspaceID := range []uint32{0, 1, 2} {
 			served := false
 			for _, server := range suite.tsoCluster.GetServers() {
-				if server.IsKeyspaceServing(keyspaceID, constant.DefaultKeyspaceGroupID) {
+				if server.IsKeyspaceServingByGroup(keyspaceID, constant.DefaultKeyspaceGroupID) {
 					tam, err := server.GetTSOAllocator(constant.DefaultKeyspaceGroupID)
 					re.NoError(err)
 					re.NotNil(tam)
@@ -145,13 +145,16 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	// Any keyspace that was assigned to a keyspace group before, except default keyspace,
 	// won't be served at this time. Default keyspace will be served by default keyspace group
 	// all the time.
+
+	runDefaultKeyspace := false
 	for _, server := range suite.tsoCluster.GetServers() {
-		server.IsKeyspaceServing(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		if server.IsKeyspaceServingByGroup(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID) {
+			runDefaultKeyspace = true
+		}
 		for _, keyspaceGroupID := range []uint32{1, 2, 3} {
-			server.IsKeyspaceServing(constant.DefaultKeyspaceID, keyspaceGroupID)
-			server.IsKeyspaceServing(constant.DefaultKeyspaceID, keyspaceGroupID)
+			re.False(server.IsKeyspaceServingByGroup(constant.DefaultKeyspaceID, keyspaceGroupID))
 			for _, keyspaceID := range []uint32{1, 2, 3} {
-				if server.IsKeyspaceServing(keyspaceID, keyspaceGroupID) {
+				if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID) {
 					tam, err := server.GetTSOAllocator(keyspaceGroupID)
 					re.NoError(err)
 					re.NotNil(tam)
@@ -159,6 +162,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 			}
 		}
 	}
+	re.True(runDefaultKeyspace)
 
 	// Create a client for each keyspace and make sure they can successfully discover the service
 	// provided by the default keyspace group.
@@ -214,7 +218,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 			for _, keyspaceID := range param.keyspaceIDs {
 				served := false
 				for _, server := range suite.tsoCluster.GetServers() {
-					if server.IsKeyspaceServing(keyspaceID, param.keyspaceGroupID) {
+					if server.IsKeyspaceServing(keyspaceID) {
 						allocator, err := server.GetTSOAllocator(param.keyspaceGroupID)
 						re.NoError(err)
 						re.NotNil(allocator)
@@ -286,7 +290,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	})
 	ts.Physical += time.Hour.Milliseconds()
 	// Set the TSO of the keyspace group `oldID` to a large value.
-	err = suite.tsoCluster.GetPrimaryServer(222, oldID).ResetTS(tsoutil.GenerateTS(&ts), false, true, oldID)
+	err = suite.tsoCluster.GetPrimaryServer(222).ResetTS(tsoutil.GenerateTS(&ts), false, true, oldID)
 	re.NoError(err)
 	// Split the keyspace group `oldID` to `newID`.
 	newID := suite.allocID()
@@ -314,7 +318,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	re *require.Assertions,
 	keyspaceID, keyspaceGroupID uint32,
 ) (pdpb.Timestamp, error) {
-	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID)
 	kgm := primary.GetKeyspaceGroupManager()
 	re.NotNil(kgm)
 	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, 1)
@@ -350,10 +354,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 	re.True(kg2.IsSplitTarget())
 	// Check the leadership.
-	member1, err := suite.tsoCluster.WaitForPrimaryServing(re, 111, oldID).GetMember(111, oldID)
+	member1, err := suite.tsoCluster.WaitForPrimaryServing(re, 111).GetMember(111, oldID)
 	re.NoError(err)
 	re.NotNil(member1)
-	member2, err := suite.tsoCluster.WaitForPrimaryServing(re, 222, newID).GetMember(222, newID)
+	member2, err := suite.tsoCluster.WaitForPrimaryServing(re, 222).GetMember(222, newID)
 	re.NoError(err)
 	re.NotNil(member2)
 	// Wait for the leader of the keyspace group `oldID` and `newID` to be elected.
@@ -447,7 +451,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 ) context.CancelFunc {
 	// Make sure the leader of the keyspace group is elected.
 	member, err := suite.tsoCluster.
-		WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID).
+		WaitForPrimaryServing(re, keyspaceID).
 		GetMember(keyspaceID, keyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(member)
@@ -626,7 +630,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	})
 	ts.Physical += time.Hour.Milliseconds()
 	// Set the TSO of the keyspace group `firstID` to a large value.
-	err = suite.tsoCluster.GetPrimaryServer(222, firstID).ResetTS(tsoutil.GenerateTS(&ts), false, true, firstID)
+	err = suite.tsoCluster.GetPrimaryServer(222).ResetTS(tsoutil.GenerateTS(&ts), false, true, firstID)
 	re.NoError(err)
 	// Merge the keyspace group `firstID` and `secondID` to the default keyspace group.
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, constant.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
@@ -836,8 +840,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	re.NotNil(svr)
 	for i := 1; i < keyspaceGroupNum; i++ {
 		// Check if the keyspace group is served.
-		svr = suite.tsoCluster.WaitForPrimaryServing(re, keyspaceGroups[i].ID, keyspaceGroups[i].ID)
+		svr = suite.tsoCluster.WaitForPrimaryServing(re, keyspaces[i])
 		re.NotNil(svr)
+		re.True(svr.IsKeyspaceServingByGroup(keyspaces[i], keyspaceGroups[i].ID))
 	}
 	// Merge all the keyspace groups into the default keyspace group.
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, constant.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
