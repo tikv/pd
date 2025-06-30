@@ -529,31 +529,42 @@ const (
 // GetTS implements the TSOClient interface.
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	var retryCount int
-	for retryCount = range maxTSORetryTimes {
+	maxRetries := maxTSORetryTimes
+	failpoint.Inject("mockMaxTSORetryTimes", func(val failpoint.Value) {
+		if newMax, ok := val.(int); ok {
+			maxRetries = newMax
+		}
+	})
+
+	for retryCount = range maxRetries {
 		resp := c.GetTSAsync(ctx)
-		if physical, logical, err = resp.Wait(); err != nil {
-			failpoint.Inject("skipRetry", func() {
-				failpoint.Return(physical, logical, err)
-			})
+		physical, logical, err = resp.Wait()
+		if !errs.IsLeaderChange(err) {
+			break
+		}
+		failpoint.Inject("skipRetry", func() {
+			failpoint.Return(physical, logical, err)
+		})
 
-			if !errs.IsLeaderChange(err) {
-				break
-			}
-
-			// If the leader changes, we need to retry.
-			// For the first time, we retry immediately to avoid impacting the latency.
-			var interval time.Duration
-			if retryCount != 0 {
-				interval = retryInterval
-			}
-			select {
-			case <-ctx.Done():
-				return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
-			case <-time.After(interval):
-				continue
-			}
+		// If the leader changes, we need to retry.
+		// For the first time, we retry immediately to avoid impacting the latency.
+		var interval time.Duration
+		if retryCount != 0 {
+			interval = retryInterval
+		}
+		select {
+		case <-ctx.Done():
+			return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
+		case <-time.After(interval):
 		}
 	}
+	failpoint.Inject("checkRetry", func(val failpoint.Value) {
+		if maxRetry, ok := val.(int); ok {
+			if retryCount >= maxRetry {
+				failpoint.Return(0, 0, errors.Errorf("retry count %d exceeds max retry times %d", retryCount, maxRetry))
+			}
+		}
+	})
 	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
 }

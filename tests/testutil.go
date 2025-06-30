@@ -242,8 +242,10 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)
+	raftCluster.UpdateAllStoreStatus()
 	if tc.GetSchedulingPrimaryServer() != nil {
 		tc.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
+		tc.GetSchedulingPrimaryServer().GetCluster().UpdateAllStoreStatus()
 	}
 }
 

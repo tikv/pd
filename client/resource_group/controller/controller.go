@@ -655,7 +655,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
 			if !errors.ErrorEqual(err, context.Canceled) {
-				log.Error("[resource group controller] token bucket rpc error", zap.Error(err))
+				log.Warn("[resource group controller] token bucket rpc error", zap.Error(err))
 			}
 			resp = nil
 			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
@@ -744,6 +744,20 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 		return nil, err
 	}
 	return gc.getMeta(), nil
+}
+
+// ReportConsumption is used to report ru consumption directly.
+//
+// Currently, this interface is used to report the consumption for TiFlash MPP cost
+// after the query is finished.
+func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, consumption *rmpb.Consumption) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
+		return
+	}
+
+	gc.addRUConsumption(consumption)
 }
 
 type groupCostController struct {
@@ -1552,6 +1566,12 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Unlock()
 
 	return delta, waitDuration, nil
+}
+
+func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
+	gc.mu.Lock()
+	add(gc.mu.consumption, consumption)
+	gc.mu.Unlock()
 }
 
 // GetActiveResourceGroup is used to get active resource group.

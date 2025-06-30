@@ -242,6 +242,8 @@ var (
 	ErrExceedMaxEtcdTxnOps = errors.Normalize("exceed max etcd txn operations", errors.RFCCodeText("PD:keyspace:ErrExceedMaxEtcdTxnOps"))
 	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
 	ErrModifyDefaultKeyspace = errors.Normalize("cannot modify default keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifyDefaultKeyspace"))
+	// ErrModifySystemKeyspace is used to indicate that system keyspace cannot be modified.
+	ErrModifySystemKeyspace = errors.Normalize("cannot modify system keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifySystemKeyspace"))
 	// ErrIllegalOperation is used to indicate this is an illegal operation.
 	ErrIllegalOperation = errors.Normalize("unknown operation", errors.RFCCodeText("PD:keyspace:ErrIllegalOperation"))
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
@@ -545,4 +547,9 @@ var (
 	ErrDecreasingTxnSafePoint         = errors.Normalize("trying to update txn safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingTxnSafePoint"))
 	ErrGCBarrierTSBehindTxnSafePoint  = errors.Normalize("trying to set a GC barrier on ts %d which is already behind the txn safe point %d", errors.RFCCodeText("PD:gc:ErrGCBarrierTSBehindTxnSafePoint"))
 	ErrReservedGCBarrierID            = errors.Normalize("trying to set a GC barrier with a barrier ID that is reserved: %v", errors.RFCCodeText("PD:gc:ErrReservedGCBarrierID"))
+)
+
+// id alloc errors
+var (
+	ErrIDExhausted = errors.Normalize("id exhausted", errors.RFCCodeText("PD:idalloc:ErrIDExhausted"))
 )
