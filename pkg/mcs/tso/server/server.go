@@ -216,7 +216,7 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 	return s.isKeyspacePrimary(keyspaceID, keyspaceGroupID)
 }
 
-// IsKeyspaceServing returns whether the server is the primary of the given keyspace.
+// IsKeyspaceServing returns whether the keyspace is serving.
 func (s *Server) IsKeyspaceServing(keyspaceID uint32) bool {
 	if atomic.LoadInt64(&s.isRunning) == 0 {
 		return false
