@@ -208,7 +208,7 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 		return false
 	}
 	// We need to check if the keyspace group ID is expected for the given keyspace ID.
-	// It is necessary because isKeyspacePrimary will correct the keyspace group ID automatically if keyspace serves.
+	// It is necessary because checkKeyspaceGroupLeadership will correct the keyspace group ID automatically if keyspace serves.
 	_, _, expected, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if keyspaceGroupID != expected || err != nil {
 		return false
