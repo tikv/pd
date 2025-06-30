@@ -16,6 +16,7 @@ package kv
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strconv"
 	"testing"
@@ -86,7 +87,7 @@ func testRange(re *require.Assertions, kv Base) {
 		err := kv.Save(k, k)
 		re.NoError(err)
 	}
-	sortedKeys := append(keys[:0:0], keys...)
+	sortedKeys := slices.Clone(keys)
 	sort.Strings(sortedKeys)
 
 	testCases := []struct {

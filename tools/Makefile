@@ -16,6 +16,7 @@ ROOT_PATH := $(shell pwd)/..
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
+PACKAGES := $(shell go list ./... | grep -v pd-ctl/helper)
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools
@@ -25,6 +26,8 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
+	@ echo "modernize ..."
+	@ go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.18.1 -test $(PACKAGES)
 
 tidy:
 	@ go mod tidy

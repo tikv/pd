@@ -247,13 +247,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 	// Also note that in current implementation, the tsoStream tries to receive the next result before checking
 	// the `tsoStream.pendingRequests` queue. Changing this behavior may need to update this test.
 	for i := range tokenCount + 3 {
-		expectedPending := tokenCount + 1 - i
-		if expectedPending > tokenCount {
-			expectedPending = tokenCount
-		}
-		if expectedPending < 0 {
-			expectedPending = 0
-		}
+		expectedPending := max(min(tokenCount+1-i, tokenCount), 0)
 
 		// Spin for a while as the dispatcher loop may have not finished sending next batch to pendingRequests
 		spinStart := time.Now()
