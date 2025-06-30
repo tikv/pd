@@ -213,7 +213,7 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 	if keyspaceGroupID != expected || err != nil {
 		return false
 	}
-	return s.isKeyspacePrimary(keyspaceID, keyspaceGroupID)
+	return s.checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID)
 }
 
 // IsKeyspaceServing returns whether the keyspace is serving.
@@ -224,9 +224,9 @@ func (s *Server) IsKeyspaceServing(keyspaceID uint32) bool {
 	// We only need to pass the keyspace ID and the default keyspace group ID.
 	// Because GetElectionMember will call getKeyspaceGroupMetaWithCheck,
 	// getKeyspaceGroupMetaWithCheck will correct the keyspace group ID automatically if keyspace serves.
-	return s.isKeyspacePrimary(keyspaceID, constant.DefaultKeyspaceGroupID)
+	return s.checkKeyspaceGroupLeadership(keyspaceID, constant.DefaultKeyspaceGroupID)
 }
-func (s *Server) isKeyspacePrimary(keyspaceID, keyspaceGroupID uint32) bool {
+func (s *Server) checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID uint32) bool {
 	member, err := s.keyspaceGroupManager.GetElectionMember(
 		keyspaceID, keyspaceGroupID)
 	if err != nil {
