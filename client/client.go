@@ -539,6 +539,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	for retryCount = range maxRetries {
 		resp := c.GetTSAsync(ctx)
 		physical, logical, err = resp.Wait()
+		// directly return if no error to avoid metrics recording
 		if err == nil {
 			return physical, logical, err
 		}
