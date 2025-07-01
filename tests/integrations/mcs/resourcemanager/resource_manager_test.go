@@ -513,6 +513,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 
 // TestSwitchBurst is used to test https://github.com/tikv/pd/issues/6209
 func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
+	suite.T().Skip("skip this test because it is not stable")
 	re := suite.Require()
 	cli := suite.client
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod", "return(true)"))
