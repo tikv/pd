@@ -1346,3 +1346,26 @@ func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
 		s.checkTxnSafePoint(keyspaceID, 30)
 	}
 }
+
+func (s *gcStateManagerTestSuite) TestUpdateServiceSafePointToGCBarrier() {
+	re := s.Require()
+	state, err := s.manager.GetGCState(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 0)
+
+	// Test the compatibility of the old API.
+	// UpdateServiceGCSafePoint should be converted to GCBarrier on NullKeyspace
+	m := NewSafePointManager(s.storage, config.PDServerConfig{})
+	nowTS := uint64((time.Now().UnixNano() / int64(time.Millisecond)) << 18)
+	min, updated, err := m.UpdateServiceGCSafePoint("lightning", nowTS, math.MaxInt64, time.Now())
+	re.NoError(err)
+	if updated {
+		re.Greater(nowTS, min.SafePoint)
+	}
+
+	state, err = s.manager.GetGCState(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 1)
+	re.Equal(state.GCBarriers[0].BarrierTS, nowTS)
+	re.Nil(state.GCBarriers[0].ExpirationTime)
+}
