@@ -848,6 +848,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 			log.Info("node state check job has been stopped")
 			return
 		case <-ticker.C:
+			failpoint.InjectCall("blockCheckStores")
 			c.checkStores()
 		}
 	}
