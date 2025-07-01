@@ -539,9 +539,18 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	for retryCount = range maxRetries {
 		resp := c.GetTSAsync(ctx)
 		physical, logical, err = resp.Wait()
+		// directly return if no error to avoid metrics recording
+		if err == nil {
+			return physical, logical, err
+		}
+
 		if !errs.IsLeaderChange(err) {
 			break
 		}
+
+		log.Debug("[pd] get tso failed, retrying",
+			zap.Int("retry-count", retryCount),
+			zap.Error(err))
 		failpoint.Inject("skipRetry", func() {
 			failpoint.Return(physical, logical, err)
 		})
