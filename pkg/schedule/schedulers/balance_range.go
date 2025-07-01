@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,25 +103,30 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 			input["engine"].(string)))
 		return
 	}
+
 	job.Alias = input["alias"].(string)
-	startKeyStr, err := url.QueryUnescape(input["start-key"].(string))
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("start key:%s can't be unescaped", input["start-key"].(string)))
-		return
+	timeoutStr := input["timeout"].(string)
+	if len(timeoutStr) > 0 {
+		timeout, err := time.ParseDuration(timeoutStr)
+		if err != nil {
+			handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", input["timeout"].(string)))
+			return
+		}
+		job.Timeout = timeout
 	}
 
-	endKeyStr, err := url.QueryUnescape(input["end-key"].(string))
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("end key:%s can't be unescaped", input["end-key"].(string)))
-		return
-	}
-	log.Info("add balance key range job", zap.String("alias", job.Alias))
-	rs, err := decodeKeyRanges(endKeyStr, startKeyStr)
+	keys, err := keyutil.DecodeHttpKeyRanges(input)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	job.Ranges = rs
+	krs, err := getKeyRanges(keys)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	log.Info("add balance key range job", zap.String("alias", job.Alias))
+	job.Ranges = krs
 	if err := handler.config.addJob(job); err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -434,7 +438,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	}
 
 	s.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	s.filterCounter = filter.NewCounter(s.GetName())
@@ -518,10 +522,12 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		excludeTargets[plan.region.GetLeader().GetStoreId()] = struct{}{}
 	}
 	conf := plan.GetSchedulerConfig()
-	filters := []filter.Filter{
+	filters := s.filters
+	filters = append(filters,
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
 		filter.NewPlacementSafeguard(s.GetName(), conf, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, plan.fit),
-	}
+	)
+
 	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
 	for i := range candidates.Stores {
 		plan.target = candidates.Stores[len(candidates.Stores)-i-1]

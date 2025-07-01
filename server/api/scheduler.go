@@ -17,6 +17,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"io"
 	"net/http"
 	"net/url"
@@ -149,9 +150,13 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		if err := apiutil.CollectKeyRangesOption(input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		keys, err := keyutil.DecodeHttpKeyRanges(input)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		for _, key := range keys {
+			collector(key)
 		}
 	case types.ScatterRangeScheduler:
 		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
