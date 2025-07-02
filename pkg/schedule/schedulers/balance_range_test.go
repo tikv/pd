@@ -101,7 +101,7 @@ func TestTIKVEngine(t *testing.T) {
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("0", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
-	re.Equal(op.Step(2).String(), "transfer leader from store 1 to store 4")
+	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
 
 func TestTIFLASHEngine(t *testing.T) {

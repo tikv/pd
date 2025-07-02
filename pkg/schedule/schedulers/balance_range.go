@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -105,8 +104,8 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 	}
 
 	job.Alias = input["alias"].(string)
-	timeoutStr := input["timeout"].(string)
-	if len(timeoutStr) > 0 {
+	timeoutStr, ok := input["timeout"].(string)
+	if ok && len(timeoutStr) > 0 {
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
 			handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", input["timeout"].(string)))
@@ -115,7 +114,7 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		job.Timeout = timeout
 	}
 
-	keys, err := keyutil.DecodeHttpKeyRanges(input)
+	keys, err := keyutil.DecodeHTTPKeyRanges(input)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -132,22 +131,6 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
-}
-
-func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]keyutil.KeyRange, error) {
-	startKeys := strings.Split(startKeyStr, ",")
-	endKeys := strings.Split(endKeyStr, ",")
-	if len(startKeys) != len(endKeys) {
-		return nil, errs.ErrInvalidArgument.FastGenByArgs("the length of start key doesn't equal to end key")
-	}
-	rs := make([]keyutil.KeyRange, len(startKeys))
-	for i := range startKeys {
-		if startKeys[i] == "" && endKeys[i] == "" {
-			return nil, errs.ErrInvalidArgument.FastGenByArgs("start key and end key cannot both be nil")
-		}
-		rs[i] = keyutil.NewKeyRange(startKeys[i], endKeys[i])
-	}
-	return rs, nil
 }
 
 func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r *http.Request) {
@@ -565,7 +548,6 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 			} else {
 				op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
 			}
-
 		}
 
 		if err != nil {
