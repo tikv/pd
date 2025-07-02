@@ -560,7 +560,12 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 			op, err = operator.CreateTransferLeaderOperator(s.GetName(), plan, plan.region, plan.targetStoreID(), []uint64{}, operator.OpRange)
 		} else {
 			newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-			op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+			if plan.region.GetLeader().GetStoreId() == sourceID {
+				op, err = operator.CreateReplaceLeaderPeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer, newPeer)
+			} else {
+				op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+			}
+
 		}
 
 		if err != nil {
