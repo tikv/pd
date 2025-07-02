@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/client/clients/gc"
