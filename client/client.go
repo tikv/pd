@@ -74,6 +74,8 @@ type RPCClient interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// Deprecated: Avoid using this API.
+	WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
