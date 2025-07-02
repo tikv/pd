@@ -155,9 +155,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		for _, key := range keys {
-			collector(key)
-		}
+		args = append(args, keys...)
 	case types.ScatterRangeScheduler:
 		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
