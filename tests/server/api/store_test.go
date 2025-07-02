@@ -471,7 +471,7 @@ func (suite *storeTestSuite) checkStoreSetState(cluster *tests.TestCluster) {
 	ch := make(chan struct{})
 	defer close(ch)
 	failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
-		ch <- struct{}{}
+		<-ch
 	})
 	defer func() {
 		failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores")
