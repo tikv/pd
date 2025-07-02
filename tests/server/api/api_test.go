@@ -1078,6 +1078,17 @@ func TestPreparingProgress(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return leader.GetRaftCluster().GetTotalRegionCount() == core.InitClusterRegionThreshold
 	})
+
+	ch := make(chan struct{})
+	defer close(ch)
+	failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
+		<-ch
+	})
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores")
+	}()
+	triggerCheckStores := func() { ch <- struct{}{} }
+
 	// to avoid forcing the store to the `serving` state with too few regions
 	for _, store := range stores[2:] {
 		tests.MustPutStore(re, cluster, store)
@@ -1100,6 +1111,7 @@ func TestPreparingProgress(t *testing.T) {
 
 	var p api.Progress
 	testutil.Eventually(re, func() bool {
+		defer triggerCheckStores()
 		// wait for cluster prepare
 		if !leader.GetRaftCluster().IsPrepared() {
 			leader.GetRaftCluster().SetPrepared()
@@ -1116,6 +1128,8 @@ func TestPreparingProgress(t *testing.T) {
 			return false
 		}
 		re.NoError(json.Unmarshal(output, &p))
+		t.Logf("progress: %v", p)
+
 		re.Equal("preparing", p.Action)
 		re.Equal(0.0, p.Progress)
 		re.Equal(0.0, p.CurrentSpeed)
@@ -1126,7 +1140,9 @@ func TestPreparingProgress(t *testing.T) {
 	// update size
 	tests.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%20d", 1000)), []byte(fmt.Sprintf("%20d", 1001)), core.SetApproximateSize(10))
 	tests.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%20d", 1001)), []byte(fmt.Sprintf("%20d", 1002)), core.SetApproximateSize(40))
+
 	testutil.Eventually(re, func() bool {
+		defer triggerCheckStores()
 		output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 		re.NoError(json.Unmarshal(output, &p))
 		t.Logf("progress: %v", p)
