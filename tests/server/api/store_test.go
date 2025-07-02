@@ -401,8 +401,8 @@ func (suite *storeTestSuite) checkStoreDelete(cluster *tests.TestCluster) {
 	}
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/store/%d", urlPrefix, testCase.id)
-		status := requestStatusBody(re, tests.TestDialClient, http.MethodDelete, url)
 		testutil.Eventually(re, func() bool {
+			status := requestStatusBody(re, tests.TestDialClient, http.MethodDelete, url)
 			return testCase.status == status
 		})
 	}
