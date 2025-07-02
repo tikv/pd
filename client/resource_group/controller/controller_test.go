@@ -547,3 +547,55 @@ func TestGetResourceGroup(t *testing.T) {
 	re.Error(err)
 	re.Nil(gc02)
 }
+
+func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	checkKeyspace := func(keyspaceID uint32) {
+		mockProvider := newMockResourceGroupProvider()
+		controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, keyspaceID)
+		re.NoError(err)
+		controller.Start(ctx)
+
+		testResourceGroup := &rmpb.ResourceGroup{
+			Name: "test-group",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}},
+			},
+		}
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.NotNil(gc)
+
+		requestReceived := make(chan bool, 1)
+
+		mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			request := args.Get(1).(*rmpb.TokenBucketsRequest)
+			re.Len(request.Requests, 1)
+			req := request.Requests[0]
+			re.NotNil(req.KeyspaceId)
+			re.Equal(keyspaceID, req.GetKeyspaceId().GetValue())
+			requestReceived <- true
+		}).Return([]*rmpb.TokenBucketResponse{}, nil)
+
+		// Trigger a low token report to ensure collectTokenBucketRequests is called
+		counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+		counter.limiter.mu.Lock()
+		counter.limiter.notify()
+		counter.limiter.mu.Unlock()
+
+		select {
+		case <-requestReceived:
+			// Success
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for AcquireTokenBuckets to be called")
+		}
+	}
+	checkKeyspace(constants.NullKeyspaceID)
+	checkKeyspace(1)
+}
