@@ -163,7 +163,7 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool
 	if fromNewRevision {
 		startRevision = updatedRevision
 	}
-	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision)
+	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision) //nolint:staticcheck
 	re.NoError(err)
 
 	timer := time.NewTimer(time.Second)
