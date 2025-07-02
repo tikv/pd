@@ -272,6 +272,7 @@ type RegionSetInformer interface {
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
+	BatchScanRegions(keyRanges *KeyRanges, limit int) []*RegionInfo
 }
 
 // StoreSetInformer provides access to a shared informer of stores.
@@ -309,3 +310,34 @@ func NewKeyRange(startKey, endKey string) KeyRange {
 		EndKey:   []byte(endKey),
 	}
 }
+<<<<<<< HEAD
+=======
+
+// KeyRanges is a slice of KeyRange.
+type KeyRanges struct {
+	krs []*KeyRange
+}
+
+// NewKeyRangesWithSize creates a KeyRanges with the hint size.
+func NewKeyRangesWithSize(size int) *KeyRanges {
+	return &KeyRanges{
+		krs: make([]*KeyRange, 0, size),
+	}
+}
+
+// Append appends a KeyRange.
+func (rs *KeyRanges) Append(startKey, endKey []byte) {
+	rs.krs = append(rs.krs, &KeyRange{
+		StartKey: startKey,
+		EndKey:   endKey,
+	})
+}
+
+// Ranges returns the slice of KeyRange.
+func (rs *KeyRanges) Ranges() []*KeyRange {
+	if rs == nil {
+		return nil
+	}
+	return rs.krs
+}
+>>>>>>> 049de1761 (api: client and server support `BatchScanRegions` (#8300))

@@ -645,6 +645,112 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 		_, err = regionHeartbeat.Recv()
 		return err == nil
 	})
+<<<<<<< HEAD
+=======
+}
+
+func (*followerForwardAndHandleTestSuite) TearDownTest() {}
+
+func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
+	suite.cluster.Destroy()
+	suite.clean()
+}
+
+func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwarding() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
+	defer cli.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	time.Sleep(200 * time.Millisecond)
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	re.NoError(err)
+	re.NotNil(r)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	time.Sleep(200 * time.Millisecond)
+	r, err = cli.GetRegion(context.Background(), []byte("a"))
+	re.NoError(err)
+	re.NotNil(r)
+}
+
+// case 1: unreachable -> normal
+func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
+	defer cli.Close()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+	var lastTS uint64
+	testutil.Eventually(re, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		suite.T().Log(err)
+		return false
+	})
+
+	lastTS = checkTS(re, cli, lastTS)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+	time.Sleep(2 * time.Second)
+	checkTS(re, cli, lastTS)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/responseNil", "return(true)"))
+	regions, err := cli.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
+	re.NoError(err)
+	re.Empty(regions)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/responseNil"))
+	regions, err = cli.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
+	re.NoError(err)
+	re.Len(regions, 1)
+}
+
+// case 2: unreachable -> leader transfer -> normal
+func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
+	defer cli.Close()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+	var lastTS uint64
+	testutil.Eventually(re, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		suite.T().Log(err)
+		return false
+	})
+
+	lastTS = checkTS(re, cli, lastTS)
+	re.NoError(suite.cluster.GetLeaderServer().ResignLeader())
+	re.NotEmpty(suite.cluster.WaitLeader())
+	lastTS = checkTS(re, cli, lastTS)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+	time.Sleep(5 * time.Second)
+	checkTS(re, cli, lastTS)
+}
+
+// case 3: network partition between client and follower A -> transfer leader to follower A -> normal
+func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerForwarding() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cluster := suite.cluster
+	leader := cluster.GetLeaderServer()
+
+>>>>>>> 049de1761 (api: client and server support `BatchScanRegions` (#8300))
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
@@ -1077,8 +1183,13 @@ func (suite *clientTestSuite) TestScanRegions() {
 	}
 
 	// Wait for region heartbeats.
+<<<<<<< HEAD
 	testutil.Eventually(suite.Require(), func() bool {
 		scanRegions, err := suite.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
+=======
+	testutil.Eventually(re, func() bool {
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+>>>>>>> 049de1761 (api: client and server support `BatchScanRegions` (#8300))
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -1096,9 +1207,15 @@ func (suite *clientTestSuite) TestScanRegions() {
 
 	t := suite.T()
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
+<<<<<<< HEAD
 		scanRegions, err := suite.client.ScanRegions(context.Background(), start, end, limit)
 		suite.NoError(err)
 		suite.Len(scanRegions, len(expect))
+=======
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: start, EndKey: end}}, limit)
+		re.NoError(err)
+		re.Len(scanRegions, len(expect))
+>>>>>>> 049de1761 (api: client and server support `BatchScanRegions` (#8300))
 		t.Log("scanRegions", scanRegions)
 		t.Log("expect", expect)
 		for i := range expect {
@@ -1660,4 +1777,128 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 		return true
 	})
 	return leader
+}
+
+func (suite *clientTestSuite) TestBatchScanRegions() {
+	re := suite.Require()
+	regionLen := 10
+	regions := make([]*metapb.Region, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		regionID := regionIDAllocator.alloc()
+		r := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    peers,
+		}
+		regions = append(regions, r)
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(suite.srv),
+			Region: r,
+			Leader: peers[0],
+		}
+		err := suite.regionHeartbeat.Send(req)
+		re.NoError(err)
+	}
+
+	// Wait for region heartbeats.
+	testutil.Eventually(re, func() bool {
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+		return err == nil && len(scanRegions) == 10
+	})
+
+	// Set leader of region3 to nil.
+	region3 := core.NewRegionInfo(regions[3], nil)
+	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+
+	// Add down peer for region4.
+	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
+	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+
+	// Add pending peers for region5.
+	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
+	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+
+	// Add buckets for region6.
+	region6 := core.NewRegionInfo(regions[6], regions[6].Peers[0], core.SetBuckets(&metapb.Buckets{RegionId: regions[6].Id, Version: 2}))
+	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region6)
+
+	t := suite.T()
+	check := func(ranges []pd.KeyRange, limit int, expect []*metapb.Region) {
+		for _, bucket := range []bool{false, true} {
+			var opts []pd.GetRegionOption
+			if bucket {
+				opts = append(opts, pd.WithBuckets())
+			}
+			scanRegions, err := suite.client.BatchScanRegions(context.Background(), ranges, limit, opts...)
+			re.NoError(err)
+			re.Len(scanRegions, len(expect))
+			t.Log("scanRegions", scanRegions)
+			t.Log("expect", expect)
+			for i := range expect {
+				re.Equal(expect[i], scanRegions[i].Meta)
+
+				if scanRegions[i].Meta.GetId() == region3.GetID() {
+					re.Equal(&metapb.Peer{}, scanRegions[i].Leader)
+				} else {
+					re.Equal(expect[i].Peers[0], scanRegions[i].Leader)
+				}
+
+				if scanRegions[i].Meta.GetId() == region4.GetID() {
+					re.Equal([]*metapb.Peer{expect[i].Peers[1]}, scanRegions[i].DownPeers)
+				}
+
+				if scanRegions[i].Meta.GetId() == region5.GetID() {
+					re.Equal([]*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]}, scanRegions[i].PendingPeers)
+				}
+
+				if scanRegions[i].Meta.GetId() == region6.GetID() {
+					if !bucket {
+						re.Nil(scanRegions[i].Buckets)
+					} else {
+						re.Equal(scanRegions[i].Buckets, region6.GetBuckets())
+					}
+				}
+			}
+		}
+	}
+
+	// valid ranges
+	check([]pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10, regions)
+	check([]pd.KeyRange{{StartKey: []byte{1}, EndKey: nil}}, 5, regions[1:6])
+	check([]pd.KeyRange{
+		{StartKey: []byte{0}, EndKey: []byte{1}},
+		{StartKey: []byte{2}, EndKey: []byte{3}},
+		{StartKey: []byte{4}, EndKey: []byte{5}},
+		{StartKey: []byte{6}, EndKey: []byte{7}},
+		{StartKey: []byte{8}, EndKey: []byte{9}},
+	}, 10, []*metapb.Region{regions[0], regions[2], regions[4], regions[6], regions[8]})
+	check([]pd.KeyRange{
+		{StartKey: []byte{0}, EndKey: []byte{1}},
+		{StartKey: []byte{2}, EndKey: []byte{3}},
+		{StartKey: []byte{4}, EndKey: []byte{5}},
+		{StartKey: []byte{6}, EndKey: []byte{7}},
+		{StartKey: []byte{8}, EndKey: []byte{9}},
+	}, 3, []*metapb.Region{regions[0], regions[2], regions[4]})
+	check([]pd.KeyRange{
+		{StartKey: []byte{0}, EndKey: []byte{0, 1}}, // non-continuous ranges in a region
+		{StartKey: []byte{0, 2}, EndKey: []byte{0, 3}},
+		{StartKey: []byte{0, 3}, EndKey: []byte{0, 4}},
+		{StartKey: []byte{0, 5}, EndKey: []byte{0, 6}},
+		{StartKey: []byte{0, 7}, EndKey: []byte{3}},
+		{StartKey: []byte{4}, EndKey: []byte{5}},
+	}, 2, []*metapb.Region{regions[0], regions[1]})
+
+	// invalid ranges
+	_, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}}, 10)
+	re.Error(err, "invalid key range, start key > end key")
+	_, err = suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{
+		{StartKey: []byte{0}, EndKey: []byte{2}},
+		{StartKey: []byte{1}, EndKey: []byte{3}},
+	}, 10)
+	re.Error(err, "invalid key range, ranges overlapped")
 }

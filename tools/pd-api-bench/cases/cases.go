@@ -275,7 +275,35 @@ func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
+<<<<<<< HEAD
 	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56), c.regionSample)
+=======
+	//nolint:staticcheck
+	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID), generateKeyForSimulator(endID), c.regionSample)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type tso struct {
+	*baseCase
+}
+
+func newTso() func() GRPCCase {
+	return func() GRPCCase {
+		return &tso{
+			baseCase: &baseCase{
+				name: "Tso",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*tso) Unary(ctx context.Context, cli pd.Client) error {
+	_, _, err := cli.GetTS(ctx)
+>>>>>>> 049de1761 (api: client and server support `BatchScanRegions` (#8300))
 	if err != nil {
 		return err
 	}
