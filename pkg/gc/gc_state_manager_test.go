@@ -1351,7 +1351,7 @@ func (s *gcStateManagerTestSuite) TestUpdateServiceSafePointToGCBarrier() {
 	re := s.Require()
 	state, err := s.manager.GetGCState(constant.NullKeyspaceID)
 	re.NoError(err)
-	re.Len(state.GCBarriers, 0)
+	re.Empty(state.GCBarriers)
 
 	// Test the compatibility of the old API.
 	// UpdateServiceGCSafePoint should be converted to GCBarrier on NullKeyspace
