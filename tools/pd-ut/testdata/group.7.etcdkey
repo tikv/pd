@@ -39,7 +39,6 @@
 /pd//keyspaces/alloc_id get
 /pd//keyspaces/gc_safe_point/ get
 /pd//keyspaces/gc_safe_point/ save
-/pd//keyspaces/gc_safe_point/ watch
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
 /pd//keyspaces/id/ks get
