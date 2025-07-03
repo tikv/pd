@@ -252,7 +252,7 @@ func DecodeHTTPKeyRanges(input map[string]any) ([]string, error) {
 	if len(startKeys) != len(endKeys) {
 		return nil, errs.ErrInvalidArgument.FastGenByArgs(startKeyStr, endKeyStr)
 	}
-	krs := make([]string, 0, len(startKeys))
+	krs := make([]string, 0, 2*len(startKeys))
 	for i := range startKeys {
 		startKey, err := url.QueryUnescape(startKeys[i])
 		if err != nil {
