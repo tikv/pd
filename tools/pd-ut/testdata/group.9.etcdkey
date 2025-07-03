@@ -89,7 +89,6 @@ resource_group/keyspace/service_limits/ get
 resource_group/keyspace/service_limits/ save
 resource_group/keyspace/settings/ get
 resource_group/keyspace/settings/ watch
-resource_group/keyspace/settings//cross_modify_test save
 resource_group/keyspace/settings//default save
 resource_group/keyspace/settings//keyspace_test remove
 resource_group/keyspace/settings//keyspace_test save
@@ -100,7 +99,6 @@ resource_group/keyspace/settings//rg_multi_ save
 resource_group/keyspace/settings//test_group remove
 resource_group/keyspace/settings//test_group save
 resource_group/keyspace/states/ get
-resource_group/keyspace/states//cross_modify_test save
 resource_group/keyspace/states//default save
 resource_group/keyspace/states//keyspace_test save
 resource_group/keyspace/states//keyspace_test_ save

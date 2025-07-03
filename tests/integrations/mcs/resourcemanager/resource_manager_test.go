@@ -1945,7 +1945,7 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 	defer clientA.Close()
 
 	// Add a resource group in Keyspace A and check
-	groupName := "cross_modify_test"
+	groupName := "keyspace_test"
 	originalGroup := &rmpb.ResourceGroup{
 		Name: groupName,
 		Mode: rmpb.GroupMode_RUMode,
