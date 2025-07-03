@@ -512,6 +512,11 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 	)
 
 	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
+	log.Debug("transfer peer",
+		zap.String("rule", plan.job.Rule.String()),
+		zap.Uint64("region-id", plan.region.GetID()),
+		zap.Int("candidate-count", len(candidates.Stores)),
+		zap.Int("dstStores-count", len(dstStores)))
 	for i := range candidates.Stores {
 		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
 		plan.targetScore = plan.score(plan.target.GetID())
