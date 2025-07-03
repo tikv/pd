@@ -436,6 +436,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		balanceRangeNoJobCounter.Inc()
 		return nil, nil
 	}
+	defer s.filterCounter.Flush()
 
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
 	// todo: don't prepare every times, the prepare information can be reused.
