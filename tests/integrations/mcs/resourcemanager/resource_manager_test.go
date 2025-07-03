@@ -38,6 +38,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -1920,4 +1921,60 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 		}
 		clients[keyspace].Close()
 	}
+}
+
+func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceGroup() {
+	re := suite.Require()
+	ctx := suite.ctx
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+
+	// Create two keyspaces
+	keyspaceA := uint32(10)
+	keyspaceB := uint32(11)
+	err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceA, Name: "ks_A"})
+	})
+	re.NoError(err)
+	err = storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceB, Name: "ks_B"})
+	})
+	re.NoError(err)
+
+	// Create clients for keyspaceA
+	clientA := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceA, suite.cluster.GetConfig().GetClientURLs())
+	defer clientA.Close()
+
+	// Add a resource group in Keyspace A and check
+	groupName := "cross_modify_test"
+	originalGroup := &rmpb.ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+	}
+	resp, err := clientA.AddResourceGroup(ctx, originalGroup)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	g, err := clientA.GetResourceGroup(ctx, groupName)
+	re.NoError(err)
+	re.Equal(groupName, g.Name)
+	re.NotNil(g.KeyspaceId)
+	re.Equal(keyspaceA, g.KeyspaceId.Value)
+
+	// Try to modify the group with a different keyspace ID using Client A
+	modifiedGroup := &rmpb.ResourceGroup{
+		Name:       groupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		Priority:   5,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceB},
+	}
+
+	// It should be failed because the keyspace ID does not match
+	_, err = clientA.ModifyResourceGroup(ctx, modifiedGroup)
+	re.Error(err)
+	expectedErr := errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(keyspaceB, keyspaceA)
+	re.EqualError(err, expectedErr.Error(), "The error should explicitly state the keyspace ID mismatch")
+
+	// Check again and ensure the group in Keyspace A is unchanged
+	g, err = clientA.GetResourceGroup(ctx, groupName)
+	re.NoError(err)
+	re.Equal(uint32(0), g.Priority, "Group in keyspace A should not be modified")
 }

@@ -101,8 +101,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if rg == nil {
 		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
 	}
-	resp := rg.IntoProtoResourceGroup()
-	resp.KeyspaceId = &rmpb.KeyspaceIDValue{Value: keyspaceID}
+	resp := rg.IntoProtoResourceGroup(keyspaceID)
 	return &rmpb.GetResourceGroupResponse{
 		Group: resp,
 	}, nil
@@ -122,8 +121,7 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
 	for _, group := range groups {
-		resp := group.IntoProtoResourceGroup()
-		resp.KeyspaceId = &rmpb.KeyspaceIDValue{Value: keyspaceID}
+		resp := group.IntoProtoResourceGroup(keyspaceID)
 		resps.Groups = append(resps.Groups, resp)
 	}
 	return resps, nil
