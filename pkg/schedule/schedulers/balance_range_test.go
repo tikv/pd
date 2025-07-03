@@ -31,6 +31,72 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
+func TestPlacementRule(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	rule1 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_0",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    1,
+		Role:     placement.Leader,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z1"}},
+		},
+	}
+	rule2 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_1",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    1,
+		Role:     placement.Voter,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z2"}},
+		},
+	}
+	rule3 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_2",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    1,
+		Role:     placement.Learner,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z3"}},
+			{Key: "engine", Op: "in", Values: []string{"tiflash"}},
+		},
+	}
+	re.NoError(tc.SetRules([]*placement.Rule{rule1, rule2, rule3}))
+	sc := newBalanceRangeScheduler(oc, &balanceRangeSchedulerConfig{}).(*balanceRangeScheduler)
+	job := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.LeaderScatter,
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
+	}
+	filter := sc.getStoreRuleFilter(tc, job)
+	re.NotNil(filter)
+	storeZ1 := core.NewStoreInfoWithLabel(1, map[string]string{"region": "z1"})
+	storeZ2 := core.NewStoreInfoWithLabel(1, map[string]string{"region": "z2"})
+	re.True(filter.Target(tc.GetSchedulerConfig(), storeZ1).IsOK())
+	re.False(filter.Target(tc.GetSchedulerConfig(), storeZ2).IsOK())
+
+	job.Rule = core.PeerScatter
+	filter = sc.getStoreRuleFilter(tc, job)
+	re.True(filter.Target(tc.GetSchedulerConfig(), storeZ1).IsOK())
+	re.True(filter.Target(tc.GetSchedulerConfig(), storeZ2).IsOK())
+
+	job.Rule = core.LearnerScatter
+	filter = sc.getStoreRuleFilter(tc, job)
+	re.False(filter.Target(tc.GetSchedulerConfig(), storeZ1).IsOK())
+	re.False(filter.Target(tc.GetSchedulerConfig(), storeZ2).IsOK())
+}
+
 func TestBalanceRangePlan(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
