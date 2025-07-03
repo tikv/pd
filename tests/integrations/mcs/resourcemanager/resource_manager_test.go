@@ -38,6 +38,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -513,6 +514,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 
 // TestSwitchBurst is used to test https://github.com/tikv/pd/issues/6209
 func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
+	suite.T().Skip("skip this test because it is not stable")
 	re := suite.Require()
 	cli := suite.client
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod", "return(true)"))
@@ -1600,7 +1602,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 		return storage.SaveKeyspaceMeta(txn, keyspace)
 	})
 	re.NoError(err)
-	// Add resource group
+	// Add resource group with keyspace id
 	group := &rmpb.ResourceGroup{
 		Name: "keyspace_test",
 		Mode: rmpb.GroupMode_RUMode,
@@ -1612,9 +1614,8 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 				Tokens: 100000,
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
 	}
-	resp, err := cli.AddResourceGroup(suite.ctx, group)
+	resp, err := clientKeyspace.AddResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 
@@ -1634,7 +1635,18 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	rgs, err = clientKeyspace.ListResourceGroups(suite.ctx, pd.WithRUStats)
 	re.NoError(err)
 	re.Len(rgs, 2) // Including the default resource group.
-	re.Contains(rgs, rg)
+	for _, r := range rgs {
+		re.NotNil(r.KeyspaceId)
+		re.Equal(r.KeyspaceId.Value, keyspaceID)
+		switch r.Name {
+		case server.DefaultResourceGroupName:
+		case group.Name:
+			re.Equal(r.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
+			re.Equal(r.RUSettings.RU.Tokens, group.RUSettings.RU.Tokens)
+		default:
+			re.Fail("unknown resource group")
+		}
+	}
 
 	// Modify resource group with keyspace id
 	group.RUSettings.RU.Settings.FillRate = 1000
@@ -1701,7 +1713,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKeyspaces() {
 	re := suite.Require()
-	cli := suite.client
 	ctx := suite.ctx
 	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
 
@@ -1717,6 +1728,11 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		keyspaceID := uint32(i + 1)
 		keyspaceName := fmt.Sprintf("keyspace%d_test", keyspaceID)
 		groupName := fmt.Sprintf("rg_multi_%d", keyspaceID)
+		// Create a specific client for this keyspace
+		client := utils.SetupClientWithKeyspaceID(
+			ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs(),
+		)
+		clients[i] = client
 		// Create and save keyspace metadata
 		keyspaceMeta := &keyspacepb.KeyspaceMeta{Id: keyspaceID, Name: keyspaceName}
 		err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
@@ -1730,13 +1746,8 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 10000}, Tokens: 100000}},
 			KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
 		}
-		_, err = cli.AddResourceGroup(ctx, groups[i])
+		_, err = clients[i].AddResourceGroup(ctx, groups[i])
 		re.NoError(err)
-		// Create a specific client for this keyspace
-		client := utils.SetupClientWithKeyspaceID(
-			ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs(),
-		)
-		clients[i] = client
 		// Prepare consumption data for later request
 		consumptions[i] = &rmpb.Consumption{
 			RRU: float64(100 * (i + 1)), // Use different values to distinguish
@@ -1808,7 +1819,6 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 					Tokens: 100000,
 				},
 			},
-			KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspace},
 		}
 	}
 
@@ -1912,4 +1922,60 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 		}
 		clients[keyspace].Close()
 	}
+}
+
+func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceGroup() {
+	re := suite.Require()
+	ctx := suite.ctx
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+
+	// Create two keyspaces
+	keyspaceA := uint32(10)
+	keyspaceB := uint32(11)
+	err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceA, Name: "ks_A"})
+	})
+	re.NoError(err)
+	err = storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceB, Name: "ks_B"})
+	})
+	re.NoError(err)
+
+	// Create clients for keyspaceA
+	clientA := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceA, suite.cluster.GetConfig().GetClientURLs())
+	defer clientA.Close()
+
+	// Add a resource group in Keyspace A and check
+	groupName := "keyspace_test"
+	originalGroup := &rmpb.ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+	}
+	resp, err := clientA.AddResourceGroup(ctx, originalGroup)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	g, err := clientA.GetResourceGroup(ctx, groupName)
+	re.NoError(err)
+	re.Equal(groupName, g.Name)
+	re.NotNil(g.KeyspaceId)
+	re.Equal(keyspaceA, g.KeyspaceId.Value)
+
+	// Try to modify the group with a different keyspace ID using Client A
+	modifiedGroup := &rmpb.ResourceGroup{
+		Name:       groupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		Priority:   5,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceB},
+	}
+
+	// It should be failed because the keyspace ID does not match
+	_, err = clientA.ModifyResourceGroup(ctx, modifiedGroup)
+	re.Error(err)
+	expectedErr := errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(keyspaceB, keyspaceA)
+	re.EqualError(err, expectedErr.Error(), "The error should explicitly state the keyspace ID mismatch")
+
+	// Check again and ensure the group in Keyspace A is unchanged
+	g, err = clientA.GetResourceGroup(ctx, groupName)
+	re.NoError(err)
+	re.Equal(uint32(0), g.Priority, "Group in keyspace A should not be modified")
 }

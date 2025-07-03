@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -400,8 +401,8 @@ func (suite *storeTestSuite) checkStoreDelete(cluster *tests.TestCluster) {
 	}
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/store/%d", urlPrefix, testCase.id)
-		status := requestStatusBody(re, tests.TestDialClient, http.MethodDelete, url)
 		testutil.Eventually(re, func() bool {
+			status := requestStatusBody(re, tests.TestDialClient, http.MethodDelete, url)
 			return testCase.status == status
 		})
 	}
@@ -467,6 +468,14 @@ func (suite *storeTestSuite) checkStoreSetState(cluster *tests.TestCluster) {
 	re.Equal(metapb.StoreState_Up, info.Store.State)
 
 	// Set to Offline.
+	ch := make(chan struct{})
+	defer close(ch)
+	failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
+		<-ch
+	})
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores")
+	}()
 	info = response.StoreInfo{}
 	err = testutil.CheckPostJSON(tests.TestDialClient, url+"/state?state=Offline", nil, testutil.StatusOK(re))
 	re.NoError(err)

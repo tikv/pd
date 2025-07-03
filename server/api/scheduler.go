@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
 )
 
@@ -149,10 +150,12 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		if err := apiutil.CollectKeyRangesOption(input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		keys, err := keyutil.DecodeHTTPKeyRanges(input)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		args = append(args, keys...)
 	case types.ScatterRangeScheduler:
 		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
