@@ -163,7 +163,7 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool
 	if fromNewRevision {
 		startRevision = updatedRevision
 	}
-	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision)
+	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision) //nolint:staticcheck
 	re.NoError(err)
 
 	timer := time.NewTimer(time.Second)
@@ -196,7 +196,14 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool
 
 // mustUpdateSafePoint updates the gc safe point of the given keyspace id.
 func (suite *gcClientTestSuite) mustUpdateSafePoint(re *require.Assertions, keyspaceID uint32, safePoint uint64) {
-	_, err := suite.client.UpdateGCSafePointV2(suite.server.Context(), keyspaceID, safePoint)
+	client, err := pd.NewClientWithKeyspace(suite.server.Context(),
+		caller.TestComponent,
+		keyspaceID,
+		[]string{suite.server.GetAddr()},
+		pd.SecurityOption{},
+	)
+	re.NoError(err)
+	_, err = client.UpdateGCSafePoint(suite.server.Context(), safePoint)
 	re.NoError(err)
 }
 
