@@ -409,7 +409,7 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 			km := cluster.GetKeyRangeManager()
 			km.Append(job.Ranges)
 		}
-		// todo: add other conditions such as the diff of the score between the source and target store.
+		
 		if time.Since(*job.Start) > job.Timeout {
 			if err := s.conf.finish(index); err != nil {
 				return false
@@ -418,14 +418,13 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 			km.Delete(job.Ranges)
 			balanceRangeExpiredCounter.Inc()
 		}
-		opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
-		// todo: don't prepare every times, the prepare information can be reused.
-		var err error
 
+		opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+		var err error
 		// todo: don't prepare every times, the prepare information can be reused.
 		s.plan, err = s.prepare(cluster, opInfluence, job)
 		if err != nil {
-			log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
+			log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
 			return false
 		}
 		if s.plan.isBalanced() {
@@ -475,13 +474,17 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	}
 
 	plan := s.plan
+	if plan == nil {
+		balanceRangePrepareFailedCounter.Inc()
+		return nil, nil
+	}
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
 	pendingFilter := filter.NewRegionPendingFilter()
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
 
-	for sourceIndex, sourceStore := range s.plan.stores {
+	for sourceIndex, sourceStore := range plan.stores {
 		plan.source = sourceStore
 		plan.sourceScore = plan.score(plan.source.GetID())
 		if plan.sourceScore < plan.averageScore {

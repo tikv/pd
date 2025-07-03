@@ -366,4 +366,5 @@ var (
 	balanceRangeCreateOpFailCounter  = balanceRangeCounterWithEvent("create-operator-fail")
 	balanceRangeNoReplacementCounter = balanceRangeCounterWithEvent("no-replacement")
 	balanceRangeNoJobCounter         = balanceRangeCounterWithEvent("no-job")
+	balanceRangePrepareFailedCounter = balanceRangeCounterWithEvent("prepare-failed")
 )
