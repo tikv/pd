@@ -128,7 +128,7 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 		},
 		Priority: middlePriority,
 	}
-	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup()); err != nil {
+	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
 		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
 	}
 }
