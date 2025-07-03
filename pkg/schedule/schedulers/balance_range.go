@@ -431,6 +431,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
+	defer s.filterCounter.Flush()
 	_, job := s.conf.peek()
 	if job == nil {
 		balanceRangeNoJobCounter.Inc()
