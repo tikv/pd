@@ -617,6 +617,43 @@ func fetchAllRegions(cluster sche.SchedulerCluster, ranges *keyutil.KeyRanges) [
 	return regions
 }
 
+func (s *balanceRangeScheduler) getStoreRuleFilter(cluster sche.SchedulerCluster, job *balanceRangeSchedulerJob) filter.Filter {
+	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() {
+		return nil
+	}
+	rules := make([]*placement.Rule, 0)
+	rm := cluster.GetRuleManager()
+	for _, r := range job.Ranges {
+		candidateRules := rm.GetRulesForApplyRange(r.StartKey, r.EndKey)
+		targetRules := make([]*placement.Rule, 0, len(candidateRules))
+		switch job.Rule {
+		case core.LeaderScatter:
+			for _, rule := range candidateRules {
+				if rule.Role == placement.Leader {
+					targetRules = []*placement.Rule{rule}
+					break
+				}
+				if rule.Role == placement.Voter {
+					targetRules = append(targetRules, rule)
+				}
+			}
+		case core.PeerScatter:
+			targetRules = candidateRules
+		case core.LearnerScatter:
+			for _, rule := range candidateRules {
+				if rule.Role == placement.Learner {
+					targetRules = append(targetRules, rule)
+				}
+			}
+		}
+		rules = append(rules, targetRules...)
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+	return filter.NewStoreRuleFilter(s.GetName(), rules)
+}
+
 func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
 	filters := s.filters
 	switch job.Engine {
@@ -626,6 +663,11 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		filters = append(filters, filter.NewEngineFilter(string(types.BalanceRangeScheduler), filter.SpecialEngines))
 	default:
 		return nil, errs.ErrGetSourceStore.FastGenByArgs(job.Engine)
+	}
+
+	storeRuleFilter := s.getStoreRuleFilter(cluster, job)
+	if storeRuleFilter != nil {
+		filters = append(filters, storeRuleFilter)
 	}
 	sources := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
 	if len(sources) <= 1 {
