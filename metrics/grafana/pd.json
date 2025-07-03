@@ -12244,7 +12244,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "max by (keyspace_id, barrier) (pd_gc_barrier{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"} / (2^18))",
+              "expr": "max by (keyspace_id, barrier) (pd_gc_barrier{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"})",
               "hide": false,
               "interval": "",
               "intervalFactor": 1,

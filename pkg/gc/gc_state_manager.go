@@ -510,7 +510,8 @@ func (m *GCStateManager) setGCBarrierImpl(keyspaceID uint32, barrierID string, b
 		zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl),
 		zap.Stringer("new-gc-barrier", newBarrier))
 
-	gcBarrierGauge.WithLabelValues(strconv.Itoa(int(keyspaceID)), barrierID).Set(float64(newBarrier.BarrierTS))
+	barrierTSMilliSec := newBarrier.BarrierTS >> 18
+	gcBarrierGauge.WithLabelValues(strconv.Itoa(int(keyspaceID)), barrierID).Set(float64(barrierTSMilliSec))
 
 	return newBarrier, nil
 }
