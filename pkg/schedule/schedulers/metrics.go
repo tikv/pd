@@ -359,6 +359,7 @@ var (
 	balanceRangeCounter              = balanceRangeCounterWithEvent("schedule")
 	balanceRangeNewOperatorCounter   = balanceRangeCounterWithEvent("new-operator")
 	balanceRangeExpiredCounter       = balanceRangeCounterWithEvent("expired")
+	balanceRangeScheduledCounter     = balanceRangeCounterWithEvent("scheduled")
 	balanceRangeNoRegionCounter      = balanceRangeCounterWithEvent("no-region")
 	balanceRangeHotCounter           = balanceRangeCounterWithEvent("region-hot")
 	balanceRangeNoLeaderCounter      = balanceRangeCounterWithEvent("no-leader")

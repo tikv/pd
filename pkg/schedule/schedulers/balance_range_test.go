@@ -43,7 +43,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
-		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "150")},
 	}
 	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
 	re.NoError(err)
@@ -52,6 +52,13 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.Len(plan.scoreMap, 3)
 	re.Equal(int64(1), plan.scoreMap[1])
 	re.Equal(int64(1), plan.tolerate)
+	re.True(plan.isBalanced())
+
+	tc.AddLeaderStore(4, 0)
+	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(3, "120", "130", 1, 2, 3)
+	plan, err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.False(plan.isBalanced())
 }
 
 func TestTIKVEngine(t *testing.T) {
