@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -321,12 +322,7 @@ func (f *HotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 	regionPeers := region.GetPeers()
 	ret := make([]uint64, 0, len(regionPeers))
 	isInSlice := func(id uint64) bool {
-		for _, storeID := range ret {
-			if storeID == id {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(ret, id)
 	}
 	// old stores
 	if ids, ok := f.storesOfRegion[region.GetID()]; ok {
@@ -347,12 +343,7 @@ func (f *HotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 
 func (f *HotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
 	isOldPeer := func() bool {
-		for _, id := range oldItem.stores {
-			if id == storeID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(oldItem.stores, storeID)
 	}
 	isInHotCache := func() bool {
 		if ids, ok := f.storesOfRegion[oldItem.RegionID]; ok {
