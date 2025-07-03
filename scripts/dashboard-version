@@ -1,3 +1,7 @@
 # This file is updated by running scripts/update-dashboard.sh
 # Don't edit it manually
+<<<<<<< HEAD
 8.5.0-bce95733
+=======
+9.0.0-e1f8338b
+>>>>>>> 72a9baa1d (chore(dashboard): update TiDB Dashboard to v9.0.0-e1f8338b [master] (#9463))

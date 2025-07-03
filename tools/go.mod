@@ -137,7 +137,11 @@ require (
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
+<<<<<<< HEAD
 	github.com/pingcap/tidb-dashboard v0.0.0-20241104061623-bce95733dad7 // indirect
+=======
+	github.com/pingcap/tidb-dashboard v0.0.0-20250630090911-e1f8338b7285 // indirect
+>>>>>>> 72a9baa1d (chore(dashboard): update TiDB Dashboard to v9.0.0-e1f8338b [master] (#9463))
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
