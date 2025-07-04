@@ -198,16 +198,35 @@ func (s *Server) Close() {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.IsKeyspaceServing(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+	return s.IsKeyspaceServing(constant.DefaultKeyspaceID)
 }
 
-// IsKeyspaceServing returns whether the server is the primary of the given keyspace.
-// TODO: update basicserver interface to support keyspace.
-func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
+// IsKeyspaceServingByGroup returns whether the server is the primary of the given keyspace.
+// It only returns true when the keyspace ID matches the keyspace group ID.
+func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bool {
 	if atomic.LoadInt64(&s.isRunning) == 0 {
 		return false
 	}
+	// We need to check if the keyspace group ID is expected for the given keyspace ID.
+	// It is necessary because checkKeyspaceGroupLeadership will correct the keyspace group ID automatically if keyspace serves.
+	_, _, expected, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if keyspaceGroupID != expected || err != nil {
+		return false
+	}
+	return s.checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID)
+}
 
+// IsKeyspaceServing returns whether the keyspace is serving.
+func (s *Server) IsKeyspaceServing(keyspaceID uint32) bool {
+	if atomic.LoadInt64(&s.isRunning) == 0 {
+		return false
+	}
+	// We only need to pass the keyspace ID and the default keyspace group ID.
+	// Because GetElectionMember will call getKeyspaceGroupMetaWithCheck,
+	// getKeyspaceGroupMetaWithCheck will correct the keyspace group ID automatically if keyspace serves.
+	return s.checkKeyspaceGroupLeadership(keyspaceID, constant.DefaultKeyspaceGroupID)
+}
+func (s *Server) checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID uint32) bool {
 	member, err := s.keyspaceGroupManager.GetElectionMember(
 		keyspaceID, keyspaceGroupID)
 	if err != nil {
