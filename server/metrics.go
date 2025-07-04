@@ -14,7 +14,10 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+)
 
 var (
 	timeJumpBackCounter = prometheus.NewCounter(
@@ -188,4 +191,7 @@ func init() {
 	prometheus.MustRegister(bucketReportInterval)
 	prometheus.MustRegister(serverMaxProcs)
 	prometheus.MustRegister(forwardTsoDuration)
+
+	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
+	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler)))
 }
