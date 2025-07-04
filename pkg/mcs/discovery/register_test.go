@@ -35,37 +35,39 @@ func TestRegister(t *testing.T) {
 	defer clean()
 	etcd, cfg := servers[0], servers[0].Config()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// Test register with http prefix.
-	sr := NewServiceRegister(context.Background(), client, "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
+	sr := NewServiceRegister(ctx, client, "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
 	err := sr.Register()
 	re.NoError(err)
 	re.Equal("/ms/0/test_service/registry/http://127.0.0.1:1", sr.key)
-	resp, err := client.Get(context.Background(), sr.key)
+	resp, err := client.Get(ctx, sr.key)
 	re.NoError(err)
 	re.Equal("http://127.0.0.1:1", string(resp.Kvs[0].Value))
 
 	// Test deregister.
 	err = sr.Deregister()
 	re.NoError(err)
-	resp, err = client.Get(context.Background(), sr.key)
+	resp, err = client.Get(ctx, sr.key)
 	re.NoError(err)
 	re.Empty(resp.Kvs)
 
 	// Test the case that ctx is canceled.
-	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
+	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr.Register()
 	re.NoError(err)
 	sr.cancel()
-	re.Empty(getKeyAfterLeaseExpired(re, client, sr.key))
+	re.Empty(getKeyAfterLeaseExpired(ctx, re, client, sr.key))
 
 	// Test the case that keepalive is failed when the etcd is restarted.
-	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
+	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr.Register()
 	re.NoError(err)
 	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
 	for i := range 3 {
-		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(re, client, sr.key))
+		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(ctx, re, client, sr.key))
 		etcd.Server.HardStop() // close the etcd to make the keepalive failed
 		// ensure that the request is timeout
 		testutil.Eventually(re, func() bool {
@@ -82,15 +84,18 @@ func TestRegister(t *testing.T) {
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		testutil.Eventually(re, func() bool {
-			return getKeyAfterLeaseExpired(re, client, sr.key) == "127.0.0.1:2"
+			return getKeyAfterLeaseExpired(ctx, re, client, sr.key) == "127.0.0.1:2"
 		})
 	}
+	// Close the last restarted etcd instance
+	etcd.Server.HardStop()
+	etcd.Close()
 }
 
-func getKeyAfterLeaseExpired(re *require.Assertions, client *clientv3.Client, key string) string {
+func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
 	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
 	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
-	resp, err := client.Get(context.Background(), key)
+	resp, err := client.Get(ctx, key)
 	re.NoError(err)
 	if len(resp.Kvs) == 0 {
 		return ""

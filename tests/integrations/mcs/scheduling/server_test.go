@@ -1187,8 +1187,7 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 			ApproximateSize: 100 * units.MiB,
 			ApproximateKeys: 1000,
 		}
-		err = stream.Send(regionReq)
-		re.NoError(err)
+		re.NoError(stream.Send(regionReq))
 		regionReq = &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -1204,8 +1203,7 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 			ApproximateSize: 100 * units.MiB,
 			ApproximateKeys: 1000,
 		}
-		err = stream.Send(regionReq)
-		re.NoError(err)
+		re.NoError(stream.Send(regionReq))
 	}()
 
 	// Forward SplitRegions request through PD to scheduling service

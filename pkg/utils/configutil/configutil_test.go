@@ -17,7 +17,13 @@ package configutil
 import (
 	"bytes"
 	"testing"
+
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestPrintConfigCheckMsg(t *testing.T) {
 	// Define test cases
