@@ -19,30 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
-var (
-	// ServerMaxProcsGauge records the maxprocs.
-	ServerMaxProcsGauge = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "service",
-			Name:      "maxprocs",
-			Help:      "The value of GOMAXPROCS.",
-		})
-
-	// ServerMemoryLimit records the cgroup memory limit.
-	ServerMemoryLimit = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "service",
-			Name:      "memory_quota_bytes",
-			Help:      "The value of memory quota bytes.",
-		})
-)
-
 func init() {
 	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
 	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler)))
-
-	prometheus.MustRegister(ServerMaxProcsGauge)
-	prometheus.MustRegister(ServerMemoryLimit)
 }
