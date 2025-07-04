@@ -37,15 +37,6 @@ var (
 			Name:      "memory_quota_bytes",
 			Help:      "The value of memory quota bytes.",
 		})
-
-	// ServerInfoGauge indicates the pd server info including version and git hash.
-	ServerInfoGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "info",
-			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
 )
 
 func init() {
@@ -54,5 +45,4 @@ func init() {
 
 	prometheus.MustRegister(ServerMaxProcsGauge)
 	prometheus.MustRegister(ServerMemoryLimit)
-	prometheus.MustRegister(ServerInfoGauge)
 }
