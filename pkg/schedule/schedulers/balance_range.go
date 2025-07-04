@@ -406,13 +406,13 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 		}
 
 		opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
-		var err error
 		// todo: don't prepare every times, the prepare information can be reused.
-		s.plan, err = s.prepare(cluster, opInfluence, job)
+		plan, err := s.prepare(cluster, opInfluence, job)
 		if err != nil {
 			log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
 			return false
 		}
+		s.plan = plan
 		if s.plan.isBalanced() {
 			if err := s.conf.finish(index); err != nil {
 				return false

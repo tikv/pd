@@ -58,6 +58,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(3, "120", "130", 1, 2, 3)
 	plan, err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.NoError(err)
 	re.False(plan.isBalanced())
 }
 
