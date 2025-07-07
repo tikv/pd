@@ -793,7 +793,12 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
 		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
 		// setting/deleting GC barrier.
-		txnSafePoint, _, _, err := m.getAllKeyspacesMaxTxnSafePoint()
+		var txnSafePoint uint64
+		err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			var err1 error
+			txnSafePoint, _, _, err1 = m.getAllKeyspacesMaxTxnSafePoint(wb)
+			return err1
+		})
 		if err != nil {
 			return nil, false, err
 		}
@@ -868,7 +873,9 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 	return m.setGlobalGCBarrierImpl(ctx, barrierID, barrierTS, ttl, now)
 }
 
-func (m *GCStateManager) getAllKeyspacesMaxTxnSafePoint() (maxSafePoint uint64, keyspaceName string, keyspaceID uint32, err error) {
+// getAllKeyspacesMaxTxnSafePoint must be called inside a transaction,
+// The WriteBatch parameter in function signature is deliberate to the call safe, do not pass nil.
+func (m *GCStateManager) getAllKeyspacesMaxTxnSafePoint(_ *endpoint.GCStateWriteBatch) (maxTxnSafePoint uint64, keyspaceName string, keyspaceID uint32, err error) {
 	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
 	allKeyspaces, err1 := m.keyspaceManager.LoadRangeKeyspace(0, 0)
 	if err1 != nil {
@@ -884,8 +891,8 @@ func (m *GCStateManager) getAllKeyspacesMaxTxnSafePoint() (maxSafePoint uint64, 
 			err = err2
 			return
 		}
-		if txnSafePoint > maxSafePoint {
-			maxSafePoint = txnSafePoint
+		if txnSafePoint > maxTxnSafePoint {
+			maxTxnSafePoint = txnSafePoint
 			keyspaceName = keyspaceMeta.Name
 			keyspaceID = keyspaceMeta.Id
 		}
@@ -896,8 +903,9 @@ func (m *GCStateManager) getAllKeyspacesMaxTxnSafePoint() (maxSafePoint uint64, 
 		err = err3
 		return
 	}
-	if txnSafePoint > maxSafePoint {
-		maxSafePoint = txnSafePoint
+	if txnSafePoint > maxTxnSafePoint {
+		maxTxnSafePoint = txnSafePoint
+		keyspaceName = ""
 		keyspaceID = constant.NullKeyspaceID
 	}
 	return
@@ -912,12 +920,15 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(_ context.Context, barrierID str
 	newBarrier := endpoint.NewGlobalGCBarrier(barrierID, barrierTS, expirationTime)
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		// Make sure global barrier ts is ahead of txn safe point of all keyspaces.
-		maxTxnSafePoint, keyspaceName, keyspaceID, err := m.getAllKeyspacesMaxTxnSafePoint()
+		maxTxnSafePoint, keyspaceName, keyspaceID, err := m.getAllKeyspacesMaxTxnSafePoint(wb)
 		if err != nil {
 			return err
 		}
 		if barrierTS < maxTxnSafePoint {
-			return errs.ErrGlobalGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, maxTxnSafePoint, keyspaceName, keyspaceID)
+			if keyspaceID == constant.NullKeyspaceID {
+				return errs.ErrGlobalGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, maxTxnSafePoint, "<null_keyspace>")
+			}
+			return errs.ErrGlobalGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, maxTxnSafePoint, fmt.Sprintf("{ name: %q, id: %d }", keyspaceName, keyspaceID))
 		}
 		err1 := wb.SetGlobalGCBarrier(newBarrier)
 		return err1

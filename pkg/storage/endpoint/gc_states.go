@@ -125,7 +125,7 @@ type TimeOptional struct {
 	*time.Time
 }
 
-func (t *TimeOptional) int64() int64 {
+func (t *TimeOptional) unixSeconds() int64 {
 	if t.Time != nil {
 		return t.Unix()
 	}
@@ -134,17 +134,17 @@ func (t *TimeOptional) int64() int64 {
 
 // MarshalJSON implements json.Marshaler for TimeOptional
 func (t *TimeOptional) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.int64())
+	return json.Marshal(t.unixSeconds())
 }
 
 // UnmarshalJSON implements json.Marshaler for TimeOptional
 func (t *TimeOptional) UnmarshalJSON(b []byte) error {
-	var expireAt int64
-	if err := json.Unmarshal(b, &expireAt); err != nil {
+	var unixSeconds int64
+	if err := json.Unmarshal(b, &unixSeconds); err != nil {
 		return err
 	}
-	if expireAt < math.MaxInt64 && expireAt > 0 {
-		val := time.Unix(expireAt, 0)
+	if unixSeconds < math.MaxInt64 && unixSeconds > 0 {
+		val := time.Unix(unixSeconds, 0)
 		t.Time = &val
 	} else {
 		t.Time = nil
@@ -538,7 +538,7 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*Se
 		ssps = append(ssps, &ServiceSafePoint{
 			ServiceID:  barrier.BarrierID,
 			SafePoint:  barrier.BarrierTS,
-			ExpiredAt:  barrier.ExpirationTime.int64(),
+			ExpiredAt:  barrier.ExpirationTime.unixSeconds(),
 			KeyspaceID: constant.NullKeyspaceID,
 		})
 	}
