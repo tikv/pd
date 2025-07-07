@@ -520,7 +520,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					consumptionInfo.RRU+consumptionInfo.WRU,
 					sinceLastRecord,
 				)
-				// Consiliate the fill rate of the resource group.
+				// Conciliate the fill rate of the resource group.
 				krgm.conciliateFillRates()
 			}
 		case <-cleanUpTicker.C:
