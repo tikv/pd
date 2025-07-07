@@ -2482,6 +2482,7 @@ func convertSplitResponse(resp *schedulingpb.SplitRegionsResponse) *pdpb.SplitRe
 	return &pdpb.SplitRegionsResponse{
 		Header:             convertHeader(resp.GetHeader()),
 		FinishedPercentage: resp.GetFinishedPercentage(),
+		RegionsId:          resp.GetRegionsId(),
 	}
 }
 

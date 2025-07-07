@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -36,7 +37,12 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{
@@ -368,7 +374,11 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 		for _, req := range request.Requests {
 			if req.ResourceGroupName == defaultResourceGroupName {
 				// no response the default group request, that's mean `len(c.run.currentRequests) != 0` always.
-				time.Sleep(100 * time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(100 * time.Second):
+				}
 				responses = append(responses, &rmpb.TokenBucketResponse{
 					ResourceGroupName: defaultResourceGroupName,
 					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
@@ -546,4 +556,56 @@ func TestGetResourceGroup(t *testing.T) {
 	gc02, err := controller02.tryGetResourceGroupController(ctx, "test-group", false)
 	re.Error(err)
 	re.Nil(gc02)
+}
+
+func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	checkKeyspace := func(keyspaceID uint32) {
+		mockProvider := newMockResourceGroupProvider()
+		controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, keyspaceID)
+		re.NoError(err)
+		controller.Start(ctx)
+
+		testResourceGroup := &rmpb.ResourceGroup{
+			Name: "test-group",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}},
+			},
+		}
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.NotNil(gc)
+
+		requestReceived := make(chan bool, 1)
+
+		mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			request := args.Get(1).(*rmpb.TokenBucketsRequest)
+			re.Len(request.Requests, 1)
+			req := request.Requests[0]
+			re.NotNil(req.KeyspaceId)
+			re.Equal(keyspaceID, req.GetKeyspaceId().GetValue())
+			requestReceived <- true
+		}).Return([]*rmpb.TokenBucketResponse{}, nil)
+
+		// Trigger a low token report to ensure collectTokenBucketRequests is called
+		counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+		counter.limiter.mu.Lock()
+		counter.limiter.notify()
+		counter.limiter.mu.Unlock()
+
+		select {
+		case <-requestReceived:
+			// Success
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for AcquireTokenBuckets to be called")
+		}
+	}
+	checkKeyspace(constants.NullKeyspaceID)
+	checkKeyspace(1)
 }

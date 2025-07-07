@@ -67,7 +67,8 @@ func TestCache(t *testing.T) {
 			utils.Write: 3, // all peers
 		}
 		cluster := core.NewBasicCluster()
-		cache := NewHotPeerCache(context.Background(), cluster, test.kind)
+		ctx, cancel := context.WithCancel(context.Background())
+		cache := NewHotPeerCache(ctx, cluster, test.kind)
 		region := buildRegion(cluster, test.kind, 3, 60)
 		checkAndUpdate(re, cache, region, defaultSize[test.kind])
 		checkHit(re, cache, region, test.kind, utils.Add) // all peers are new
@@ -78,6 +79,7 @@ func TestCache(t *testing.T) {
 		if test.expect != defaultSize[test.kind] {
 			checkOp(re, res, srcStore, test.actionType)
 		}
+		cancel()
 	}
 }
 
@@ -294,8 +296,10 @@ func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, i
 
 func TestUpdateHotPeerStat(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	storeID, regionID := uint64(1), uint64(2)
 	peer := &metapb.Peer{StoreId: storeID}
 	region := core.NewRegionInfo(&metapb.Region{Id: regionID, Peers: []*metapb.Peer{peer}}, peer)
@@ -379,18 +383,20 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	byteRate := utils.MinHotThresholds[utils.RegionReadBytes] * 2
 	expectThreshold := byteRate * HotThresholdRatio
-	testMetrics(re, 120., byteRate, expectThreshold)
-	testMetrics(re, 60., byteRate, expectThreshold)
-	testMetrics(re, 30., byteRate, expectThreshold)
-	testMetrics(re, 17., byteRate, expectThreshold)
-	testMetrics(re, 1., byteRate, expectThreshold)
+	testMetrics(ctx, re, 120., byteRate, expectThreshold)
+	testMetrics(ctx, re, 60., byteRate, expectThreshold)
+	testMetrics(ctx, re, 30., byteRate, expectThreshold)
+	testMetrics(ctx, re, 17., byteRate, expectThreshold)
+	testMetrics(ctx, re, 1., byteRate, expectThreshold)
 }
 
-func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold float64) {
+func testMetrics(ctx context.Context, re *require.Assertions, interval, byteRate, expectThreshold float64) {
 	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	storeID := uint64(1)
 	cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
 	re.GreaterOrEqual(byteRate, utils.MinHotThresholds[utils.RegionReadBytes])
@@ -434,12 +440,14 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 
 func TestRemoveFromCache(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	peerCount := 3
 	interval := uint64(5)
 	checkers := []check{checkAndUpdate, checkAndUpdateWithOrdering}
 	for _, checker := range checkers {
 		cluster := core.NewBasicCluster()
-		cache := NewHotPeerCache(context.Background(), cluster, utils.Write)
+		cache := NewHotPeerCache(ctx, cluster, utils.Write)
 		region := buildRegion(cluster, utils.Write, peerCount, interval)
 		// prepare
 		intervalSums := make(map[uint64]int)
@@ -475,7 +483,8 @@ func TestRemoveFromCacheRandom(t *testing.T) {
 		for _, interval := range intervals {
 			for _, checker := range checkers {
 				cluster := core.NewBasicCluster()
-				cache := NewHotPeerCache(context.Background(), cluster, utils.Write)
+				ctx, cancel := context.WithCancel(context.Background())
+				cache := NewHotPeerCache(ctx, cluster, utils.Write)
 				region := buildRegion(cluster, utils.Write, peerCount, interval)
 
 				target := uint64(10)
@@ -517,6 +526,7 @@ func TestRemoveFromCacheRandom(t *testing.T) {
 					}
 				}
 				re.True(isClear)
+				cancel()
 			}
 		}
 	}
@@ -530,7 +540,9 @@ func checkCoolDown(re *require.Assertions, cache *HotPeerCache, region *core.Reg
 func TestCoolDownTransferLeader(t *testing.T) {
 	re := require.New(t)
 	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	region := buildRegion(cluster, utils.Read, 3, 60)
 
 	moveLeader := func() {
@@ -564,21 +576,25 @@ func TestCoolDownTransferLeader(t *testing.T) {
 	testCases := []func(){moveLeader, transferLeader, movePeer, addReplica, removeReplica}
 	for _, testCase := range testCases {
 		cluster = core.NewBasicCluster()
-		cache = NewHotPeerCache(context.Background(), cluster, utils.Read)
+		cctx, ccancel := context.WithCancel(ctx)
+		cache = NewHotPeerCache(cctx, cluster, utils.Read)
 		region = buildRegion(cluster, utils.Read, 3, 60)
 		for i := 1; i <= 200; i++ {
 			checkAndUpdate(re, cache, region)
 		}
 		checkCoolDown(re, cache, region, false)
 		testCase()
+		ccancel()
 	}
 }
 
 // See issue #4510
 func TestCacheInherit(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
+	cache := NewHotPeerCache(ctx, cluster, utils.Read)
 	region := buildRegion(cluster, utils.Read, 3, 10)
 	// prepare
 	for i := 1; i <= 200; i++ {
@@ -667,10 +683,12 @@ func TestUnstableData(t *testing.T) {
 // Previously, there was a mixed use of dim and kind, which caused inconsistencies in write-related statistics.
 func TestHotPeerCacheTopNThreshold(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	testWithUpdateInterval := func(interval time.Duration) {
 		ThresholdsUpdateInterval = interval
 		cluster := core.NewBasicCluster()
-		cache := NewHotPeerCache(context.Background(), cluster, utils.Write)
+		cache := NewHotPeerCache(ctx, cluster, utils.Write)
 		now := time.Now()
 		storeID := uint64(1)
 		for id := range uint64(100) {
@@ -714,8 +732,10 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 
 func TestRemoveExpireItems(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(context.Background(), cluster, utils.Write)
+	cache := NewHotPeerCache(ctx, cluster, utils.Write)
 	cache.topNTTL = 100 * time.Millisecond
 	// case1: remove expired items
 	region1 := buildRegion(cluster, utils.Write, 3, 10)
@@ -741,8 +761,10 @@ func TestRemoveExpireItems(t *testing.T) {
 
 func TestDifferentReportInterval(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(context.Background(), cluster, utils.Write)
+	cache := NewHotPeerCache(ctx, cluster, utils.Write)
 	region := buildRegion(cluster, utils.Write, 3, 5)
 	for _, interval := range []uint64{120, 60, 30} {
 		region = region.Clone(core.SetReportInterval(0, interval))

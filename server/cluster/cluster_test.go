@@ -29,6 +29,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -70,6 +71,10 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
@@ -1470,8 +1475,17 @@ func TestSyncConfigContext(t *testing.T) {
 	tc := newTestCluster(ctx, opt)
 	tc.httpClient = &http.Client{}
 
-	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
-		time.Sleep(time.Second * 100)
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		// Use the request context to handle cancellation
+		ctx := req.Context()
+		select {
+		case <-time.After(time.Second * 100):
+			// This should not happen in normal test execution
+		case <-ctx.Done():
+			// Client cancelled the request, return immediately
+			return
+		}
+
 		cfg := &sc.StoreConfig{}
 		b, err := json.Marshal(cfg)
 		if err != nil {
@@ -1483,6 +1497,7 @@ func TestSyncConfigContext(t *testing.T) {
 		res.WriteHeader(http.StatusOK)
 		res.Write(b)
 	}))
+	defer server.Close()
 	stores := newTestStores(1, "2.0.0")
 	for _, s := range stores {
 		re.NoError(tc.setStore(s))

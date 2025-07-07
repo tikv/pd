@@ -162,7 +162,7 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 		groupToUpdate := group.Clone(false)
 		groupToUpdate.Priority = 10
 		groupToUpdate.RUSettings.RU.Settings.FillRate = 200
-		groupToUpdateProto := groupToUpdate.IntoProtoResourceGroup()
+		groupToUpdateProto := groupToUpdate.IntoProtoResourceGroup(keyspaceID.GetValue())
 		groupToUpdateProto.KeyspaceId = keyspaceID
 		suite.mustUpdateResourceGroup(re, groupToUpdateProto)
 		group = suite.mustGetResourceGroup(re, groupToUpdate.Name, keyspaceName)
