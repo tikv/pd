@@ -47,7 +47,6 @@ const (
 	mergeOptionValueDeny = "deny"
 )
 
-<<<<<<< HEAD
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	mergeCheckerCounter                     = checkerCounter.WithLabelValues(mergeCheckerName, "check")
@@ -73,9 +72,8 @@ var (
 	mergeCheckerAdjSpecialPeerCounter       = checkerCounter.WithLabelValues(mergeCheckerName, "adj-special-peer")
 	mergeCheckerAdjAbnormalReplicaCounter   = checkerCounter.WithLabelValues(mergeCheckerName, "adj-abnormal-replica")
 )
-=======
+
 var gcInterval = time.Minute
->>>>>>> 1ad446e57 (schedule: fix split-merge-interval update (#8405))
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {

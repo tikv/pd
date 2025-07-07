@@ -246,10 +246,7 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 	ops = suite.mc.Check(suite.regions[2])
 	suite.NotNil(ops)
 	ops = suite.mc.Check(suite.regions[3])
-<<<<<<< HEAD
 	suite.NotNil(ops)
-=======
-	re.NotNil(ops)
 
 	// issue #8405
 	suite.mc.startTime = time.Now()
@@ -260,10 +257,9 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 	suite.mc.Check(suite.regions[2]) // trigger the config update
 	time.Sleep(time.Second)          // wait for the cache to gc
 	ops = suite.mc.Check(suite.regions[2])
-	re.NotNil(ops)
+	suite.NotNil(ops)
 	ops = suite.mc.Check(suite.regions[3])
-	re.NotNil(ops)
->>>>>>> 1ad446e57 (schedule: fix split-merge-interval update (#8405))
+	suite.NotNil(ops)
 }
 
 func (suite *mergeCheckerTestSuite) TestMatchPeers() {
