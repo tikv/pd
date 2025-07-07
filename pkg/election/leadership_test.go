@@ -24,12 +24,17 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 const defaultLeaseTimeout = 1
 
@@ -181,7 +186,10 @@ func TestExitWatch(t *testing.T) {
 
 		etcd2.Server.HardStop()
 		etcd3.Server.HardStop()
-		return func() {}
+		return func() {
+			etcd2.Close()
+			etcd3.Close()
+		}
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/fastTick"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))

@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,7 +35,12 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestBasic(t *testing.T) {
 	re := require.New(t)
@@ -232,6 +238,7 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(coreStorage)
 	re.NotNil(storage)
 	re.Equal(regionStorage, storage)
+	re.NoError(regionStorage.Close())
 	// Raw LevelDB backend integrated into core storage.
 	defaultStorage = NewStorageWithMemoryBackend()
 	regionStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
@@ -240,6 +247,7 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(coreStorage)
 	re.NotNil(storage)
 	re.Equal(regionStorage, storage)
+	re.NoError(regionStorage.Close())
 	defaultStorage = NewStorageWithMemoryBackend()
 	regionStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
 	re.NoError(err)
@@ -247,6 +255,7 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(coreStorage)
 	re.NotNil(storage)
 	re.Equal(regionStorage, storage)
+	re.NoError(regionStorage.Close())
 	// Without core storage.
 	defaultStorage = NewStorageWithMemoryBackend()
 	storage = RetrieveRegionStorage(defaultStorage)
@@ -257,11 +266,13 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(defaultStorage)
 	re.NotNil(storage)
 	re.Equal(defaultStorage, storage)
+	re.NoError(defaultStorage.Close())
 	defaultStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
 	re.NoError(err)
 	storage = RetrieveRegionStorage(defaultStorage)
 	re.NotNil(storage)
 	re.Equal(defaultStorage, storage)
+	re.NoError(defaultStorage.Close())
 }
 
 func TestLoadRegions(t *testing.T) {

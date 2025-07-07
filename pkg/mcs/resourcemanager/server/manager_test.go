@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -31,6 +32,10 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type mockConfigProvider struct{ bs.Server }
 
