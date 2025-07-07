@@ -30,11 +30,13 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -159,35 +161,110 @@ func makeMutations() []*keyspace.Mutation {
 	}
 }
 
-func TestSystemKeyspace(t *testing.T) {
+func TestProtectedKeyspace(t *testing.T) {
 	re := require.New(t)
-	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
 	defer func() {
-		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
-		conf.Keyspace.WaitRegionSplit = false
-	})
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetLeaderServer()
-	re.NoError(server.BootstrapCluster())
-	manager := server.GetKeyspaceManager()
-	// Load system keyspace.
-	systemKeyspace, err := manager.LoadKeyspace(constant.SystemKeyspaceName)
-	re.NoError(err)
-	re.Equal(constant.SystemKeyspaceID, systemKeyspace.GetId())
-	// Update system keyspace.
-	// Changing state of SYSTEM keyspace is not allowed.
-	newTime := time.Now().Unix()
-	_, err = manager.UpdateKeyspaceState(constant.SystemKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
-	re.Error(err)
-	// Changing config of SYSTEM keyspace is allowed.
-	mutations := makeMutations()
-	_, err = manager.UpdateKeyspaceConfig(constant.SystemKeyspaceName, mutations)
-	re.NoError(err)
+	const classic = `return(false)`
+	const nextGen = `return(true)`
+
+	cases := []struct {
+		name                  string
+		nextGenFlag           string
+		protectedKeyspaceID   uint32
+		protectedKeyspaceName string
+		gcConfig              string
+	}{
+		{
+			name:                  "legacy_default_keyspace",
+			nextGenFlag:           classic,
+			protectedKeyspaceID:   constant.DefaultKeyspaceID,
+			protectedKeyspaceName: constant.DefaultKeyspaceName,
+			gcConfig:              "",
+		},
+		{
+			name:                  "nextgen_system_keyspace",
+			nextGenFlag:           nextGen,
+			protectedKeyspaceID:   constant.SystemKeyspaceID,
+			protectedKeyspaceName: constant.SystemKeyspaceName,
+			gcConfig:              keyspace.KeyspaceLevelGC,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(_ *testing.T) {
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", c.nextGenFlag))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+				conf.Keyspace.WaitRegionSplit = false
+			})
+			re.NoError(err)
+			defer cluster.Destroy()
+			re.NoError(cluster.RunInitialServers())
+			re.NotEmpty(cluster.WaitLeader())
+			server := cluster.GetLeaderServer()
+			re.NoError(server.BootstrapCluster())
+			manager := server.GetKeyspaceManager()
+			// Load keyspace.
+			meta, err := manager.LoadKeyspace(c.protectedKeyspaceName)
+			re.NoError(err)
+			re.Equal(c.protectedKeyspaceID, meta.GetId())
+			// Check gc config.
+			gcConfig := meta.Config[keyspace.GCManagementType]
+			re.Equal(c.gcConfig, gcConfig)
+
+			// Update keyspace.
+			// Changing state of keyspace is not allowed.
+			newTime := time.Now().Unix()
+			_, err = manager.UpdateKeyspaceState(c.protectedKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+			re.Error(err)
+			// Changing config of keyspace is allowed.
+			mutations := makeMutations()
+			_, err = manager.UpdateKeyspaceConfig(c.protectedKeyspaceName, mutations)
+			re.NoError(err)
+
+			// Add TSO Server and check split keyspace.
+			nodes := make(map[string]bs.Server)
+			s1, cleanup := tests.StartSingleTSOTestServer(ctx, re, server.GetAddr(), tempurl.Alloc())
+			defer cleanup()
+			nodes[s1.GetAddr()] = s1
+			s2, cleanup := tests.StartSingleTSOTestServer(ctx, re, server.GetAddr(), tempurl.Alloc())
+			defer cleanup()
+			nodes[s2.GetAddr()] = s2
+			primary := tests.WaitForPrimaryServing(re, nodes)
+			re.NotEmpty(primary)
+		})
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(_ *testing.T) {
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", c.nextGenFlag))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+				conf.Keyspace.WaitRegionSplit = false
+			})
+			re.NoError(err)
+			defer tc.Destroy()
+			pdAddr := tc.GetConfig().GetClientURL()
+			err = tc.RunInitialServers()
+			re.NoError(err)
+			tc.WaitLeader()
+			leaderServer := tc.GetLeaderServer()
+			re.NoError(leaderServer.BootstrapCluster())
+
+			tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
+			re.NoError(err)
+			defer tsoCluster.Destroy()
+			tsoCluster.WaitForDefaultPrimaryServing(re)
+
+			kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
+			re.NotNil(kgm)
+			err = kgm.SplitKeyspaceGroupByID(0, 1, []uint32{c.protectedKeyspaceID})
+			re.Error(err)
+			re.Contains(err.Error(), "cannot modify")
+		})
+	}
 }
