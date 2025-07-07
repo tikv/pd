@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/constants"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
@@ -57,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -2415,4 +2417,24 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 		// The existing GC barrier remains unchanged.
 		s.checkGCBarrier(re, keyspaceID, "b1", 22)
 	}
+}
+
+func TestDecodeHttpKeyRange(t *testing.T) {
+	re := require.New(t)
+	input := make(map[string]any)
+	startStrs := make([]string, 0)
+	endStrs := make([]string, 0)
+	for _, kr := range []*pdHttp.KeyRange{
+		pdHttp.NewKeyRange([]byte("100"), []byte("200")),
+		pdHttp.NewKeyRange([]byte("300"), []byte("400")),
+	} {
+		startStr, endStr := kr.EscapeAsUTF8Str()
+		startStrs = append(startStrs, startStr)
+		endStrs = append(endStrs, endStr)
+	}
+	input["start-key"] = strings.Join(startStrs, ",")
+	input["end-key"] = strings.Join(endStrs, ",")
+	ret, err := keyutil.DecodeHTTPKeyRanges(input)
+	re.NoError(err)
+	re.Equal([]string{"100", "200", "300", "400"}, ret)
 }
