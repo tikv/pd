@@ -246,13 +246,13 @@ func TestRequestProgress(t *testing.T) {
 		}()
 
 		if injectWatchChanBlock {
-			failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)")
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
 				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
-			failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock")
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock"))
 		} else {
 			testutil.Eventually(re, func() bool {
 				b, _ := os.ReadFile(fname)

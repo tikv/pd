@@ -171,9 +171,11 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 		{nextGen, UnifiedGC, UnifiedGC},
 		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
 	}
-	defer failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+	}()
 	for idx, tc := range cases {
-		failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag)
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag))
 		cfg := make(map[string]string)
 		if tc.gcManagementType != "" {
 			cfg[GCManagementType] = tc.gcManagementType

@@ -87,9 +87,9 @@ func TestIDAllocationEndValue(t *testing.T) {
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
 	checkIDAllocationEndValue(t, client, uint64(constant.MaxValidKeyspaceID))
-	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`))
 	defer func() {
-		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
 	}()
 	checkIDAllocationEndValue(t, client, constant.ReservedKeyspaceIDStart-1)
 }

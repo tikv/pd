@@ -208,7 +208,8 @@ func (suite *tsoClientTestSuite) TearDownTest() {
 }
 
 func (suite *tsoClientTestSuite) TearDownSuite() {
-	failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval")
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 	suite.cancel()
 	if !suite.legacy {
 		suite.tsoCluster.Destroy()
