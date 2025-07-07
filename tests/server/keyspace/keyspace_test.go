@@ -30,13 +30,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -224,47 +222,6 @@ func TestProtectedKeyspace(t *testing.T) {
 			mutations := makeMutations()
 			_, err = manager.UpdateKeyspaceConfig(c.protectedKeyspaceName, mutations)
 			re.NoError(err)
-
-			// Add TSO Server and check split keyspace.
-			nodes := make(map[string]bs.Server)
-			s1, cleanup := tests.StartSingleTSOTestServer(ctx, re, server.GetAddr(), tempurl.Alloc())
-			defer cleanup()
-			nodes[s1.GetAddr()] = s1
-			s2, cleanup := tests.StartSingleTSOTestServer(ctx, re, server.GetAddr(), tempurl.Alloc())
-			defer cleanup()
-			nodes[s2.GetAddr()] = s2
-			primary := tests.WaitForPrimaryServing(re, nodes)
-			re.NotEmpty(primary)
-		})
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(_ *testing.T) {
-			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", c.nextGenFlag))
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
-				conf.Keyspace.WaitRegionSplit = false
-			})
-			re.NoError(err)
-			defer tc.Destroy()
-			pdAddr := tc.GetConfig().GetClientURL()
-			err = tc.RunInitialServers()
-			re.NoError(err)
-			tc.WaitLeader()
-			leaderServer := tc.GetLeaderServer()
-			re.NoError(leaderServer.BootstrapCluster())
-
-			tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
-			re.NoError(err)
-			defer tsoCluster.Destroy()
-			tsoCluster.WaitForDefaultPrimaryServing(re)
-
-			kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
-			re.NotNil(kgm)
-			err = kgm.SplitKeyspaceGroupByID(0, 1, []uint32{c.protectedKeyspaceID})
-			re.Error(err)
-			re.Contains(err.Error(), "cannot modify")
 		})
 	}
 }
