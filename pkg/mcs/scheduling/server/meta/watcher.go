@@ -79,14 +79,10 @@ func (w *Watcher) initializeStoreWatcher() error {
 		origin := w.basicCluster.GetStore(store.GetId())
 		if origin == nil {
 			w.basicCluster.PutStore(core.NewStoreInfo(store))
-<<<<<<< HEAD
 			return nil
-=======
-		} else {
-			w.basicCluster.PutStore(origin, core.SetStoreMeta(store))
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 		}
-		w.basicCluster.PutStore(origin.Clone(core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed())))
+		opt := core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed())
+		w.basicCluster.PutStore(origin.Clone(opt), opt)
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
