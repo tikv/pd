@@ -19,7 +19,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestSystimeMonitor(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

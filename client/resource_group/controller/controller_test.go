@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -36,7 +37,12 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{
@@ -368,7 +374,11 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 		for _, req := range request.Requests {
 			if req.ResourceGroupName == defaultResourceGroupName {
 				// no response the default group request, that's mean `len(c.run.currentRequests) != 0` always.
-				time.Sleep(100 * time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(100 * time.Second):
+				}
 				responses = append(responses, &rmpb.TokenBucketResponse{
 					ResourceGroupName: defaultResourceGroupName,
 					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
