@@ -1824,6 +1824,10 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo, opts ...core.StoreCr
 	}
 
 	c.core.PutStore(store, opts...)
+	if !c.isAPIServiceMode {
+		c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
+		c.slowStat.ObserveSlowStoreStatus(store.GetID(), store.IsSlow())
+	}
 	return nil
 }
 
