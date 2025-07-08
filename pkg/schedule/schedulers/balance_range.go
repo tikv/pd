@@ -410,6 +410,7 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 		plan, err := s.prepare(cluster, opInfluence, job)
 		if err != nil {
 			log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
+			balanceRangePrepareFailedCounter.Inc()
 			return false
 		}
 		s.plan = plan
@@ -668,14 +669,6 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 			totalScore += 1
 		}
 	}
-	averageScore := int64(0)
-	averageScore = totalScore / int64(len(sources))
-	maxScore := scoreMap[sources[0].GetID()]
-	minScore := scoreMap[sources[len(sources)-1].GetID()]
-	balancedThreshold := int64(float64(averageScore) * defaultBalancedThresholdRatio)
-	if balancedThreshold < 2 {
-		balancedThreshold = 2
-	}
 
 	sort.Slice(sources, func(i, j int) bool {
 		rule := job.Rule
@@ -686,7 +679,16 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		return iScore+iop > jScore+jop
 	})
 
-	tolerantSizeRatio := int64(float64(len(scanRegions)) * adjustRatio)
+	averageScore := int64(0)
+	averageScore = totalScore / int64(len(sources))
+	maxScore := scoreMap[sources[0].GetID()]
+	minScore := scoreMap[sources[len(sources)-1].GetID()]
+	ratio := cluster.GetSchedulerConfig().GetTolerantSizeRatio()
+	if ratio == 0 {
+		ratio = defaultBalancedThresholdRatio
+	}
+
+	tolerantSizeRatio := int64(float64(len(scanRegions)) * ratio)
 	if tolerantSizeRatio < 1 {
 		tolerantSizeRatio = 1
 	}
