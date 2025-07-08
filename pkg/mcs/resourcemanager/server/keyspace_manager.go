@@ -290,6 +290,7 @@ func (krgm *keyspaceResourceGroupManager) getRUTracker(name string) *ruTracker {
 // dimension to calculate real-time RU/s more accurately.
 type ruTracker struct {
 	syncutil.RWMutex
+	initialized bool
 	// beta = ln(2) / τ, τ is the time constant which can be thought of as the half-life of the EMA.
 	// For example, if τ = 5s, then the decay factor calculated by e^{-β·Δt} will be 0.5 when Δt = 5s,
 	// which means the weight of the "old data" is 0.5 when the elapsed time is 5s.
@@ -307,37 +308,37 @@ func newRUTracker(timeConstant time.Duration) *ruTracker {
 // Sample the RU consumption and calculate the real-time RU/s as `lastEMA`.
 // - `now` is the current time point to sample the RU consumption.
 // - `totalRU` is the total RU consumption within the `dur`.
-// - `dur` is the time cost to run out of the `totalRU`.
-func (rt *ruTracker) sample(now time.Time, totalRU float64, dur time.Duration) {
+func (rt *ruTracker) sample(now time.Time, totalRU float64) {
 	rt.Lock()
 	defer rt.Unlock()
+	// Calculate the elapsed duration since the last sample time.
+	var dur time.Duration
+	if !rt.lastSampleTime.IsZero() {
+		dur = now.Sub(rt.lastSampleTime)
+	}
+	rt.lastSampleTime = now
 	// If `dur` is not greater than 0, skip this record.
 	if dur <= 0 {
 		return
 	}
+	durSeconds := dur.Seconds()
 	// Calculate the average RU/s within the `dur`.
-	ruPerSec := math.Max(0, totalRU) / dur.Seconds()
-	// If the last sample time is not set, set the last EMA directly.
-	if rt.lastSampleTime.IsZero() {
+	ruPerSec := math.Max(0, totalRU) / durSeconds
+	// If the RU tracker is not initialized, set the last EMA directly.
+	if !rt.initialized {
+		rt.initialized = true
 		rt.lastEMA = ruPerSec
-		rt.lastSampleTime = now
 		return
-	}
-	// Calculate the time delta between the last sample time and the current time.
-	dt := now.Sub(rt.lastSampleTime).Seconds()
-	if dt <= 0 {
-		dt = 1e-3 // Avoid division by zero or negative value, use 1 millisecond as the minimum time delta.
 	}
 	// By using e^{-β·Δt} to calculate the decay factor, we can have the following behavior:
 	//   1. The decay factor is always between 0 and 1.
 	//   2. The decay factor is time-aware, the larger the time delta, the lower the weight of the "old data".
-	decay := math.Exp(-rt.beta * dt)
+	decay := math.Exp(-rt.beta * durSeconds)
 	rt.lastEMA = decay*rt.lastEMA + (1-decay)*ruPerSec
 	// If the `lastEMA` is less than `minSampledRUPerSec`, set it to 0 to avoid converging into a very small value.
 	if rt.lastEMA < minSampledRUPerSec {
 		rt.lastEMA = 0
 	}
-	rt.lastSampleTime = now
 }
 
 // Get the real-time RU/s calculated by the EMA algorithm.
@@ -352,17 +353,17 @@ func (rt *ruTracker) getRUPerSec() float64 {
 // priorities consuming the RU at the same time. In this case, we need to conciliate
 // the fill rate of the resource group to ensure the priority, for example, there are
 // three resource groups with priorities 1, 2, and 3, and the service limit is 50 RU/s:
-// - Group A: priority 1, fill rate 30 RU/s
-// - Group B: priority 2, fill rate 20 RU/s
-// - Group C: priority 3, fill rate 10 RU/s
+// - Group A: priority 1, demand 30 RU/s
+// - Group B: priority 2, demand 20 RU/s
+// - Group C: priority 3, demand 10 RU/s
 // In this case, the fill rate of the resource group should be 30 RU/s, 20 RU/s, and 0 RU/s,
 // respectively. The conciliation algorithm is as follows:
 //  1. Sort the resource groups by the priority.
-//  2. Start from the highest priority resource group, get the real-time RU/s of each.
-//  3. Calculate the total real-time RU/s of the resource groups within the same priority.
-//     a. If the total real-time RU/s is greater than the service limit,
-//     allocate the service limit to all resource groups based on the proportion of RU/s.
-//     b. If the total real-time RU/s is less or equal to the service limit,
+//  2. Start from the highest priority resource group, get the real-time RU demand of each.
+//  3. Calculate the total real-time RU demand of the resource groups within the same priority.
+//     a. If the total real-time RU demand is greater than the service limit,
+//     allocate the service limit to all resource groups based on the proportion of RU demand.
+//     b. If the total real-time RU demand is less or equal to the service limit,
 //     allocate the needed RU/s to the resource group respectively.
 //  4. Calculate the remaining service limit, and repeat the process for the next priority
 //     until the service limit is allocated.
@@ -381,33 +382,47 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 		if len(queue) == 0 {
 			continue
 		}
-		totalRUPerSec := 0.0 // The total real-time RU/s of all resource groups in the current priority.
-		ruPerSecMap := make(map[string]float64, len(queue))
+		// If the remaining service limit is 0, set the fill rate of all the remaining resource groups to 0 directly.
+		if remainingServiceLimit == 0 {
+			for _, group := range queue {
+				ruTracker := krgm.getRUTracker(group.Name)
+				if ruTracker == nil || ruTracker.getRUPerSec() == 0 {
+					continue
+				}
+				// Only set the active resource groups.
+				group.overrideFillRate(0)
+			}
+			continue
+		}
+		// Calculate the total real-time RU demand of all resource groups in the current priority.
+		totalRUDemand := 0.0
+		ruDemandMap := make(map[string]float64, len(queue))
 		for _, group := range queue {
 			ruTracker := krgm.getRUTracker(group.Name)
 			// Not found the RU tracker, skip this group.
 			if ruTracker == nil {
 				continue
 			}
-			ruPerSec := ruTracker.getRUPerSec()
-			totalRUPerSec += ruPerSec
-			ruPerSecMap[group.Name] = ruPerSec
+			// The RU demand exceeding the fill rate setting should be ignored.
+			ruDemand := math.Min(ruTracker.getRUPerSec(), group.getFillRateSetting())
+			totalRUDemand += ruDemand
+			ruDemandMap[group.Name] = ruDemand
 		}
-		if totalRUPerSec > remainingServiceLimit {
-			// If the total real-time RU/s is greater than the service limit,
-			// allocate the service limit to all resource groups based on the proportion of RU/s.
+		if totalRUDemand > remainingServiceLimit {
+			// If the total real-time RU demand is greater than the service limit,
+			// allocate the service limit to all resource groups based on the proportion of RU demand.
 			for _, group := range queue {
-				ruPerSec := ruPerSecMap[group.Name]
+				ruDemand := ruDemandMap[group.Name]
 				overrideFillRate := math.Min(
-					remainingServiceLimit*ruPerSec/totalRUPerSec,
-					group.getFillRate(), // Should not exceed the fill rate setting.
+					remainingServiceLimit*ruDemand/totalRUDemand,
+					group.getFillRateSetting(), // Should not exceed the fill rate setting.
 				)
 				group.overrideFillRate(overrideFillRate)
 			}
 			remainingServiceLimit = 0
 		} else {
-			// If the total real-time RU/s is less or equal to the service limit,
-			// allocate the needed RU/s to the resource group respectively.
+			// If the total real-time RU demand is less or equal to the service limit,
+			// allocate the needed RU to the resource group respectively.
 			for _, group := range queue {
 				// By setting the override fill rate to -1 to allow the resource group to consume
 				// as many RUs as they originally need according to its fill rate setting. This is
@@ -418,7 +433,7 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 			// Although this layer does not set `overrideFillRate`, it still needs to deduct the actual
 			// RU consumption from `remainingFillRate` to reflect the concept of priority, so that the
 			// available service limit share decreases level by level.
-			remainingServiceLimit -= totalRUPerSec
+			remainingServiceLimit -= totalRUDemand
 		}
 	}
 }

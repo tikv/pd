@@ -418,21 +418,22 @@ func TestRUTracker(t *testing.T) {
 
 	rt := newRUTracker(time.Second)
 	now := time.Now()
-	rt.sample(now, 100, time.Duration(0))
+	rt.sample(now, 100)
 	re.Zero(rt.getRUPerSec())
-	rt.sample(now, 100, time.Second)
+	now = now.Add(time.Second)
+	rt.sample(now, 100)
 	re.Equal(100.0, rt.getRUPerSec())
 	now = now.Add(time.Second)
-	rt.sample(now, 100, time.Second)
+	rt.sample(now, 100)
 	re.InDelta(100.0, rt.getRUPerSec(), floatDelta)
 	now = now.Add(time.Second)
-	rt.sample(now, 200, time.Second)
+	rt.sample(now, 200)
 	re.InDelta(150.0, rt.getRUPerSec(), floatDelta)
 	// EMA should eventually converge to 10000 RU/s.
 	const targetRUPerSec = 10000.0
 	testutil.Eventually(re, func() bool {
 		now = now.Add(time.Second)
-		rt.sample(now, targetRUPerSec, time.Second)
+		rt.sample(now, targetRUPerSec)
 		return math.Abs(rt.getRUPerSec()-targetRUPerSec) < floatDelta
 	})
 }
@@ -667,7 +668,7 @@ func TestConciliateFillRate(t *testing.T) {
 		serviceLimit         float64
 		priorityList         []uint32
 		fillRateSettingList  []float64
-		ruPerSecList         []float64
+		ruDemandList         []float64
 		expectedFillRateList []float64
 	}{
 		{
@@ -675,7 +676,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         100,
 			priorityList:         []uint32{1, 1, 1},
 			fillRateSettingList:  []float64{10, 20, 30},
-			ruPerSecList:         []float64{10, 20, 30},
+			ruDemandList:         []float64{10, 20, 30},
 			expectedFillRateList: []float64{10, 20, 30},
 		},
 		{
@@ -683,7 +684,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         50,
 			priorityList:         []uint32{1, 1, 1},
 			fillRateSettingList:  []float64{20, 30, 50},
-			ruPerSecList:         []float64{20, 30, 50},
+			ruDemandList:         []float64{20, 30, 50},
 			expectedFillRateList: []float64{10, 15, 25}, // 50 * (20/100), 50 * (30/100), 50 * (50/100)
 		},
 		{
@@ -691,7 +692,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         200,
 			priorityList:         []uint32{3, 3, 2, 2, 1},
 			fillRateSettingList:  []float64{20, 30, 25, 35, 40},
-			ruPerSecList:         []float64{10, 15, 20, 30, 40},
+			ruDemandList:         []float64{10, 15, 20, 30, 40},
 			expectedFillRateList: []float64{20, 30, 25, 35, 40},
 		},
 		{
@@ -699,7 +700,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         80,
 			priorityList:         []uint32{3, 3, 2, 1, 1},
 			fillRateSettingList:  []float64{30, 20, 30, 20, 10},
-			ruPerSecList:         []float64{30, 20, 30, 20, 10},
+			ruDemandList:         []float64{30, 20, 30, 20, 10},
 			expectedFillRateList: []float64{30, 20, 30, 0, 0}, // Priority 3 gets 50, priority 2 gets 30, priority 1 gets 0
 		},
 		{
@@ -707,7 +708,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         100,
 			priorityList:         []uint32{5, 5, 3, 2, 1},
 			fillRateSettingList:  []float64{60, 60, 30, 20, 10},
-			ruPerSecList:         []float64{60, 60, 30, 20, 10},
+			ruDemandList:         []float64{60, 60, 30, 20, 10},
 			expectedFillRateList: []float64{50, 50, 0, 0, 0}, // Only priority 5 gets resources, proportionally
 		},
 		{
@@ -715,7 +716,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         0,
 			priorityList:         []uint32{3, 2, 1},
 			fillRateSettingList:  []float64{10, 20, 30},
-			ruPerSecList:         []float64{10, 20, 30},
+			ruDemandList:         []float64{10, 20, 30},
 			expectedFillRateList: []float64{10, 20, 30},
 		},
 		{
@@ -723,7 +724,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         100,
 			priorityList:         []uint32{3, 2, 1},
 			fillRateSettingList:  []float64{10, 20, 30},
-			ruPerSecList:         []float64{0, 0, 0},
+			ruDemandList:         []float64{0, 0, 0},
 			expectedFillRateList: []float64{10, 20, 30}, // Should get their configured rates when no demand
 		},
 		{
@@ -731,7 +732,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         150,
 			priorityList:         []uint32{4, 3, 3, 2, 1},
 			fillRateSettingList:  []float64{40, 30, 20, 25, 15},
-			ruPerSecList:         []float64{35, 25, 15, 20, 10},
+			ruDemandList:         []float64{35, 25, 15, 20, 10},
 			expectedFillRateList: []float64{40, 30, 20, 25, 15}, // All groups get their demand so the fill rate is the same as the fill rate setting
 		},
 		{
@@ -739,7 +740,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         120,
 			priorityList:         []uint32{3, 3, 2, 2, 1},
 			fillRateSettingList:  []float64{40, 30, 30, 30, 20},
-			ruPerSecList:         []float64{40, 30, 30, 30, 20},
+			ruDemandList:         []float64{40, 30, 30, 30, 20},
 			expectedFillRateList: []float64{40, 30, 25, 25, 0}, // Priority 3 gets full, priority 2 gets partial, priority 1 gets none
 		},
 		{
@@ -747,7 +748,7 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:         120,
 			priorityList:         []uint32{3, 3, 2, 2, 1, 1},
 			fillRateSettingList:  []float64{40, 30, 20, 20, 30, 30},
-			ruPerSecList:         []float64{40, 30, 10, 10, 30, 30},
+			ruDemandList:         []float64{40, 30, 10, 10, 30, 30},
 			expectedFillRateList: []float64{40, 30, 20, 20, 15, 15}, // Priority 3 gets full, priority 2 gets full, priority 1 gets partial
 		},
 	}
@@ -775,11 +776,15 @@ func TestConciliateFillRate(t *testing.T) {
 			err := krgm.addResourceGroup(group)
 			re.NoError(err, "case %s, group %d", tc.name, i)
 		}
-		// Mock the RU/s of each resource group.
+		// Mock the RU demand of each resource group.
 		now := time.Now()
-		for i, ruPerSec := range tc.ruPerSecList {
-			krgm.getOrCreateRUTracker(genGroupName(idx, i)).
-				sample(now, ruPerSec, time.Second)
+		for i, ruDemand := range tc.ruDemandList {
+			ruTracker := krgm.getOrCreateRUTracker(genGroupName(idx, i))
+			// Warm up the RU tracker.
+			ruTracker.sample(now, 0)
+			// Sample the RU demand.
+			now = now.Add(time.Second)
+			ruTracker.sample(now, ruDemand)
 		}
 		// Conciliate the fill rate.
 		krgm.conciliateFillRates()
