@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -509,9 +510,9 @@ type prioritiesConfig struct {
 }
 
 func (conf *hotRegionSchedulerConfig) applyPrioritiesConfig(p prioritiesConfig) {
-	conf.ReadPriorities = append(p.read[:0:0], p.read...)
-	conf.WriteLeaderPriorities = append(p.writeLeader[:0:0], p.writeLeader...)
-	conf.WritePeerPriorities = append(p.writePeer[:0:0], p.writePeer...)
+	conf.ReadPriorities = slices.Clone(p.read)
+	conf.WriteLeaderPriorities = slices.Clone(p.writeLeader)
+	conf.WritePeerPriorities = slices.Clone(p.writePeer)
 }
 
 func getReadPriorities(c *prioritiesConfig) []string {

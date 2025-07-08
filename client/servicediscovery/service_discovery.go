@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -762,7 +763,7 @@ func (c *serviceDiscovery) GetAllServiceClients() []ServiceClient {
 		return nil
 	}
 	ret := all.([]ServiceClient)
-	return append(ret[:0:0], ret...)
+	return slices.Clone(ret)
 }
 
 // ScheduleCheckMemberChanged is used to check if there is any membership

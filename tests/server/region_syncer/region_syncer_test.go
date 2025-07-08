@@ -146,7 +146,7 @@ func TestRegionSyncer(t *testing.T) {
 	regionLen = len(regions)
 
 	// change the statistics of regions
-	for i := 0; i < len(regions); i++ {
+	for i := range regions {
 		idx := uint64(i)
 		regions[i] = regions[i].Clone(
 			core.SetWrittenBytes(idx+10),
@@ -158,7 +158,7 @@ func TestRegionSyncer(t *testing.T) {
 	}
 
 	// change the leader of region
-	for i := 0; i < len(regions); i++ {
+	for i := range regions {
 		regions[i] = regions[i].Clone(core.WithLeader(regions[i].GetPeers()[1]))
 		err = rc.HandleRegionHeartbeat(regions[i])
 		re.NoError(err)

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand"
 	"net"
 	"net/http"
@@ -633,9 +634,7 @@ func MustAddScheduler(
 	request := map[string]any{
 		"name": schedulerName,
 	}
-	for arg, val := range args {
-		request[arg] = val
-	}
+	maps.Copy(request, args)
 	data, err := json.Marshal(request)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", serverAddr, schedulersPrefix), bytes.NewBuffer(data))

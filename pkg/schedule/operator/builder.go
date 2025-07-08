@@ -16,7 +16,7 @@ package operator
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -302,7 +302,7 @@ func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
 	if b.err != nil {
 		return b
 	}
-	sort.Slice(storeIDs, func(i, j int) bool { return storeIDs[i] < storeIDs[j] })
+	slices.Sort(storeIDs)
 	for _, storeID := range storeIDs {
 		peer := b.targetPeers[storeID]
 		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
@@ -1276,7 +1276,7 @@ func (pm peersMap) IDs() []uint64 {
 	for id := range pm {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids
 }
 

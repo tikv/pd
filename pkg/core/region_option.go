@@ -17,6 +17,7 @@ package core
 import (
 	"math"
 	"math/rand"
+	"slices"
 	"sort"
 	"time"
 
@@ -31,7 +32,7 @@ type RegionCreateOption func(region *RegionInfo)
 // WithDownPeers sets the down peers for the region.
 func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.downPeers = append(downPeers[:0:0], downPeers...)
+		region.downPeers = slices.Clone(downPeers)
 		sort.Sort(peerStatsSlice(region.downPeers))
 	}
 }
@@ -47,7 +48,7 @@ func WithFlowRoundByDigit(digit int) RegionCreateOption {
 // WithPendingPeers sets the pending peers for the region.
 func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.pendingPeers = append(pendingPeers[:0:0], pendingPeers...)
+		region.pendingPeers = slices.Clone(pendingPeers)
 		sort.Sort(peerSlice(region.pendingPeers))
 	}
 }

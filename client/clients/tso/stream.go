@@ -464,11 +464,7 @@ func (s *tsoStream) EstimatedRPCLatency() time.Duration {
 			panic("invalid failpoint value for `tsoStreamSimulateEstimatedRPCLatency`: expected string")
 		}
 	})
-	latencyUs := s.estimatedLatencyMicros.Load()
-	// Limit it at least 100us
-	if latencyUs < 100 {
-		latencyUs = 100
-	}
+	latencyUs := max(s.estimatedLatencyMicros.Load(), 100)
 	return time.Microsecond * time.Duration(latencyUs)
 }
 

@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"sync"
@@ -465,9 +466,7 @@ func checkCreateByIDRequest(re *require.Assertions, request *CreateKeyspaceByIDR
 func checkMutations(re *require.Assertions, oldConfig, newConfig map[string]string, mutations []*Mutation) {
 	// Copy oldConfig to expected to avoid modifying its content.
 	expected := map[string]string{}
-	for k, v := range oldConfig {
-		expected[k] = v
-	}
+	maps.Copy(expected, oldConfig)
 	for _, mutation := range mutations {
 		switch mutation.Op {
 		case OpPut:
