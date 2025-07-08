@@ -217,20 +217,14 @@ func newMetrics() *metrics {
 	}
 }
 
-// insertConsumptionRecord inserts the consumption record and returns the duration since the last record.
-// If the record is not found, it returns 0 as the duration.
-func (m *metrics) insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string, now time.Time) time.Duration {
+// insertConsumptionRecord inserts the consumption record.
+func (m *metrics) insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string, now time.Time) {
 	key := consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  groupName,
 		ruType:     ruType,
 	}
-	last, ok := m.consumptionRecordMap[key]
 	m.consumptionRecordMap[key] = now
-	if !ok {
-		return 0
-	}
-	return now.Sub(last)
 }
 
 func (m *metrics) deleteConsumptionRecord(record consumptionRecordKey) {
@@ -277,7 +271,7 @@ func (m *metrics) recordConsumption(
 	keyspaceName string,
 	controllerConfig *ControllerConfig,
 	now time.Time,
-) time.Duration {
+) {
 	keyspaceID := consumptionInfo.keyspaceID
 	groupName := consumptionInfo.resourceGroupName
 	ruLabelType := defaultTypeLabel
@@ -290,7 +284,7 @@ func (m *metrics) recordConsumption(
 	consumption := consumptionInfo.Consumption
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
 	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig)
-	return m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
+	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
 }
 
 func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
