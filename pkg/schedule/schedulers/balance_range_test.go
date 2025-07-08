@@ -54,7 +54,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.Equal(int64(1), plan.tolerate)
 	re.True(plan.isBalanced())
 
-	tc.AddLeaderStore(4, 0)
+	// case: store 1 has 3 leader and others store has no leader, so the max leader count su
 	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(3, "120", "130", 1, 2, 3)
 	plan, err = sc.prepare(tc, *operator.NewOpInfluence(), job)

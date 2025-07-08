@@ -606,10 +606,9 @@ type balanceRangeSchedulerPlan struct {
 	opInfluence operator.OpInfluence
 	tolerate    int64
 
-	averageScore      int64
-	maxScore          int64
-	minScore          int64
-	balancedThreshold int64
+	averageScore int64
+	maxScore     int64
+	minScore     int64
 }
 
 func fetchAllRegions(cluster sche.SchedulerCluster, ranges *keyutil.KeyRanges) []*core.RegionInfo {
@@ -683,9 +682,10 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	averageScore = totalScore / int64(len(sources))
 	maxScore := scoreMap[sources[0].GetID()]
 	minScore := scoreMap[sources[len(sources)-1].GetID()]
+
 	ratio := cluster.GetSchedulerConfig().GetTolerantSizeRatio()
 	if ratio == 0 {
-		ratio = defaultBalancedThresholdRatio
+		ratio = adjustRatio
 	}
 
 	tolerantSizeRatio := int64(float64(len(scanRegions)) * ratio)
@@ -693,26 +693,25 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		tolerantSizeRatio = 1
 	}
 	return &balanceRangeSchedulerPlan{
-		SchedulerCluster:  cluster,
-		stores:            sources,
-		scoreMap:          scoreMap,
-		source:            nil,
-		target:            nil,
-		region:            nil,
-		job:               job,
-		opInfluence:       opInfluence,
-		tolerate:          tolerantSizeRatio,
-		averageScore:      averageScore,
-		maxScore:          maxScore,
-		minScore:          minScore,
-		balancedThreshold: balancedThreshold,
+		SchedulerCluster: cluster,
+		stores:           sources,
+		scoreMap:         scoreMap,
+		source:           nil,
+		target:           nil,
+		region:           nil,
+		job:              job,
+		opInfluence:      opInfluence,
+		tolerate:         tolerantSizeRatio,
+		averageScore:     averageScore,
+		maxScore:         maxScore,
+		minScore:         minScore,
 	}, nil
 }
 
 func (p *balanceRangeSchedulerPlan) isBalanced() bool {
 	// If the max score subtracted by the min score is less than the average score multiplied by the threshold,
 	// we can consider the key ranges are balanced.
-	return p.maxScore-p.minScore <= p.balancedThreshold
+	return p.maxScore-p.minScore <= p.tolerate
 }
 
 func (p *balanceRangeSchedulerPlan) sourceStoreID() uint64 {
