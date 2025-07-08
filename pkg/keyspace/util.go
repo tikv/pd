@@ -288,7 +288,7 @@ func newModifyProtectedKeyspaceError() error {
 
 func isProtectedKeyspaceID(id uint32) bool {
 	if kerneltype.IsNextGen() {
-		return uint64(id) >= constant.ReservedKeyspaceIDStart
+		return id == constant.SystemKeyspaceID
 	}
 	return id == constant.DefaultKeyspaceID
 }
