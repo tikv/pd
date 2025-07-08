@@ -1085,7 +1085,7 @@ func TestPreparingProgress(t *testing.T) {
 		<-ch
 	})
 	defer func() {
-		failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores")
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores"))
 	}()
 	triggerCheckStores := func() { ch <- struct{}{} }
 
