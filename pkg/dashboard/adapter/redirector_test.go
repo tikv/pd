@@ -22,6 +22,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type redirectorTestSuite struct {
@@ -34,6 +37,10 @@ type redirectorTestSuite struct {
 	redirector *Redirector
 
 	noRedirectHTTPClient *http.Client
+}
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
 func TestRedirectorTestSuite(t *testing.T) {

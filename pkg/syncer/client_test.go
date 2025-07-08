@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -30,7 +31,12 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // For issue https://github.com/tikv/pd/issues/3936
 func TestLoadRegion(t *testing.T) {
@@ -38,6 +44,7 @@ func TestLoadRegion(t *testing.T) {
 	tempDir := t.TempDir()
 	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
+	defer re.NoError(rs.Close())
 
 	server := mockserver.NewMockServer(
 		context.Background(),
@@ -68,6 +75,7 @@ func TestErrorCode(t *testing.T) {
 	tempDir := t.TempDir()
 	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
+	defer re.NoError(rs.Close())
 	server := mockserver.NewMockServer(
 		context.Background(),
 		nil,

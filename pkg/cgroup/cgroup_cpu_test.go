@@ -25,9 +25,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func checkKernelVersionNewerThan(re *require.Assertions, t *testing.T, major, minor int) bool {
 	u := syscall.Utsname{}

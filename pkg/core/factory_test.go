@@ -18,11 +18,16 @@ import (
 	"testing"
 
 	"github.com/gogo/protobuf/proto"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func BenchmarkDeepClone(b *testing.B) {
 	for range b.N {
