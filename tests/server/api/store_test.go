@@ -71,11 +71,12 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
 	// store 1 is used to bootstrapped that its state might be different the store inside initStores.
-	leader.GetRaftCluster().ReadyToServeLocked(1)
+	err := leader.GetRaftCluster().ReadyToServeLocked(1)
+	re.NoError(err)
 
 	url := fmt.Sprintf("%s/stores", urlPrefix)
 	info := new(response.StoresInfo)
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, stores[:3])
 
@@ -261,7 +262,8 @@ func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 	// Test merge.
 	// enable label match check.
 	labelCheck := map[string]string{"strictly-match-label": "true"}
-	lc, _ := json.Marshal(labelCheck)
+	lc, err := json.Marshal(labelCheck)
+	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config", lc, testutil.StatusOK(re))
 	re.NoError(err)
 	// Test set.
@@ -274,7 +276,8 @@ func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 		testutil.StringContain(re, "key matching the label was not found"))
 	re.NoError(err)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
-	ll, _ := json.Marshal(locationLabels)
+	ll, err := json.Marshal(locationLabels)
+	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config", ll, testutil.StatusOK(re))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, url+"/label", b, testutil.StatusOK(re))
@@ -290,7 +293,8 @@ func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 	// Test merge.
 	// disable label match check.
 	labelCheck = map[string]string{"strictly-match-label": "false"}
-	lc, _ = json.Marshal(labelCheck)
+	lc, err = json.Marshal(labelCheck)
+	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config", lc, testutil.StatusOK(re))
 	re.NoError(err)
 
@@ -336,7 +340,8 @@ func (suite *storeTestSuite) checkStoreGet(cluster *tests.TestCluster) {
 
 	leader := cluster.GetLeaderServer()
 	// store 1 is used to bootstrapped that its state might be different the store inside initStores.
-	leader.GetRaftCluster().ReadyToServeLocked(1)
+	err := leader.GetRaftCluster().ReadyToServeLocked(1)
+	re.NoError(err)
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/store/1", urlPrefix)
 
@@ -350,10 +355,12 @@ func (suite *storeTestSuite) checkStoreGet(cluster *tests.TestCluster) {
 		},
 	})
 	info := new(response.StoreInfo)
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
-	capacity, _ := units.RAMInBytes("1.636TiB")
-	available, _ := units.RAMInBytes("1.555TiB")
+	capacity, err := units.RAMInBytes("1.636TiB")
+	re.NoError(err)
+	available, err := units.RAMInBytes("1.555TiB")
+	re.NoError(err)
 	re.Equal(capacity, int64(info.Status.Capacity))
 	re.Equal(available, int64(info.Status.Available))
 	checkStoresInfo(re, []*response.StoreInfo{info}, stores[:1])

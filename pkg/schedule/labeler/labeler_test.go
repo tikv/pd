@@ -147,7 +147,8 @@ func TestGetSetRule(t *testing.T) {
 	}
 
 	for _, r := range rules {
-		labeler.DeleteLabelRule(r.ID)
+		err = labeler.DeleteLabelRule(r.ID)
+		re.NoError(err)
 	}
 	re.Empty(labeler.GetAllLabelRules())
 }
@@ -251,8 +252,10 @@ func TestIndex(t *testing.T) {
 		{"cdef", "efef", map[string]string{"k1": "v0", "k2": "v3"}},
 	}
 	for _, testCase := range testCases {
-		start, _ := hex.DecodeString(testCase.start)
-		end, _ := hex.DecodeString(testCase.end)
+		start, err := hex.DecodeString(testCase.start)
+		re.NoError(err)
+		end, err := hex.DecodeString(testCase.end)
+		re.NoError(err)
 		region := core.NewTestRegionInfo(1, 1, start, end)
 		labels := labeler.GetRegionLabels(region)
 		re.Len(labels, len(testCase.labels))
@@ -292,14 +295,17 @@ func TestSaveLoadRule(t *testing.T) {
 }
 
 func expectSameRegionLabels(re *require.Assertions, r1, r2 *RegionLabel) {
-	r1.checkAndAdjustExpire()
-	r2.checkAndAdjustExpire()
+	err := r1.checkAndAdjustExpire()
+	re.NoError(err)
+	err = r2.checkAndAdjustExpire()
+	re.NoError(err)
 	if len(r1.TTL) == 0 {
 		re.Equal(r1, r2)
 	}
 
 	r2.StartAt = r1.StartAt
-	r2.checkAndAdjustExpire()
+	err = r2.checkAndAdjustExpire()
+	re.NoError(err)
 
 	re.Equal(r1, r2)
 }
@@ -342,8 +348,10 @@ func TestKeyRange(t *testing.T) {
 		{"ffee", "ffff", map[string]string{}},
 	}
 	for _, testCase := range testCases {
-		start, _ := hex.DecodeString(testCase.start)
-		end, _ := hex.DecodeString(testCase.end)
+		start, err := hex.DecodeString(testCase.start)
+		re.NoError(err)
+		end, err := hex.DecodeString(testCase.end)
+		re.NoError(err)
 		region := core.NewTestRegionInfo(1, 1, start, end)
 		labels := labeler.GetRegionLabels(region)
 		re.Len(labels, len(testCase.labels))
@@ -387,8 +395,10 @@ func TestLabelerRuleTTL(t *testing.T) {
 			Data:     MakeKeyRanges("1234", "5678")},
 	}
 
-	start, _ := hex.DecodeString("1234")
-	end, _ := hex.DecodeString("5678")
+	start, err := hex.DecodeString("1234")
+	re.NoError(err)
+	end, err := hex.DecodeString("5678")
+	re.NoError(err)
 	region := core.NewTestRegionInfo(1, 1, start, end)
 	// the region has no label rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
@@ -424,11 +434,12 @@ func TestLabelerRuleTTL(t *testing.T) {
 func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
 	re.Equal(exist, labeler.labelRules[ruleID] != nil)
 	existInStorage := false
-	labeler.storage.LoadRegionRules(func(k, _ string) {
+	err := labeler.storage.LoadRegionRules(func(k, _ string) {
 		if k == ruleID {
 			existInStorage = true
 		}
 	})
+	re.NoError(err)
 	re.Equal(exist, existInStorage)
 }
 
@@ -441,8 +452,10 @@ func TestGC(t *testing.T) {
 	labeler, err := NewRegionLabeler(ctx, store, time.Hour)
 	re.NoError(err)
 	ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}
-	start, _ := hex.DecodeString("1234")
-	end, _ := hex.DecodeString("5678")
+	start, err := hex.DecodeString("1234")
+	re.NoError(err)
+	end, err := hex.DecodeString("5678")
+	re.NoError(err)
 	region := core.NewTestRegionInfo(1, 1, start, end)
 	// the region has no label rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))

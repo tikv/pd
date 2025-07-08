@@ -116,7 +116,8 @@ func checkMemberList(re *require.Assertions, clientURL string, configs []*config
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
 	}
 	data := make(map[string][]*pdpb.Member)
-	json.Unmarshal(buf, &data)
+	err = json.Unmarshal(buf, &data)
+	re.NoError(err)
 	if len(data["members"]) != len(configs) {
 		return errors.Errorf("member length not match, %v vs %v", len(data["members"]), len(configs))
 	}
@@ -303,10 +304,13 @@ func TestMoveLeader(t *testing.T) {
 		go func(s *tests.TestServer) {
 			defer wg.Done()
 			if s.IsLeader() {
-				s.ResignLeader()
+				err = s.ResignLeader()
+				re.NoError(err)
 			} else {
-				old, _ := s.GetEtcdLeaderID()
-				s.MoveEtcdLeader(old, s.GetServerID())
+				old, err := s.GetEtcdLeaderID()
+				re.NoError(err)
+				err = s.MoveEtcdLeader(old, s.GetServerID())
+				re.NoError(err)
 			}
 		}(s)
 	}
@@ -418,7 +422,8 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 			// just make sure the server will not panic.
 			grpcPDClient := testutil.MustNewGrpcClient(re, addr)
 			if grpcPDClient != nil {
-				_, _ = grpcPDClient.AllocID(context.Background(), req)
+				_, err := grpcPDClient.AllocID(context.Background(), req)
+				re.NoError(err)
 			}
 		}
 		time.Sleep(10 * time.Millisecond)

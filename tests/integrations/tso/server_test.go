@@ -83,7 +83,8 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
-	suite.pdLeaderServer.BootstrapCluster()
+	err = suite.pdLeaderServer.BootstrapCluster()
+	re.NoError(err)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
 		suite.pdClient = testutil.MustNewGrpcClient(re, backendEndpoints)
@@ -129,7 +130,10 @@ func (suite *tsoServerTestSuite) request(ctx context.Context, re *require.Assert
 		}
 		tsoClient, err := suite.pdClient.Tso(ctx)
 		re.NoError(err)
-		defer tsoClient.CloseSend()
+		defer func() {
+			err := tsoClient.CloseSend()
+			re.NoError(err)
+		}()
 		re.NoError(tsoClient.Send(req))
 		_, err = tsoClient.Recv()
 		return err
@@ -141,7 +145,10 @@ func (suite *tsoServerTestSuite) request(ctx context.Context, re *require.Assert
 	}
 	tsoClient, err := suite.tsoClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err := tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 	re.NoError(tsoClient.Send(req))
 	_, err = tsoClient.Recv()
 	return err

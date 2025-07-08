@@ -66,7 +66,10 @@ func TestRequestFollower(t *testing.T) {
 	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 
 	start := time.Now()
 	re.NoError(tsoClient.Send(req))
@@ -94,7 +97,8 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	var leaderServer, nextLeaderServer *tests.TestServer
 	leaderServer = cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
-	leaderServer.BootstrapCluster()
+	err = leaderServer.BootstrapCluster()
+	re.NoError(err)
 	for _, s := range cluster.GetServers() {
 		if s.GetConfig().Name != cluster.GetLeader() {
 			nextLeaderServer = s
@@ -113,13 +117,17 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
 
 	// Make the old leader resign and wait for the new leader to get a lease
-	leaderServer.ResignLeader()
+	err = leaderServer.ResignLeader()
+	re.NoError(err)
 	re.True(nextLeaderServer.WaitLeader())
 
 	ctx = grpcutil.BuildForwardContext(ctx, nextLeaderServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 	re.NoError(tsoClient.Send(req))
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
@@ -152,13 +160,17 @@ func TestLogicalOverflow(t *testing.T) {
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
-	leaderServer.BootstrapCluster()
+	err = leaderServer.BootstrapCluster()
+	re.NoError(err)
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 
 	var (
 		maxDuration   time.Duration

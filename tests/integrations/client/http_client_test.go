@@ -218,13 +218,17 @@ func (suite *httpClientTestSuite) TestMeta() {
 	version, err := client.GetClusterVersion(ctx)
 	re.NoError(err)
 	re.Equal("1.0.0", version)
-	rgs, _ := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	rgs, err := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	re.NoError(err)
 	re.Equal(int64(0), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	re.NoError(err)
 	re.Equal(int64(1), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
 	// store 2 origin status:offline
 	err = client.DeleteStore(ctx, 2)
@@ -842,11 +846,13 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err := c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	var out dto.Metric
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	c.Close()
 
@@ -859,10 +865,12 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(1), out.GetCounter().GetValue())
 	c.Close()
 
@@ -874,14 +882,17 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	failureCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(3), out.GetCounter().GetValue())
 	c.Close()
 }
@@ -963,7 +974,8 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
 	for range 3 {
-		leader.ResignLeader()
+		err := leader.ResignLeader()
+		re.NoError(err)
 		re.NotEmpty(suite.cluster.WaitLeader())
 		leader = suite.cluster.GetLeaderServer()
 		re.NotNil(leader)
@@ -1008,7 +1020,8 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		err := storage.SaveServiceGCSafePoint(ssp)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	err := storage.SaveGCSafePoint(1)
+	re.NoError(err)
 
 	// get the safepoints and start testing
 	l, err := client.GetGCSafePoint(ctx)

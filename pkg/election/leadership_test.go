@@ -167,7 +167,8 @@ func TestExitWatch(t *testing.T) {
 		// close the original leader
 		server.Server.HardStop()
 		// delete the leader key with the new client
-		client2.Delete(context.Background(), leaderKey)
+		_, err = client2.Delete(context.Background(), leaderKey)
+		re.NoError(err)
 		return func() {
 			etcd2.Close()
 			client2.Close()
@@ -256,14 +257,16 @@ func TestRequestProgress(t *testing.T) {
 		if injectWatchChanBlock {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock"))
 		} else {
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})

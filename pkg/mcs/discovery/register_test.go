@@ -71,7 +71,8 @@ func TestRegister(t *testing.T) {
 		etcd.Server.HardStop() // close the etcd to make the keepalive failed
 		// ensure that the request is timeout
 		testutil.Eventually(re, func() bool {
-			content, _ := os.ReadFile(fname)
+			content, err := os.ReadFile(fname)
+			re.NoError(err)
 			// check log in function `ServiceRegister.Register`
 			// ref https://github.com/tikv/pd/blob/6377b26e4e879e7623fbc1d0b7f1be863dea88ad/pkg/mcs/discovery/register.go#L77
 			// need to both contain `register.go` and `keep alive failed`

@@ -916,7 +916,8 @@ func BenchmarkGetRegions(b *testing.B) {
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		tests.MustPutRegionInfo(re, cluster, r)
 	}
-	resp, _ := apiutil.GetJSON(tests.TestDialClient, url, nil)
+	resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+	re.NoError(err)
 	regions := &response.RegionsInfo{}
 	err = json.NewDecoder(resp.Body).Decode(regions)
 	re.NoError(err)
@@ -925,7 +926,8 @@ func BenchmarkGetRegions(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		resp, _ := apiutil.GetJSON(tests.TestDialClient, url, nil)
+		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+		re.NoError(err)
 		resp.Body.Close()
 	}
 }

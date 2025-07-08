@@ -109,9 +109,12 @@ func (suite *gcClientTestSuite) CleanupEtcdGCPath() {
 func (suite *gcClientTestSuite) TestWatch1() {
 	re := suite.Require()
 	receiver := gcClientTestReceiver{re: suite.Require()}
-	go suite.server.WatchGCSafePointV2(&pdpb.WatchGCSafePointV2Request{
-		Revision: 0,
-	}, receiver)
+	go func() {
+		err := suite.server.WatchGCSafePointV2(&pdpb.WatchGCSafePointV2Request{
+			Revision: 0,
+		}, receiver)
+		re.NoError(err)
+	}()
 
 	// Init gc safe points as index value of keyspace 0 ~ 5.
 	for i := range 6 {
