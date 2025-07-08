@@ -1901,14 +1901,15 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 		for _, keyspaceToFind := range keyspaces {
 			groupToFind := genGroupByKeyspace(keyspaceToFind)
 			testutil.Eventually(re, func() bool {
-				_, _, _, _, err := c.OnRequestWait(suite.ctx, groupToFind.Name, tcs.makeReadRequest())
-				re.NoError(err)
 				meta := c.GetActiveResourceGroup(groupToFind.Name)
+				_, _, _, _, err := c.OnRequestWait(suite.ctx, groupToFind.Name, tcs.makeReadRequest())
 				if keyspaceToFind == keyspace {
+					re.NoError(err)
 					return meta != nil &&
 						meta.Name == groupToFind.Name &&
 						meta.RUSettings.RU.Settings.FillRate == groupToFind.RUSettings.RU.Settings.FillRate
 				}
+				re.Error(err)
 				return meta == nil
 			})
 		}

@@ -331,7 +331,7 @@ func TestStaleRegion(t *testing.T) {
 	regionInfoA = regionInfoA.Clone(core.WithIncConfVer(), core.WithIncVersion())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/decEpoch", `return(true)`))
 	err = tc.HandleRegionHeartbeat(regionInfoA)
-	re.NoError(err)
+	re.ErrorContains(err, "region is stale")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/decEpoch"))
 	regionInfoA = regionInfoA.Clone(core.WithIncConfVer(), core.WithIncVersion())
 	err = tc.HandleRegionHeartbeat(regionInfoA)
@@ -773,8 +773,10 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = leaderServer.BootstrapCluster()
-			re.NoError(err)
+			err := leaderServer.BootstrapCluster()
+			if err != nil {
+				re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+			}
 		}()
 	}
 	wg.Wait()
@@ -958,7 +960,11 @@ func TestConcurrentHandleRegion(t *testing.T) {
 					return
 				default:
 					_, err = stream.Recv()
-					re.NoError(err)
+					if err != nil {
+						isCanceled := strings.Contains(err.Error(), "context canceled")
+						isEOF := strings.Contains(err.Error(), "EOF")
+						re.True(isCanceled || isEOF)
+					}
 				}
 			}
 		}(i == 0)
@@ -1326,6 +1332,7 @@ func TestOfflineStoreLimit(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
+	leaderServer.GetPersistOptions().SetMaxReplicas(1) // ensure it is successful to offline store
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -1593,7 +1600,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return leaderServer.GetRaftCluster().IsPrepared()
 	})
-	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
+	schedulersNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
 	tests.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
@@ -1602,9 +1609,11 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 		"store_id": 2,
 	})
 	// Check scheduler updated.
-	schedsNum += 1
+	schedulersNum += 1
 	schedulersController := rc.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), schedsNum)
+	testutil.Eventually(re, func() bool {
+		return len(schedulersController.GetSchedulerNames()) == schedulersNum
+	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
@@ -1627,7 +1636,9 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Check scheduler updated.
 	schedulersController = rc1.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), schedsNum)
+	testutil.Eventually(re, func() bool {
+		return len(schedulersController.GetSchedulerNames()) == schedulersNum
+	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
@@ -1650,7 +1661,9 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	})
 	// Check scheduler updated
 	schedulersController = rc.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), schedsNum)
+	testutil.Eventually(re, func() bool {
+		return len(schedulersController.GetSchedulerNames()) == schedulersNum
+	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 }

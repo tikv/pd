@@ -110,6 +110,9 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	re := suite.Require()
 	receiver := gcClientTestReceiver{re: suite.Require()}
 	go func() {
+		// TODO: fix this test
+		// It will return "unexpected end of JSON input" because watch value is empty and exit watch loop directly.
+		// And we also need to use wait group to manage this goroutine.
 		err := suite.server.WatchGCSafePointV2(&pdpb.WatchGCSafePointV2Request{
 			Revision: 0,
 		}, receiver)

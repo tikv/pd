@@ -131,9 +131,7 @@ func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
 	suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3", "host": "h5"})
 	suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
-	err := suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
-	re.NoError(err)
-	err = suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:        placement.DefaultGroupID,
 		ID:             "test",
 		Index:          100,
@@ -143,6 +141,8 @@ func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
 		LocationLabels: []string{"zone", "host"},
 		IsolationLevel: "zone",
 	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.Nil(op)
@@ -348,7 +348,7 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeers2() {
 		ID:       "r1",
 		Index:    100,
 		Override: true,
-		Role:     placement.Leader,
+		Role:     placement.Voter,
 		Count:    2,
 		LabelConstraints: []placement.LabelConstraint{
 			{Key: "foo", Op: "in", Values: []string{"baz"}},

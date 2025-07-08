@@ -133,11 +133,11 @@ func (suite *memberTestSuite) checkChangeLeaderPeerUrls(cluster *tests.TestClust
 	buf, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	resp.Body.Close()
-	got1 := make(map[string]*pdpb.Member)
+	got1 := &pdpb.GetMembersResponse{}
 	err = json.Unmarshal(buf, &got1)
 	re.NoError(err)
-	re.Equal(newPeerUrls, got1["leader"].GetPeerUrls())
-	re.Equal(newPeerUrls, got1["etcd_leader"].GetPeerUrls())
+	re.Equal(newPeerUrls, got1.GetLeader().GetPeerUrls())
+	re.Equal(newPeerUrls, got1.GetEtcdLeader().GetPeerUrls())
 
 	// reset
 	suite.changeLeaderPeerUrls(leader, peerUrls)
@@ -182,11 +182,11 @@ func relaxEqualStings(re *require.Assertions, a, b []string) {
 }
 
 func checkListResponse(re *require.Assertions, body []byte, svrs map[string]*tests.TestServer) {
-	got := make(map[string][]*pdpb.Member)
+	got := &pdpb.GetMembersResponse{}
 	err := json.Unmarshal(body, &got)
 	re.NoError(err)
-	re.Len(svrs, len(got["members"]))
-	for _, member := range got["members"] {
+	re.Len(svrs, len(got.GetMembers()))
+	for _, member := range got.GetMembers() {
 		for _, svr := range svrs {
 			if member.GetName() != svr.GetConfig().Name {
 				continue

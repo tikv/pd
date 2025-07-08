@@ -847,7 +847,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	})
 	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
 	err := c.CreateScheduler(context.Background(), "test", 0)
-	re.NoError(err)
+	re.ErrorContains(err, "mock error")
 	var out dto.Metric
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)

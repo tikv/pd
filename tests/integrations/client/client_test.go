@@ -705,7 +705,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 
 	// here is just for trigger the leader change.
 	_, err = cli.GetRegion(context.Background(), []byte("a"))
-	re.NoError(err)
+	re.Error(err)
 
 	testutil.Eventually(re, func() bool {
 		return cli.GetLeaderURL() == follower.GetAddr()

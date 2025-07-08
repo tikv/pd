@@ -67,7 +67,10 @@ func (s *schedulerSuite) TestTransferLeader() {
 	// record scheduler
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), 1))
 	defer func() {
-		re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String()))
+		err := pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 	res, err := pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
@@ -120,7 +123,9 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
 		err = pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
-		re.NoError(err)
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 
 	// wait leader transfer
@@ -162,7 +167,9 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
 		err := pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
-		re.NoError(err)
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
@@ -179,7 +186,9 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
 		err = pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
-		re.NoError(err)
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)

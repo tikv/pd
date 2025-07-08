@@ -146,7 +146,8 @@ func TestGetSetRule(t *testing.T) {
 		expectSameRules(re, rule, rules[id+1])
 	}
 
-	for _, r := range rules {
+	allRulesBeforeCleanup := labeler.GetAllLabelRules()
+	for _, r := range allRulesBeforeCleanup {
 		err = labeler.DeleteLabelRule(r.ID)
 		re.NoError(err)
 	}

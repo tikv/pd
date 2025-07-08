@@ -162,15 +162,23 @@ func TestExitWatch(t *testing.T) {
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
+		cfg2 := etcd2.Config()
+		etcd3 := etcdutil.MustAddEtcdMember(t, &cfg2, client)
 		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls)
 		re.NoError(err)
 		// close the original leader
 		server.Server.HardStop()
+		// wait new leader
+		testutil.Eventually(re, func() bool {
+			_, err := client2.Get(context.Background(), leaderKey, clientv3.WithLimit(1))
+			return err == nil
+		})
 		// delete the leader key with the new client
 		_, err = client2.Delete(context.Background(), leaderKey)
 		re.NoError(err)
 		return func() {
 			etcd2.Close()
+			etcd3.Close()
 			client2.Close()
 		}
 	})
