@@ -161,9 +161,9 @@ func makeMutations() []*keyspace.Mutation {
 
 func TestSystemKeyspace(t *testing.T) {
 	re := require.New(t)
-	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`))
 	defer func() {
-		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

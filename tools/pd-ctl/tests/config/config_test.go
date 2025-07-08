@@ -1230,18 +1230,18 @@ func (suite *configTestSuite) checkMaxReplicaChanged(cluster *pdTests.TestCluste
 	re.Contains(string(output), "Success!")
 	re.NotContains(string(output), "which is less than the current replicas")
 	// test meet error when get config failed
-	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(200)`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(200)`))
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	re.Contains(string(output), "Failed to unmarshal config when checking config")
-	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
-	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(500)`)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(500)`))
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	re.Contains(string(output), "Failed to get config when checking config")
-	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed"))
 }
 
 func (suite *configTestSuite) TestPDServerConfig() {

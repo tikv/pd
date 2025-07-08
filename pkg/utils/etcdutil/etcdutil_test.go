@@ -738,13 +738,13 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 		}()
 
 		if injectWatchChanBlock {
-			failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)")
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
 				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
-			failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 		} else {
 			testutil.Eventually(re, func() bool {
 				b, _ := os.ReadFile(fname)
