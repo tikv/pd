@@ -182,10 +182,10 @@ func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
 }
 
 // PutStore put a store.
-func (bc *BasicCluster) PutStore(store *StoreInfo) {
+func (bc *BasicCluster) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
 	bc.Stores.mu.Lock()
 	defer bc.Stores.mu.Unlock()
-	bc.Stores.SetStore(store)
+	bc.Stores.SetStore(store, opts...)
 }
 
 // ResetStores resets the store cache.
