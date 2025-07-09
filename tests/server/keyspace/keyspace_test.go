@@ -161,9 +161,6 @@ func makeMutations() []*keyspace.Mutation {
 
 func TestProtectedKeyspace(t *testing.T) {
 	re := require.New(t)
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
-	}()
 	const classic = `return(false)`
 	const nextGen = `return(true)`
 
@@ -190,6 +187,9 @@ func TestProtectedKeyspace(t *testing.T) {
 		},
 	}
 
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+	}()
 	for _, c := range cases {
 		t.Run(c.name, func(_ *testing.T) {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", c.nextGenFlag))

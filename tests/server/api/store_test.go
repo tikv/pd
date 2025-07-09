@@ -470,11 +470,11 @@ func (suite *storeTestSuite) checkStoreSetState(cluster *tests.TestCluster) {
 	// Set to Offline.
 	ch := make(chan struct{})
 	defer close(ch)
-	failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
 		<-ch
-	})
+	}))
 	defer func() {
-		failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores")
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores"))
 	}()
 	info = response.StoreInfo{}
 	err = testutil.CheckPostJSON(tests.TestDialClient, url+"/state?state=Offline", nil, testutil.StatusOK(re))

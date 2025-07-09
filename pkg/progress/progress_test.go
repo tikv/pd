@@ -80,11 +80,11 @@ func TestProgress(t *testing.T) {
 
 	// test gc progress
 	m.markProgressAsFinished(storeID)
-	failpoint.Enable("github.com/tikv/pd/pkg/progress/gcExpiredTime", `return("100ms")`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/progress/gcExpiredTime", `return("100ms")`))
 	time.Sleep(200 * time.Millisecond)
 	m.gcCompletedProgress()
 	re.Nil(m.GetProgressByStoreID(storeID))
-	failpoint.Disable("github.com/tikv/pd/pkg/progress/gcExpiredTime")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/progress/gcExpiredTime"))
 }
 
 func TestOnlineAndOffline(t *testing.T) {
