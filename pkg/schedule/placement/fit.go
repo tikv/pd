@@ -119,6 +119,11 @@ func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
 	return f.regionStores
 }
 
+// GetRules returns the rules that are used to fit the region.
+func (f *RegionFit) GetRules() []*Rule {
+	return f.rules
+}
+
 // RuleFit is the result of fitting status of a Rule.
 type RuleFit struct {
 	Rule *Rule `json:"rule"`
