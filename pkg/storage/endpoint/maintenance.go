@@ -47,8 +47,8 @@ type MaintenanceStorage interface {
 	LoadAllMaintenanceTasks(f func(k, v string)) error
 	// TryStartMaintenanceTaskAtomic tries to start a maintenance task atomically.
 	TryStartMaintenanceTaskAtomic(ctx context.Context, task *MaintenanceTask) (bool, *MaintenanceTask, error)
-	// TryEndMaintenanceTaskAtomic tries to end a maintenance task atomically.
-	TryEndMaintenanceTaskAtomic(ctx context.Context, taskType, taskID string) (bool, *MaintenanceTask, error)
+	// TryDeleteMaintenanceTaskAtomic tries to delete a maintenance task atomically.
+	TryDeleteMaintenanceTaskAtomic(ctx context.Context, taskType, taskID string) (bool, *MaintenanceTask, error)
 }
 
 var _ MaintenanceStorage = (*StorageEndpoint)(nil)
@@ -166,9 +166,9 @@ func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task
 	return false, nil, nil
 }
 
-// TryEndMaintenanceTaskAtomic tries to end a maintenance task atomically.
+// TryDeleteMaintenanceTaskAtomic tries to delete a maintenance task atomically.
 // Returns (true, nil) if success, (false, existingTask, nil) if conflict, (false, nil, err) if error.
-func (se *StorageEndpoint) TryEndMaintenanceTaskAtomic(_ context.Context, taskType, taskID string) (bool, *MaintenanceTask, error) {
+func (se *StorageEndpoint) TryDeleteMaintenanceTaskAtomic(_ context.Context, taskType, taskID string) (bool, *MaintenanceTask, error) {
 	// Use a single atomic transaction
 	rawTxn := se.CreateRawTxn()
 

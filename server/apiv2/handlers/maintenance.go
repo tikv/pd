@@ -42,7 +42,7 @@ func RegisterMaintenance(r *gin.RouterGroup) {
 	router.PUT("/:task_type/:task_id", StartMaintenanceTask)
 	router.GET("", GetMaintenanceTask)
 	router.GET("/:task_type", GetMaintenanceTaskByType)
-	router.DELETE("/:task_type/:task_id", EndMaintenanceTask)
+	router.DELETE("/:task_type/:task_id", DeleteMaintenanceTask)
 }
 
 // StartMaintenanceTask starts a maintenance task.
@@ -163,23 +163,23 @@ func GetMaintenanceTaskByType(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
-// EndMaintenanceTask ends a maintenance task.
+// DeleteMaintenanceTask deletes a maintenance task.
 // @Tags     maintenance
-// @Summary  End a maintenance task.
+// @Summary  Delete a maintenance task.
 // @Param    task_type  path  string  true  "The type of maintenance task"
 // @Param    task_id    path  string  true  "Unique identifier for the task"
 // @Produce  json
-// @Success  200  {string}  string  "Maintenance task ended successfully."
+// @Success  200  {string}  string  "Maintenance task deleted successfully."
 // @Failure  404  {string}  string  "No maintenance task is running for this type."
 // @Failure  409  {object}  map[string]interface{}  "Task ID does not match the current task."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /maintenance/{task_type}/{task_id} [delete]
-func EndMaintenanceTask(c *gin.Context) {
+func DeleteMaintenanceTask(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	taskType := c.Param("task_type")
 	taskID := c.Param("task_id")
 
-	ok, existingTask, err := svr.GetStorage().TryEndMaintenanceTaskAtomic(c.Request.Context(), taskType, taskID)
+	ok, existingTask, err := svr.GetStorage().TryDeleteMaintenanceTaskAtomic(c.Request.Context(), taskType, taskID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -199,5 +199,5 @@ func EndMaintenanceTask(c *gin.Context) {
 	// Update metrics
 	maintenance.SetMaintenanceTaskInfo(taskType, taskID, 0)
 
-	c.JSON(http.StatusOK, "Maintenance task ended successfully.")
+	c.JSON(http.StatusOK, "Maintenance task deleted successfully.")
 }

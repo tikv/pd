@@ -129,7 +129,7 @@ func newMaintenanceShowCommand() *cobra.Command {
 func newMaintenanceDeleteCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <task_type> <task_id>",
-		Short: "End a maintenance task",
+		Short: "Delete a maintenance task",
 		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 			taskType := args[0]
@@ -139,15 +139,15 @@ func newMaintenanceDeleteCommand() *cobra.Command {
 			resp, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
 			if err != nil {
 				if strings.Contains(err.Error(), "[404]") {
-					cmd.Printf("Failed to end maintenance task: No maintenance task is running for type %s\n", taskType)
+					cmd.Printf("Failed to delete maintenance task: No maintenance task is running for type %s\n", taskType)
 				} else if strings.Contains(err.Error(), "[409]") {
-					cmd.Printf("Failed to end maintenance task: Task ID does not match the current task.\n")
+					cmd.Printf("Failed to delete maintenance task: Task ID does not match the current task.\n")
 					// Try to parse the existing task from the error response
 					if strings.Contains(err.Error(), "existing_task") {
 						cmd.Printf("Current task details: %s\n", extractExistingTaskInfo(err.Error()))
 					}
 				} else {
-					cmd.Printf("Failed to end maintenance task: %s\n", err)
+					cmd.Printf("Failed to delete maintenance task: %s\n", err)
 				}
 				return
 			}

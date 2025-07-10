@@ -148,7 +148,7 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 		re.Equal(taskID, taskByType.ID)
 		re.Equal(desc, taskByType.Description)
 
-		// 6. End maintenance task with wrong ID (should conflict)
+		// 6. Delete maintenance task with wrong ID (should conflict)
 		wrongID := "wrong_id"
 		deleteURL := fmt.Sprintf("%s/%s/%s", baseURL, taskType, wrongID)
 		req, err := http.NewRequest(http.MethodDelete, deleteURL, nil)
@@ -168,7 +168,7 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 		re.Equal("Task ID does not match the current task", deleteErrorResp.Error)
 		re.NotNil(deleteErrorResp.ExistingTask)
 
-		// 7. End maintenance task with correct ID
+		// 7. Delete maintenance task with correct ID
 		deleteURL = fmt.Sprintf("%s/%s/%s", baseURL, taskType, taskID)
 		req, err = http.NewRequest(http.MethodDelete, deleteURL, nil)
 		re.NoError(err)
@@ -177,7 +177,7 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 		defer res.Body.Close()
 		re.Equal(http.StatusOK, res.StatusCode)
 		body, _ = io.ReadAll(res.Body)
-		re.Contains(string(body), "ended successfully")
+		re.Contains(string(body), "deleted successfully")
 
 		// 8. Get maintenance task after deletion (should 404)
 		res, err = client.Get(baseURL)
@@ -294,9 +294,9 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
 		re.Len(tasks, 1, "Should only have one task")
 		successfulTaskID := tasks[0].ID
 
-		// Test concurrent end requests with wrong IDs
-		suite.T().Log("Testing concurrent end requests with wrong IDs...")
-		wrongEndCount := 0
+		// Test concurrent delete requests with wrong IDs
+		suite.T().Log("Testing concurrent delete requests with wrong IDs...")
+		wrongDeleteCount := 0
 		for i := range make([]struct{}, numConcurrentRequests) {
 			wg.Add(1)
 			go func(index int) {
@@ -319,18 +319,18 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
 
 				mu.Lock()
 				if res.StatusCode == http.StatusConflict {
-					wrongEndCount++
+					wrongDeleteCount++
 				}
 				mu.Unlock()
 			}(i)
 		}
 		wg.Wait()
 
-		re.Equal(numConcurrentRequests, wrongEndCount, "All wrong end requests should get conflict")
+		re.Equal(numConcurrentRequests, wrongDeleteCount, "All wrong delete requests should get conflict")
 
-		// Test concurrent end requests with correct ID
-		suite.T().Log("Testing concurrent end requests with correct ID...")
-		correctEndCount := 0
+		// Test concurrent delete requests with correct ID
+		suite.T().Log("Testing concurrent delete requests with correct ID...")
+		correctDeleteCount := 0
 		for i := range make([]struct{}, numConcurrentRequests) {
 			wg.Add(1)
 			go func(index int) {
@@ -353,10 +353,10 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
 				mu.Lock()
 				switch res.StatusCode {
 				case http.StatusOK:
-					correctEndCount++
-					suite.T().Logf("Task ended successfully on attempt %d", index)
+					correctDeleteCount++
+					suite.T().Logf("Task deleted successfully on attempt %d", index)
 				case http.StatusNotFound:
-					suite.T().Logf("Task already ended on attempt %d", index)
+					suite.T().Logf("Task already deleted on attempt %d", index)
 				default:
 					suite.T().Logf("Unexpected status on attempt %d: %d", index, res.StatusCode)
 				}
@@ -365,8 +365,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
 		}
 		wg.Wait()
 
-		// Verify that exactly one end request succeeded
-		re.Equal(1, correctEndCount, "Only one end request should succeed")
+		// Verify that exactly one delete request succeeded
+		re.Equal(1, correctDeleteCount, "Only one delete request should succeed")
 
 		// Verify no tasks are running
 		res, err = client.Get(baseURL)

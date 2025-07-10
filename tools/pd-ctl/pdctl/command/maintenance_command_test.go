@@ -82,7 +82,7 @@ func TestMaintenanceDeleteCommand_Success(t *testing.T) {
 	re := require.New(t)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader("Maintenance task ended successfully.")),
+		Body:       io.NopCloser(strings.NewReader("Maintenance task deleted successfully.")),
 	}
 	oldClient := dialClient
 	dialClient = &http.Client{Transport: &mockRoundTripper{resp: resp}}
@@ -96,7 +96,7 @@ func TestMaintenanceDeleteCommand_Success(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "Maintenance task ended successfully")
+	re.Contains(result, "Maintenance task deleted successfully")
 }
 
 func TestMaintenanceDeleteCommand_Error(t *testing.T) {
@@ -113,7 +113,7 @@ func TestMaintenanceDeleteCommand_Error(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "Failed to end maintenance task:")
+	re.Contains(result, "Failed to delete maintenance task:")
 	re.Contains(result, "mock error")
 }
 
@@ -375,7 +375,7 @@ func TestMaintenanceDeleteCommand_NotFound(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "Failed to end maintenance task: No maintenance task is running for type nonexistent")
+	re.Contains(result, "Failed to delete maintenance task: No maintenance task is running for type nonexistent")
 }
 
 func TestMaintenanceDeleteCommand_Conflict(t *testing.T) {
@@ -398,7 +398,7 @@ func TestMaintenanceDeleteCommand_Conflict(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "Failed to end maintenance task: Task ID does not match the current task")
+	re.Contains(result, "Failed to delete maintenance task: Task ID does not match the current task")
 	re.Contains(result, "Current task details:")
 	re.Contains(result, "current_task")
 	re.Contains(result, "current maintenance task")
