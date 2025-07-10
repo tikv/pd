@@ -535,7 +535,10 @@ func restartTestCluster(
 		wg.Add(1)
 		go func(serverName string, server *TestServer) {
 			defer wg.Done()
-			server.Destroy()
+			err := server.Destroy()
+			if err != nil {
+				return
+			}
 			var (
 				newServer *TestServer
 				serverErr error

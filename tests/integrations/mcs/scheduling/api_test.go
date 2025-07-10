@@ -405,7 +405,8 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
 
 	var cfg config.Config
-	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	re.NoError(err)
 	re.Equal(cfg.GetListenAddr(), s.GetConfig().GetListenAddr())
 	re.Equal(cfg.Schedule.LeaderScheduleLimit, s.GetConfig().Schedule.LeaderScheduleLimit)
 	re.Equal(cfg.Schedule.EnableCrossTableMerge, s.GetConfig().Schedule.EnableCrossTableMerge)
@@ -428,7 +429,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	// Test config forward
 	// Expect to get same config in scheduling server and PD
 	testutil.Eventually(re, func() bool {
-		testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		re.NoError(err)
 		re.Equal(cfg["schedule"].(map[string]any)["leader-schedule-limit"],
 			float64(opts.GetLeaderScheduleLimit()))
 		return cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
@@ -443,7 +445,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, reqData, testutil.StatusOK(re))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		re.NoError(err)
 		return cfg["replication"].(map[string]any)["max-replicas"] == 4. &&
 			opts.GetReplicationConfig().MaxReplicas == 4.
 	})
@@ -454,13 +457,15 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	scheCfg.LeaderScheduleLimit = 100
 	opts.SetScheduleConfig(scheCfg)
 	re.Equal(100, int(opts.GetLeaderScheduleLimit()))
-	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	re.NoError(err)
 	re.Equal(100., cfg["schedule"].(map[string]any)["leader-schedule-limit"])
 	repCfg := opts.GetReplicationConfig().Clone()
 	repCfg.MaxReplicas = 5
 	opts.SetReplicationConfig(repCfg)
 	re.Equal(5, int(opts.GetReplicationConfig().MaxReplicas))
-	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	re.NoError(err)
 	re.Equal(5., cfg["replication"].(map[string]any)["max-replicas"])
 }
 
@@ -693,8 +698,9 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	re.Equal("mock://tikv-7:7", resp["store"].(map[string]any)["address"])
 	re.Equal("Tombstone", resp["store"].(map[string]any)["state_name"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/233", scheServerAddr)
-	testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
 		testutil.Status(re, http.StatusNotFound), testutil.StringContain(re, "not found"))
+	re.NoError(err)
 }
 
 func (suite *apiTestSuite) TestRegions() {
@@ -731,9 +737,11 @@ func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
 	re.NoError(err)
 	re.Equal(3., resp["count"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions/0", scheServerAddr)
-	testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
 		testutil.Status(re, http.StatusBadRequest))
+	re.NoError(err)
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions/233", scheServerAddr)
-	testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
 		testutil.Status(re, http.StatusNotFound), testutil.StringContain(re, "not found"))
+	re.NoError(err)
 }

@@ -228,8 +228,10 @@ func TestSubtractKeyRanges(t *testing.T) {
 	for _, tc := range testCases {
 		rs := &KeyRanges{krs: tc.ks}
 		res := rs.SubtractKeyRanges(tc.base)
-		expectData, _ := json.Marshal(tc.expect)
-		actualData, _ := json.Marshal(res)
+		expectData, err := json.Marshal(tc.expect)
+		re.NoError(err)
+		actualData, err := json.Marshal(res)
+		re.NoError(err)
 		re.Equal(expectData, actualData, tc.name)
 	}
 }
@@ -276,8 +278,10 @@ func TestDeleteKeyRanges(t *testing.T) {
 	for _, tc := range testData {
 		rs := &KeyRanges{krs: tc.input}
 		rs.Delete(tc.base)
-		expectData, _ := json.Marshal(tc.expect)
-		actualData, _ := json.Marshal(rs.krs)
+		expectData, err := json.Marshal(tc.expect)
+		re.NoError(err)
+		actualData, err := json.Marshal(rs.krs)
+		re.NoError(err)
 		re.Equal(expectData, actualData, tc.name)
 	}
 }

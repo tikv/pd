@@ -52,8 +52,10 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	})
 	c := newClientWithMockServiceDiscovery("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	defer c.Close()
-	c.GetRegions(context.Background())
-	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
+	_, err := c.GetRegions(context.Background())
+	re.NoError(err)
+	_, err = c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
+	re.NoError(err)
 	re.Equal(2, checked)
 }
 
@@ -74,9 +76,11 @@ func TestWithCallerID(t *testing.T) {
 	})
 	c := newClientWithMockServiceDiscovery("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	defer c.Close()
-	c.GetRegions(context.Background())
+	_, err := c.GetRegions(context.Background())
+	re.NoError(err)
 	expectedVal.Store("test")
-	c.WithCallerID(expectedVal.Load().(string)).GetRegions(context.Background())
+	_, err = c.WithCallerID(expectedVal.Load().(string)).GetRegions(context.Background())
+	re.NoError(err)
 	re.Equal(2, checked)
 }
 
