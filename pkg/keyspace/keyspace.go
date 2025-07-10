@@ -143,7 +143,7 @@ func NewKeyspaceManager(
 		cluster:           cluster,
 		config:            config,
 		kgm:               kgm,
-		nextPatrolStartID: constant.ZeroKeyspaceID,
+		nextPatrolStartID: constant.StartKeyspaceID,
 	}
 }
 
