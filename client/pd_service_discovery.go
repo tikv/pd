@@ -554,17 +554,11 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		case <-ticker.C:
 		case <-c.checkMembershipCh:
 		}
-<<<<<<< HEAD:client/pd_service_discovery.go
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
 		if err := bo.Exec(ctx, c.updateMember); err != nil {
-			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
-=======
-		err := bo.Exec(ctx, c.updateMember)
-		if err != nil {
 			log.Warn("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
->>>>>>> 3bc8b2cab (log: degrade unless error log (#9358)):client/servicediscovery/service_discovery.go
 		}
 	}
 }
