@@ -150,6 +150,56 @@ func (c *tsoClient) Close() {
 	log.Info("tso client is closed")
 }
 
+<<<<<<< HEAD
+=======
+func (c *tsoClient) scheduleCheckTSDeadline() {
+	select {
+	case c.checkTSDeadlineCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *tsoClient) scheduleCheckTSODispatcher() {
+	select {
+	case c.checkTSODispatcherCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *tsoClient) scheduleUpdateTSOConnectionCtxs() {
+	select {
+	case c.updateTSOConnectionCtxsCh <- struct{}{}:
+	default:
+	}
+}
+
+// TSO Follower Proxy only supports the Global TSO proxy now.
+func (c *tsoClient) allowTSOFollowerProxy(dc string) bool {
+	return dc == globalDCLocation && c.option.getEnableTSOFollowerProxy()
+}
+
+func (c *tsoClient) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
+	req := c.tsoReqPool.Get().(*tsoRequest)
+	// Set needed fields in the request before using it.
+	req.start = time.Now()
+	req.pool = c.tsoReqPool
+	req.requestCtx = ctx
+	req.clientCtx = c.ctx
+	req.physical = 0
+	req.logical = 0
+	req.dcLocation = dcLocation
+	return req
+}
+
+func (c *tsoClient) getTSODispatcher(dcLocation string) (*tsoDispatcher, bool) {
+	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
+	if !ok || dispatcher == nil {
+		return nil, false
+	}
+	return dispatcher.(*tsoDispatcher), true
+}
+
+>>>>>>> aae410f16 (client/tso: improve the switching of TSO stream (#8123))
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 func (c *tsoClient) GetTSOAllocators() *sync.Map {
 	return &c.tsoAllocators
@@ -230,7 +280,12 @@ func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
 	c.tsoAllocators.Store(globalDCLocation, addr)
 	log.Info("[tso] switch dc tso global allocator serving address",
 		zap.String("dc-location", globalDCLocation),
+<<<<<<< HEAD
 		zap.String("new-address", addr))
+=======
+		zap.String("new-url", url))
+	c.scheduleUpdateTSOConnectionCtxs()
+>>>>>>> aae410f16 (client/tso: improve the switching of TSO stream (#8123))
 	c.scheduleCheckTSODispatcher()
 	return nil
 }
@@ -263,8 +318,218 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 		cc  *grpc.ClientConn
 		err error
 	)
+<<<<<<< HEAD
 	for i := 0; i < len(addrs); i++ {
 		addr := addrs[rand.Intn(len(addrs))]
+=======
+	for i := 0; i < len(urls); i++ {
+		url := urls[rand.Intn(len(urls))]
+		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
+			continue
+		}
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
+		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+		healthCancel()
+		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+			return cc, url
+		}
+	}
+	return nil, ""
+}
+
+type tsoConnectionContext struct {
+	streamURL string
+	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluster,
+	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO cluster
+	stream tsoStream
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (c *tsoClient) updateTSOConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) bool {
+	// Normal connection creating, it will be affected by the `enableForwarding`.
+	createTSOConnection := c.tryConnectToTSO
+	if c.allowTSOFollowerProxy(dc) {
+		createTSOConnection = c.tryConnectToTSOWithProxy
+	}
+	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
+		log.Error("[tso] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
+		return false
+	}
+	return true
+}
+
+// tryConnectToTSO will try to connect to the TSO allocator leader. If the connection becomes unreachable
+// and enableForwarding is true, it will create a new connection to a follower to do the forwarding,
+// while a new daemon will be created also to switch back to a normal leader connection ASAP the
+// connection comes back to normal.
+func (c *tsoClient) tryConnectToTSO(
+	ctx context.Context,
+	dc string,
+	connectionCtxs *sync.Map,
+) error {
+	var (
+		networkErrNum  uint64
+		err            error
+		stream         tsoStream
+		url            string
+		cc             *grpc.ClientConn
+		updateAndClear = func(newURL string, connectionCtx *tsoConnectionContext) {
+			// Only store the `connectionCtx` if it does not exist before.
+			connectionCtxs.LoadOrStore(newURL, connectionCtx)
+			// Remove all other `connectionCtx`s.
+			connectionCtxs.Range(func(url, cc any) bool {
+				if url.(string) != newURL {
+					cc.(*tsoConnectionContext).cancel()
+					connectionCtxs.Delete(url)
+				}
+				return true
+			})
+		}
+	)
+
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
+	// Retry several times before falling back to the follower when the network problem happens
+	for i := 0; i < maxRetryTimes; i++ {
+		c.svcDiscovery.ScheduleCheckMemberChanged()
+		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
+		if _, ok := connectionCtxs.Load(url); ok {
+			return nil
+		}
+		if cc != nil {
+			cctx, cancel := context.WithCancel(ctx)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
+			failpoint.Inject("unreachableNetwork", func() {
+				stream = nil
+				err = status.New(codes.Unavailable, "unavailable").Err()
+			})
+			if stream != nil && err == nil {
+				updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
+				return nil
+			}
+
+			if err != nil && c.option.enableForwarding {
+				// The reason we need to judge if the error code is equal to "Canceled" here is that
+				// when we create a stream we use a goroutine to manually control the timeout of the connection.
+				// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
+				// But it conflicts with the retry mechanism since we use the error code to decide if it is caused by network error.
+				// And actually the `Canceled` error can be regarded as a kind of network error in some way.
+				if rpcErr, ok := status.FromError(err); ok && (isNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
+					networkErrNum++
+				}
+			}
+			cancel()
+		} else {
+			networkErrNum++
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-ticker.C:
+		}
+	}
+
+	if networkErrNum == maxRetryTimes {
+		// encounter the network error
+		backupClientConn, backupURL := c.backupClientConn()
+		if backupClientConn != nil {
+			log.Info("[tso] fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("follower-url", backupURL))
+			forwardedHost, ok := c.GetTSOAllocatorServingURLByDCLocation(dc)
+			if !ok {
+				return errors.Errorf("cannot find the allocator leader in %s", dc)
+			}
+
+			// create the follower stream
+			cctx, cancel := context.WithCancel(ctx)
+			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.timeout)
+			if err == nil {
+				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
+				addr := trimHTTPPrefix(backupURL)
+				// the goroutine is used to check the network and change back to the original stream
+				go c.checkAllocator(ctx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
+				requestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
+				updateAndClear(backupURL, &tsoConnectionContext{backupURL, stream, cctx, cancel})
+				return nil
+			}
+			cancel()
+		}
+	}
+	return err
+}
+
+// tryConnectToTSOWithProxy will create multiple streams to all the service endpoints to work as
+// a TSO proxy to reduce the pressure of the main serving service endpoint.
+func (c *tsoClient) tryConnectToTSOWithProxy(
+	ctx context.Context,
+	dc string,
+	connectionCtxs *sync.Map,
+) error {
+	tsoStreamBuilders := c.getAllTSOStreamBuilders()
+	leaderAddr := c.svcDiscovery.GetServingURL()
+	forwardedHost, ok := c.GetTSOAllocatorServingURLByDCLocation(dc)
+	if !ok {
+		return errors.Errorf("cannot find the allocator leader in %s", dc)
+	}
+	// GC the stale one.
+	connectionCtxs.Range(func(addr, cc any) bool {
+		addrStr := addr.(string)
+		if _, ok := tsoStreamBuilders[addrStr]; !ok {
+			log.Info("[tso] remove the stale tso stream",
+				zap.String("dc", dc),
+				zap.String("addr", addrStr))
+			cc.(*tsoConnectionContext).cancel()
+			connectionCtxs.Delete(addr)
+		}
+		return true
+	})
+	// Update the missing one.
+	for addr, tsoStreamBuilder := range tsoStreamBuilders {
+		if _, ok = connectionCtxs.Load(addr); ok {
+			continue
+		}
+		log.Info("[tso] try to create tso stream",
+			zap.String("dc", dc), zap.String("addr", addr))
+		cctx, cancel := context.WithCancel(ctx)
+		// Do not proxy the leader client.
+		if addr != leaderAddr {
+			log.Info("[tso] use follower to forward tso stream to do the proxy",
+				zap.String("dc", dc), zap.String("addr", addr))
+			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
+		}
+		// Create the TSO stream.
+		stream, err := tsoStreamBuilder.build(cctx, cancel, c.option.timeout)
+		if err == nil {
+			if addr != leaderAddr {
+				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
+				addrTrim := trimHTTPPrefix(addr)
+				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
+			}
+			connectionCtxs.Store(addr, &tsoConnectionContext{addr, stream, cctx, cancel})
+			continue
+		}
+		log.Error("[tso] create the tso stream failed",
+			zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
+		cancel()
+	}
+	return nil
+}
+
+// getAllTSOStreamBuilders returns a TSO stream builder for every service endpoint of TSO leader/followers
+// or of keyspace group primary/secondaries.
+func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
+	var (
+		addrs          = c.svcDiscovery.GetServiceURLs()
+		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
+		cc             *grpc.ClientConn
+		err            error
+	)
+	for _, addr := range addrs {
+		if len(addrs) == 0 {
+			continue
+		}
+>>>>>>> aae410f16 (client/tso: improve the switching of TSO stream (#8123))
 		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
