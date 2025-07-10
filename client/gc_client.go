@@ -21,10 +21,8 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/constants"
@@ -33,6 +31,7 @@ import (
 )
 
 // updateGCSafePointV2 update gc safe point for the given keyspace.
+// Only used for handling `UpdateGCSafePoint` in keyspace context, which is a deprecated usage.
 func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateGCSafePointV2", opentracing.ChildOf(span.Context()))
@@ -62,6 +61,7 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 }
 
 // updateServiceSafePointV2 update service safe point for the given keyspace.
+// Only used for handling `UpdateServiceGCSafePoint` in keyspace context, which is a deprecated usage.
 func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateServiceSafePointV2", opentracing.ChildOf(span.Context()))
@@ -89,50 +89,6 @@ func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 		return 0, err
 	}
 	return resp.GetMinSafePoint(), nil
-}
-
-// WatchGCSafePointV2 watch gc safe point change.
-func (c *client) WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error) {
-	SafePointEventsChan := make(chan []*pdpb.SafePointEvent)
-	req := &pdpb.WatchGCSafePointV2Request{
-		Header:   c.requestHeader(),
-		Revision: revision,
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
-	defer cancel()
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
-		return nil, errs.ErrClientGetProtoClient
-	}
-	stream, err := protoClient.WatchGCSafePointV2(ctx, req)
-	if err != nil {
-		close(SafePointEventsChan)
-		return nil, err
-	}
-	go func() {
-		defer func() {
-			close(SafePointEventsChan)
-			if r := recover(); r != nil {
-				log.Error("[pd] panic in gc client `WatchGCSafePointV2`", zap.Any("error", r))
-				return
-			}
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				resp, err := stream.Recv()
-				if err != nil {
-					log.Error("watch gc safe point v2 error", errs.ZapError(errs.ErrClientWatchGCSafePointV2Stream, err))
-					return
-				}
-				SafePointEventsChan <- resp.GetEvents()
-			}
-		}
-	}()
-	return SafePointEventsChan, err
 }
 
 // gcInternalController is a stateless wrapper over the client and implements gc.InternalController interface.

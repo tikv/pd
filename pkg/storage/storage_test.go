@@ -16,17 +16,12 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"math"
 	"math/rand"
 	"sort"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -133,90 +128,6 @@ func TestStoreWeight(t *testing.T) {
 		re.Equal(leaderWeights[i], cache.GetStore(uint64(i)).GetLeaderWeight())
 		re.Equal(regionWeights[i], cache.GetStore(uint64(i)).GetRegionWeight())
 	}
-}
-
-func TestLoadGCSafePoint(t *testing.T) {
-	re := require.New(t)
-	storage := NewStorageWithMemoryBackend()
-	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
-
-	r, e := storage.LoadGCSafePoint()
-	re.Equal(uint64(0), r)
-	re.NoError(e)
-	for _, safePoint := range testData {
-		err := storage.SaveGCSafePoint(safePoint)
-		re.NoError(err)
-		safePoint1, err := storage.LoadGCSafePoint()
-		re.NoError(err)
-		re.Equal(safePoint1, safePoint)
-	}
-}
-
-func TestSaveServiceGCSafePoint(t *testing.T) {
-	re := require.New(t)
-	storage := NewStorageWithMemoryBackend()
-	expireAt := time.Now().Add(100 * time.Second).Unix()
-	serviceSafePoints := []*endpoint.ServiceSafePoint{
-		{ServiceID: "1", ExpiredAt: expireAt, SafePoint: 1},
-		{ServiceID: "2", ExpiredAt: expireAt, SafePoint: 2},
-		{ServiceID: "3", ExpiredAt: expireAt, SafePoint: 3},
-	}
-
-	for _, ssp := range serviceSafePoints {
-		re.NoError(storage.SaveServiceGCSafePoint(ssp))
-	}
-
-	prefix := keypath.ServiceGCSafePointPrefix()
-	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
-	re.NoError(err)
-	re.Len(keys, 3)
-	re.Len(values, 3)
-
-	ssp := &endpoint.ServiceSafePoint{}
-	for i, key := range keys {
-		re.True(strings.HasSuffix(key, serviceSafePoints[i].ServiceID))
-
-		re.NoError(json.Unmarshal([]byte(values[i]), ssp))
-		re.Equal(serviceSafePoints[i].ServiceID, ssp.ServiceID)
-		re.Equal(serviceSafePoints[i].ExpiredAt, ssp.ExpiredAt)
-		re.Equal(serviceSafePoints[i].SafePoint, ssp.SafePoint)
-	}
-}
-
-func TestLoadMinServiceGCSafePoint(t *testing.T) {
-	re := require.New(t)
-	storage := NewStorageWithMemoryBackend()
-	expireAt := time.Now().Add(1000 * time.Second).Unix()
-	serviceSafePoints := []*endpoint.ServiceSafePoint{
-		{ServiceID: "1", ExpiredAt: 0, SafePoint: 1},
-		{ServiceID: "2", ExpiredAt: expireAt, SafePoint: 2},
-		{ServiceID: "3", ExpiredAt: expireAt, SafePoint: 3},
-	}
-
-	for _, ssp := range serviceSafePoints {
-		re.NoError(storage.SaveServiceGCSafePoint(ssp))
-	}
-
-	// gc_worker's service safe point will be automatically inserted with initial value 0. If txn safe point was set,
-	// the initial value of gc_worker's service safe point would be the same value as the txn safe point; however we
-	// didn't.
-	ssp, err := storage.LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal(uint64(0), ssp.SafePoint)
-
-	// Advance gc_worker's safepoint
-	re.NoError(storage.SaveServiceGCSafePoint(&endpoint.ServiceSafePoint{
-		ServiceID: "gc_worker",
-		ExpiredAt: math.MaxInt64,
-		SafePoint: 10,
-	}))
-
-	ssp, err = storage.LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("2", ssp.ServiceID)
-	re.Equal(expireAt, ssp.ExpiredAt)
-	re.Equal(uint64(2), ssp.SafePoint)
 }
 
 func TestTryGetLocalRegionStorage(t *testing.T) {

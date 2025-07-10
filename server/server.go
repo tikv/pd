@@ -166,8 +166,6 @@ type Server struct {
 	encryptionKeyManager *encryption.Manager
 	// for storage operation.
 	storage storage.Storage
-	// safe point manager (to be deprecated)
-	gcSafePointManager *gc.SafePointManager
 	// GC states manager
 	gcStateManager *gc.GCStateManager
 	// keyspace manager
@@ -473,7 +471,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
-	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
