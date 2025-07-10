@@ -121,13 +121,16 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	re.True(ok)
 	re.Zero(es2.conf.evictStore())
 	// prepare with no evict store.
-	suite.es.PrepareConfig(suite.tc)
+	err := suite.es.PrepareConfig(suite.tc)
+	re.NoError(err)
 
-	es2.conf.setStoreAndPersist(1)
+	err = es2.conf.setStoreAndPersist(1)
+	re.NoError(err)
 	re.Equal(uint64(1), es2.conf.evictStore())
 	re.False(es2.conf.readyForRecovery())
 	// prepare with evict store.
-	suite.es.PrepareConfig(suite.tc)
+	err = suite.es.PrepareConfig(suite.tc)
+	re.NoError(err)
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {

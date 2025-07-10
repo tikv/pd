@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -34,8 +35,13 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 const (
 	testConfig  = "test config"
@@ -171,9 +177,11 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 		{nextGen, UnifiedGC, UnifiedGC},
 		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
 	}
-	defer failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+	}()
 	for idx, tc := range cases {
-		failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag)
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag))
 		cfg := make(map[string]string)
 		if tc.gcManagementType != "" {
 			cfg[GCManagementType] = tc.gcManagementType

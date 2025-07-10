@@ -74,7 +74,8 @@ func TestServiceLimiterPersistence(t *testing.T) {
 
 	// Test loading service limits from storage
 	for _, keyspaceID := range []uint32{1, 2, 3} {
-		storage.SaveServiceLimit(keyspaceID, float64(keyspaceID)*100.0)
+		err = storage.SaveServiceLimit(keyspaceID, float64(keyspaceID)*100.0)
+		re.NoError(err)
 	}
 	err = storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
 		re.Equal(float64(keyspaceID)*100.0, serviceLimit)

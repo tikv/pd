@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -31,6 +32,10 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type mockConfigProvider struct{ bs.Server }
 
@@ -57,6 +62,7 @@ func TestInitManager(t *testing.T) {
 	err := m.Init(ctx)
 	re.NoError(err)
 	// There should only be one null keyspace resource group manager.
+	keyspaceID := uint32(1)
 	krgm := m.getKeyspaceResourceGroupManager(constant.NullKeyspaceID)
 	re.NotNil(krgm)
 	re.Equal(constant.NullKeyspaceID, krgm.keyspaceID)
@@ -66,7 +72,7 @@ func TestInitManager(t *testing.T) {
 		Name:       "test_group",
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
 	}
 	err = m.AddResourceGroup(group)
 	re.NoError(err)
@@ -80,9 +86,7 @@ func TestInitManager(t *testing.T) {
 	re.Equal(DefaultResourceGroupName, defaultGroup.Name)
 	// Modify the default resource group settings.
 	defaultGroup.RUSettings.RU.Settings.FillRate = 100
-	// TODO: set the keyspace ID inside `IntoProtoResourceGroup`.
-	defaultGroupPb := defaultGroup.IntoProtoResourceGroup()
-	defaultGroupPb.KeyspaceId = &rmpb.KeyspaceIDValue{Value: 1}
+	defaultGroupPb := defaultGroup.IntoProtoResourceGroup(keyspaceID)
 	err = m.ModifyResourceGroup(defaultGroupPb)
 	re.NoError(err)
 	// Rebuild the manager based on the same storage.
@@ -145,7 +149,8 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	manager.dispatchConsumption(req)
+	err = manager.dispatchConsumption(req)
+	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	// Verify consumption was added to the resource group.

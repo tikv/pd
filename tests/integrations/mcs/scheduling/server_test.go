@@ -119,7 +119,8 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	id, _, err := cluster.AllocID(1)
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
-	suite.cluster.ResignLeader()
+	err = suite.cluster.ResignLeader()
+	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
@@ -219,7 +220,8 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	conf := leaderServer.GetMicroserviceConfig().Clone()
 	// Change back to the default value.
 	conf.EnableSchedulingFallback = true
-	leaderServer.SetMicroserviceConfig(*conf)
+	err := leaderServer.SetMicroserviceConfig(*conf)
+	re.NoError(err)
 	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
@@ -269,13 +271,15 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	// After Disabling scheduling service fallback, the PD will stop scheduling.
 	conf := leaderServer.GetMicroserviceConfig().Clone()
 	conf.EnableSchedulingFallback = false
-	leaderServer.SetMicroserviceConfig(*conf)
+	err := leaderServer.SetMicroserviceConfig(*conf)
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	// Enable scheduling service fallback again, the PD will restart scheduling.
 	conf.EnableSchedulingFallback = true
-	leaderServer.SetMicroserviceConfig(*conf)
+	err = leaderServer.SetMicroserviceConfig(*conf)
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -294,7 +298,8 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	})
 	// Disable scheduling service fallback and stop scheduling server. PD won't execute scheduling jobs again.
 	conf.EnableSchedulingFallback = false
-	leaderServer.SetMicroserviceConfig(*conf)
+	err = leaderServer.SetMicroserviceConfig(*conf)
+	re.NoError(err)
 	tc.GetPrimaryServer().Close()
 	time.Sleep(time.Second)
 	testutil.Eventually(re, func() bool {
@@ -510,7 +515,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	leaderServer := suite.pdLeader.GetServer()
 	conf := leaderServer.GetReplicationConfig().Clone()
 	conf.MaxReplicas = 1
-	leaderServer.SetReplicationConfig(*conf)
+	err = leaderServer.SetReplicationConfig(*conf)
+	re.NoError(err)
 	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
@@ -547,10 +553,14 @@ func (suite *serverTestSuite) TestStoreLimit() {
 		re.NoError(err)
 	}
 
-	leaderServer.GetRaftCluster().SetStoreLimit(1, storelimit.AddPeer, 60)
-	leaderServer.GetRaftCluster().SetStoreLimit(1, storelimit.RemovePeer, 60)
-	leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 60)
-	leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.RemovePeer, 60)
+	err = leaderServer.GetRaftCluster().SetStoreLimit(1, storelimit.AddPeer, 60)
+	re.NoError(err)
+	err = leaderServer.GetRaftCluster().SetStoreLimit(1, storelimit.RemovePeer, 60)
+	re.NoError(err)
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 60)
+	re.NoError(err)
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.RemovePeer, 60)
+	re.NoError(err)
 	// There is a time window between setting store limit in PD side and capturing the change in scheduling service.
 	waitSyncFinish(re, tc, storelimit.AddPeer, 60)
 	for i := uint64(1); i <= 5; i++ {
@@ -560,13 +570,15 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 100})
 	checkOperatorFail(re, oc, op)
 
-	leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 120)
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 120)
+	re.NoError(err)
 	waitSyncFinish(re, tc, storelimit.AddPeer, 120)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 100})
 		checkOperatorSuccess(re, oc, op)
 	}
-	leaderServer.GetRaftCluster().SetAllStoresLimit(storelimit.AddPeer, 60)
+	err = leaderServer.GetRaftCluster().SetAllStoresLimit(storelimit.AddPeer, 60)
+	re.NoError(err)
 	waitSyncFinish(re, tc, storelimit.AddPeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 100})
@@ -575,7 +587,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 100})
 	checkOperatorFail(re, oc, op)
 
-	leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.RemovePeer, 60)
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.RemovePeer, 60)
+	re.NoError(err)
 	waitSyncFinish(re, tc, storelimit.RemovePeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
@@ -584,13 +597,15 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	checkOperatorFail(re, oc, op)
 
-	leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.RemovePeer, 120)
+	err = leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.RemovePeer, 120)
+	re.NoError(err)
 	waitSyncFinish(re, tc, storelimit.RemovePeer, 120)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 		checkOperatorSuccess(re, oc, op)
 	}
-	leaderServer.GetRaftCluster().SetAllStoresLimit(storelimit.RemovePeer, 60)
+	err = leaderServer.GetRaftCluster().SetAllStoresLimit(storelimit.RemovePeer, 60)
+	re.NoError(err)
 	waitSyncFinish(re, tc, storelimit.RemovePeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
@@ -677,12 +692,14 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 	}
 
 	originLeaderName := suite.pdLeader.GetLeader().GetName()
-	suite.pdLeader.ResignLeader()
+	err = suite.pdLeader.ResignLeader()
+	re.NoError(err)
 	newLeaderName := suite.cluster.WaitLeader()
 	re.NotEqual(originLeaderName, newLeaderName)
 
 	suite.pdLeader = suite.cluster.GetServer(newLeaderName)
-	suite.pdLeader.ResignLeader()
+	err = suite.pdLeader.ResignLeader()
+	re.NoError(err)
 	newLeaderName = suite.cluster.WaitLeader()
 	re.Equal(originLeaderName, newLeaderName)
 
@@ -1099,4 +1116,120 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 		return true
 	})
 	re.Equal(4000, len)
+}
+
+func (suite *serverTestSuite) TestForwardSplitRegion() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+
+	// Create stores
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	// Create a region via region heartbeat
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region: &metapb.Region{
+			Id:       100,
+			Peers:    peers,
+			StartKey: []byte(""),
+			EndKey:   []byte(""),
+		},
+		Leader:          peers[0],
+		ApproximateSize: 100 * units.MiB,
+		ApproximateKeys: 1000,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+
+	// Wait for the region to be created in scheduling cluster
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(100)
+		return region != nil && region.GetApproximateSize() == 100
+	})
+
+	// Test SplitRegions request
+	splitReq := &pdpb.SplitRegionsRequest{
+		Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+		SplitKeys: [][]byte{
+			[]byte("m"), // Split key in the middle
+		},
+		RetryLimit: 3,
+	}
+
+	go func() {
+		// make sure the region heartbeat is sent after the SplitRegions request
+		time.Sleep(time.Second)
+
+		regionReq = &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:    100,
+				Peers: peers,
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
+				StartKey: []byte(""),
+				EndKey:   []byte("m"),
+			},
+			Leader:          peers[0],
+			ApproximateSize: 100 * units.MiB,
+			ApproximateKeys: 1000,
+		}
+		re.NoError(stream.Send(regionReq))
+		regionReq = &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:    101,
+				Peers: peers,
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
+				StartKey: []byte("m"),
+				EndKey:   []byte(""),
+			},
+			Leader:          peers[0],
+			ApproximateSize: 100 * units.MiB,
+			ApproximateKeys: 1000,
+		}
+		re.NoError(stream.Send(regionReq))
+	}()
+
+	// Forward SplitRegions request through PD to scheduling service
+	splitResp, err := grpcPDClient.SplitRegions(suite.ctx, splitReq)
+	re.NoError(err)
+	re.Empty(splitResp.GetHeader().GetError())
+
+	// The response should contain the finished percentage
+	re.Equal(uint64(100), splitResp.GetFinishedPercentage())
+	// Should have regions IDs for the split operation
+	re.Equal([]uint64{101}, splitResp.GetRegionsId())
 }

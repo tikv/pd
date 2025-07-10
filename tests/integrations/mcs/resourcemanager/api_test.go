@@ -162,7 +162,7 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 		groupToUpdate := group.Clone(false)
 		groupToUpdate.Priority = 10
 		groupToUpdate.RUSettings.RU.Settings.FillRate = 200
-		groupToUpdateProto := groupToUpdate.IntoProtoResourceGroup()
+		groupToUpdateProto := groupToUpdate.IntoProtoResourceGroup(keyspaceID.GetValue())
 		groupToUpdateProto.KeyspaceId = keyspaceID
 		suite.mustUpdateResourceGroup(re, groupToUpdateProto)
 		group = suite.mustGetResourceGroup(re, groupToUpdate.Name, keyspaceName)
@@ -338,11 +338,12 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 
 	// Prepare the keyspace for later test.
 	leaderServer := suite.cluster.GetLeaderServer()
-	leaderServer.GetKeyspaceManager().CreateKeyspace(
+	_, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
 		&keyspace.CreateKeyspaceRequest{
 			Name: "test_keyspace",
 		},
 	)
+	re.NoError(err)
 	for _, keyspaceName := range []string{"", "test_keyspace"} {
 		// Get the keyspace service limit.
 		limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)

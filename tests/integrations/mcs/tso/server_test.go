@@ -277,7 +277,8 @@ func TestForwardTSORelated(t *testing.T) {
 	leaderServer := suite.cluster.GetLeaderServer().GetServer()
 	cfg := leaderServer.GetMicroserviceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
-	leaderServer.SetMicroserviceConfig(*cfg)
+	err := leaderServer.SetMicroserviceConfig(*cfg)
+	re.NoError(err)
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
@@ -312,7 +313,8 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	suite.checkAvailableTSO(re)
 
 	// can use the tso-related interface with old primary again
-	tc.AddServer(oldPrimary)
+	err = tc.AddServer(oldPrimary)
+	re.NoError(err)
 	suite.checkAvailableTSO(re)
 	for addr := range tc.GetServers() {
 		if addr != oldPrimary {
@@ -338,7 +340,8 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	tc.WaitForDefaultPrimaryServing(re)
 
 	for range 10 {
-		tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		err = tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		re.NoError(err)
 		tc.WaitForDefaultPrimaryServing(re)
 		var err error
 		for range 3 { // try 3 times
@@ -369,7 +372,8 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 	}()
 
 	for range 10 {
-		suite.pdLeader.ResignLeader()
+		err = suite.pdLeader.ResignLeader()
+		re.NoError(err)
 		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 		suite.backendEndpoints = suite.pdLeader.GetAddr()
 		_, _, err = suite.pdClient.GetTS(suite.ctx)
@@ -424,7 +428,7 @@ func (suite *PDServiceForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 
 	// get follower's address
 	servers := tc.GetServers()
-	oldPrimary := tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr()
+	oldPrimary := tc.GetPrimaryServer(constant.DefaultKeyspaceID).GetAddr()
 	var follower string
 	for addr := range servers {
 		if addr != oldPrimary {
@@ -453,6 +457,7 @@ func (suite *PDServiceForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 }
 
 func (suite *PDServiceForward) addRegions() {
+	re := suite.re
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	rc := leader.GetServer().GetRaftCluster()
 	for i := range 3 {
@@ -462,7 +467,8 @@ func (suite *PDServiceForward) addRegions() {
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
 		}
-		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+		err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+		re.NoError(err)
 	}
 }
 
@@ -612,7 +618,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(constant.DefaultKeyspaceID)
 }
 
 func (suite *CommonTestSuite) TearDownSuite() {
@@ -666,10 +672,12 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	re.NoError(s.Run())
 
 	// transfer leader to the new server
-	suite.pdLeader.ResignLeader()
+	err = suite.pdLeader.ResignLeader()
+	re.NoError(err)
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 	check()
-	suite.pdLeader.ResignLeader()
+	err = suite.pdLeader.ResignLeader()
+	re.NoError(err)
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 }
 
@@ -725,7 +733,8 @@ func TestTSOServiceSwitch(t *testing.T) {
 	// Disable TSO switching
 	cfg := pdLeader.GetServer().GetMicroserviceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
-	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	re.NoError(err)
 
 	tsoCluster.Destroy()
 
@@ -742,7 +751,8 @@ func TestTSOServiceSwitch(t *testing.T) {
 	cfg = pdLeader.GetServer().GetMicroserviceConfig().Clone()
 
 	cfg.EnableTSODynamicSwitching = true
-	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	re.NoError(err)
 
 	// Wait for PD to detect the change
 	time.Sleep(300 * time.Millisecond)

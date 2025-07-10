@@ -89,7 +89,8 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 		err := storage.SaveServiceGCSafePoint(ssp)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	err := storage.SaveGCSafePoint(1)
+	re.NoError(err)
 
 	res, err := tests.TestDialClient.Get(sspURL)
 	re.NoError(err)
