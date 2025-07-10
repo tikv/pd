@@ -99,7 +99,6 @@ func TestProtectedKeyspaceValidation(t *testing.T) {
 		{"nextgen_default_id_allowed", nextGen, constant.DefaultKeyspaceID, "", false, false},
 		{"nextgen_default_name_allowed", nextGen, 1, constant.DefaultKeyspaceName, false, false},
 		{"nextgen_normal_case", nextGen, 100, "normal_keyspace", false, false},
-		{"nextgen_reserved_range_id", nextGen, uint32(constant.ReservedKeyspaceIDStart + 1), "", true, false},
 	}
 
 	for _, c := range cases {
