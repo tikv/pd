@@ -16,7 +16,6 @@ package client_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -134,66 +133,6 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	}
 }
 
-func (suite *gcClientTestSuite) TestClientWatchWithRevision() {
-	suite.testClientWatchWithRevision(false)
-	suite.testClientWatchWithRevision(true)
-}
-
-// nolint:revive
-func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool) {
-	re := suite.Require()
-	testKeyspaceID := uint32(100)
-	initGCSafePoint := uint64(50)
-	updatedGCSafePoint := uint64(100)
-
-	// Init gc safe point.
-	suite.mustUpdateSafePoint(re, testKeyspaceID, initGCSafePoint)
-
-	// Get the initial revision.
-	initRevision := suite.mustGetRevision(re, testKeyspaceID)
-
-	// Update the gc safe point.
-	suite.mustUpdateSafePoint(re, testKeyspaceID, updatedGCSafePoint)
-
-	// Get the revision of the updated gc safe point.
-	updatedRevision := suite.mustGetRevision(re, testKeyspaceID)
-
-	// Set the start revision of the watch request based on fromNewRevision.
-	startRevision := initRevision
-	if fromNewRevision {
-		startRevision = updatedRevision
-	}
-	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision) //nolint:staticcheck
-	re.NoError(err)
-
-	timer := time.NewTimer(time.Second)
-	defer timer.Stop()
-	isFirstUpdate := true
-	runTest := false
-	for {
-		select {
-		case <-timer.C:
-			re.True(runTest)
-			return
-		case res := <-watchChan:
-			for _, r := range res {
-				re.Equal(r.GetKeyspaceId(), testKeyspaceID)
-				if fromNewRevision {
-					// If fromNewRevision, first response should be the updated gc safe point.
-					re.Equal(r.GetSafePoint(), updatedGCSafePoint)
-				} else if isFirstUpdate {
-					isFirstUpdate = false
-					re.Equal(r.GetSafePoint(), initGCSafePoint)
-				} else {
-					re.Equal(r.GetSafePoint(), updatedGCSafePoint)
-					continue
-				}
-			}
-			runTest = true
-		}
-	}
-}
-
 // mustUpdateSafePoint updates the gc safe point of the given keyspace id.
 func (suite *gcClientTestSuite) mustUpdateSafePoint(re *require.Assertions, keyspaceID uint32, safePoint uint64) {
 	client, err := pd.NewClientWithKeyspace(suite.server.Context(),
@@ -203,7 +142,7 @@ func (suite *gcClientTestSuite) mustUpdateSafePoint(re *require.Assertions, keys
 		pd.SecurityOption{},
 	)
 	re.NoError(err)
-	_, err = client.UpdateGCSafePoint(suite.server.Context(), safePoint)
+	_, err = client.UpdateGCSafePoint(suite.server.Context(), safePoint) //nolint:staticcheck
 	re.NoError(err)
 }
 

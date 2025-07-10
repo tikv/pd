@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
@@ -46,21 +47,22 @@ func TestSafepoint(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	// add some gc_safepoint to the server
+	now := time.Now().Truncate(time.Second)
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "AAA",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 1,
 			},
 			{
 				ServiceID: "BBB",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 2,
 			},
 			{
 				ServiceID: "CCC",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 3,
 			},
 		},
@@ -68,12 +70,15 @@ func TestSafepoint(t *testing.T) {
 		MinServiceGcSafepoint: 1,
 	}
 
-	storage := leaderServer.GetServer().GetStorage()
+	gcStateManager := leaderServer.GetServer().GetGCStateManager()
 	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+		_, _, err = gcStateManager.CompatibleUpdateServiceGCSafePoint(ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	_, err = gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	re.NoError(err)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	re.NoError(err)
 
 	// get the safepoints
 	args := []string{"-u", pdAddr, "service-gc-safepoint"}
