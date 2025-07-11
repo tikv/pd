@@ -17,13 +17,14 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -62,7 +63,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	}
 
 	newSafePoint := request.GetSafePoint()
-	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(newSafePoint)
+	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(constant.NullKeyspaceID, newSafePoint)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint()
+	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +146,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
 	serviceID := string(request.ServiceId)
-	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(serviceID, request.GetSafePoint(), request.GetTTL(), now)
+	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), now)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +166,13 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 
 // GetGCSafePointV2 return gc safe point for the given keyspace.
 func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).GetGCSafePointV2(ctx, request)
 	}
@@ -174,7 +182,12 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 		return rsp.(*pdpb.GetGCSafePointV2Response), err
 	}
 
-	safePoint, err := s.safePointV2Manager.LoadGCSafePoint(request.GetKeyspaceId())
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetGCSafePointV2Response{Header: notBootstrappedHeader()}, nil
+	}
+
+	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(request.GetKeyspaceId())
 
 	if err != nil {
 		return &pdpb.GetGCSafePointV2Response{
@@ -184,12 +197,19 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 
 	return &pdpb.GetGCSafePointV2Response{
 		Header:    wrapHeader(),
-		SafePoint: safePoint.SafePoint,
+		SafePoint: safePoint,
 	}, nil
 }
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
 func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePointV2(ctx, request)
 	}
@@ -199,24 +219,27 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 		return rsp.(*pdpb.UpdateGCSafePointV2Response), err
 	}
 
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateGCSafePointV2Response{Header: notBootstrappedHeader()}, nil
+	}
+
 	newSafePoint := request.GetSafePoint()
-	oldSafePoint, err := s.safePointV2Manager.UpdateGCSafePoint(&endpoint.GCSafePointV2{
-		KeyspaceID: request.KeyspaceId,
-		SafePoint:  request.SafePoint,
-	})
+	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(request.GetKeyspaceId(), newSafePoint)
 	if err != nil {
 		return nil, err
 	}
-	if newSafePoint > oldSafePoint.SafePoint {
+
+	if newSafePoint > oldSafePoint {
 		log.Info("updated gc safe point",
 			zap.Uint64("safe-point", newSafePoint),
 			zap.Uint32("keyspace-id", request.GetKeyspaceId()))
-	} else if newSafePoint < oldSafePoint.SafePoint {
+	} else if newSafePoint < oldSafePoint {
 		log.Warn("trying to update gc safe point",
-			zap.Uint64("old-safe-point", oldSafePoint.SafePoint),
+			zap.Uint64("old-safe-point", oldSafePoint),
 			zap.Uint64("new-safe-point", newSafePoint),
 			zap.Uint32("keyspace-id", request.GetKeyspaceId()))
-		newSafePoint = oldSafePoint.SafePoint
+		newSafePoint = oldSafePoint
 	}
 
 	return &pdpb.UpdateGCSafePointV2Response{
@@ -227,6 +250,13 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 
 // UpdateServiceSafePointV2 update service safe point for the given keyspace.
 func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).UpdateServiceSafePointV2(ctx, request)
 	}
@@ -236,90 +266,34 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return rsp.(*pdpb.UpdateServiceSafePointV2Response), err
 	}
 
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateServiceSafePointV2Response{Header: notBootstrappedHeader()}, nil
+	}
+
 	nowTSO, err := s.getGlobalTSO(ctx)
 	if err != nil {
 		return nil, err
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
 
-	var minServiceSafePoint *endpoint.ServiceSafePointV2
-	if request.Ttl < 0 {
-		minServiceSafePoint, err = s.safePointV2Manager.RemoveServiceSafePoint(request.GetKeyspaceId(), string(request.GetServiceId()), now)
-	} else {
-		serviceSafePoint := &endpoint.ServiceSafePointV2{
-			KeyspaceID: request.GetKeyspaceId(),
-			ServiceID:  string(request.GetServiceId()),
-			ExpiredAt:  now.Unix() + request.GetTtl(),
-			SafePoint:  request.GetSafePoint(),
-		}
-		// Fix possible overflow.
-		if math.MaxInt64-now.Unix() <= request.GetTtl() {
-			serviceSafePoint.ExpiredAt = math.MaxInt64
-		}
-		minServiceSafePoint, err = s.safePointV2Manager.UpdateServiceSafePoint(serviceSafePoint, now)
-	}
+	serviceID := string(request.ServiceId)
+	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTtl(), now)
+
 	if err != nil {
 		return nil, err
 	}
 	return &pdpb.UpdateServiceSafePointV2Response{
 		Header:       wrapHeader(),
-		ServiceId:    []byte(minServiceSafePoint.ServiceID),
-		Ttl:          minServiceSafePoint.ExpiredAt - now.Unix(),
-		MinSafePoint: minServiceSafePoint.SafePoint,
+		ServiceId:    []byte(min.ServiceID),
+		Ttl:          min.ExpiredAt - now.Unix(),
+		MinSafePoint: min.SafePoint,
 	}, nil
 }
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
-func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request, stream pdpb.PD_WatchGCSafePointV2Server) error {
-	ctx, cancel := context.WithCancel(s.Context())
-	defer cancel()
-	revision := request.GetRevision()
-	// If the revision is compacted, will meet required revision has been compacted error.
-	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
-	// - If required revision >= CompactRevision, just keep watching.
-	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := etcdutil.Watch(ctx, s.client, keypath.GCSafePointV2Prefix(), clientv3.WithRev(revision), clientv3.WithPrefix())
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case res := <-watchChan:
-			if res.Err() != nil {
-				var resp pdpb.WatchGCSafePointV2Response
-				if revision < res.CompactRevision {
-					resp.Header = wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
-						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
-				} else {
-					resp.Header = wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
-				}
-				if err := stream.Send(&resp); err != nil {
-					return err
-				}
-				// Err() indicates that this WatchResponse holds a channel-closing error.
-				return res.Err()
-			}
-			revision = res.Header.GetRevision()
-
-			safePointEvents := make([]*pdpb.SafePointEvent, 0, len(res.Events))
-			for _, event := range res.Events {
-				gcSafePoint := &endpoint.GCSafePointV2{}
-				if err := json.Unmarshal(event.Kv.Value, gcSafePoint); err != nil {
-					return err
-				}
-				safePointEvents = append(safePointEvents, &pdpb.SafePointEvent{
-					KeyspaceId: gcSafePoint.KeyspaceID,
-					SafePoint:  gcSafePoint.SafePoint,
-					Type:       pdpb.EventType(event.Type),
-				})
-			}
-			if len(safePointEvents) > 0 {
-				if err := stream.Send(&pdpb.WatchGCSafePointV2Response{Header: wrapHeader(), Events: safePointEvents, Revision: res.Header.GetRevision()}); err != nil {
-					return err
-				}
-			}
-		}
-	}
+func (s *GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.PD_WatchGCSafePointV2Server) error {
+	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.

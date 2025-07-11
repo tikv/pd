@@ -1007,7 +1007,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
 	for _, ssp := range list.ServiceGCSafepoints {
-		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(keyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
 	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)

@@ -148,8 +148,8 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 }
 
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
-func (m *GCStateManager) CompatibleLoadGCSafePoint() (uint64, error) {
-	keyspaceID, err := m.redirectKeyspace(constant.NullKeyspaceID, false)
+func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, error) {
+	keyspaceID, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return 0, err
 	}
@@ -180,7 +180,7 @@ func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (o
 // current value, it returns the current value without updating it.
 // This is provided for compatibility purpose, making the existing uses of the deprecated API `UpdateGCSafePoint`
 // still work.
-func (m *GCStateManager) CompatibleUpdateGCSafePoint(target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
+func (m *GCStateManager) CompatibleUpdateGCSafePoint(keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -702,13 +702,15 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 //     with the service ID equals to "gc_worker".
 //
 // This function only works on the NullKeyspace.
-func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
-	keyspaceID := constant.NullKeyspaceID
+func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
+	keyspaceID, err = m.redirectKeyspace(keyspaceID, true)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// TODO: After implementing the global GC barrier, redirect the invocation on "native_br" to `SetGlobalGCBarrier`.
-	if serviceID == keypath.GCWorkerServiceSafePointID {
+	//       Note that the behavior is only for the null keyspace.
+	if serviceID == keypath.GCWorkerServiceSafePointID && keyspaceID == constant.NullKeyspaceID {
 		if ttl != math.MaxInt64 {
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
 		}
