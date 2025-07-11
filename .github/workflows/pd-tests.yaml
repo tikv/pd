@@ -23,7 +23,7 @@ jobs:
   chunks:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - worker_id: 1
@@ -70,6 +70,7 @@ jobs:
           path: covprofile_${{ matrix.worker_id }}
   report-coverage:
     needs: chunks
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
