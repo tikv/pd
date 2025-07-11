@@ -35,9 +35,11 @@ import (
 )
 
 const (
-	alterEpsilon               = 1e-9
-	minReCheckDurationGap      = 120 // default gap for re-check the slow node, unit: s
-	defaultRecoveryDurationGap = 600 // default gap for recovery, unit: s.
+	alterEpsilon          = 1e-9
+	minReCheckDurationGap = 120 // default gap for re-check the slow node, unit: s
+	// We use 1800 seconds as the default gap for recovery, which is 30 minutes.
+	// This is based on the SLA level reflected by AWS EBS. And we can adjust it later if needed.
+	defaultRecoveryDurationGap = 1800 // default gap for recovery, unit: s.
 )
 
 type slowCandidate struct {

@@ -17,8 +17,10 @@ package schedulers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -143,4 +145,109 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {
 	re.NoError(failpoint.Disable(persisFail))
 	ops, _ = suite.es.Schedule(suite.tc, false)
 	re.NotEmpty(ops)
+}
+
+func TestRecoveryTime(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Add stores 1, 2, 3 with different leader counts
+	tc.AddLeaderStore(1, 10)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+
+	// Add regions with leader in store 1
+	for i := range 10 {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	storage := storage.NewStorageWithMemoryBackend()
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, storage,
+		ConfigSliceDecoder(types.EvictSlowStoreScheduler, []string{}), nil)
+	re.NoError(err)
+	bs, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage,
+		ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{}), nil)
+	re.NoError(err)
+
+	var recoveryTimeInSec uint64 = 1
+	recoveryTime := 1 * time.Second
+	es.(*evictSlowStoreScheduler).conf.RecoveryDurationGap = recoveryTimeInSec
+
+	// Mark store 1 as slow
+	storeInfo := tc.GetStore(1)
+	slowStore := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 100
+	})
+	tc.PutStore(slowStore)
+
+	// Verify store is marked for eviction
+	ops, _ := es.Schedule(tc, false)
+	re.NotEmpty(ops)
+	re.Equal(types.EvictSlowStoreScheduler.String(), ops[0].Desc())
+	re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+
+	// Store recovers from being slow
+	time.Sleep(recoveryTime)
+	recoveredStore := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 0
+	})
+	tc.PutStore(recoveredStore)
+
+	// Should not recover immediately due to recovery time window
+	for range 10 {
+		// trigger recovery check
+		es.Schedule(tc, false)
+		ops, _ = bs.Schedule(tc, false)
+		re.Empty(ops)
+		re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+	}
+
+	// Store is slow again before recovery time is over
+	time.Sleep(recoveryTime / 2)
+	slowStore = storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 100
+	})
+	tc.PutStore(slowStore)
+	time.Sleep(recoveryTime / 2)
+	// Should not recover due to recovery time window recalculation
+	for range 10 {
+		// trigger recovery check
+		es.Schedule(tc, false)
+		ops, _ = bs.Schedule(tc, false)
+		re.Empty(ops)
+		re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+	}
+
+	// Store recovers from being slow
+	time.Sleep(recoveryTime)
+	recoveredStore = storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 0
+	})
+	tc.PutStore(recoveredStore)
+
+	// Should not recover immediately due to recovery time window
+	for range 10 {
+		// trigger recovery check
+		es.Schedule(tc, false)
+		ops, _ = bs.Schedule(tc, false)
+		re.Empty(ops)
+		re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+	}
+
+	// Should now recover
+	time.Sleep(recoveryTime)
+	// trigger recovery check
+	es.Schedule(tc, false)
+
+	ops, _ = bs.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(es.(*evictSlowStoreScheduler).conf.evictStore())
+
+	// Verify persistence
+	var persistValue evictSlowStoreSchedulerConfig
+	err = es.(*evictSlowStoreScheduler).conf.load(&persistValue)
+	re.NoError(err)
+	re.Zero(persistValue.evictStore())
+	re.True(persistValue.readyForRecovery())
 }
