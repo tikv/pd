@@ -375,36 +375,40 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 	}
 	stores := cluster.GetStores()
 	for _, store := range stores {
-		if store.GetNetworkSlowScore() >= slowStoreEvictThreshold {
-			if len(networkSlowStores) >= int(s.conf.MaxNetworkSlowStore) {
-				log.Warn("network slow store has reached the max limit, skip",
-					zap.Uint64("store-id", store.GetID()),
-				)
-				continue
-			}
-			log.Info("detected network slow store, start to pause scheduler",
-				zap.Uint64("store-id", store.GetID()),
-				zap.Uint64("network-slow-score", store.GetNetworkSlowScore()))
-			if err := cluster.PauseLeaderTransfer(store.GetID(), constant.In); err != nil {
-				log.Warn("failed to pause leader transfer for network slow store",
-					zap.Uint64("store-id", store.GetID()),
-					zap.Error(err))
-				continue
-			}
-			s.conf.Lock()
-			s.conf.NetworkSlowStores[store.GetID()] = time.Now()
-			if err := s.conf.save(); err != nil {
-				log.Warn("failed to persist evict slow store config",
-					zap.Uint64("store-id", store.GetID()),
-					zap.Error(err))
-				delete(s.conf.NetworkSlowStores, store.GetID())
-				cluster.ResumeLeaderTransfer(store.GetID(), constant.In)
-				s.conf.Unlock()
-				continue
-			}
-			s.conf.Unlock()
-			evictedSlowStoreStatusGauge.WithLabelValues(s.GetName(), strconv.FormatUint(store.GetID(), 10), string(networkSlowStore)).Set(1)
+		if store.GetNetworkSlowScore() < slowStoreEvictThreshold {
+			continue
 		}
+		if _, exist := networkSlowStores[store.GetID()]; exist {
+			continue
+		}
+		if len(networkSlowStores) >= int(s.conf.MaxNetworkSlowStore) {
+			log.Warn("network slow store has reached the max limit, skip",
+				zap.Uint64("store-id", store.GetID()),
+			)
+			continue
+		}
+		log.Info("detected network slow store, start to pause scheduler",
+			zap.Uint64("store-id", store.GetID()),
+			zap.Uint64("network-slow-score", store.GetNetworkSlowScore()))
+		if err := cluster.PauseLeaderTransfer(store.GetID(), constant.In); err != nil {
+			log.Warn("failed to pause leader transfer for network slow store",
+				zap.Uint64("store-id", store.GetID()),
+				zap.Error(err))
+			continue
+		}
+		s.conf.Lock()
+		s.conf.NetworkSlowStores[store.GetID()] = time.Now()
+		if err := s.conf.save(); err != nil {
+			log.Warn("failed to persist evict slow store config",
+				zap.Uint64("store-id", store.GetID()),
+				zap.Error(err))
+			delete(s.conf.NetworkSlowStores, store.GetID())
+			cluster.ResumeLeaderTransfer(store.GetID(), constant.In)
+			s.conf.Unlock()
+			continue
+		}
+		s.conf.Unlock()
+		evictedSlowStoreStatusGauge.WithLabelValues(s.GetName(), strconv.FormatUint(store.GetID(), 10), string(networkSlowStore)).Set(1)
 	}
 }
 
