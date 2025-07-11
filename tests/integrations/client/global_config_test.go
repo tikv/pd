@@ -214,10 +214,13 @@ func (suite *globalConfigTestSuite) TestWatch() {
 	ctx, cancel := context.WithCancel(suite.server.Context())
 	defer cancel()
 	server := testReceiver{re: suite.Require(), ctx: ctx}
-	go suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
-		ConfigPath: globalConfigPath,
-		Revision:   0,
-	}, server)
+	go func() {
+		err := suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
+			ConfigPath: globalConfigPath,
+			Revision:   0,
+		}, server)
+		re.NoError(err)
+	}()
 	for i := range 6 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)

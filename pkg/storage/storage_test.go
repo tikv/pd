@@ -477,19 +477,13 @@ func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
 	ctx := context.Background()
 	dir := b.TempDir()
 	regionStorage, err := NewRegionStorageWithLevelDBBackend(ctx, dir, nil)
-	if err != nil {
-		b.Fatal(err)
-	}
+	re.NoError(err)
 	cluster := core.NewBasicCluster()
 	err = saveRegions(regionStorage, n, ratio)
-	if err != nil {
-		b.Fatal(err)
-	}
+	re.NoError(err)
 	defer func() {
 		err = regionStorage.Close()
-		if err != nil {
-			b.Fatal(err)
-		}
+		re.NoError(err)
 	}()
 
 	b.ResetTimer()

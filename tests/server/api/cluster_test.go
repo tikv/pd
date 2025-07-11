@@ -66,12 +66,13 @@ func (suite *clusterTestSuite) checkCluster(cluster *tests.TestCluster) {
 	rule := rm.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	rule.LocationLabels = []string{"host"}
 	rule.Count = 1
-	rm.SetRule(rule)
+	err := rm.SetRule(rule)
+	re.NoError(err)
 
 	// Test set the config
 	url := fmt.Sprintf("%s/cluster", urlPrefix)
 	c1 := &metapb.Cluster{}
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, url, c1)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, c1)
 	re.NoError(err)
 
 	c2 := &metapb.Cluster{}
@@ -103,7 +104,8 @@ func (suite *clusterTestSuite) testGetClusterStatus(leader *tests.TestServer, ur
 	re.NoError(err)
 	re.True(status.RaftBootstrapTime.After(now))
 	re.False(status.IsInitialized)
-	leader.GetServer().SetReplicationConfig(sc.ReplicationConfig{MaxReplicas: 1})
+	err = leader.GetServer().SetReplicationConfig(sc.ReplicationConfig{MaxReplicas: 1})
+	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.True(status.RaftBootstrapTime.After(now))

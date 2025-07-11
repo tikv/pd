@@ -723,7 +723,8 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 		createdName = name
 	}
 	var schedulers []string
-	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers)
+	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers)
+	re.NoError(err)
 	if !slice.Contains(schedulers, createdName) {
 		err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re))
 		re.NoError(err)

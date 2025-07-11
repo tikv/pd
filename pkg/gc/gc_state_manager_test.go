@@ -480,7 +480,8 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	go func() {
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
-		min, updated, _ := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+		re.NoError(err)
 		re.True(updated)
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
 		re.Equal(gcWorkerSafePoint, min.SafePoint)

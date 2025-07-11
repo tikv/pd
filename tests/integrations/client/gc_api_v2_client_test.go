@@ -109,9 +109,14 @@ func (suite *gcClientTestSuite) CleanupEtcdGCPath() {
 func (suite *gcClientTestSuite) TestWatch1() {
 	re := suite.Require()
 	receiver := gcClientTestReceiver{re: suite.Require()}
-	go suite.server.WatchGCSafePointV2(&pdpb.WatchGCSafePointV2Request{
-		Revision: 0,
-	}, receiver)
+	go func() {
+		// TODO: fix this test
+		// It will return "unexpected end of JSON input" because watch value is empty and exit watch loop directly.
+		// And we also need to use wait group to manage this goroutine.
+		_ = suite.server.WatchGCSafePointV2(&pdpb.WatchGCSafePointV2Request{
+			Revision: 0,
+		}, receiver)
+	}()
 
 	// Init gc safe points as index value of keyspace 0 ~ 5.
 	for i := range 6 {

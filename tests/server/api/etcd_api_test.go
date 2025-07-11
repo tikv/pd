@@ -39,12 +39,14 @@ func TestGRPCGateway(t *testing.T) {
 
 	addr := leaderServer.GetAddr() + "/v3/kv/put"
 	putKey := map[string]string{"key": "Zm9v", "value": "YmFy"}
-	v, _ := json.Marshal(putKey)
+	v, err := json.Marshal(putKey)
+	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, addr, v, testutil.StatusOK(re))
 	re.NoError(err)
 	addr = leaderServer.GetAddr() + "/v3/kv/range"
 	getKey := map[string]string{"key": "Zm9v"}
-	v, _ = json.Marshal(getKey)
+	v, err = json.Marshal(getKey)
+	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, addr, v, testutil.StatusOK(re), testutil.StringContain(re, "Zm9v"))
 	re.NoError(err)
 }

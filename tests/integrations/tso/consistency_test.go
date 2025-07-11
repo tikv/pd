@@ -84,7 +84,8 @@ func (suite *tsoConsistencyTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
-	suite.pdLeaderServer.BootstrapCluster()
+	err = suite.pdLeaderServer.BootstrapCluster()
+	re.NoError(err)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
 		suite.pdClient = testutil.MustNewGrpcClient(re, backendEndpoints)
@@ -114,7 +115,10 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 		}
 		tsoClient, err := suite.pdClient.Tso(ctx)
 		re.NoError(err)
-		defer tsoClient.CloseSend()
+		defer func() {
+			err := tsoClient.CloseSend()
+			re.NoError(err)
+		}()
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
@@ -129,7 +133,10 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 	testutil.Eventually(re, func() bool {
 		tsoClient, err := suite.tsoClient.Tso(ctx)
 		re.NoError(err)
-		defer tsoClient.CloseSend()
+		defer func() {
+			err := tsoClient.CloseSend()
+			re.NoError(err)
+		}()
 		re.NoError(tsoClient.Send(req))
 		resp, err = tsoClient.Recv()
 		return err == nil && resp != nil

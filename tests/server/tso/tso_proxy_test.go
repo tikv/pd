@@ -16,6 +16,7 @@ package tso_test
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -81,22 +82,39 @@ func (s *tsoProxyTestSuite) SetupTest() {
 }
 
 func (s *tsoProxyTestSuite) reCreateProxyClient() {
+	re := s.Require()
 	if s.proxyClient != nil {
-		_ = s.proxyClient.CloseSend()
+		err := s.proxyClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}
+	if s.clientCancel != nil {
 		s.clientCancel()
 	}
-	s.proxyClient, s.clientCtx, s.clientCancel = s.createClient()
+	var err error
+	s.proxyClient, s.clientCtx, s.clientCancel, err = s.createClient()
+	re.NoError(err)
 }
 
-func (s *tsoProxyTestSuite) createClient() (pdpb.PD_TsoClient, context.Context, context.CancelFunc) {
+func (s *tsoProxyTestSuite) createClient() (pdpb.PD_TsoClient, context.Context, context.CancelFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = grpcutil.BuildForwardContext(ctx, s.leader.GetAddr())
-	tsoClient, _ := s.pdClient.Tso(ctx)
-	return tsoClient, ctx, cancel
+	tsoClient, err := s.pdClient.Tso(ctx)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, err
+	}
+	return tsoClient, ctx, cancel, nil
 }
-
 func (s *tsoProxyTestSuite) TearDownTest() {
-	_ = s.proxyClient.CloseSend()
+	re := s.Require()
+	if s.proxyClient != nil {
+		err := s.proxyClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}
 	s.clientCancel()
 	s.cluster.Destroy()
 	s.serverCancel()
@@ -169,14 +187,24 @@ func (s *tsoProxyTestSuite) TestProxyCanNotCreateConnectionToLeader() {
 }
 
 func (s *tsoProxyTestSuite) TestClientsContinueToWorkAfterFirstStreamIsClosed() {
+	re := s.Require()
 	s.verifyProxyIsHealthy()
 	// open second stream
-	proxyClient, _, cancel := s.createClient()
+	proxyClient, _, cancel, err := s.createClient()
 	defer cancel()
-	defer proxyClient.CloseSend()
+	re.NoError(err)
+	defer func() {
+		err := proxyClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
 
 	// close the first stream
-	s.proxyClient.CloseSend()
+	err = s.proxyClient.CloseSend()
+	if err != nil && err != io.EOF {
+		re.NoError(err)
+	}
 
 	// verify other streams are still working
 	s.verifyProxyIsHealthyWith(proxyClient)

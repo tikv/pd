@@ -734,20 +734,23 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 		suite.wg.Add(1)
 		go func() {
 			defer suite.wg.Done()
-			watcher.watch(suite.ctx, 0)
+			_, err := watcher.watch(suite.ctx, 0)
+			re.NoError(err)
 		}()
 
 		if injectWatchChanBlock {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 		} else {
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})
