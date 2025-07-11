@@ -138,7 +138,7 @@ func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bo
 	defer conf.Unlock()
 	conf.lastSlowStoreCaptureTS = time.Now()
 	conf.isRecovered = isRecovered
-	return conf.save()
+	return conf.persistLocked()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
@@ -326,17 +326,12 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			s.cleanupEvictLeader(cluster)
 			return nil, nil
 		}
-<<<<<<< HEAD
-		s.cleanupEvictLeader(cluster)
-		return ops, nil
-=======
 		// If the slow store is still slow or slow again, we can continue to evict leaders from it.
 		if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
 			log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
 			return nil, nil
 		}
 		return s.schedulerEvictLeader(cluster), nil
->>>>>>> 7bdf48946 (scheduler: fix the recovery time of slow store (#9388))
 	}
 
 	var slowStore *core.StoreInfo
