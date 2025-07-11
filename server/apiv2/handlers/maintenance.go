@@ -115,9 +115,9 @@ func GetMaintenanceTask(c *gin.Context) {
 		if k == keypath.MaintenanceTaskPath("__maintenance_lock__") {
 			return
 		}
-		var task endpoint.MaintenanceTask
-		if err := json.Unmarshal([]byte(v), &task); err == nil {
-			tasks = append(tasks, &task)
+		task := &endpoint.MaintenanceTask{} // Heap allocation
+		if err := json.Unmarshal([]byte(v), task); err == nil {
+			tasks = append(tasks, task)
 		}
 	})
 
