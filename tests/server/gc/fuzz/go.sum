@@ -58,6 +58,8 @@ github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81P
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
+github.com/tikv/client-go/v2 v2.0.7 h1:nNTx/AR6n8Ew5VtHanFPG8NkFLLXbaNs5/K43DDma04=
+github.com/tikv/client-go/v2 v2.0.7/go.mod h1:9JNUWtHN8cx8eynHZ9xzdPi5YY6aiN1ILQyhfPUBcMo=
 github.com/tikv/pd/client v0.0.0-20250708074224-7db3b6232c07 h1:ZeIF68P8OoZ2TlYyivRQv/Dl2bJN7/fD6vONCVUvhmg=
 github.com/tikv/pd/client v0.0.0-20250708074224-7db3b6232c07/go.mod h1:SicyvcZE0fzrGGWW3AEtZWWPRzGw/h5img4/6qiSYws=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

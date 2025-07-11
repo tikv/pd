@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tikv/client-go/v2/oracle"
 	"github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -73,69 +74,148 @@ func setGCBarrier(ctx context.Context, cli gc.GCStatesClient, barrierID string, 
 	}
 }
 
-func fuzzSetGCBarrier(ctx context.Context, wg *sync.WaitGroup, cli gc.GCStatesClient, barrierID string) {
-	// Action: push forward barrier by random [1-5] using SetGCBarrier()
-	// If barrier ts is too much larger than txn safe point, sleep a while for it to catch up
-	// Invariance: barrier ts >= txn safe point
-	defer wg.Done()
-	gcState, err := getGCState(ctx, cli)
+type fuzzOperation interface {
+	fuzz(ctx context.Context, wg *sync.WaitGroup)
+}
+
+type fuzzSetGCBarrier struct {
+	cli pd.Client
+	barrierID string
+}
+
+func (f fuzzSetGCBarrier) fuzz(ctx context.Context, wg *sync.WaitGroup) {
+	// barrier TS use a random value between [now-20min, tso)
+	physical, logical, err := f.cli.GetTS(ctx)
+	tso := oracle.ComposeTS(physical, logical)
 	if err != nil {
-		fmt.Println("fuzzSetGCBarrier exit with error", err)
+		fmt.Println("get tso error?", err)
 		return
 	}
-	barrierTS := gcState.TxnSafePoint + 1
-	for {
-		select {
-		case <-ctx.Done():
+	lowerBound := oracle.GoTimeToTS(time.Now()) - uint64(20 * time.Minute)
+	barrierTS := lowerBound + uint64(rand.Int63n(int64(tso - lowerBound)))
+
+	keyspaceID := uint32(1)
+	_, err = setGCBarrier(ctx, f.cli.GetGCStatesClient(keyspaceID), f.barrierID, barrierTS, time.Duration(math.MaxInt64))
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "context canceled") && ctx.Err() != nil {
 			return
-		default:
 		}
-		barrierTS = barrierTS + 1 + uint64(rand.Int63n(5))
-		barrierInfo, err := setGCBarrier(ctx, cli, barrierID, barrierTS, time.Duration(math.MaxInt64))
-		if err != nil {
-			errStr := err.Error()
-			if strings.Contains(errStr, "context canceled") && ctx.Err() != nil {
-				return
-			}
-			if strings.Contains(errStr, "ErrGCBarrierTSBehindTxnSafePoint") {
-				// retry push forward barrierTS with lager value
-				continue
-			}
-			fmt.Printf("SetGCBarrier error = %+v\n", err)
-			time.Sleep(5 * time.Millisecond)
-			continue
+		if strings.Contains(errStr, "ErrGCBarrierTSBehindTxnSafePoint") {
+			// retry push forward barrierTS with lager value
+			return
 		}
-		gcState, err := getGCState(ctx, cli)
-		if err != nil {
-			if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
-				return
-			}
-			fmt.Printf("GetGCState error = %+v\n", err)
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-		// Check invariance
-		if barrierInfo.BarrierTS < gcState.TxnSafePoint {
-			panic("fuzzSetGCBarrier")
-		}
-		if barrierInfo.BarrierTS > gcState.TxnSafePoint+30 {
-			time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-		}
+		fmt.Printf("SetGCBarrier error = %+v\n", err)
+		time.Sleep(5 * time.Millisecond)
+		return
 	}
 }
 
-func fuzzGetGCState(ctx context.Context, wg *sync.WaitGroup, cli gc.GCStatesClient) {
-	// Action: call GetGCState() once a while
-	// Invariance: txn safe point and gc safe point should never go backward
-	defer wg.Done()
+type fuzzAdvanceTxnSafePoint struct {
+	cli gc.InternalController
+}
 
-	gcState, err := getGCState(ctx, cli)
+func (f fuzzAdvanceTxnSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
+	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
+	target := oracle.GoTimeToTS(time.Now() ) + uint64(10 * time.Minute - 10 * time.Second) + uint64(rand.Int63n(20)) * uint64(time.Second)
+	_, err := advanceTxnSafePoint(ctx, f.cli, target)
 	if err != nil {
-		fmt.Printf("GetGCState error = %+v\n", err)
+		if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
+			return
+		}
+		if strings.Contains(err.Error(), "ErrDecreasingTxnSafePoint") {
+			return
+		}
+		fmt.Printf("SetGCBarrier error =%+v\n", err)
+		time.Sleep(5 * time.Millisecond)
+	}
+	// if result.NewTxnSafePoint != target {
+	// 	// not pushed to target value
+	// }
+	// txnSafePoint = result.NewTxnSafePoint
+
+	// // Check invariance
+	// gcState, err := getGCState(ctx, cli1)
+	// if err != nil {
+	// 	if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
+	// 		return
+	// 	}
+	// 	fmt.Printf("GetGCState error =%+v\n", err)
+	// 	time.Sleep(5 * time.Millisecond)
+	// 	continue
+	// }
+	// if txnSafePoint < gcState.TxnSafePoint {
+	// 	panic("fuzzAdvanceTxnSafePoint")
+	// }
+	// for _, barrier := range gcState.GCBarriers {
+	// 	if !(txnSafePoint <= barrier.BarrierTS) {
+	// 		panic("txn safe point must <= barrier ts")
+	// 	}
+	// }
+	// if txnSafePoint < gcState.GCSafePoint {
+	// 	panic(fmt.Sprintf("txn safe point %d must >= gc safe point %d", txnSafePoint, gcState.GCSafePoint))
+	// }
+	// if txnSafePoint > gcState.GCSafePoint+30 {
+	// 	time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
+	// }
+}
+
+type fuzzAdvanceGCSafePoint struct {
+	cli gc.InternalController
+}
+
+func (f fuzzAdvanceGCSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
+	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
+	target := oracle.GoTimeToTS(time.Now() ) + uint64(10 * time.Minute - 10 * time.Second) + uint64(rand.Int63n(20)) * uint64(time.Second)
+	_, err := advanceGCSafePoint(ctx, f.cli, target)
+	if err != nil {
+		if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
+			return
+		}
+		if strings.Contains(err.Error(), "ErrGCSafePointExceedsTxnSafePoint") {
+			return
+		}
+		if strings.Contains(err.Error(), "ErrDecreasingGCSafePoint") {
+			return
+		}
+
+		fmt.Printf("SetGCBarrier error =%+v\n", err)
+		time.Sleep(5 * time.Millisecond)
 		return
 	}
+	// if result.NewGCSafePoint == target {
+	// 	// Success
+	// 	gcSafePoint = result.NewGCSafePoint
+	// } else {
+	// 	// Blocked
+	// }
 
-	lastTxnSafePoint, lastGCSafePoint := gcState.TxnSafePoint, gcState.GCSafePoint
+	// // Check invariance
+	// gcState, err := getGCState(ctx, cli1)
+	// if err != nil {
+	// 	if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
+	// 		return
+	// 	}
+	// 	fmt.Printf("GetGCState error =%+v\n", err)
+	// 	time.Sleep(5 * time.Millisecond)
+	// 	continue
+	// }
+	// if gcSafePoint > gcState.TxnSafePoint {
+	// 	panic("gc safe point must <= txn safe point")
+	// }
+}
+
+func checkInvariance(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
+	defer wg.Done()
+	// Invariance:
+	// 1. txn safe point and gc safe point should never decrease
+	// 2. gc safe point <= txn safe point
+	// 3. txn safe point <= min{barrier ts}
+	// 4. txn safe point <= max{start ts}?
+	keyspaceID := uint32(1)
+	cli := pdcli.GetGCStatesClient(keyspaceID)
+
+	var lastTxnSafePoint, lastGCSafePoint uint64
 	for {
 		select {
 		case <-ctx.Done():
@@ -151,140 +231,26 @@ func fuzzGetGCState(ctx context.Context, wg *sync.WaitGroup, cli gc.GCStatesClie
 			time.Sleep(5 * time.Millisecond)
 			continue
 		}
-		// Check invariance
-		if gcState.TxnSafePoint < lastTxnSafePoint {
-			panic("GetGCState find txn safe point jump back")
+		if lastTxnSafePoint != 0 &&  gcState.TxnSafePoint < lastTxnSafePoint {
+			panic("txn safe point jump back")
 		}
-		if gcState.GCSafePoint < lastGCSafePoint {
-			panic("GetGCState find gc safe point jump back")
+		if lastGCSafePoint != 0 && gcState.GCSafePoint < lastGCSafePoint {
+			panic("gc safe point jump back")
 		}
 		lastTxnSafePoint, lastGCSafePoint = gcState.TxnSafePoint, gcState.GCSafePoint
+
+		if !(lastTxnSafePoint >= lastGCSafePoint) {
+			panic("txn safe point must >= gc safe point")
+		}
 
 		fmt.Println("current GC state txn safe point:", gcState.TxnSafePoint, "gc safe point:", gcState.GCSafePoint)
 		for _, barrier := range gcState.GCBarriers {
 			fmt.Println("barrier id:", barrier.BarrierID, "barrier ts:", barrier.BarrierTS)
-		}
-		time.Sleep(time.Second)
-	}
-}
-
-func fuzzAdvanceTxnSafePoint(ctx context.Context, wg *sync.WaitGroup, cli gc.InternalController, cli1 gc.GCStatesClient) {
-	// Action: push forward txn safe point by random [1-5] using AdvanceTxnSafePoint()
-	// Invariance: txn safe point <= barrier ts and txn safe point >= gc safe point
-	defer wg.Done()
-
-	gcState, err := getGCState(ctx, cli1)
-	if err != nil {
-		fmt.Printf("GetGCState error =%+v\n", err)
-		return
-	}
-	txnSafePoint := gcState.TxnSafePoint
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		target := txnSafePoint + 1 + uint64(rand.Int63n(5))
-		result, err := advanceTxnSafePoint(ctx, cli, target)
-		if err != nil {
-			if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
-				return
-			}
-			if strings.Contains(err.Error(), "ErrDecreasingTxnSafePoint") {
-				fmt.Println("should this happen?", err)
-			} else {
-				fmt.Printf("SetGCBarrier error =%+v\n", err)
-				time.Sleep(5 * time.Millisecond)
-			}
-			continue
-		}
-		if result.NewTxnSafePoint != target {
-			// not pushed to target value
-		}
-		txnSafePoint = result.NewTxnSafePoint
-
-		// Check invariance
-		gcState, err := getGCState(ctx, cli1)
-		if err != nil {
-			if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
-				return
-			}
-			fmt.Printf("GetGCState error =%+v\n", err)
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-		if txnSafePoint < gcState.TxnSafePoint {
-			panic("fuzzAdvanceTxnSafePoint")
-		}
-		for _, barrier := range gcState.GCBarriers {
-			if !(txnSafePoint <= barrier.BarrierTS) {
+			if !(lastTxnSafePoint <= barrier.BarrierTS) {
 				panic("txn safe point must <= barrier ts")
 			}
 		}
-		if txnSafePoint < gcState.GCSafePoint {
-			panic(fmt.Sprintf("txn safe point %d must >= gc safe point %d", txnSafePoint, gcState.GCSafePoint))
-		}
-		if txnSafePoint > gcState.GCSafePoint+30 {
-			time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-		}
-	}
-}
-
-func fuzzAdvanceGCSafePoint(ctx context.Context, wg *sync.WaitGroup, cli gc.InternalController, cli1 gc.GCStatesClient) {
-	// Action: push forward gc safe point by random [1-5] using AdvanceGCSafePoint()
-	// Invariance: txn safe point >= gc safe point
-	defer wg.Done()
-
-	gcState, err := getGCState(ctx, cli1)
-	if err != nil {
-		fmt.Printf("GetGCState error =%+v\n", err)
-		return
-	}
-	gcSafePoint := gcState.GCSafePoint
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		target := gcSafePoint + 1 + uint64(rand.Int63n(5))
-		result, err := advanceGCSafePoint(ctx, cli, target)
-		if err != nil {
-			if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
-				return
-			}
-			if strings.Contains(err.Error(), "ErrGCSafePointExceedsTxnSafePoint") {
-				// don't push too harsh in case of this error
-				// sleep a while for txn safe point to catch up
-				time.Sleep(5 * time.Millisecond)
-				continue
-			}
-
-			fmt.Printf("SetGCBarrier error =%+v\n", err)
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-		if result.NewGCSafePoint == target {
-			// Success
-			gcSafePoint = result.NewGCSafePoint
-		} else {
-			// Blocked
-		}
-
-		// Check invariance
-		gcState, err := getGCState(ctx, cli1)
-		if err != nil {
-			if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
-				return
-			}
-			fmt.Printf("GetGCState error =%+v\n", err)
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-		if gcSafePoint > gcState.TxnSafePoint {
-			panic("gc safe point must <= txn safe point")
-		}
+		time.Sleep(time.Second)
 	}
 }
 
@@ -305,7 +271,7 @@ func resignLeader() error {
 	return nil
 }
 
-func fuzzResignLeader(ctx context.Context, wg *sync.WaitGroup) {
+func chaosResignLeader(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
 		select {
@@ -329,6 +295,37 @@ func fuzzResignLeader(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
+func fuzzGoroutine(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
+	defer wg.Done()
+
+	keyspaceID := uint32(1)
+	operations := []fuzzOperation{
+		fuzzSetGCBarrier{pdcli, "barrier1"},
+		fuzzSetGCBarrier{pdcli, "barrier2"},
+		fuzzAdvanceTxnSafePoint{pdcli.GetGCInternalController(keyspaceID)},
+		fuzzAdvanceGCSafePoint{pdcli.GetGCInternalController(keyspaceID)},
+	}
+	for {
+		// check exit signal
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		
+		// choose the fuzz operation
+		n := rand.Intn(len(operations))
+		op := operations[n]
+
+		// run one round
+		op.fuzz(ctx, wg)
+	}
+}
+
+func fuzzMinStartTS(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+}
+
 func main() {
 	pdcli, err := pd.NewClient(caller.Component("test"),
 		[]string{"127.0.0.1:2379"}, pd.SecurityOption{})
@@ -343,23 +340,17 @@ func main() {
 	leader := pdcli.GetLeaderURL()
 	fmt.Println("leader url ==", leader)
 
-	keyspaceID := uint32(1)
-
-	cli1 := pdcli.GetGCStatesClient(keyspaceID)
-	state, err := getGCState(context.Background(), cli1)
-	fmt.Println("get gcstate info ==", state)
-
-	cli2 := pdcli.GetGCInternalController(keyspaceID)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	wg.Add(6)
-	go fuzzSetGCBarrier(ctx, &wg, cli1, "barrier1")
-	go fuzzSetGCBarrier(ctx, &wg, cli1, "barrier2")
-	go fuzzGetGCState(ctx, &wg, cli1)
-	go fuzzAdvanceTxnSafePoint(ctx, &wg, cli2, cli1)
-	go fuzzAdvanceGCSafePoint(ctx, &wg, cli2, cli1)
-	go fuzzResignLeader(ctx, &wg)
+	Concurrency := 20
+	wg.Add(Concurrency + 3)
+
+	for i:=0; i<20; i++ {
+		go fuzzGoroutine(ctx, &wg, pdcli)
+	}
+	go fuzzMinStartTS(ctx, &wg)
+	go chaosResignLeader(ctx, &wg)
+	go checkInvariance(ctx, &wg, pdcli)
 
 	time.Sleep(10 * time.Minute)
 
