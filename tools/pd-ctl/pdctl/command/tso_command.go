@@ -15,6 +15,7 @@
 package command
 
 import (
+	"net/http"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -22,14 +23,52 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 )
 
+var (
+	tsoMemberPrefix = "/api/v1/primary/transfer"
+)
+
 // NewTSOCommand return a TSO subcommand of rootCmd
 func NewTSOCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tso <timestamp>",
+		Use:   "tso <timestamp|leader>",
 		Short: "parse TSO to the system and logic time",
 		Run:   showTSOCommandFunc,
 	}
+	cmd.AddCommand(NewTSOMemberCommand())
 	return cmd
+}
+
+// NewTSOMemberCommand return a leader subcommand of tsoCmd
+func NewTSOMemberCommand() *cobra.Command {
+	d := &cobra.Command{
+		Use:   "leader <subcommand>",
+		Short: "leader commands",
+	}
+	d.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "show the leader member status",
+		Run:   getLeaderMemberCommandFunc,
+	})
+	d.AddCommand(&cobra.Command{
+		Use:   "resign",
+		Short: "resign current leader pd's leadership",
+		Run:   resignLeaderCommandFunc,
+	})
+	d.AddCommand(&cobra.Command{
+		Use:   "transfer <member_name>",
+		Short: "transfer leadership to another pd",
+		Run:   transferPDLeaderCommandFunc,
+	})
+	return d
+}
+
+func getTsoMemberCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := doRequest(cmd, leaderMemberPrefix, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 func showTSOCommandFunc(cmd *cobra.Command, args []string) {
