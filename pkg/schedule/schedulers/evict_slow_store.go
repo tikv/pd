@@ -368,7 +368,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 			continue
 		}
 
-		if store.GetSlowScore() <= slowStoreRecoverThreshold && uint64(time.Since(startTime).Seconds()) >= recoveryGap {
+		if store.GetNetworkSlowScore() <= slowStoreRecoverThreshold && uint64(time.Since(startTime).Seconds()) >= recoveryGap {
 			cluster.ResumeLeaderTransfer(storeID, constant.In)
 			deleteStore(storeID)
 		}
@@ -403,7 +403,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 				continue
 			}
 			s.conf.Unlock()
-			evictedSlowStoreStatusGauge.WithLabelValues(s.GetName(), strconv.FormatUint(store.GetID(), 10), string(diskSlowStore)).Set(1)
+			evictedSlowStoreStatusGauge.WithLabelValues(s.GetName(), strconv.FormatUint(store.GetID(), 10), string(networkSlowStore)).Set(1)
 		}
 	}
 }
