@@ -69,7 +69,8 @@ func TestTIKVEngine(t *testing.T) {
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
-	re.True(scheduler.IsScheduleAllowed(tc))
+	re.NoError(err)
+	re.False(scheduler.IsScheduleAllowed(tc))
 	km := tc.GetKeyRangeManager()
 	kr := keyutil.NewKeyRange("", "")
 	ranges := km.GetNonOverlappingKeyRanges(&kr)
@@ -77,9 +78,6 @@ func TestTIKVEngine(t *testing.T) {
 	re.Equal(ranges[0], keyutil.NewKeyRange("", "100"))
 	re.Equal(ranges[1], keyutil.NewKeyRange("200", ""))
 
-	re.NoError(err)
-	ops, _ := scheduler.Schedule(tc, true)
-	re.Empty(ops)
 	for i := 1; i <= 3; i++ {
 		tc.AddLeaderStore(uint64(i), 0)
 	}
@@ -94,7 +92,9 @@ func TestTIKVEngine(t *testing.T) {
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(6, "180", "200", 3, 1, 2)
 	// case1: transfer leader from store 1 to store 3
-	ops, _ = scheduler.Schedule(tc, true)
+	re.True(scheduler.IsScheduleAllowed(tc))
+	ops, _ := scheduler.Schedule(tc, true)
+	re.NoError(err)
 	re.NotEmpty(ops)
 	op := ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
@@ -103,6 +103,7 @@ func TestTIKVEngine(t *testing.T) {
 
 	// case2: move leader from store 1 to store 4
 	tc.AddLeaderStore(4, 0)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
@@ -146,14 +147,18 @@ func TestTIFLASHEngine(t *testing.T) {
 			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
 	re.NoError(err)
 	// tiflash-4 only has 1 region, so it doesn't need to balance
-	ops, _ := scheduler.Schedule(tc, false)
-	re.Empty(ops)
+	re.False(scheduler.IsScheduleAllowed(tc))
 
 	// add 2 learner on tiflash-4
+	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
+	re.NoError(err)
 	for i := 2; i <= 3; i++ {
 		tc.AddRegionWithLearner(uint64(i), 1, []uint64{2, 3}, []uint64{4})
 	}
-	ops, _ = scheduler.Schedule(tc, false)
+	re.True(scheduler.IsScheduleAllowed(tc))
+	ops, _ := scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
