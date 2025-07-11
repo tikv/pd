@@ -282,7 +282,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			// Previous slow store had been removed, remove the scheduler and check
 			// slow node next time.
 			log.Info("slow store has been removed",
-				zap.Uint64("store-id", store.GetID()))
+				zap.Uint64("store-id", s.conf.evictStore()))
 			s.cleanupEvictLeader(cluster)
 			return nil, nil
 		}
