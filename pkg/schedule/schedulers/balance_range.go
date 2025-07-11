@@ -48,9 +48,6 @@ import (
 var (
 	defaultJobTimeout = 30 * time.Minute
 	reserveDuration   = 7 * 24 * time.Hour
-	// if the max score subtracted by the min score is less than the average score multiplied by the threshold,
-	// we can consider the key ranges are balanced.
-	defaultBalancedThresholdRatio = 0.1
 )
 
 type balanceRangeSchedulerHandler struct {
@@ -462,10 +459,6 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	defer s.filterCounter.Flush()
 
 	plan := s.plan
-	if plan == nil {
-		balanceRangePrepareFailedCounter.Inc()
-		return nil, nil
-	}
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
