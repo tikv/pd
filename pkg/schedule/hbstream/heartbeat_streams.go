@@ -130,7 +130,7 @@ func (s *HeartbeatStreams) run() {
 			storeLabel := strconv.FormatUint(storeID, 10)
 			store := s.storeInformer.GetStore(storeID)
 			if store == nil {
-				log.Error("failed to get store",
+				log.Warn("failed to get store",
 					zap.Uint64("region-id", msg.GetRegionId()),
 					zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 				delete(s.streams, storeID)
@@ -139,7 +139,7 @@ func (s *HeartbeatStreams) run() {
 			storeAddress := store.GetAddress()
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
-					log.Error("send heartbeat message fail",
+					log.Warn("send heartbeat message fail",
 						zap.Uint64("region-id", msg.GetRegionId()), errs.ZapError(errs.ErrGRPCSend, err))
 					delete(s.streams, storeID)
 					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
@@ -156,7 +156,7 @@ func (s *HeartbeatStreams) run() {
 			for storeID, stream := range s.streams {
 				store := s.storeInformer.GetStore(storeID)
 				if store == nil {
-					log.Error("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
+					log.Warn("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 					delete(s.streams, storeID)
 					continue
 				}

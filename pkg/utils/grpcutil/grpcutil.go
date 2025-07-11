@@ -219,7 +219,7 @@ func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig, do
 		}
 		conn, err = establish(ctx, addr, tlsConfig, do...)
 		if err != nil {
-			log.Error("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
+			log.Warn("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
 			continue
 		}
 		break
