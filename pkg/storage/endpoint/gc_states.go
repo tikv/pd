@@ -120,6 +120,79 @@ var (
 	_ json.Unmarshaler = (*ServiceSafePoint)(nil)
 )
 
+// TimeOptional is time.Time or nil
+type TimeOptional struct {
+	*time.Time
+}
+
+func (t *TimeOptional) unixSeconds() int64 {
+	if t.Time != nil {
+		return t.Unix()
+	}
+	return 0
+}
+
+// MarshalJSON implements json.Marshaler for TimeOptional
+func (t *TimeOptional) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.unixSeconds())
+}
+
+// UnmarshalJSON implements json.Marshaler for TimeOptional
+func (t *TimeOptional) UnmarshalJSON(b []byte) error {
+	var unixSeconds int64
+	if err := json.Unmarshal(b, &unixSeconds); err != nil {
+		return err
+	}
+	if unixSeconds < math.MaxInt64 && unixSeconds > 0 {
+		val := time.Unix(unixSeconds, 0)
+		t.Time = &val
+	} else {
+		t.Time = nil
+	}
+	return nil
+}
+
+// GlobalGCBarrier represents a global GC barrier.
+// It looks like a GCBarrier now but the struct might change with the code evolve.
+// A more important reason is to distinguish from GC barrier by the type system,
+// avoiding potential misuse between them in code.
+type GlobalGCBarrier struct {
+	BarrierID      string       `json:"barrier_id"`
+	BarrierTS      uint64       `json:"barrier_ts"`
+	ExpirationTime TimeOptional `json:"expiration_time"`
+}
+
+// NewGlobalGCBarrier creates a new GlobalGCBarrier. The given expirationTime will be rounded up to the next second if it's
+// not in integral seconds.
+// Passing nil to `expirationTime` means the barrier never expires.
+func NewGlobalGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time) *GlobalGCBarrier {
+	// Round up the expirationTime.
+	if expirationTime != nil {
+		rounded := expirationTime.Add(time.Second - time.Nanosecond).Truncate(time.Second)
+		*expirationTime = rounded
+	}
+	return &GlobalGCBarrier{
+		BarrierID:      barrierID,
+		BarrierTS:      barrierTS,
+		ExpirationTime: TimeOptional{expirationTime},
+	}
+}
+
+// IsExpired checks whether the GlobalGCBarrier is expired at the given time.
+func (b *GlobalGCBarrier) IsExpired(now time.Time) bool {
+	return b.ExpirationTime.Time != nil && now.After(*b.ExpirationTime.Time)
+}
+
+// String implements fmt.Stringer.
+func (b *GlobalGCBarrier) String() string {
+	expirationTime := "<nil>"
+	if b.ExpirationTime.Time != nil {
+		expirationTime = b.ExpirationTime.String()
+	}
+	return fmt.Sprintf("GlobalGCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
+		b.BarrierID, b.BarrierTS, expirationTime)
+}
+
 // GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
 // barrier to be safe to read. The concept *GC barrier* is replacing the *service safe points*, but it reuses the
 // same physical persistent data as the service safe points for backward compatibility.
@@ -323,6 +396,31 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 	return barriers, nil
 }
 
+// LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
+func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier, error) {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	barrier, err := loadJSON[*GlobalGCBarrier](p.storage, key)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return barrier, nil
+}
+
+// LoadAllGlobalGCBarriers loads all global GC barriers.
+func (p GCStateProvider) LoadAllGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
+	prefix := keypath.GlobalGCBarrierPrefix()
+	return p.loadAllGlobalGCBarriersImpl(prefix)
+}
+
+func (p GCStateProvider) loadAllGlobalGCBarriersImpl(prefix string) ([]*GlobalGCBarrier, error) {
+	// TODO: Limit the count for each call.
+	_, barriers, err := loadJSONByPrefix[*GlobalGCBarrier](p.storage, prefix, 0)
+	if err != nil {
+		return nil, err
+	}
+	return barriers, err
+}
+
 // CompatibleLoadTiDBMinStartTS loads the minStartTS reported to etcd directly by TiDB.
 func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
 	prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
@@ -428,6 +526,22 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*Se
 	if err != nil {
 		return nil, nil, err
 	}
+
+	prefix = keypath.GlobalGCBarrierPrefix()
+	keys1, barriers, err := loadJSONByPrefix[*GlobalGCBarrier](p.storage, prefix, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for i, barrier := range barriers {
+		keys = append(keys, keys1[i])
+		ssps = append(ssps, &ServiceSafePoint{
+			ServiceID:  barrier.BarrierID,
+			SafePoint:  barrier.BarrierTS,
+			ExpiredAt:  barrier.ExpirationTime.unixSeconds(),
+			KeyspaceID: constant.NullKeyspaceID,
+		})
+	}
 	if len(keys) == 0 {
 		return []string{}, []*ServiceSafePoint{}, nil
 	}
@@ -485,6 +599,22 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 		Key:    key,
 		OpType: kv.RawTxnOpPut,
 		Value:  value,
+	})
+	return nil
+}
+
+// SetGlobalGCBarrier sets a global GCBarrier.
+func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GlobalGCBarrier) error {
+	key := keypath.GlobalGCBarrierPath(barrier.BarrierID)
+	return wb.writeJSON(key, barrier)
+}
+
+// DeleteGlobalGCBarrier deletes the global GCBarrier with the given barrierID.
+func (wb *GCStateWriteBatch) DeleteGlobalGCBarrier(barrierID string) error {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	wb.ops = append(wb.ops, kv.RawTxnOp{
+		Key:    key,
+		OpType: kv.RawTxnOpDelete,
 	})
 	return nil
 }
