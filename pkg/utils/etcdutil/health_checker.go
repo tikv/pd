@@ -452,7 +452,7 @@ func (checker *healthChecker) removeClient(ep string) {
 func (checker *healthChecker) syncURLs() (eps []string) {
 	resp, err := ListEtcdMembers(clientv3.WithRequireLeader(checker.client.Ctx()), checker.client)
 	if err != nil {
-		log.Error("failed to list members",
+		log.Warn("failed to list members",
 			zap.String("source", checker.source),
 			errs.ZapError(err))
 		return nil

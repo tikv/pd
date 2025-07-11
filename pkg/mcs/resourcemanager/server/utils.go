@@ -17,7 +17,7 @@ package server
 import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 // ExtractKeyspaceID extracts the keyspace ID from the keyspace ID value.

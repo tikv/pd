@@ -26,7 +26,8 @@ import (
 
 	"github.com/pingcap/failpoint"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -68,7 +69,7 @@ func TestKeyspaceGroup(t *testing.T) {
 			{
 				ID:        1,
 				UserKind:  endpoint.Standard.String(),
-				Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
+				Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 				Keyspaces: []uint32{111, 222, 333},
 			},
 		},

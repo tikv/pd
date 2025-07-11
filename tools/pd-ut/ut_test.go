@@ -22,6 +22,7 @@ import (
 )
 
 func TestCheckDiff(t *testing.T) {
+	re := require.New(t)
 	a := `# pkg/storage TestTimestampTxn
 # pkg/unsaferecovery TestFailed
 # pkg/window TestWindowResetBucket
@@ -52,9 +53,10 @@ func TestCheckDiff(t *testing.T) {
 		ToFile:   "b",
 		Context:  3,
 	}
-	diffText, _ := difflib.GetUnifiedDiffString(diff)
+	diffText, err := difflib.GetUnifiedDiffString(diff)
+	re.NoError(err)
 
-	require.Equal(t, `--- a
+	re.Equal(`--- a
 +++ b
 @@ -1,15 +1,7 @@
 -# pkg/storage TestTimestampTxn
@@ -83,6 +85,7 @@ func TestCheckDiff(t *testing.T) {
 		ToFile:   "b",
 		Context:  3,
 	}
-	diffText, _ = difflib.GetUnifiedDiffString(diff)
-	require.Empty(t, diffText)
+	diffText, err = difflib.GetUnifiedDiffString(diff)
+	re.NoError(err)
+	re.Empty(diffText)
 }

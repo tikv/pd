@@ -97,7 +97,9 @@ func TestConfigClone(t *testing.T) {
 	con2 := emptyConf.clone()
 	re.Empty(con2.getKeyRangesByID(1))
 
-	con2.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
+	var err error
+	con2.StoreIDWithRanges[1], err = getKeyRanges([]string{"a", "b", "c", "d"})
+	re.NoError(err)
 	con3 := con2.clone()
 	re.Len(con3.getRanges(1), len(con2.getRanges(1)))
 

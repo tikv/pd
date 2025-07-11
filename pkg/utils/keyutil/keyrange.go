@@ -18,7 +18,11 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"sort"
+	"strings"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // KeyRange is a key range.
@@ -231,4 +235,34 @@ func (rs *KeyRanges) Merge() {
 		EndKey:   end,
 	})
 	rs.krs = merged
+}
+
+// DecodeHTTPKeyRanges decodes the key ranges from the HTTP request parameters.
+func DecodeHTTPKeyRanges(input map[string]any) ([]string, error) {
+	startKeyStr, ok := input["start-key"].(string)
+	if !ok {
+		return nil, errs.ErrInvalidArgument.FastGenByArgs("start-key")
+	}
+	endKeyStr, ok := input["end-key"].(string)
+	if !ok {
+		return nil, errs.ErrInvalidArgument.FastGenByArgs("end-key")
+	}
+	startKeys := strings.Split(startKeyStr, ",")
+	endKeys := strings.Split(endKeyStr, ",")
+	if len(startKeys) != len(endKeys) {
+		return nil, errs.ErrInvalidArgument.FastGenByArgs(startKeyStr, endKeyStr)
+	}
+	krs := make([]string, 0, 2*len(startKeys))
+	for i := range startKeys {
+		startKey, err := url.QueryUnescape(startKeys[i])
+		if err != nil {
+			return nil, err
+		}
+		endKey, err := url.QueryUnescape(endKeys[i])
+		if err != nil {
+			return nil, err
+		}
+		krs = append(krs, startKey, endKey)
+	}
+	return krs, nil
 }

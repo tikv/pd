@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
@@ -61,7 +61,7 @@ func (suite *hotStatusTestSuite) checkGetHotStore(cluster *tests.TestCluster) {
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	stat := handler.HotStoreStats{}
-	err := tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/hotspot/stores", &stat)
+	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/hotspot/stores", &stat)
 	re.NoError(err)
 }
 
@@ -76,10 +76,10 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsBasic(cluster *tests.T
 	}
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, tu.StatusOK(re))
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, testutil.StatusOK(re))
 	re.NoError(err)
 	errRequest := "{\"start_time\":\"err\"}"
-	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", []byte(errRequest), tu.StatusNotOK(re))
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", []byte(errRequest), testutil.StatusNotOK(re))
 	re.NoError(err)
 }
 
@@ -118,7 +118,7 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsTimeRange(cluster *tes
 	re.NoError(err)
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, check)
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, check)
 	re.NoError(err)
 }
 
@@ -197,7 +197,8 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsIDAndTypes(cluster *te
 	check := func(res []byte, statusCode int, _ http.Header) {
 		re.Equal(200, statusCode)
 		historyHotRegions := &storage.HistoryHotRegions{}
-		json.Unmarshal(res, historyHotRegions)
+		err := json.Unmarshal(res, historyHotRegions)
+		re.NoError(err)
 		re.Len(historyHotRegions.HistoryHotRegion, 1)
 		re.Equal(hotRegions[0], historyHotRegions.HistoryHotRegion[0])
 	}
@@ -205,7 +206,7 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsIDAndTypes(cluster *te
 	re.NoError(err)
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, check)
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, check)
 	re.NoError(err)
 }
 
@@ -219,6 +220,5 @@ func writeToDB(kv *kv.LevelDBKV, hotRegions []*storage.HistoryHotRegion) error {
 		}
 		batch.Put([]byte(key), value)
 	}
-	kv.Write(batch, nil)
-	return nil
+	return kv.Write(batch, nil)
 }

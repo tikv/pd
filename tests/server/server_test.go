@@ -158,7 +158,8 @@ func TestGRPCRateLimit(t *testing.T) {
 	clusterID := leaderServer.GetClusterID()
 	addr := leaderServer.GetAddr()
 	grpcPDClient := testutil.MustNewGrpcClient(re, addr)
-	leaderServer.BootstrapCluster()
+	err = leaderServer.BootstrapCluster()
+	re.NoError(err)
 	for range 100 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: clusterID},

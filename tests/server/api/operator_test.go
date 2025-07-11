@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -104,36 +104,36 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
-	err := tu.CheckGetJSON(tests.TestDialClient, regionURL, nil,
-		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
+	err := testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+		testutil.StatusNotOK(re), testutil.StringContain(re, "operator not found"))
 	re.NoError(err)
 	recordURL := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
-	err = tu.CheckGetJSON(tests.TestDialClient, recordURL, nil,
-		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, recordURL, nil,
+		testutil.StatusNotOK(re), testutil.StringContain(re, "operator not found"))
 	re.NoError(err)
 
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, regionURL, nil,
-		tu.StatusOK(re), tu.StringContain(re, "add learner peer 1 on store 3"), tu.StringContain(re, "RUNNING"))
-	re.NoError(err)
-
-	err = tu.CheckDelete(tests.TestDialClient, regionURL, tu.StatusOK(re))
-	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, recordURL, nil,
-		tu.StatusOK(re), tu.StringContain(re, "admin-add-peer {add peer: store [3]}"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "add learner peer 1 on store 3"), testutil.StringContain(re, "RUNNING"))
 	re.NoError(err)
 
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`), tu.StatusOK(re))
+	err = testutil.CheckDelete(tests.TestDialClient, regionURL, testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, regionURL, nil,
-		tu.StatusOK(re), tu.StringContain(re, "remove peer on store 2"), tu.StringContain(re, "RUNNING"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, recordURL, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "admin-add-peer {add peer: store [3]}"))
 	re.NoError(err)
 
-	err = tu.CheckDelete(tests.TestDialClient, regionURL, tu.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, recordURL, nil,
-		tu.StatusOK(re), tu.StringContain(re, "admin-remove-peer {rm peer: store [2]}"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "remove peer on store 2"), testutil.StringContain(re, "RUNNING"))
+	re.NoError(err)
+
+	err = testutil.CheckDelete(tests.TestDialClient, regionURL, testutil.StatusOK(re))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(tests.TestDialClient, recordURL, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "admin-remove-peer {rm peer: store [2]}"))
 	re.NoError(err)
 
 	tests.MustPutStore(re, cluster, &metapb.Store{
@@ -142,27 +142,27 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 		NodeState:     metapb.NodeState_Serving,
 		LastHeartbeat: time.Now().UnixNano(),
 	})
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`), tu.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, regionURL, nil,
-		tu.StatusOK(re), tu.StringContain(re, "add learner peer 2 on store 4"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+		testutil.StatusOK(re), testutil.StringContain(re, "add learner peer 2 on store 4"))
 	re.NoError(err)
 
 	// Fail to add peer to tombstone store.
 	err = cluster.GetLeaderServer().GetRaftCluster().RemoveStore(3, true)
 	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusNotOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), testutil.StatusNotOK(re))
 	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`), tu.StatusNotOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`), testutil.StatusNotOK(re))
 	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), tu.StatusNotOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), testutil.StatusNotOK(re))
 	re.NoError(err)
 
 	// Fail to get operator if from is latest.
 	time.Sleep(time.Second)
 	url := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
-	err = tu.CheckGetJSON(tests.TestDialClient, url, nil,
-		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+		testutil.StatusNotOK(re), testutil.StringContain(re, "operator not found"))
 	re.NoError(err)
 }
 
@@ -206,18 +206,20 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 	tests.MustPutRegionInfo(re, cluster, r3)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	err := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
+	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), testutil.StatusOK(re))
 	re.NoError(err)
 
-	tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), tu.StatusOK(re))
+	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), testutil.StatusOK(re))
 	re.NoError(err)
-	tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
-		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
-		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
+	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), testutil.StatusOK(re))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
+		testutil.StatusNotOK(re), testutil.StringContain(re, "not adjacent"))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
+		testutil.StatusNotOK(re), testutil.StringContain(re, "not adjacent"))
 	re.NoError(err)
 }
 
@@ -279,8 +281,8 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
-	err := tu.CheckGetJSON(tests.TestDialClient, regionURL, nil,
-		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
+	err := testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+		testutil.StatusNotOK(re), testutil.StringContain(re, "operator not found"))
 	re.NoError(err)
 	convertStepsToStr := func(steps []string) string {
 		stepStrs := make([]string, len(steps))
@@ -454,11 +456,11 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		}
 		reqData, e := json.Marshal(data)
 		re.NoError(e)
-		err := tu.CheckPostJSON(tests.TestDialClient, url, reqData, tu.StatusOK(re))
+		err := testutil.CheckPostJSON(tests.TestDialClient, url, reqData, testutil.StatusOK(re))
 		re.NoError(err)
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			// wait for the scheduling server to update the config
-			tu.Eventually(re, func() bool {
+			testutil.Eventually(re, func() bool {
 				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
 			})
 		}
@@ -483,19 +485,19 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			re.NoError(err)
 		}
 		if testCase.expectedError == nil {
-			err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input, tu.StatusOK(re))
+			err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input, testutil.StatusOK(re))
 		} else {
-			err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input,
-				tu.StatusNotOK(re), tu.StringContain(re, testCase.expectedError.Error()))
+			err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input,
+				testutil.StatusNotOK(re), testutil.StringContain(re, testCase.expectedError.Error()))
 		}
 		re.NoError(err)
 		if len(testCase.expectSteps) > 0 {
-			err = tu.CheckGetJSON(tests.TestDialClient, regionURL, nil,
-				tu.StatusOK(re), tu.StringContain(re, testCase.expectSteps))
+			err = testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+				testutil.StatusOK(re), testutil.StringContain(re, testCase.expectSteps))
 			re.NoError(err)
-			err = tu.CheckDelete(tests.TestDialClient, regionURL, tu.StatusOK(re))
+			err = testutil.CheckDelete(tests.TestDialClient, regionURL, testutil.StatusOK(re))
 		} else {
-			err = tu.CheckDelete(tests.TestDialClient, regionURL, tu.StatusNotOK(re))
+			err = testutil.CheckDelete(tests.TestDialClient, regionURL, testutil.StatusNotOK(re))
 		}
 		re.NoError(err)
 	}
@@ -544,7 +546,7 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 	resp := make([]operator.OpObject, 0)
 
 	// No operator.
-	err := tu.ReadGetJSON(re, tests.TestDialClient, objURL, &resp)
+	err := testutil.ReadGetJSON(re, tests.TestDialClient, objURL, &resp)
 	re.NoError(err)
 	re.Empty(resp)
 
@@ -556,9 +558,9 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	tests.MustPutRegionInfo(re, cluster, r3)
 
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, tests.TestDialClient, objURL, &resp)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, objURL, &resp)
 	re.NoError(err)
 	re.Len(resp, 2)
 	less := func(i, j int) bool {
@@ -593,9 +595,9 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 	}
 	regionInfo := core.NewRegionInfo(region, peer1)
 	tests.MustPutRegionInfo(re, cluster, regionInfo)
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 40, "store_id": 3}`), tu.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 40, "store_id": 3}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, tests.TestDialClient, objURL, &resp)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, objURL, &resp)
 	re.NoError(err)
 	re.Len(resp, 3)
 	sort.Slice(resp, less)
@@ -643,15 +645,15 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 	tests.MustPutRegionInfo(re, cluster, r3)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	err := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
+	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 30, "store_id": 4}`), tu.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 30, "store_id": 4}`), testutil.StatusOK(re))
 	re.NoError(err)
 	url := fmt.Sprintf("%s/operators", urlPrefix)
-	err = tu.CheckGetJSON(tests.TestDialClient, url, nil, tu.StatusOK(re), tu.StringContain(re, "merge: region 10 to 20"), tu.StringContain(re, "add peer: store [4]"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil, testutil.StatusOK(re), testutil.StringContain(re, "merge: region 10 to 20"), testutil.StringContain(re, "add peer: store [4]"))
 	re.NoError(err)
-	err = tu.CheckDelete(tests.TestDialClient, url, tu.StatusOK(re))
+	err = testutil.CheckDelete(tests.TestDialClient, url, testutil.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, url, nil, tu.StatusOK(re), tu.StringNotContain(re, "merge: region 10 to 20"), tu.StringNotContain(re, "add peer: store [4]"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil, testutil.StatusOK(re), testutil.StringNotContain(re, "merge: region 10 to 20"), testutil.StringNotContain(re, "add peer: store [4]"))
 	re.NoError(err)
 }

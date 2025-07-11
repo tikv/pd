@@ -109,9 +109,14 @@ func (suite *gcClientTestSuite) CleanupEtcdGCPath() {
 func (suite *gcClientTestSuite) TestWatch1() {
 	re := suite.Require()
 	receiver := gcClientTestReceiver{re: suite.Require()}
-	go suite.server.WatchGCSafePointV2(&pdpb.WatchGCSafePointV2Request{
-		Revision: 0,
-	}, receiver)
+	go func() {
+		// TODO: fix this test
+		// It will return "unexpected end of JSON input" because watch value is empty and exit watch loop directly.
+		// And we also need to use wait group to manage this goroutine.
+		_ = suite.server.WatchGCSafePointV2(&pdpb.WatchGCSafePointV2Request{
+			Revision: 0,
+		}, receiver)
+	}()
 
 	// Init gc safe points as index value of keyspace 0 ~ 5.
 	for i := range 6 {
@@ -163,7 +168,7 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool
 	if fromNewRevision {
 		startRevision = updatedRevision
 	}
-	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision)
+	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision) //nolint:staticcheck
 	re.NoError(err)
 
 	timer := time.NewTimer(time.Second)
@@ -196,7 +201,14 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool
 
 // mustUpdateSafePoint updates the gc safe point of the given keyspace id.
 func (suite *gcClientTestSuite) mustUpdateSafePoint(re *require.Assertions, keyspaceID uint32, safePoint uint64) {
-	_, err := suite.client.UpdateGCSafePointV2(suite.server.Context(), keyspaceID, safePoint)
+	client, err := pd.NewClientWithKeyspace(suite.server.Context(),
+		caller.TestComponent,
+		keyspaceID,
+		[]string{suite.server.GetAddr()},
+		pd.SecurityOption{},
+	)
+	re.NoError(err)
+	_, err = client.UpdateGCSafePoint(suite.server.Context(), safePoint)
 	re.NoError(err)
 }
 

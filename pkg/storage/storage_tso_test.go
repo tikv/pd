@@ -89,7 +89,8 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	re.Equal(globalTS, ts)
 
 	// testLeaderKey -> ""
-	storage.Save(leadership.GetLeaderKey(), "")
+	err = storage.Save(leadership.GetLeaderKey(), "")
+	re.NoError(err)
 	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
@@ -97,7 +98,8 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	re.Equal(globalTS, ts)
 
 	// testLeaderKey -> non-existent
-	storage.Remove(leadership.GetLeaderKey())
+	err = storage.Remove(leadership.GetLeaderKey())
+	re.NoError(err)
 	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
@@ -105,7 +107,8 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	re.Equal(globalTS, ts)
 
 	// testLeaderKey -> testLeaderValue
-	storage.Save(leadership.GetLeaderKey(), testLeaderValue)
+	err = storage.Save(leadership.GetLeaderKey(), testLeaderValue)
+	re.NoError(err)
 	globalTS = globalTS.Add(time.Second)
 	err = storage.SaveTimestamp(testGroupID, globalTS, leadership)
 	re.NoError(err)

@@ -384,7 +384,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	re.NoError(err)
 
 	// Check the states before persist.
-	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
+	err = storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
 		re.Equal(group.GetName(), name)
 		states := &GroupStates{}
@@ -392,6 +392,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 		re.NoError(err)
 		re.Equal(0.0, states.RU.Tokens)
 	})
+	re.NoError(err)
 
 	mutableGroup := krgm.getMutableResourceGroup(group.GetName())
 	mutableGroup.RUSettings.RU.Tokens = 100.0
@@ -399,7 +400,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	krgm.persistResourceGroupRunningState()
 
 	// Verify state was persisted.
-	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
+	err = storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
 		re.Equal(group.GetName(), name)
 		states := &GroupStates{}
@@ -407,6 +408,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 		re.NoError(err)
 		re.Equal(mutableGroup.RUSettings.RU.Tokens, states.RU.Tokens)
 	})
+	re.NoError(err)
 }
 
 func TestRUTracker(t *testing.T) {
@@ -432,4 +434,90 @@ func TestRUTracker(t *testing.T) {
 		rt.sample(now, targetRUPerSec, time.Second)
 		return math.Abs(rt.getRUPerSec()-targetRUPerSec) < floatDelta
 	})
+}
+
+func TestPersistAndReloadIntegrity(t *testing.T) {
+	re := require.New(t)
+	storage := storage.NewStorageWithMemoryBackend()
+	keyspaceID := uint32(101)
+	groupName := "persist_test_group"
+
+	// Add resource group to storage
+	krgm := newKeyspaceResourceGroupManager(keyspaceID, storage)
+	groupProto := &rmpb.ResourceGroup{
+		Name:     groupName,
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 10,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 500},
+			},
+		},
+	}
+	err := krgm.addResourceGroup(groupProto)
+	re.NoError(err)
+
+	// Modify the resource group to set initial state
+	mutableGroup := krgm.getMutableResourceGroup(groupName)
+	re.NotNil(mutableGroup)
+	mutableGroup.RUSettings.RU.Tokens = 12345.67
+	mutableGroup.RUConsumption = &rmpb.Consumption{RRU: 100, WRU: 200}
+
+	// Persist the resource group running state
+	krgm.persistResourceGroupRunningState()
+
+	// Load the resource group settings and states from storage
+	foundSettings := false
+	err = storage.LoadResourceGroupSettings(func(kid uint32, name string, rawValue string) {
+		if kid == keyspaceID && name == groupName {
+			foundSettings = true
+			groupSetting := &rmpb.ResourceGroup{}
+			err = proto.Unmarshal([]byte(rawValue), groupSetting)
+			re.NoError(err)
+			re.NotNil(groupSetting.KeyspaceId)
+			re.Equal(keyspaceID, groupSetting.KeyspaceId.Value)
+			re.Equal(uint64(500), groupSetting.RUSettings.RU.Settings.FillRate)
+		}
+	})
+	re.NoError(err)
+	re.True(foundSettings)
+
+	foundStates := false
+	err = storage.LoadResourceGroupStates(func(kid uint32, name string, rawValue string) {
+		if kid == keyspaceID && name == groupName {
+			foundStates = true
+			loadedStates := &GroupStates{}
+			err = json.Unmarshal([]byte(rawValue), loadedStates)
+			re.NoError(err)
+			re.NotNil(loadedStates.RU)
+			re.InDelta(12345.67, loadedStates.RU.Tokens, 0.001)
+			re.NotNil(loadedStates.RUConsumption)
+			re.Equal(float64(100), loadedStates.RUConsumption.RRU)
+		}
+	})
+	re.NoError(err)
+	re.True(foundStates)
+
+	// Reload the keyspace resource group manager
+	reloadedManager := newKeyspaceResourceGroupManager(keyspaceID, storage)
+	err = storage.LoadResourceGroupSettings(func(kid uint32, name string, rawValue string) {
+		if kid == keyspaceID {
+			re.NoError(reloadedManager.addResourceGroupFromRaw(name, rawValue))
+		}
+	})
+	re.NoError(err)
+	err = storage.LoadResourceGroupStates(func(kid uint32, name string, rawValue string) {
+		if kid == keyspaceID {
+			re.NoError(reloadedManager.setRawStatesIntoResourceGroup(name, rawValue))
+		}
+	})
+	re.NoError(err)
+
+	reloadedGroup := reloadedManager.getResourceGroup(groupName, true)
+	re.NotNil(reloadedGroup)
+	re.Equal(groupName, reloadedGroup.Name)
+	re.InDelta(12345.67, reloadedGroup.RUSettings.RU.Tokens, 0.001)
+	re.Equal(float64(100), reloadedGroup.RUConsumption.RRU)
+	re.Equal(float64(200), reloadedGroup.RUConsumption.WRU)
+	re.Equal(uint32(10), reloadedGroup.Priority)
 }

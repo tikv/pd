@@ -22,6 +22,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type redirectorTestSuite struct {
@@ -36,14 +39,20 @@ type redirectorTestSuite struct {
 	noRedirectHTTPClient *http.Client
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 func TestRedirectorTestSuite(t *testing.T) {
 	suite.Run(t, new(redirectorTestSuite))
 }
 
 func (suite *redirectorTestSuite) SetupSuite() {
+	re := suite.Require()
 	suite.tempText = "temp1"
 	suite.tempServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, suite.tempText)
+		_, err := io.WriteString(w, suite.tempText)
+		re.NoError(err)
 	}))
 
 	suite.testName = "test1"

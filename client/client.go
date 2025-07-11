@@ -74,8 +74,7 @@ type RPCClient interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
-	UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error)
-	UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// Deprecated: Avoid using this API.
 	WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
@@ -538,29 +537,42 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 
 	for retryCount = range maxRetries {
 		resp := c.GetTSAsync(ctx)
-		if physical, logical, err = resp.Wait(); err != nil {
-			failpoint.Inject("skipRetry", func() {
-				failpoint.Return(physical, logical, err)
-			})
+		physical, logical, err = resp.Wait()
+		// directly return if no error to avoid metrics recording
+		if err == nil {
+			return physical, logical, err
+		}
 
-			if !errs.IsLeaderChange(err) {
-				break
-			}
+		if !errs.IsLeaderChange(err) {
+			break
+		}
 
-			// If the leader changes, we need to retry.
-			// For the first time, we retry immediately to avoid impacting the latency.
-			var interval time.Duration
-			if retryCount != 0 {
-				interval = retryInterval
-			}
-			select {
-			case <-ctx.Done():
-				return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
-			case <-time.After(interval):
-				continue
-			}
+		log.Debug("[pd] get tso failed, retrying",
+			zap.Int("retry-count", retryCount),
+			zap.Error(err))
+		failpoint.Inject("skipRetry", func() {
+			failpoint.Return(physical, logical, err)
+		})
+
+		// If the leader changes, we need to retry.
+		// For the first time, we retry immediately to avoid impacting the latency.
+		var interval time.Duration
+		if retryCount != 0 {
+			interval = retryInterval
+		}
+		select {
+		case <-ctx.Done():
+			return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
+		case <-time.After(interval):
 		}
 	}
+	failpoint.Inject("checkRetry", func(val failpoint.Value) {
+		if maxRetry, ok := val.(int); ok {
+			if retryCount >= maxRetry {
+				failpoint.Return(0, 0, errors.Errorf("retry count %d exceeds max retry times %d", retryCount, maxRetry))
+			}
+		}
+	})
 	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
 }
@@ -1022,6 +1034,10 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 
 // UpdateGCSafePoint implements the RPCClient interface.
 func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
+	if c.inner.keyspaceID != constants.NullKeyspaceID {
+		return c.updateGCSafePointV2(ctx, c.inner.keyspaceID, safePoint)
+	}
+
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1052,6 +1068,10 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+	if c.inner.keyspaceID != constants.NullKeyspaceID {
+		return c.updateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)
+	}
+
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateServiceGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()

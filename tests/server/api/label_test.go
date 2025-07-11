@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
@@ -144,7 +144,7 @@ func (suite *labelsStoreTestSuite) checkLabelsGet(cluster *tests.TestCluster) {
 
 	url := fmt.Sprintf("%s/labels", urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(suite.stores))
-	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, url, &labels))
+	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, &labels))
 }
 
 func (suite *labelsStoreTestSuite) checkStoresLabelFilter(cluster *tests.TestCluster) {
@@ -189,7 +189,7 @@ func (suite *labelsStoreTestSuite) checkStoresLabelFilter(cluster *tests.TestClu
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", urlPrefix, testCase.name, testCase.value)
 		info := new(response.StoresInfo)
-		err := tu.ReadGetJSON(re, tests.TestDialClient, url, info)
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
 		re.NoError(err)
 		checkStoresInfo(re, info.Stores, testCase.want)
 	}
@@ -339,11 +339,11 @@ func (suite *strictlyLabelsStoreTestSuite) checkStoreMatch(cluster *tests.TestCl
 	}
 
 	// enable placement rules. Report no error any more.
-	re.NoError(tu.CheckPostJSON(
+	re.NoError(testutil.CheckPostJSON(
 		tests.TestDialClient,
 		fmt.Sprintf("%s/config", urlPrefix),
 		[]byte(`{"enable-placement-rules":"true"}`),
-		tu.StatusOK(re)))
+		testutil.StatusOK(re)))
 	for _, testCase := range testCases {
 		resp, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},

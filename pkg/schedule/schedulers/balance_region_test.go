@@ -566,10 +566,12 @@ func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules 
 	// ensure store score without operator influence : store 4 > store 3
 	// and store score with operator influence : store 3 > store 4
 	for i := 1; i <= 8; i++ {
-		id, _, _ := tc.Alloc(1)
+		id, _, err := tc.Alloc(1)
+		re.NoError(err)
 		origin := tc.AddLeaderRegion(id, 4)
 		newPeer := &metapb.Peer{StoreId: 3, Role: metapb.PeerRole_Voter}
-		op, _ := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
+		op, err := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
+		re.NoError(err)
 		re.NotNil(op)
 		oc.AddOperator(op)
 	}
@@ -688,7 +690,7 @@ func TestConcurrencyUpdateConfig(t *testing.T) {
 				return
 			default:
 			}
-			sche.config.buildWithArgs(args)
+			re.NoError(sche.config.buildWithArgs(args))
 			re.NoError(sche.config.persist())
 		}
 	}()

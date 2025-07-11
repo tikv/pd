@@ -627,6 +627,9 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
+			request.KeyspaceId = &rmpb.KeyspaceIDValue{
+				Value: c.keyspaceID,
+			}
 			c.run.currentRequests = append(c.run.currentRequests, request)
 			gc.metrics.tokenRequestCounter.Inc()
 		}
@@ -655,7 +658,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
 			if !errors.ErrorEqual(err, context.Canceled) {
-				log.Error("[resource group controller] token bucket rpc error", zap.Error(err))
+				log.Warn("[resource group controller] token bucket rpc error", zap.Error(err))
 			}
 			resp = nil
 			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())

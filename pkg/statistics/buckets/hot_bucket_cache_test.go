@@ -19,13 +19,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
 func TestPutItem(t *testing.T) {
 	re := require.New(t)
-	cache := NewBucketsCache(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := NewBucketsCache(ctx)
 	testdata := []struct {
 		regionID    uint64
 		keys        [][]byte
@@ -120,7 +127,9 @@ func TestConvertToBucketTreeStat(t *testing.T) {
 
 func TestGetBucketsByKeyRange(t *testing.T) {
 	re := require.New(t)
-	cache := NewBucketsCache(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := NewBucketsCache(ctx)
 	bucket1 := newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("015")}, 0)
 	bucket2 := newTestBuckets(2, 1, [][]byte{[]byte("015"), []byte("020")}, 0)
 	bucket3 := newTestBuckets(3, 1, [][]byte{[]byte("020"), []byte("")}, 0)

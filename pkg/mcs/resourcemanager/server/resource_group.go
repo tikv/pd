@@ -213,7 +213,7 @@ func (rg *ResourceGroup) RequestRU(
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
-func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
+func (rg *ResourceGroup) IntoProtoResourceGroup(keyspaceID uint32) *rmpb.ResourceGroup {
 	rg.RLock()
 	defer rg.RUnlock()
 
@@ -228,6 +228,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			},
 			RunawaySettings:    rg.Runaway,
 			BackgroundSettings: rg.Background,
+			KeyspaceId:         &rmpb.KeyspaceIDValue{Value: keyspaceID},
 		}
 
 		if rg.RUConsumption != nil {
@@ -244,7 +245,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
 func (rg *ResourceGroup) persistSettings(keyspaceID uint32, storage endpoint.ResourceGroupStorage) error {
-	metaGroup := rg.IntoProtoResourceGroup()
+	metaGroup := rg.IntoProtoResourceGroup(keyspaceID)
 	return storage.SaveResourceGroupSetting(keyspaceID, rg.Name, metaGroup)
 }
 

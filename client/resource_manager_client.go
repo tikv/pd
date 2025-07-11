@@ -159,6 +159,15 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 	if err != nil {
 		return "", err
 	}
+	// ensure to use the keyspace ID of the inner client
+	if metaGroup.KeyspaceId == nil {
+		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{
+			Value: c.inner.keyspaceID,
+		}
+	} else if metaGroup.KeyspaceId.Value != c.inner.keyspaceID {
+		return "", errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(
+			metaGroup.KeyspaceId.Value, c.inner.keyspaceID)
+	}
 	req := &rmpb.PutResourceGroupRequest{
 		Group: metaGroup,
 	}

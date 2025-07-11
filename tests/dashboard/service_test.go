@@ -154,7 +154,8 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	}
 	data, err := json.Marshal(input)
 	re.NoError(err)
-	req, _ := http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	re.NoError(err)
 	resp, err := suite.httpClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
@@ -167,7 +168,8 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	}
 	data, err = json.Marshal(input)
 	re.NoError(err)
-	req, _ = http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	req, err = http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	re.NoError(err)
 	resp, err = suite.httpClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()

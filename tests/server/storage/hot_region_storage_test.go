@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -32,6 +33,10 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestHotRegionStorage(t *testing.T) {
 	re := require.New(t)
@@ -101,7 +106,8 @@ func TestHotRegionStorage(t *testing.T) {
 		},
 	}
 	for _, storeStats := range storeStats {
-		leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
+		err = leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
+		re.NoError(err)
 	}
 	var iter storage.HotRegionStorageIterator
 	var next *storage.HistoryHotRegion
@@ -198,7 +204,8 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	schedule := leaderServer.GetConfig().Schedule
 	// set reserved day to zero, close hot region storage
 	schedule.HotRegionsReservedDays = 0
-	leaderServer.GetServer().SetScheduleConfig(schedule)
+	err = leaderServer.GetServer().SetScheduleConfig(schedule)
+	re.NoError(err)
 	time.Sleep(3 * interval)
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
 		core.SetReportInterval(uint64(time.Now().Unix()-utils.RegionHeartBeatReportInterval), uint64(time.Now().Unix())))
@@ -216,7 +223,8 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	re.Nil(next)
 	// set reserved day to one, open hot region storage
 	schedule.HotRegionsReservedDays = 1
-	leaderServer.GetServer().SetScheduleConfig(schedule)
+	err = leaderServer.GetServer().SetScheduleConfig(schedule)
+	re.NoError(err)
 	time.Sleep(3 * interval)
 	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
 	iter = hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixMilli())
@@ -291,7 +299,8 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	schedule := leaderServer.GetConfig().Schedule
 	// set the time to 20 times the interval
 	schedule.HotRegionsWriteInterval.Duration = 20 * interval
-	leaderServer.GetServer().SetScheduleConfig(schedule)
+	err = leaderServer.GetServer().SetScheduleConfig(schedule)
+	re.NoError(err)
 	time.Sleep(3 * interval)
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
 		core.SetReportInterval(uint64(time.Now().Unix()-utils.RegionHeartBeatReportInterval), uint64(time.Now().Unix())))

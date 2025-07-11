@@ -31,9 +31,9 @@ import (
 
 	pdClient "github.com/tikv/pd/client/http"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -198,7 +198,8 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = ""
-		data, _ := json.Marshal(newPrimaryData)
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
@@ -229,7 +230,8 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			}
 		}
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ = json.Marshal(newPrimaryData)
+		data, err = json.Marshal(newPrimaryData)
+		re.NoError(err)
 		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
@@ -247,7 +249,8 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		// Test transfer primary to a non-exist node
 		newPrimary = "http://"
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ = json.Marshal(newPrimaryData)
+		data, err = json.Marshal(newPrimaryData)
+		re.NoError(err)
 		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
@@ -284,7 +287,8 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		}
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ := json.Marshal(newPrimaryData)
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
@@ -340,7 +344,8 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ := json.Marshal(newPrimaryData)
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
@@ -395,7 +400,8 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = ""
-		data, _ := json.Marshal(newPrimaryData)
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)

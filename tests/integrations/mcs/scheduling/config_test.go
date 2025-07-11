@@ -153,7 +153,8 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	// Get all default scheduler names.
 	var namesFromPDService []string
 	testutil.Eventually(re, func() bool {
-		namesFromPDService, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
+		namesFromPDService, _, err = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
+		re.NoError(err)
 		return len(namesFromPDService) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.

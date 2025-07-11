@@ -401,8 +401,6 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	availableRUCounter.DeleteLabelValues(groupName, groupName, keyspaceName)
 	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
-	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
-	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
 }

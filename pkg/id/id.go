@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -40,15 +40,6 @@ const (
 	DefaultLabel label = "idalloc"
 	// KeyspaceLabel is the label for keyspace id allocator.
 	KeyspaceLabel label = "keyspace-idAlloc"
-
-	// reservedKeyspaceIDCount is the reserved count for keyspace id.
-	reservedKeyspaceIDCount = uint64(1024)
-	// reservedKeyspaceIDStart is the start id for reserved keyspace id.
-	// The reserved keyspace id range is [0xFFFFFF - 1024, 0xFFFFFF)
-	reservedKeyspaceIDStart = uint64(constant.MaxValidKeyspaceID) - reservedKeyspaceIDCount
-	// nonNextGenKeyspaceIDLimit is the upper limit for keyspace IDs when not in NextGen mode.
-	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	nonNextGenKeyspaceIDLimit = uint64(constant.MaxValidKeyspaceID)
 
 	defaultAllocStep = uint64(1000)
 )
@@ -108,9 +99,9 @@ func NewAllocator(params *AllocatorParams) Allocator {
 	effectiveEnd = math.MaxUint64
 	if params.Label == KeyspaceLabel {
 		if kerneltype.IsNextGen() {
-			effectiveEnd = reservedKeyspaceIDStart - 1 // Last allocable ID for NextGen
+			effectiveEnd = constant.ReservedKeyspaceIDStart - 1 // Last allocable ID for NextGen
 		} else {
-			effectiveEnd = nonNextGenKeyspaceIDLimit // Last allocable ID for non NextGen
+			effectiveEnd = uint64(constant.MaxValidKeyspaceID) // Last allocable ID for non NextGen
 		}
 	}
 	allocator.effectiveEnd = effectiveEnd
