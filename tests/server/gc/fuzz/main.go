@@ -93,21 +93,21 @@ func (f fuzzSetGCBarrier) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 	}
 	lowerBound := oracle.GoTimeToTS(time.Now()) - uint64(20 * time.Minute)
 	barrierTS := lowerBound + uint64(rand.Int63n(int64(tso - lowerBound)))
+	// fmt.Println("lowerBound = ", lowerBound, "tso=", tso, "barrier ts=", barrierTS)
 
 	keyspaceID := uint32(1)
-	_, err = setGCBarrier(ctx, f.cli.GetGCStatesClient(keyspaceID), f.barrierID, barrierTS, time.Duration(math.MaxInt64))
+	gcCli := f.cli.GetGCStatesClient(keyspaceID)
+	_, err = setGCBarrier(ctx, gcCli, f.barrierID, barrierTS, time.Duration(math.MaxInt64))
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "context canceled") && ctx.Err() != nil {
 			return
 		}
 		if strings.Contains(errStr, "ErrGCBarrierTSBehindTxnSafePoint") {
-			// retry push forward barrierTS with lager value
+			// fmt.Println("barrier ts behind txn safe point", errStr)
 			return
 		}
 		fmt.Printf("SetGCBarrier error = %+v\n", err)
-		time.Sleep(5 * time.Millisecond)
-		return
 	}
 }
 
@@ -117,7 +117,9 @@ type fuzzAdvanceTxnSafePoint struct {
 
 func (f fuzzAdvanceTxnSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
-	target := oracle.GoTimeToTS(time.Now() ) + uint64(10 * time.Minute - 10 * time.Second) + uint64(rand.Int63n(20)) * uint64(time.Second)
+	target := oracle.GoTimeToTS(time.Now()) -
+		uint64(10 * time.Minute - 10 * time.Second) +
+		uint64(rand.Int63n(20)) * uint64(time.Second)
 	_, err := advanceTxnSafePoint(ctx, f.cli, target)
 	if err != nil {
 		if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
@@ -166,7 +168,9 @@ type fuzzAdvanceGCSafePoint struct {
 
 func (f fuzzAdvanceGCSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
-	target := oracle.GoTimeToTS(time.Now() ) + uint64(10 * time.Minute - 10 * time.Second) + uint64(rand.Int63n(20)) * uint64(time.Second)
+	target := oracle.GoTimeToTS(time.Now() ) -
+		uint64(10 * time.Minute - 10 * time.Second) +
+		uint64(rand.Int63n(20)) * uint64(time.Second)
 	_, err := advanceGCSafePoint(ctx, f.cli, target)
 	if err != nil {
 		if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
@@ -313,11 +317,11 @@ func fuzzGoroutine(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
 		default:
 		}
 		
-		// choose the fuzz operation
+		// choose a random fuzz operation
 		n := rand.Intn(len(operations))
 		op := operations[n]
 
-		// run one round
+		// run the operation one round
 		op.fuzz(ctx, wg)
 	}
 }
