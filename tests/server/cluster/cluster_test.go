@@ -1597,10 +1597,11 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	id := leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
 
+	schedulersNum := len(sc.DefaultSchedulers)
 	testutil.Eventually(re, func() bool {
-		return leaderServer.GetRaftCluster().IsPrepared()
+		return len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames()) == schedulersNum
 	})
-	schedulersNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Add evict leader scheduler
 	tests.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
