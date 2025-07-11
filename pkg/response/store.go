@@ -67,6 +67,7 @@ type StoreStatus struct {
 	WitnessCount       int                `json:"witness_count,omitempty"`
 	PendingPeerCount   int                `json:"pending_peer_count,omitempty"`
 	SlowScore          uint64             `json:"slow_score,omitempty"`
+	NetworkSlowScore   uint64             `json:"network_slow_score,omitempty"`
 	SlowTrend          *SlowTrend         `json:"slow_trend,omitempty"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
@@ -116,6 +117,7 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			LearnerCount:       store.GetLearnerCount(),
 			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
+			NetworkSlowScore:   store.GetNetworkSlowScore(),
 			SlowTrend:          slowTrend,
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
