@@ -139,14 +139,10 @@ func (conf *evictLeaderSchedulerConfig) reloadConfig() error {
 	if err := conf.load(newCfg); err != nil {
 		return err
 	}
-<<<<<<< HEAD
-	pauseAndResumeLeaderTransfer(conf.cluster, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
-=======
 	if newCfg.Batch == 0 {
 		newCfg.Batch = EvictLeaderBatchSize
 	}
-	pauseAndResumeLeaderTransfer(conf.cluster, constant.In, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
->>>>>>> 0b3335267 (scheduler: fix batch compatibility issue (#9425))
+	pauseAndResumeLeaderTransfer(conf.cluster, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	conf.Batch = newCfg.Batch
 	return nil
