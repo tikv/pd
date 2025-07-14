@@ -189,9 +189,6 @@ func schedulersRegister() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		if conf.Batch == 0 {
-			conf.Batch = EvictLeaderBatchSize
-		}
 		conf.cluster = opController.GetCluster()
 		sche := newEvictSlowStoreScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)

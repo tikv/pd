@@ -144,8 +144,8 @@ func TestEvictLeaderSchedulerCompatibility(t *testing.T) {
 	defer cancel()
 
 	saveConf := &evictLeaderSchedulerConfig{
-		StoreIDWithRanges: map[uint64][]keyutil.KeyRange{
-			1: {keyutil.KeyRange{StartKey: []byte(""), EndKey: []byte("")}},
+		StoreIDWithRanges: map[uint64][]core.KeyRange{
+			1: {core.KeyRange{StartKey: []byte(""), EndKey: []byte("")}},
 		},
 	}
 
