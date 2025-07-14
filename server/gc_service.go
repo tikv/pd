@@ -16,11 +16,9 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -29,12 +27,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -292,12 +287,19 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 }
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
-func (s *GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.PD_WatchGCSafePointV2Server) error {
+func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.PD_WatchGCSafePointV2Server) error {
 	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.
 func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (*pdpb.GetAllGCSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).GetAllGCSafePointV2(ctx, request)
 	}
@@ -307,55 +309,36 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 		return rsp.(*pdpb.GetAllGCSafePointV2Response), err
 	}
 
-	startkey := keypath.GCSafePointV2Prefix()
-	endkey := clientv3.GetPrefixRangeEnd(startkey)
-	values, revision, err := s.loadRangeFromEtcd(startkey, endkey)
-
-	gcSafePoints := make([]*pdpb.GCSafePointV2, 0, len(values))
-	for _, value := range values {
-		jsonGcSafePoint := &endpoint.GCSafePointV2{}
-		if err = json.Unmarshal([]byte(value), jsonGcSafePoint); err != nil {
-			return nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
-		}
-		gcSafePoint := &pdpb.GCSafePointV2{
-			KeyspaceId:  jsonGcSafePoint.KeyspaceID,
-			GcSafePoint: jsonGcSafePoint.SafePoint,
-		}
-		log.Debug("get all gc safe point v2",
-			zap.Uint32("keyspace-id", jsonGcSafePoint.KeyspaceID),
-			zap.Uint64("gc-safe-point", jsonGcSafePoint.SafePoint))
-		gcSafePoints = append(gcSafePoints, gcSafePoint)
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetAllGCSafePointV2Response{Header: notBootstrappedHeader()}, nil
 	}
 
+	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates()
 	if err != nil {
 		return &pdpb.GetAllGCSafePointV2Response{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, err
+		}, nil
+	}
+
+	gcSafePoints := make([]*pdpb.GCSafePointV2, 0, len(gcStates))
+	for _, gcState := range gcStates {
+		if gcState.KeyspaceID == constant.NullKeyspaceID {
+			// The original GetAllGCSafePointV2 API doesn't return the null keyspace. To keep the behavior, we
+			// still exclude it.
+			continue
+		}
+		gcSafePoints = append(gcSafePoints, &pdpb.GCSafePointV2{
+			KeyspaceId:  gcState.KeyspaceID,
+			GcSafePoint: gcState.GCSafePoint,
+		})
 	}
 
 	return &pdpb.GetAllGCSafePointV2Response{
 		Header:       wrapHeader(),
 		GcSafePoints: gcSafePoints,
-		Revision:     revision,
+		Revision:     0,
 	}, nil
-}
-
-func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) (values []string, revision int64, err error) {
-	var opOption []clientv3.OpOption
-	if endKey == "\x00" {
-		opOption = append(opOption, clientv3.WithPrefix())
-	} else {
-		opOption = append(opOption, clientv3.WithRange(endKey))
-	}
-	resp, err := etcdutil.EtcdKVGet(s.client, startKey, opOption...)
-	if err != nil {
-		return nil, 0, err
-	}
-	values = make([]string, 0, len(resp.Kvs))
-	for _, item := range resp.Kvs {
-		values = append(values, string(item.Value))
-	}
-	return values, resp.Header.Revision, nil
 }
 
 func getKeyspaceID(keyspaceScope *pdpb.KeyspaceScope) uint32 {

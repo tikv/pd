@@ -384,7 +384,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWit
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithNewLoad() {
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		s.testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID, func(keyspaceID uint32) (uint64, error) {
-			state, err := s.manager.GetGCState(constant.NullKeyspaceID)
+			state, err := s.manager.GetGCState(keyspaceID)
 			if err != nil {
 				return 0, err
 			}
@@ -967,7 +967,7 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 	}
 }
 
-func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
+func (s *gcStateManagerTestSuite) testServiceGCSafePointCompatibilityImpl(keyspaceID uint32) {
 	re := s.Require()
 
 	var nowUnix int64 = 1741584577
@@ -1140,6 +1140,12 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.NoError(err)
 	re.Equal(uint64(15), res.NewTxnSafePoint)
 	re.Empty(res.BlockerDescription)
+}
+
+func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		s.testServiceGCSafePointCompatibilityImpl(keyspaceID)
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {

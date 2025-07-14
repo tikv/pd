@@ -91,7 +91,7 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 		MinServiceGcSafepoint: 1,
 	}
 	for _, ssp := range list.ServiceGCSafepoints {
-		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(keyspaceID, ssp.ServiceID, ssp.SafePoint, 10, now)
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, 10, now)
 		re.NoError(err)
 	}
 	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)

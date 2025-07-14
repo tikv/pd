@@ -184,7 +184,7 @@ func (m *GCStateManager) CompatibleUpdateGCSafePoint(keyspaceID uint32, target u
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.advanceGCSafePointImpl(constant.NullKeyspaceID, target, true)
+	return m.advanceGCSafePointImpl(keyspaceID, target, true)
 }
 
 func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64, compatible bool) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {

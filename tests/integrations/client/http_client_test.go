@@ -38,7 +38,7 @@ import (
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -1007,7 +1007,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
 	for _, ssp := range list.ServiceGCSafepoints {
-		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(keyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
 	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)

@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
@@ -72,7 +72,7 @@ func TestSafepoint(t *testing.T) {
 
 	gcStateManager := leaderServer.GetServer().GetGCStateManager()
 	for _, ssp := range list.ServiceGCSafepoints {
-		_, _, err = gcStateManager.CompatibleUpdateServiceGCSafePoint(keyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
+		_, _, err = gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
 	_, err = gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)

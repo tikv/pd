@@ -2043,7 +2043,7 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 	re := s.Require()
 
 	loadMinServiceGCSafePoint := func() *endpoint.ServiceSafePoint {
-		res, _, err := s.srv.GetGCStateManager().CompatibleUpdateServiceGCSafePoint(keyspaceID, "_", 0, 0, time.Now())
+		res, _, err := s.srv.GetGCStateManager().CompatibleUpdateServiceGCSafePoint(constants.NullKeyspaceID, "_", 0, 0, time.Now())
 		re.NoError(err)
 		return res
 	}
