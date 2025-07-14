@@ -16,7 +16,6 @@ package keypath
 
 import (
 	"fmt"
-	"path"
 )
 
 const (
@@ -25,14 +24,8 @@ const (
 	keyspaceAllocIDPathFormat = "/pd/%d/keyspaces/alloc_id" // "/pd/{cluster_id}/keyspaces/alloc_id"
 )
 
-// Prefix returns the parent directory of the given path.
-func Prefix(str string) string {
-	return path.Dir(str)
-}
-
 // LeaderPath returns the leader path.
 func LeaderPath() string {
-
 	return fmt.Sprintf(leaderPathFormat, ClusterID())
 }
 
