@@ -8248,7 +8248,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\", type!=\"store-state-tombstone-filter\"}[1m])*60) by (source, type, scope)",
+              "expr": "sum(rate(pd_schedule_source_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\", type!=\"store-state-tombstone-filter\"}[1m])*60) by (source, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{scope}}-store-{{source}}-{{type}}",
@@ -8349,30 +8349,6 @@
               "legendFormat": "{{scope}}-store-{{target}}-{{type}}",
               "refId": "A",
               "step": 4
-            },
-            {
-              "expr": "sum(rate(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", action=\"filter-target\",type=\"distinct-filter\"}[1m])*60) by (source, target, type, scope)",
-              "format": "time_series",
-              "hide": true,
-              "intervalFactor": 2,
-              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
-              "refId": "B"
-            },
-            {
-              "expr": "sum(rate(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", action=\"filter-target\",type=\"rule-fit-filter\"}[1m])*60) by (source, target, type, scope)",
-              "format": "time_series",
-              "hide": true,
-              "intervalFactor": 2,
-              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
-              "refId": "C"
-            },
-            {
-              "expr": "sum(rate(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", action=\"filter-target\",type=\"rule-fit-leader-filter\"}[1m])*60) by (source, target, type, scope)",
-              "format": "time_series",
-              "hide": true,
-              "intervalFactor": 2,
-              "legendFormat": "{{scope}}-{{type}}-{{source}}-{{target}}",
-              "refId": "D"
             }
           ],
           "thresholds": [],
