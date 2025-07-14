@@ -26,6 +26,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -120,7 +121,13 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
+	testutil.Eventually(re, func() bool {
+		err = leaderServer.BootstrapCluster()
+		if err != nil {
+			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+		}
+		return err == nil
+	})
 
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
