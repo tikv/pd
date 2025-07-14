@@ -3,14 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"io"
 	"math"
+	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"github.com/tikv/client-go/v2/oracle"
 	"github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
@@ -37,7 +42,9 @@ func advanceTxnSafePoint(ctx context.Context, cli gc.InternalController, target 
 		result, err := cli.AdvanceTxnSafePoint(ctx, target)
 		if err != nil {
 			errStr := err.Error()
-			if strings.Contains(errStr, "not leader") || strings.Contains(errStr, "DeadlineExceeded") {
+			if strings.Contains(errStr, "not leader") ||
+				strings.Contains(errStr, "DeadlineExceeded") ||
+				strings.Contains(errStr, "ErrEtcdTxnConflict") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
@@ -65,7 +72,9 @@ func setGCBarrier(ctx context.Context, cli gc.GCStatesClient, barrierID string, 
 		barrierInfo, err := cli.SetGCBarrier(ctx, barrierID, barrierTS, ttl)
 		if err != nil {
 			errStr := err.Error()
-			if strings.Contains(errStr, "not leader") || strings.Contains(errStr, "DeadlineExceeded") {
+			if strings.Contains(errStr, "not leader") ||
+				strings.Contains(errStr, "DeadlineExceeded") ||
+				strings.Contains(errStr, "ErrEtcdTxnConflict") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
@@ -119,7 +128,7 @@ func (f fuzzAdvanceTxnSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
 	target := oracle.GoTimeToTS(time.Now()) -
 		uint64(10 * time.Minute - 10 * time.Second) +
-		uint64(rand.Int63n(20)) * uint64(time.Second)
+		uint64(rand.Int63n(20000)) * uint64(time.Millisecond)
 	_, err := advanceTxnSafePoint(ctx, f.cli, target)
 	if err != nil {
 		if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
@@ -131,35 +140,6 @@ func (f fuzzAdvanceTxnSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 		fmt.Printf("SetGCBarrier error =%+v\n", err)
 		time.Sleep(5 * time.Millisecond)
 	}
-	// if result.NewTxnSafePoint != target {
-	// 	// not pushed to target value
-	// }
-	// txnSafePoint = result.NewTxnSafePoint
-
-	// // Check invariance
-	// gcState, err := getGCState(ctx, cli1)
-	// if err != nil {
-	// 	if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
-	// 		return
-	// 	}
-	// 	fmt.Printf("GetGCState error =%+v\n", err)
-	// 	time.Sleep(5 * time.Millisecond)
-	// 	continue
-	// }
-	// if txnSafePoint < gcState.TxnSafePoint {
-	// 	panic("fuzzAdvanceTxnSafePoint")
-	// }
-	// for _, barrier := range gcState.GCBarriers {
-	// 	if !(txnSafePoint <= barrier.BarrierTS) {
-	// 		panic("txn safe point must <= barrier ts")
-	// 	}
-	// }
-	// if txnSafePoint < gcState.GCSafePoint {
-	// 	panic(fmt.Sprintf("txn safe point %d must >= gc safe point %d", txnSafePoint, gcState.GCSafePoint))
-	// }
-	// if txnSafePoint > gcState.GCSafePoint+30 {
-	// 	time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
-	// }
 }
 
 type fuzzAdvanceGCSafePoint struct {
@@ -170,7 +150,7 @@ func (f fuzzAdvanceGCSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
 	target := oracle.GoTimeToTS(time.Now() ) -
 		uint64(10 * time.Minute - 10 * time.Second) +
-		uint64(rand.Int63n(20)) * uint64(time.Second)
+		uint64(rand.Int63n(20000)) * uint64(time.Millisecond)
 	_, err := advanceGCSafePoint(ctx, f.cli, target)
 	if err != nil {
 		if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
@@ -187,26 +167,6 @@ func (f fuzzAdvanceGCSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 		time.Sleep(5 * time.Millisecond)
 		return
 	}
-	// if result.NewGCSafePoint == target {
-	// 	// Success
-	// 	gcSafePoint = result.NewGCSafePoint
-	// } else {
-	// 	// Blocked
-	// }
-
-	// // Check invariance
-	// gcState, err := getGCState(ctx, cli1)
-	// if err != nil {
-	// 	if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
-	// 		return
-	// 	}
-	// 	fmt.Printf("GetGCState error =%+v\n", err)
-	// 	time.Sleep(5 * time.Millisecond)
-	// 	continue
-	// }
-	// if gcSafePoint > gcState.TxnSafePoint {
-	// 	panic("gc safe point must <= txn safe point")
-	// }
 }
 
 func checkInvariance(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
@@ -215,7 +175,7 @@ func checkInvariance(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
 	// 1. txn safe point and gc safe point should never decrease
 	// 2. gc safe point <= txn safe point
 	// 3. txn safe point <= min{barrier ts}
-	// 4. txn safe point <= max{start ts}?
+	// 4. txn safe point <= min{start ts} ???
 	keyspaceID := uint32(1)
 	cli := pdcli.GetGCStatesClient(keyspaceID)
 
@@ -226,6 +186,8 @@ func checkInvariance(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
 			return
 		default:
 		}
+
+		checkMinStartTSMutex.RLock()
 		gcState, err := getGCState(ctx, cli)
 		if err != nil {
 			if strings.Contains(err.Error(), "context canceled") && ctx.Err() != nil {
@@ -241,6 +203,23 @@ func checkInvariance(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
 		if lastGCSafePoint != 0 && gcState.GCSafePoint < lastGCSafePoint {
 			panic("gc safe point jump back")
 		}
+
+		minStartTS := uint64(math.MaxUint64)
+		for _, v := range globalMinStartTS {
+			if minStartTS > v {
+				minStartTS = v
+			}
+		}
+		checkMinStartTSMutex.RUnlock()
+		if !(gcState.TxnSafePoint <= minStartTS) {
+			// if txn safe point advance first, and then min start write a smaller value
+			// gcState.TxnSafePoint < minStartTS could happen.
+			// In this case, the invariance should be stop pushing txn safe point
+			if lastTxnSafePoint != gcState.TxnSafePoint {
+				log.Fatal("txn safe point must <= min start ts", gcState.TxnSafePoint, minStartTS)
+			}
+		}
+
 		lastTxnSafePoint, lastGCSafePoint = gcState.TxnSafePoint, gcState.GCSafePoint
 
 		if !(lastTxnSafePoint >= lastGCSafePoint) {
@@ -254,6 +233,7 @@ func checkInvariance(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
 				panic("txn safe point must <= barrier ts")
 			}
 		}
+
 		time.Sleep(time.Second)
 	}
 }
@@ -326,8 +306,93 @@ func fuzzGoroutine(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
 	}
 }
 
-func fuzzMinStartTS(ctx context.Context, wg *sync.WaitGroup) {
+func getEtcdCli(ctx context.Context, pdcli pd.Client) (*clientv3.Client, error) {
+	members, err := pdcli.GetAllMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var etcdAddrs []string
+	for _, member := range members.GetMembers() {
+		if len(member.ClientUrls) > 0 {
+			u, err := url.Parse(member.ClientUrls[0])
+			if err != nil {
+				// logutil.BgLogger().Error("fail to parse client url from pd members",
+				// 	zap.String("client_url", member.ClientUrls[0]),
+				// 	zap.Error(err))
+				return nil, err
+			}
+			etcdAddrs = append(etcdAddrs, u.Host)
+		}
+	}
+	lgc := zap.NewProductionConfig()
+	return clientv3.New(clientv3.Config{
+		Endpoints:            etcdAddrs,
+		DialTimeout:          3 * time.Second,
+		// TLS:                  tlsConfig,
+		LogConfig:            &lgc,
+		DialKeepAliveTime:    10*time.Second,
+		DialKeepAliveTimeout: 3 * time.Second,
+	})
+}
+
+func putKVToETCD(ctx context.Context, etcdCli *clientv3.Client, key, val string) error {
+	var err error
+	for {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+
+		childCtx, cancel := context.WithTimeout(ctx, 2 * time.Second)
+		_, err = etcdCli.Put(childCtx, key, val)
+		cancel()
+		if err == nil {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	return nil
+}
+
+var globalMinStartTS map[string]uint64
+var checkMinStartTSMutex sync.RWMutex
+
+func fuzzMinStartTS(ctx context.Context, wg *sync.WaitGroup, id string, cli *clientv3.Client) {
 	defer wg.Done()
+
+	const keyspaceID = 1
+	minStartTSPath := fmt.Sprintf("/keyspaces/tidb/%d/tidb/server/minstartts/%s", keyspaceID, id)
+	// minStartTSPath := fmt.Sprintf("/tidb/server/minstartts/%s", id)
+
+	t := time.NewTimer(time.Duration(5+ rand.Intn(5)) * time.Second)
+	defer t.Stop()
+
+
+	minStartTS := oracle.GoTimeToTS(time.Now()) - uint64(10 * time.Minute);
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			t.Reset(time.Duration(5+ rand.Intn(5)) * time.Second)
+		}
+
+		randv := oracle.GoTimeToTS(time.Now()) -
+			uint64(10 * time.Minute) +
+			uint64(rand.Int63n(10000)) * uint64(time.Millisecond)
+		if randv > minStartTS {
+			minStartTS = randv
+		}
+
+		checkMinStartTSMutex.Lock()
+		err := putKVToETCD(ctx, cli, minStartTSPath, strconv.FormatUint(minStartTS, 10))
+		if err != nil {
+			fmt.Println("put key to etcd error:", err)
+		}
+		globalMinStartTS[id] = minStartTS
+		checkMinStartTSMutex.Unlock()
+
+		// fmt.Println("min start ts for", id, "===", minStartTS)
+	}
 }
 
 func main() {
@@ -346,18 +411,29 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	Concurrency := 20
-	wg.Add(Concurrency + 3)
-
 	for i:=0; i<20; i++ {
+		wg.Add(1)
 		go fuzzGoroutine(ctx, &wg, pdcli)
 	}
-	go fuzzMinStartTS(ctx, &wg)
+
+	etcdCli, err := getEtcdCli(ctx, pdcli)
+	if err != nil {
+		fmt.Println("open etcd client error", err)
+		return
+	}
+	globalMinStartTS = make(map[string]uint64, 2)
+	for _, id := range []string{"tidb1", "tidb2"} {
+		wg.Add(1)
+		go fuzzMinStartTS(ctx, &wg, id, etcdCli)
+	}
+
+	wg.Add(1)
 	go chaosResignLeader(ctx, &wg)
+
+	wg.Add(1)
 	go checkInvariance(ctx, &wg, pdcli)
 
 	time.Sleep(10 * time.Minute)
-
 	cancel()
 	wg.Wait()
 	fmt.Println("test success")
