@@ -361,14 +361,8 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 			}
 			err := sender.Send(regions)
 			if err != nil {
-<<<<<<< HEAD
-				log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
+				log.Warn("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
 				failed = append(failed, name)
-=======
-				log.Warn("region syncer send data meet error", zap.String("name", name),
-					errs.ZapError(errs.ErrGRPCSend, err))
-				failed.Store(name, struct{}{})
->>>>>>> 2ee5b4507 (log: degrade error log (#9418))
 			}
 		}
 		s.mu.RUnlock()
