@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
@@ -49,6 +50,10 @@ import (
 
 // PromHandler is a handler to get prometheus metrics.
 func PromHandler() gin.HandlerFunc {
+	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
+	if err := prometheus.Register(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler))); err != nil {
+		log.Warn("go runtime collectors have already registered", errs.ZapError(err))
+	}
 	return func(c *gin.Context) {
 		// register promhttp.HandlerOpts DisableCompression
 		promhttp.InstrumentMetricHandler(prometheus.DefaultRegisterer, promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
