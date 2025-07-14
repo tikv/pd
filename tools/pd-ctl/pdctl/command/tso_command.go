@@ -24,7 +24,8 @@ import (
 )
 
 var (
-	tsoMemberPrefix = "/api/v1/primary/transfer"
+	tsoPrimaryUri = "/pd/api/v2/ms/primary/tso"
+	tsoMembersUri = "/pd/api/v2/ms/members/tso"
 )
 
 // NewTSOCommand return a TSO subcommand of rootCmd
@@ -41,29 +42,33 @@ func NewTSOCommand() *cobra.Command {
 // NewTSOMemberCommand return a leader subcommand of tsoCmd
 func NewTSOMemberCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "leader <subcommand>",
-		Short: "leader commands",
+		Use:   "ms <subcommand>",
+		Short: "ms commands",
 	}
 	d.AddCommand(&cobra.Command{
-		Use:   "show",
-		Short: "show the leader member status",
-		Run:   getLeaderMemberCommandFunc,
+		Use:   "primary",
+		Short: "show the primary member status",
+		Run:   getTsoPrimaryCommandFunc,
 	})
 	d.AddCommand(&cobra.Command{
-		Use:   "resign",
-		Short: "resign current leader pd's leadership",
-		Run:   resignLeaderCommandFunc,
-	})
-	d.AddCommand(&cobra.Command{
-		Use:   "transfer <member_name>",
-		Short: "transfer leadership to another pd",
-		Run:   transferPDLeaderCommandFunc,
+		Use:   "members",
+		Short: "show the primary member status",
+		Run:   getTsoMembersCommandFunc,
 	})
 	return d
 }
 
-func getTsoMemberCommandFunc(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, leaderMemberPrefix, http.MethodGet, http.Header{})
+func getTsoMembersCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := doRequest(cmd, tsoMembersUri, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func getTsoPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := doRequest(cmd, tsoPrimaryUri, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
 		return
