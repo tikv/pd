@@ -214,8 +214,8 @@ func NewRaftCluster(
 	tsoAllocator *tso.AllocatorManager,
 ) *RaftCluster {
 	return &RaftCluster{
-<<<<<<< HEAD
 		serverCtx:       ctx,
+		storeStateLock:  syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
 		member:          member,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
@@ -226,25 +226,6 @@ func NewRaftCluster(
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-=======
-		serverCtx:      ctx,
-		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
-		member:         member,
-		regionSyncer:   regionSyncer,
-		httpClient:     httpClient,
-		etcdClient:     etcdClient,
-		BasicCluster:   basicCluster,
-		storage:        storage,
-		tsoAllocator:   tsoAllocator,
-		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner,
-			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		miscRunner: ratelimit.NewConcurrentRunner(miscTaskRunner,
-			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		logRunner: ratelimit.NewConcurrentRunner(logTaskRunner,
-			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		syncRegionRunner: ratelimit.NewConcurrentRunner(syncRegionTaskRunner,
-			ratelimit.NewConcurrencyLimiter(1), time.Minute),
->>>>>>> ae59bc09f (cluster: fix store state change problem (#9257))
 	}
 }
 
