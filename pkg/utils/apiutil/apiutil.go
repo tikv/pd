@@ -462,7 +462,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
+			log.Warn("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
 		var reader io.ReadCloser
@@ -500,7 +500,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		resp.Body.Close()
 		reader.Close()
 		if err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
+			log.Warn("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.
 			continue
 		}

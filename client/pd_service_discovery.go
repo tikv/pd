@@ -558,7 +558,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 			failpoint.Continue()
 		})
 		if err := bo.Exec(ctx, c.updateMember); err != nil {
-			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			log.Warn("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
 }
@@ -585,7 +585,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		case <-ticker.C:
 		}
 		if err := c.checkServiceModeChanged(); err != nil {
-			log.Error("[pd] failed to update service mode",
+			log.Warn("[pd] failed to update service mode",
 				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 			c.ScheduleCheckMemberChanged() // check if the leader changed
 		}
