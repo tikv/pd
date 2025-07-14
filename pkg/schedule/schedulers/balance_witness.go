@@ -349,7 +349,6 @@ func (s *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator"),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), solver.targetMetricLabel()),
 		s.counter.WithLabelValues("move-witness", solver.sourceMetricLabel()+"-out"),
 		s.counter.WithLabelValues("move-witness", solver.targetMetricLabel()+"-in"),
 	)
