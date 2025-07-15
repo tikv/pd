@@ -124,6 +124,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		err = leaderServer.BootstrapCluster()
 		if err != nil {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
 		}
 		return err == nil
@@ -332,6 +333,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		err = leaderServer.BootstrapCluster()
 		if err != nil {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
 		}
 		return err == nil
@@ -589,7 +591,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		output, err := tests.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
 		if strings.Contains(string(output), "Failed") {
-			// It may be failed when meets error, such as [PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.Contains(string(output), "ErrEtcdTxnConflict", "output: %s", string(output))
 			return false
 		}

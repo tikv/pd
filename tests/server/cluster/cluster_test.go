@@ -775,6 +775,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 			defer wg.Done()
 			err := leaderServer.BootstrapCluster()
 			if err != nil {
+				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 				re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
 			}
 		}()
