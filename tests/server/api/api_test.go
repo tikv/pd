@@ -464,7 +464,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{caller_id=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 1")
 
 	// resign to test persist config
 	oldLeaderName := leader.GetServer().Name()
@@ -494,7 +494,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	output = string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{caller_id=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 2")
 
 	input = map[string]any{
 		"enable-audit": "false",
