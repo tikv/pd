@@ -173,9 +173,10 @@ leader-schedule-limit = 0
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
 	flagSet.StringP("log-file", "", "pd.log", "log file path")
-	flagSet.Parse(nil)
+	err := flagSet.Parse(nil)
+	re.NoError(err)
 	cfg := NewConfig()
-	err := cfg.Parse(flagSet)
+	err = cfg.Parse(flagSet)
 	re.NoError(err)
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
@@ -273,7 +274,8 @@ max-backups = 5
 	flagSet = pflag.NewFlagSet("testlog", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
 	flagSet.StringP("log-file", "", "pd.log", "log file path")
-	flagSet.Parse(nil)
+	err = flagSet.Parse(nil)
+	re.NoError(err)
 	cfg = NewConfig()
 	err = cfg.Parse(flagSet)
 	re.NoError(err)
@@ -489,21 +491,25 @@ hot-regions-write-interval= "30m"
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 	cfg := &Config{}
-	cfg.Adjust(nil, false)
+	err := cfg.Adjust(nil, false)
+	re.NoError(err)
 	re.Equal(cfg, cfg.Clone())
 
 	emptyConfigMetaData := configutil.NewConfigMetadata(nil)
 
 	schedule := &sc.ScheduleConfig{}
-	schedule.Adjust(emptyConfigMetaData, false)
+	err = schedule.Adjust(emptyConfigMetaData, false)
+	re.NoError(err)
 	re.Equal(schedule, schedule.Clone())
 
 	replication := &sc.ReplicationConfig{}
-	replication.Adjust(emptyConfigMetaData)
+	err = replication.Adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(replication, replication.Clone())
 
 	pdServer := &PDServerConfig{}
-	pdServer.adjust(emptyConfigMetaData)
+	err = pdServer.adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(pdServer, pdServer.Clone())
 
 	replicationMode := &ReplicationModeConfig{}

@@ -621,9 +621,9 @@ error = '''
 default keyspace group cannot be modified
 '''
 
-["PD:keyspace:ErrModifySystemKeyspace"]
+["PD:keyspace:ErrModifyReservedKeyspace"]
 error = '''
-cannot modify system keyspace's state
+cannot modify reserved keyspace's state
 '''
 
 ["PD:keyspace:ErrNoAvailableNode"]

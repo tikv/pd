@@ -18,6 +18,9 @@ const (
 	// DefaultKeyspaceName is the name reserved for default keyspace.
 	DefaultKeyspaceName = "DEFAULT"
 
+	// StartKeyspaceID is the start keyspace for keyspace id.
+	StartKeyspaceID = uint32(0)
+
 	// DefaultKeyspaceID is the default key space id.
 	// 0 is reserved for default keyspace with the name "DEFAULT". It's initialized when PD bootstraps
 	// and reserved for users who haven't been assigned keyspace.

@@ -39,7 +39,8 @@ func TestGetVersion(t *testing.T) {
 
 	fname := filepath.Join(os.TempDir(), "stdout")
 	old := os.Stdout
-	temp, _ := os.Create(fname)
+	temp, err := os.Create(fname)
+	re.NoError(err)
 	os.Stdout = temp
 
 	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
@@ -69,7 +70,8 @@ func TestGetVersion(t *testing.T) {
 
 	svr := <-ch
 	close(ch)
-	out, _ := os.ReadFile(fname)
+	out, err := os.ReadFile(fname)
+	re.NoError(err)
 	re.NotContains(string(out), "PANIC")
 
 	// clean up

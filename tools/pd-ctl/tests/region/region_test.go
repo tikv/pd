@@ -116,7 +116,8 @@ func TestRegion(t *testing.T) {
 	defer cluster.Destroy()
 
 	getRegionsByType := func(storeID uint64, regionType core.SubTreeRegionType) []*core.RegionInfo {
-		regions, _ := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		regions, err := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		re.NoError(err)
 		return regions
 	}
 

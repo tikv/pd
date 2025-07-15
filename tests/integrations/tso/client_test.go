@@ -516,7 +516,8 @@ func TestTSONotLeader(t *testing.T) {
 	wg.Add(1)
 	go func(client pd.Client) {
 		defer wg.Done()
-		pdLeader.ResignLeader()
+		err = pdLeader.ResignLeader()
+		re.NoError(err)
 		_, _, err := client.GetTS(ctx)
 		re.ErrorContains(err, "not leader")
 	}(pdClient)
@@ -568,7 +569,8 @@ func TestMixedTSODeployment(t *testing.T) {
 		for range 2 {
 			n := r.Intn(2) + 1
 			time.Sleep(time.Duration(n) * time.Second)
-			leaderServer.ResignLeader()
+			err = leaderServer.ResignLeader()
+			re.NoError(err)
 			leaderServer = cluster.GetServer(cluster.WaitLeader())
 			re.NotNil(leaderServer)
 		}

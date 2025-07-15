@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -59,13 +60,8 @@ func validateID(id uint32) error {
 	if id > constant.MaxValidKeyspaceID {
 		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, constant.MaxValidKeyspaceID)
 	}
-	if id == constant.DefaultKeyspaceID {
-		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", id)
-	}
-	if kerneltype.IsNextGen() {
-		if checkReservedID(id) {
-			return errors.Errorf("illegal keyspace id %d, collides with reserved system keyspace id", id)
-		}
+	if isProtectedKeyspaceID(id) {
+		return errors.Errorf("illegal keyspace id %d, collides with a protected keyspace id", id)
 	}
 	return nil
 }
@@ -81,17 +77,10 @@ func validateName(name string) error {
 	if !isValid {
 		return errors.Errorf("illegal keyspace name %s, should contain only alphanumerical and underline", name)
 	}
-	if name == constant.DefaultKeyspaceName {
-		return errors.Errorf("illegal keyspace name %s, collides with default keyspace name", name)
-	}
-	if name == constant.SystemKeyspaceName {
-		return errors.Errorf("illegal keyspace name %s, collides with system keyspace name", name)
+	if isProtectedKeyspaceName(name) {
+		return errors.Errorf("illegal keyspace name %s, collides with a protected keyspace name", name)
 	}
 	return nil
-}
-
-func checkReservedID(keyspaceID uint32) bool {
-	return kerneltype.IsNextGen() && keyspaceID == constant.SystemKeyspaceID
 }
 
 // MaskKeyspaceID is used to hash the spaceID inside the lockGroup.
@@ -268,4 +257,45 @@ func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
 		return item.(*endpoint.KeyspaceGroup)
 	}
 	return nil
+}
+
+// GetBootstrapKeyspaceID returns the Keyspace ID used for bootstrapping.
+// Legacy: constant.DefaultKeyspaceID
+// NextGen: constant.SystemKeyspaceID
+func GetBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
+
+// GetBootstrapKeyspaceName returns the Keyspace Name used for bootstrapping.
+// Legacy: constant.DefaultKeyspaceName
+// NextGen: constant.SystemKeyspaceName
+func GetBootstrapKeyspaceName() string {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceName
+	}
+	return constant.DefaultKeyspaceName
+}
+
+func newModifyProtectedKeyspaceError() error {
+	if kerneltype.IsNextGen() {
+		return errs.ErrModifyReservedKeyspace
+	}
+	return errs.ErrModifyDefaultKeyspace
+}
+
+func isProtectedKeyspaceID(id uint32) bool {
+	if kerneltype.IsNextGen() {
+		return id == constant.SystemKeyspaceID
+	}
+	return id == constant.DefaultKeyspaceID
+}
+
+func isProtectedKeyspaceName(name string) bool {
+	if kerneltype.IsNextGen() {
+		return name == constant.SystemKeyspaceName
+	}
+	return name == constant.DefaultKeyspaceName
 }
