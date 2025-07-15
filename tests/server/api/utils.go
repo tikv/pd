@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -60,7 +61,10 @@ func cleanStoresAndRegions(re *require.Assertions) func(*tests.TestCluster) {
 			if store.NodeState == metapb.NodeState_Removed {
 				continue
 			}
-			re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true))
+			err := cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true)
+			if err != nil {
+				re.ErrorContains(err, errs.ErrStoreRemoved.GetMsg())
+			}
 			re.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
 		}
 		re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
