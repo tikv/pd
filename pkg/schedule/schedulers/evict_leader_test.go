@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -134,4 +135,33 @@ func TestBatchEvict(t *testing.T) {
 		ops, _ := sl.Schedule(tc, false)
 		return len(ops) == 5
 	})
+}
+
+func TestEvictLeaderSchedulerCompatibility(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	saveConf := &evictLeaderSchedulerConfig{
+		StoreIDWithRanges: map[uint64][]core.KeyRange{
+			1: {core.KeyRange{StartKey: []byte(""), EndKey: []byte("")}},
+		},
+	}
+
+	configJSON, err := json.Marshal(saveConf)
+	re.NoError(err)
+
+	// Save the serialized config to storage
+	err = tc.GetStorage().SaveSchedulerConfig(string(types.EvictLeaderScheduler), configJSON)
+	re.NoError(err)
+
+	scheduleNames, configs, err := tc.GetStorage().LoadAllSchedulerConfigs()
+	re.NoError(err)
+	re.Len(scheduleNames, 1)
+	data := configs[0]
+	es, err := CreateScheduler(types.EvictLeaderScheduler, oc, tc.GetStorage(), ConfigJSONDecoder([]byte(data)), func(string) error { return nil })
+	re.NoError(err)
+	re.Equal(3, es.(*evictLeaderScheduler).conf.Batch)
+	re.NotEmpty(es.(*evictLeaderScheduler).conf.StoreIDWithRanges[1])
 }

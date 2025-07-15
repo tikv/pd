@@ -139,6 +139,9 @@ func (conf *evictLeaderSchedulerConfig) reloadConfig() error {
 	if err := conf.load(newCfg); err != nil {
 		return err
 	}
+	if newCfg.Batch == 0 {
+		newCfg.Batch = EvictLeaderBatchSize
+	}
 	pauseAndResumeLeaderTransfer(conf.cluster, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	conf.Batch = newCfg.Batch
