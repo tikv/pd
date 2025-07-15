@@ -63,20 +63,7 @@ func (suite *ruleTestSuite) TearDownSuite() {
 
 func (suite *ruleTestSuite) TearDownTest() {
 	re := suite.Require()
-	cleanFunc := func(cluster *tests.TestCluster) {
-		def := placement.GroupBundle{
-			ID: "pd",
-			Rules: []*placement.Rule{
-				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
-			},
-		}
-		data, err := json.Marshal([]placement.GroupBundle{def})
-		re.NoError(err)
-		urlPrefix := cluster.GetLeaderServer().GetAddr()
-		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
-		re.NoError(err)
-	}
-	suite.env.RunTest(cleanFunc)
+	suite.env.RunTest(cleanRules(re))
 }
 
 func (suite *ruleTestSuite) TestSet() {
