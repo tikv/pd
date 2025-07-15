@@ -329,8 +329,13 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
+	testutil.Eventually(re, func() bool {
+		err = leaderServer.BootstrapCluster()
+		if err != nil {
+			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+		}
+		return err == nil
+	})
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
