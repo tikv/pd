@@ -63,7 +63,7 @@ func cleanStoresAndRegions(re *require.Assertions) func(*tests.TestCluster) {
 			}
 			err := cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true)
 			if err != nil {
-				re.ErrorContains(err, errs.ErrStoreRemoved.GetMsg())
+				re.ErrorIs(err, errs.ErrStoreRemoved)
 			}
 			re.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
 		}
