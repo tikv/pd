@@ -1179,7 +1179,7 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 	re := s.Require()
 
 	iter := func(ith int, v uint64) uint64 {
-		return uint64(ith * 100) + v
+		return uint64(ith*100) + v
 	}
 
 	for ith, keyspaceID := range s.keyspacePresets.manageable {
