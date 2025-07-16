@@ -115,4 +115,3 @@ txn-k get
 txn-k remove
 txn-k save
 txn-unexpected save
-txn-unexpected save/pd//gc/gc_state_revision get/pd/cluster_id get/pd//gc/safe_point/service/ get
