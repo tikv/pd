@@ -92,7 +92,7 @@ func TestGCBarriersConversions(t *testing.T) {
 	}
 }
 
-func TestGlobalGCBarriersConversions(t *testing.T) {
+func TestGlobalGCBarriersMarshalling(t *testing.T) {
 	re := require.New(t)
 
 	t1 := time.Date(2025, 2, 20, 15, 30, 00, 0, time.Local)

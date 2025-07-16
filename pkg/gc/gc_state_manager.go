@@ -385,15 +385,17 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 
 	blockerDesc := ""
 	simulatedServiceID := ""
-	if blockingBarrier != nil {
-		blockerDesc = blockingBarrier.String()
-		simulatedServiceID = blockingBarrier.BarrierID
-	} else if blockingGlobalBarrier != nil {
+	// Note the order of check blockingGlobalBarrier/blockingMinStartTSOwner/blockingBarrier
+	// This is important: it uses the reverse of the checking order to get the correct blocking reason.
+	if blockingGlobalBarrier != nil {
 		blockerDesc = blockingGlobalBarrier.String()
 		simulatedServiceID = blockingGlobalBarrier.BarrierID
 	} else if blockingMinStartTSOwner != nil {
 		blockerDesc = fmt.Sprintf("TiDBMinStartTS { Key: %+q, MinStartTS: %d }", *blockingMinStartTSOwner, newTxnSafePoint)
 		simulatedServiceID = "tidb_min_start_ts_" + *blockingMinStartTSOwner
+	} else if blockingBarrier != nil {
+		blockerDesc = blockingBarrier.String()
+		simulatedServiceID = blockingBarrier.BarrierID
 	}
 
 	if newTxnSafePoint != target {
@@ -770,7 +772,12 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
 		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
 		// setting/deleting global GC barrier.
-		txnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+		var txnSafePoint uint64
+		err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			var err1 error
+			txnSafePoint, _, _, err1 = m.getAllKeyspacesMaxTxnSafePoint(wb)
+			return err1
+		})
 		if err != nil {
 			return nil, false, err
 		}
@@ -793,12 +800,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
 		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
 		// setting/deleting GC barrier.
-		var txnSafePoint uint64
-		err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			var err1 error
-			txnSafePoint, _, _, err1 = m.getAllKeyspacesMaxTxnSafePoint(wb)
-			return err1
-		})
+		txnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err != nil {
 			return nil, false, err
 		}
