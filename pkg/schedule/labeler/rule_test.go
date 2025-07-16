@@ -54,7 +54,8 @@ func TestRegionLabelTTL(t *testing.T) {
 	re.NoError(err)
 	re.Equal(label.StartAt, label2.StartAt)
 	re.Equal(label.TTL, label2.TTL)
-	label2.checkAndAdjustExpire()
+	err = label2.checkAndAdjustExpire()
+	re.NoError(err)
 	// The `expire` should be the same with minor inaccuracies.
 	re.Less(math.Abs(label2.expire.Sub(*label.expire).Seconds()), 1.0)
 }

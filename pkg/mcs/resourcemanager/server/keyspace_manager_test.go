@@ -384,7 +384,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	re.NoError(err)
 
 	// Check the states before persist.
-	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
+	err = storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
 		re.Equal(group.GetName(), name)
 		states := &GroupStates{}
@@ -392,6 +392,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 		re.NoError(err)
 		re.Equal(0.0, states.RU.Tokens)
 	})
+	re.NoError(err)
 
 	mutableGroup := krgm.getMutableResourceGroup(group.GetName())
 	mutableGroup.RUSettings.RU.Tokens = 100.0
@@ -399,7 +400,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	krgm.persistResourceGroupRunningState()
 
 	// Verify state was persisted.
-	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
+	err = storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
 		re.Equal(group.GetName(), name)
 		states := &GroupStates{}
@@ -407,6 +408,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 		re.NoError(err)
 		re.Equal(mutableGroup.RUSettings.RU.Tokens, states.RU.Tokens)
 	})
+	re.NoError(err)
 }
 
 func TestRUTracker(t *testing.T) {

@@ -273,10 +273,12 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 }
 
 func BenchmarkObserve(b *testing.B) {
+	re := require.New(b)
 	// Setup
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
+	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	peers := []*metapb.Peer{

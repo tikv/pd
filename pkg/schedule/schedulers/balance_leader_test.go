@@ -48,7 +48,8 @@ func TestMain(m *testing.M) {
 
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
-	keyRanges1, _ := getKeyRanges([]string{"a", "b", "c", "d"})
+	keyRanges1, err := getKeyRanges([]string{"a", "b", "c", "d"})
+	re.NoError(err)
 	conf := &balanceLeaderSchedulerConfig{
 		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
 			Ranges: keyRanges1,
@@ -59,7 +60,8 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re.Equal(conf.Batch, conf2.Batch)
 	re.Equal(conf.Ranges, conf2.Ranges)
 
-	keyRanges2, _ := getKeyRanges([]string{"e", "f", "g", "h"})
+	keyRanges2, err := getKeyRanges([]string{"e", "f", "g", "h"})
+	re.NoError(err)
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)

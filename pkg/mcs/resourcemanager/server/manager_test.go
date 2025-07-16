@@ -149,7 +149,8 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		},
 		KeyspaceId: keyspaceIDValue,
 	}
-	manager.dispatchConsumption(req)
+	err = manager.dispatchConsumption(req)
+	re.NoError(err)
 
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	// Verify consumption was added to the resource group.
