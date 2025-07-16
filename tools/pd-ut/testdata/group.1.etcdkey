@@ -28,6 +28,8 @@
 /pd//gc/global_gc_barriers/b get
 /pd//gc/global_gc_barriers/b remove
 /pd//gc/global_gc_barriers/b save
+/pd//gc/global_gc_barriers/gc_worker get
+/pd//gc/global_gc_barriers/native_br get
 /pd//gc/global_gc_barriers/native_br save
 /pd//gc/safe_point get
 /pd//gc/safe_point save
@@ -113,3 +115,4 @@ txn-k get
 txn-k remove
 txn-k save
 txn-unexpected save
+txn-unexpected save/pd//gc/gc_state_revision get/pd/cluster_id get/pd//gc/safe_point/service/ get
