@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 )
 
 const apiPrefix = "/pd"

@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 )
 
 // serviceMiddlewareBuilder is used to build service middleware for HTTP api
