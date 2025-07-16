@@ -351,22 +351,39 @@ func (rt *ruTracker) getRUPerSec() float64 {
 // conciliateFillRates is used to conciliate the fill rate of each resource group.
 // Under the service limit, there might be multiple resource groups with different
 // priorities consuming the RU at the same time. In this case, we need to conciliate
-// the fill rate of the resource group to ensure the priority, for example, there are
-// three resource groups with priorities 1, 2, and 3, and the service limit is 50 RU/s:
-// - Group A: priority 1, demand 30 RU/s
-// - Group B: priority 2, demand 20 RU/s
-// - Group C: priority 3, demand 10 RU/s
-// In this case, the fill rate of the resource group should be 30 RU/s, 20 RU/s, and 0 RU/s,
-// respectively. The conciliation algorithm is as follows:
-//  1. Sort the resource groups by the priority.
-//  2. Start from the highest priority resource group, get the real-time RU demand of each.
-//  3. Calculate the total real-time RU demand of the resource groups within the same priority.
-//     a. If the total real-time RU demand is greater than the service limit,
-//     allocate the service limit to all resource groups based on the proportion of RU demand.
-//     b. If the total real-time RU demand is less or equal to the service limit,
-//     allocate the needed RU/s to the resource group respectively.
-//  4. Calculate the remaining service limit, and repeat the process for the next priority
-//     until the service limit is allocated.
+// the fill rate of the resource group to ensure the priority is properly enforced.
+//
+// The conciliation algorithm works as follows:
+//  1. Sort resource groups by priority in descending order (higher priority first).
+//  2. For each priority level (from highest to lowest):
+//     a. Calculate total basic RU demand and total burst RU demand for all groups in this priority.
+//     - Basic RU demand: min(realtime_RU_per_sec, fill_rate_setting)
+//     - Burst RU demand: max(0, realtime_RU_per_sec - fill_rate_setting)
+//     b. Determine allocation strategy based on remaining service limit:
+//     - Case 1: If total RU demand (basic + burst) ≤ remaining service limit:
+//     * Grant all groups their full demanded resources (overrideFillRate = -1, overrideBurstLimit = -1)
+//     * Deduct total RU demand from remaining service limit
+//     - Case 2: If total RU demand > remaining service limit:
+//     * Sub-case 2.1: If basic RU demand ≥ remaining service limit:
+//     - Only satisfy basic needs proportionally: overrideFillRate = remainingLimit * (basicDemand / totalBasicDemand)
+//     - Do not allow the resource group to consume extra tokens in this case: overrideBurstLimit = overrideFillRate
+//     - Cannot exceed original fillRateSetting
+//     - Set remaining service limit to 0
+//     * Sub-case 2.2: If basic RU demand < remaining service limit:
+//     - Fully satisfy all basic demands first (overrideFillRate = -1)
+//     - Distribute remaining capacity proportionally among burst demands:
+//     overrideBurstLimit = fillRateSetting + remainingCapacity * (burstDemand / totalBurstDemand)
+//     - Set remaining service limit to 0
+//  3. Continue to next priority level until all groups are processed or service limit is exhausted.
+//  4. If service limit is exhausted, set overrideFillRate = 0 for all remaining lower priority groups
+//     (only for active groups where RU tracker exists and getRUPerSec() > 0).
+//
+// This ensures:
+// - Higher priority groups get resources first
+// - Within same priority, resources are allocated proportionally based on actual demand
+// - Basic needs are prioritized over burst needs
+// - No group exceeds its configured limits
+// - Inactive groups (no RU consumption) are skipped to avoid unnecessary computation
 func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 	serviceLimiter := krgm.getServiceLimiter()
 	// No need to conciliate if the service limit is not set or is 0.
@@ -383,56 +400,98 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 			continue
 		}
 		// If the remaining service limit is 0, set the fill rate of all the remaining resource groups to 0 directly.
+		// Only apply this to active resource groups (those with RU tracker and actual RU consumption).
 		if remainingServiceLimit == 0 {
 			for _, group := range queue {
 				ruTracker := krgm.getRUTracker(group.Name)
 				if ruTracker == nil || ruTracker.getRUPerSec() == 0 {
 					continue
 				}
-				// Only set the active resource groups.
-				group.overrideFillRate(0)
+				// Only set the active resource groups to avoid unnecessary overrides.
+				group.overrideFillRateAndBurstLimit(0, 0)
 			}
 			continue
 		}
-		// Calculate the total real-time RU demand of all resource groups in the current priority.
-		totalRUDemand := 0.0
-		ruDemandMap := make(map[string]float64, len(queue))
+
+		var (
+			totalBasicRUDemand = 0.0
+			totalBurstRUDemand = 0.0
+			basicRUDemandMap   = make(map[string]float64, len(queue))
+			burstRUDemandMap   = make(map[string]float64, len(queue))
+		)
+		// Calculate the basic and burst RU demands for all groups in this priority level.
 		for _, group := range queue {
 			ruTracker := krgm.getRUTracker(group.Name)
 			// Not found the RU tracker, skip this group.
 			if ruTracker == nil {
 				continue
 			}
-			// The RU demand exceeding the fill rate setting should be ignored.
-			ruDemand := math.Min(ruTracker.getRUPerSec(), group.getFillRateSetting())
-			totalRUDemand += ruDemand
-			ruDemandMap[group.Name] = ruDemand
-		}
-		if totalRUDemand > remainingServiceLimit {
-			// If the total real-time RU demand is greater than the service limit,
-			// allocate the service limit to all resource groups based on the proportion of RU demand.
-			for _, group := range queue {
-				ruDemand := ruDemandMap[group.Name]
-				overrideFillRate := math.Min(
-					remainingServiceLimit*ruDemand/totalRUDemand,
-					group.getFillRateSetting(), // Should not exceed the fill rate setting.
-				)
-				group.overrideFillRate(overrideFillRate)
+			ruPerSec := ruTracker.getRUPerSec()
+			fillRateSetting := group.getFillRateSetting()
+			burstLimitSetting := group.getBurstLimitSetting()
+			// Calculate the basic RU demand of the resource group.
+			// Basic demand is the minimum of real-time RU consumption and configured fill rate.
+			basicRUDemand := math.Min(ruPerSec, fillRateSetting)
+			totalBasicRUDemand += basicRUDemand
+			basicRUDemandMap[group.Name] = basicRUDemand
+			// Calculate the burst RU demand of the resource group.
+			// Burst demand is the excess consumption beyond the fill rate setting.
+			burstRUDemand := math.Max(0, ruPerSec-fillRateSetting)
+			// If the burst limit setting is greater than 0, the burst RU demand should not exceed the burst limit setting.
+			if burstLimitSetting >= 0 {
+				burstRUDemand = math.Min(burstRUDemand, burstLimitSetting)
 			}
+			totalBurstRUDemand += burstRUDemand
+			burstRUDemandMap[group.Name] = burstRUDemand
+		}
+
+		totalRUDemand := totalBasicRUDemand + totalBurstRUDemand
+		// If the total real-time RU demand is greater than or equal to the remaining service limit,
+		// we need to divide the remaining service limit proportionally within the same priority level.
+		if totalRUDemand >= remainingServiceLimit {
+			// If the basic RU demand already exceeds the remaining service limit, then we can only try to meet the basic needs of
+			// the resource groups through proportional allocation of the fill rate setting.
+			if totalBasicRUDemand >= remainingServiceLimit {
+				for _, group := range queue {
+					basicRUDemand := basicRUDemandMap[group.Name]
+					// Allocate the remaining service limit proportionally based on basic demand.
+					overrideFillRate := math.Min(
+						remainingServiceLimit*basicRUDemand/totalBasicRUDemand,
+						group.getFillRateSetting(), // Should not exceed the original fill rate setting.
+					)
+					// Do not allow the resource group to consume extra tokens in this case,
+					// so the override burst limit is set to the same as the override fill rate.
+					group.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
+				}
+			} else {
+				// If the basic RU demand can be fully met, we can further satisfy burst RU demands.
+				remainingServiceLimit -= totalBasicRUDemand
+				for _, group := range queue {
+					burstRUDemand := burstRUDemandMap[group.Name]
+					// Allocate the remaining service limit proportionally based on burst demand.
+					overrideBurstLimit := group.getFillRateSetting() + remainingServiceLimit*burstRUDemand/totalBurstRUDemand
+					// Should not exceed the original burst limit setting if it's greater than 0.
+					if burstLimit := group.getBurstLimitSetting(); burstLimit > 0 {
+						overrideBurstLimit = math.Min(overrideBurstLimit, burstLimit)
+					}
+					// The basic RU demand is already met, so the override fill rate is set to -1
+					// to allow the resource group to consume as many RUs as they originally need
+					// according to its fill rate setting.
+					group.overrideFillRateAndBurstLimit(-1, int64(overrideBurstLimit))
+				}
+			}
+			// After allocation, all remaining service limit is consumed.
 			remainingServiceLimit = 0
 		} else {
-			// If the total real-time RU demand is less or equal to the service limit,
-			// allocate the needed RU to the resource group respectively.
+			// If the total real-time RU demand is less than the remaining service limit, no need to divide the service limit,
+			// just set the override fill rate to -1 to allow the resource group to consume as many RUs as they originally
+			// need according to its fill rate setting.
 			for _, group := range queue {
-				// By setting the override fill rate to -1 to allow the resource group to consume
-				// as many RUs as they originally need according to its fill rate setting. This is
-				// to prevent the true demand from being suppressed due to setting `overrideFillRate`,
-				// thereby wasting idle resources of the Service Limit.
-				group.overrideFillRate(-1)
+				group.overrideFillRateAndBurstLimit(-1, -1)
 			}
-			// Although this layer does not set `overrideFillRate`, it still needs to deduct the actual
-			// RU consumption from `remainingFillRate` to reflect the concept of priority, so that the
-			// available service limit share decreases level by level.
+			// Although this priority level does not require resource limiting, it still needs to deduct the actual
+			// RU consumption from `remainingServiceLimit` to reflect the concept of priority, so that the
+			// available service limit share decreases level by level for lower priority groups.
 			remainingServiceLimit -= totalRUDemand
 		}
 	}
@@ -442,9 +501,6 @@ func (krgm *keyspaceResourceGroupManager) getPriorityQueues() [][]*ResourceGroup
 	priorityQueues := make([][]*ResourceGroup, maxPriority+1)
 	krgm.RLock()
 	for _, group := range krgm.groups {
-		if group.Name == DefaultResourceGroupName {
-			continue
-		}
 		priority := group.Priority
 		priorityQueues[priority] = append(priorityQueues[priority], group)
 	}

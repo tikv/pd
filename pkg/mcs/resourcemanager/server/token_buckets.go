@@ -99,10 +99,8 @@ func (gtb *GroupTokenBucket) getBurstLimitSetting() int64 {
 }
 
 func (gtb *GroupTokenBucket) getBurstLimit() int64 {
-	// When override fill rate is set, it means the service limit is throttled,
-	// so the burst should work in the limited mode to prevent consuming extra tokens.
-	if gtb.overrideFillRate != -1 {
-		return int64(gtb.getFillRateSetting())
+	if gtb.overrideBurstLimit >= 0 {
+		return gtb.overrideBurstLimit
 	}
 	return gtb.Settings.GetBurstLimit()
 }
@@ -110,7 +108,7 @@ func (gtb *GroupTokenBucket) getBurstLimit() int64 {
 func (gtb *GroupTokenBucket) getBurstableMode() burstableMode {
 	// When override fill rate is set, it means the service limit is throttled,
 	// so the burst should work in the limited mode to prevent consuming extra tokens.
-	if gtb.overrideFillRate != -1 {
+	if gtb.overrideBurstLimit >= 0 {
 		return limited
 	}
 	return getBurstableMode(gtb.Settings)
@@ -169,6 +167,11 @@ type GroupTokenBucketState struct {
 	// limit to ensure the priority of the resource group. Only non-negative value
 	// means the fill rate is overridden.
 	overrideFillRate float64
+	// overrideBurstLimit is used to override the burst limit of the token bucket.
+	// It's used to control the burst limit of the token bucket within the service
+	// limit to ensure the priority of the resource group. Only non-negative value
+	// means the burst limit is overridden.
+	overrideBurstLimit int64
 
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
@@ -197,6 +200,7 @@ func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 		Initialized:                gts.Initialized,
 		tokenSlots:                 tokenSlots,
 		overrideFillRate:           gts.overrideFillRate,
+		overrideBurstLimit:         gts.overrideBurstLimit,
 		clientConsumptionTokensSum: gts.clientConsumptionTokensSum,
 		lastCheckExpireSlot:        gts.lastCheckExpireSlot,
 	}
@@ -333,9 +337,10 @@ func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
 	return &GroupTokenBucket{
 		Settings: tokenBucket.GetSettings(),
 		GroupTokenBucketState: GroupTokenBucketState{
-			Tokens:           tokenBucket.GetTokens(),
-			tokenSlots:       make(map[uint64]*tokenSlot),
-			overrideFillRate: -1,
+			Tokens:             tokenBucket.GetTokens(),
+			tokenSlots:         make(map[uint64]*tokenSlot),
+			overrideFillRate:   -1,
+			overrideBurstLimit: -1,
 		},
 	}
 }
