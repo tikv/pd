@@ -1132,8 +1132,10 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	re.Empty(s.getAllGCBarriers(ks1))
 	re.Empty(s.getAllGCBarriers(ks2))
 	re.Len(s.getAllGlobalGCBarriers(), 1)
-	s.manager.SetGCBarrier(ks1, "b2", 210, time.Hour, time.Now())
-	s.manager.SetGCBarrier(ks2, "b3", 220, time.Hour, time.Now())
+	_, err = s.manager.SetGCBarrier(ks1, "b2", 210, time.Hour, time.Now())
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(ks2, "b3", 220, time.Hour, time.Now())
+	re.NoError(err)
 
 	res, err := s.manager.AdvanceTxnSafePoint(ks1, 300, time.Now())
 	re.NoError(err)
@@ -1242,7 +1244,7 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 		re.Equal(iter(ith, 26), res.NewTxnSafePoint)
 		re.Contains(res.BlockerDescription, `BarrierID: "b2"`)
 
-		s.manager.DeleteGlobalGCBarrier(context.Background(), "b2")
+		_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b2")
 		re.NoError(err)
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
 		re.NoError(err)
@@ -1726,7 +1728,8 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 
 	// change the value and check again
 	for i, keyspaceID := range s.keyspacePresets.manageable {
-		s.manager.AdvanceTxnSafePoint(keyspaceID, uint64(i+1), time.Now())
+		_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, uint64(i+1), time.Now())
+		re.NoError(err)
 	}
 	err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
@@ -1741,7 +1744,8 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	go func(initVal uint64) {
 		<-notify
 		for i, keyspaceID := range s.keyspacePresets.manageable {
-			s.manager.AdvanceTxnSafePoint(keyspaceID, initVal+1+uint64(i), time.Now())
+			_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, initVal+1+uint64(i), time.Now())
+			re.NoError(err)
 		}
 	}(txnSafePoint)
 	for {
