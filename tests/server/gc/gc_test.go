@@ -216,7 +216,6 @@ func TestGCOperations(t *testing.T) {
 			re.Greater(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds(), int64(3500))
 			re.Less(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds(), int64(3601))
 		}
-
 	}
 
 	testInKeyspace(constant.NullKeyspaceID)

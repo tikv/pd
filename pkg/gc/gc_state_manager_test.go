@@ -1469,13 +1469,13 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	// keyspace has larger txn safe point than the given service safe point value
 	_, err = s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 25, time.Now())
 	re.NoError(err)
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 16, math.MaxInt64, now)
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 16, math.MaxInt64, now)
 	re.NoError(err)
 	re.False(updated) // the call failed, but this is not an error
 	_, err = s.manager.AdvanceTxnSafePoint(2, 22, time.Now())
 	re.NoError(err)
 	re.False(updated)
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 20, math.MaxInt64, now)
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 20, math.MaxInt64, now)
 	re.NoError(err)
 	re.False(updated)
 
