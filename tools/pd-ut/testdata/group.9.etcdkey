@@ -154,3 +154,4 @@ resource_group/states/test save
 resource_group/states/test_ru_consumption save
 resource_group/states/tombstone_test save
 resource_group/states/watch_test save
+resource_group/states/watch_test save/pd/cluster_id get
