@@ -206,21 +206,9 @@ func (s *gcStateManagerTestSuite) putLegacyGCWorkerServiceSafePoint(keyspaceID u
 		SafePoint:  initialValue,
 		KeyspaceID: keyspaceID,
 	}
-	sspJson, err := json.Marshal(ssp)
+	sspStr, err := json.Marshal(ssp)
 	re.NoError(err)
-	err = s.storage.Save(key, string(sspJson))
-	re.NoError(err)
-}
-func (s *gcStateManagerTestSuite) deleteLegacyGCWorkerServiceSafePoint(keyspaceID uint32) {
-	re := s.Require()
-	redirectedKeyspaceID, err := s.manager.redirectKeyspace(keyspaceID, false)
-	re.NoError(err)
-	re.Equal(keyspaceID, redirectedKeyspaceID, "legacy service safe point is not applicable for non-null keyspaces configured in unified GC mode")
-	key := keypath.ServiceGCSafePointPath(keypath.GCWorkerServiceSafePointID)
-	if keyspaceID != constant.NullKeyspaceID {
-		key = keypath.ServiceSafePointV2Path(keyspaceID, keypath.GCWorkerServiceSafePointID)
-	}
-	err = s.storage.Remove(key)
+	err = s.storage.Save(key, string(sspStr))
 	re.NoError(err)
 }
 
