@@ -30,6 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
+// MaintenanceLockName is the name used for the maintenance lock key.
+// This global lock ensures only one maintenance task can be active at a time.
+const MaintenanceLockName = "maintenance_lock"
+
 // MaintenanceTask represents a maintenance task stored in etcd.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MaintenanceTask struct {
@@ -82,7 +86,7 @@ func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task
 	rawTxn := se.CreateRawTxn()
 
 	// Maintenance lock key to enforce single task type constraint
-	lockKey := keypath.MaintenanceTaskPath("__maintenance_lock__")
+	lockKey := keypath.MaintenanceTaskPath(MaintenanceLockName)
 	// Task key for storing the actual task data
 	taskKey := keypath.MaintenanceTaskPath(task.Type)
 
@@ -172,7 +176,7 @@ func (se *StorageEndpoint) TryDeleteMaintenanceTaskAtomic(_ context.Context, tas
 	// Use a single atomic transaction
 	rawTxn := se.CreateRawTxn()
 
-	lockKey := keypath.MaintenanceTaskPath("__maintenance_lock__")
+	lockKey := keypath.MaintenanceTaskPath(MaintenanceLockName)
 	taskKey := keypath.MaintenanceTaskPath(taskType)
 
 	// Condition: check if the lock value matches "task_type/task_id"

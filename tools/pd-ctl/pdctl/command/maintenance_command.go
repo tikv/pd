@@ -22,7 +22,6 @@
 package command
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -63,20 +62,11 @@ func newMaintenanceSetCommand() *cobra.Command {
 			}
 
 			if err != nil {
-				// Try to extract existing task info from error response
-				if strings.Contains(err.Error(), "[409]") {
-					cmd.Printf("Failed to start maintenance task: Another maintenance task is already running.\n")
-					// Try to parse the existing task from the error response
-					if strings.Contains(err.Error(), "existing_task") {
-						cmd.Printf("Existing task details: %s\n", extractExistingTaskInfo(err.Error()))
-					}
-				} else {
-					cmd.Printf("Failed to start maintenance task: %s\n", err)
-				}
+				cmd.Printf("Failed to start maintenance task: %s\n", err)
 				return
 			}
 
-			// Success case (200 OK)
+			// Print the raw response
 			cmd.Println(resp)
 		},
 	}
@@ -100,26 +90,11 @@ func newMaintenanceShowCommand() *cobra.Command {
 
 			resp, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 			if err != nil {
-				if strings.Contains(err.Error(), "[404]") {
-					if len(args) == 0 {
-						cmd.Println("No maintenance tasks are currently running.")
-					} else {
-						cmd.Printf("No maintenance task found for type: %s\n", args[0])
-					}
-				} else {
-					cmd.Printf("Failed to get maintenance task: %s\n", err)
-				}
+				cmd.Printf("Failed to get maintenance task: %s\n", err)
 				return
 			}
 
-			// Try to parse as JSON and pretty print
-			var out interface{}
-			if err := json.Unmarshal([]byte(resp), &out); err == nil {
-				jsonPrint(cmd, out)
-				return
-			}
-
-			// Fallback: print raw response
+			// Print the raw response
 			cmd.Println(resp)
 		},
 	}
@@ -138,49 +113,13 @@ func newMaintenanceDeleteCommand() *cobra.Command {
 
 			resp, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
 			if err != nil {
-				if strings.Contains(err.Error(), "[404]") {
-					cmd.Printf("Failed to delete maintenance task: No maintenance task is running for type %s\n", taskType)
-				} else if strings.Contains(err.Error(), "[409]") {
-					cmd.Printf("Failed to delete maintenance task: Task ID does not match the current task.\n")
-					// Try to parse the existing task from the error response
-					if strings.Contains(err.Error(), "existing_task") {
-						cmd.Printf("Current task details: %s\n", extractExistingTaskInfo(err.Error()))
-					}
-				} else {
-					cmd.Printf("Failed to delete maintenance task: %s\n", err)
-				}
+				cmd.Printf("Failed to delete maintenance task: %s\n", err)
 				return
 			}
+
+			// Print the raw response
 			cmd.Println(resp)
 		},
 	}
 	return cmd
-}
-
-// extractExistingTaskInfo tries to extract existing task information from error response
-func extractExistingTaskInfo(errorMsg string) string {
-	// Look for JSON content in the error message
-	start := strings.Index(errorMsg, "{")
-	if start == -1 {
-		return "Unable to parse existing task details"
-	}
-
-	end := strings.LastIndex(errorMsg, "}")
-	if end == -1 || end <= start {
-		return "Unable to parse existing task details"
-	}
-
-	jsonStr := errorMsg[start : end+1]
-	var response map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &response); err != nil {
-		return "Unable to parse existing task details"
-	}
-
-	if existingTask, ok := response["existing_task"]; ok {
-		if taskBytes, err := json.MarshalIndent(existingTask, "", "  "); err == nil {
-			return string(taskBytes)
-		}
-	}
-
-	return "No existing task details available"
 }

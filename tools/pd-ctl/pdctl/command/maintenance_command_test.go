@@ -137,15 +137,8 @@ func TestMaintenanceShowCommand_Success(t *testing.T) {
 	cmd.Execute()
 	result := out.String()
 
-	// Check pretty print formatting (should have proper indentation)
-	re.Contains(result, "  \"type\"")
-	re.Contains(result, "  \"id\"")
-	re.Contains(result, "  \"start_timestamp\"")
-	re.Contains(result, "  \"description\"")
-	re.Contains(result, "tikv")
-	re.Contains(result, "task1")
-	re.Contains(result, "1234567890")
-	re.Contains(result, "rolling restart for TiKV store-1")
+	// Check that the raw JSON response is printed
+	re.Contains(result, `{"type":"tikv","id":"task1","start_timestamp":1234567890,"description":"rolling restart for TiKV store-1"}`)
 }
 
 func TestMaintenanceShowCommand_Error(t *testing.T) {
@@ -185,10 +178,7 @@ func TestMaintenanceShowCommand_AllTasks(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "tikv")
-	re.Contains(result, "task1")
-	re.Contains(result, "rolling restart for TiKV store-1")
-	re.Contains(result, "1234567890")
+	re.Contains(result, `{"type":"tikv","id":"task1","start_timestamp":1234567890,"description":"rolling restart for TiKV store-1"}`)
 }
 
 func TestMaintenanceShowCommand_SpecificTaskType(t *testing.T) {
@@ -210,17 +200,15 @@ func TestMaintenanceShowCommand_SpecificTaskType(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "tikv")
-	re.Contains(result, "task1")
-	re.Contains(result, "specific task")
+	re.Contains(result, `{"type":"tikv","id":"task1","start_timestamp":1234567890,"description":"specific task"}`)
 }
 
 func TestMaintenanceShowCommand_NotFound_AllTasks(t *testing.T) {
 	re := require.New(t)
-	// Mock 404 response for all tasks
+	// Mock 404 response
 	resp := &http.Response{
 		StatusCode: http.StatusNotFound,
-		Body:       io.NopCloser(strings.NewReader("No maintenance task is running")),
+		Body:       io.NopCloser(strings.NewReader("No maintenance tasks are currently running.")),
 	}
 	oldClient := dialClient
 	dialClient = &http.Client{Transport: &mockRoundTripper{resp: resp}}
@@ -234,15 +222,15 @@ func TestMaintenanceShowCommand_NotFound_AllTasks(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "No maintenance tasks are currently running")
+	re.Contains(result, "No maintenance tasks are currently running.")
 }
 
 func TestMaintenanceShowCommand_NotFound_SpecificType(t *testing.T) {
 	re := require.New(t)
-	// Mock 404 response for specific task type
+	// Mock 404 response
 	resp := &http.Response{
 		StatusCode: http.StatusNotFound,
-		Body:       io.NopCloser(strings.NewReader("No maintenance task is running for this type")),
+		Body:       io.NopCloser(strings.NewReader("No maintenance task found for type: tikv")),
 	}
 	oldClient := dialClient
 	dialClient = &http.Client{Transport: &mockRoundTripper{resp: resp}}
@@ -250,13 +238,13 @@ func TestMaintenanceShowCommand_NotFound_SpecificType(t *testing.T) {
 
 	cmd := newMaintenanceShowCommand()
 	cmd.Flags().String("pd", "http://mock-pd:2379", "")
-	cmd.SetArgs([]string{"nonexistent"})
+	cmd.SetArgs([]string{"tikv"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "No maintenance task found for type: nonexistent")
+	re.Contains(result, "No maintenance task found for type: tikv")
 }
 
 func TestMaintenanceShowCommand_InvalidJSON(t *testing.T) {
@@ -264,7 +252,7 @@ func TestMaintenanceShowCommand_InvalidJSON(t *testing.T) {
 	// Mock response with invalid JSON
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader("invalid json")),
+		Body:       io.NopCloser(strings.NewReader("invalid json response")),
 	}
 	oldClient := dialClient
 	dialClient = &http.Client{Transport: &mockRoundTripper{resp: resp}}
@@ -278,14 +266,13 @@ func TestMaintenanceShowCommand_InvalidJSON(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "invalid json")
+	re.Contains(result, "invalid json response")
 }
 
 func TestMaintenanceShowCommand_NetworkError(t *testing.T) {
 	re := require.New(t)
-	// Mock HTTP client that fails to make the request due to network issues
 	oldClient := dialClient
-	dialClient = &http.Client{Transport: &mockRoundTripper{err: errors.New("connection refused")}}
+	dialClient = &http.Client{Transport: &mockRoundTripper{err: errors.New("network error")}}
 	defer func() { dialClient = oldClient }()
 
 	cmd := newMaintenanceShowCommand()
@@ -297,10 +284,10 @@ func TestMaintenanceShowCommand_NetworkError(t *testing.T) {
 	cmd.Execute()
 	result := out.String()
 	re.Contains(result, "Failed to get maintenance task:")
-	re.Contains(result, "connection refused")
+	re.Contains(result, "network error")
 }
 
-// errorReader implements io.Reader that always returns an error
+// errorReader implements io.Reader and always returns an error
 type errorReader struct{}
 
 func (e *errorReader) Read(p []byte) (n int, err error) {
@@ -309,7 +296,7 @@ func (e *errorReader) Read(p []byte) (n int, err error) {
 
 func TestMaintenanceShowCommand_ReadBodyError(t *testing.T) {
 	re := require.New(t)
-	// Mock response with a body that fails to read
+	// Mock response with error reader
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(&errorReader{}),
@@ -332,11 +319,10 @@ func TestMaintenanceShowCommand_ReadBodyError(t *testing.T) {
 
 func TestMaintenanceSetCommand_Conflict(t *testing.T) {
 	re := require.New(t)
-	// Mock 409 conflict response with existing task
-	conflictResp := `{"error":"Another maintenance task is already running","existing_task":{"type":"tikv","id":"existing_task","start_timestamp":1234567890,"description":"existing maintenance"}}`
+	// Mock 409 conflict response
 	resp := &http.Response{
 		StatusCode: http.StatusConflict,
-		Body:       io.NopCloser(strings.NewReader(conflictResp)),
+		Body:       io.NopCloser(strings.NewReader(`{"error":"Another maintenance task is already running","existing_task":{"type":"tikv","id":"task1","start_timestamp":1234567890,"description":"existing task"}}`)),
 	}
 	oldClient := dialClient
 	dialClient = &http.Client{Transport: &mockRoundTripper{resp: resp}}
@@ -344,16 +330,14 @@ func TestMaintenanceSetCommand_Conflict(t *testing.T) {
 
 	cmd := newMaintenanceSetCommand()
 	cmd.Flags().String("pd", "http://mock-pd:2379", "")
-	cmd.SetArgs([]string{"tikv", "new_task"})
+	cmd.SetArgs([]string{"tikv", "task2"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "Failed to start maintenance task: Another maintenance task is already running")
-	re.Contains(result, "Existing task details:")
-	re.Contains(result, "existing_task")
-	re.Contains(result, "existing maintenance")
+	re.Contains(result, "Failed to start maintenance task:")
+	re.Contains(result, "[409]")
 }
 
 func TestMaintenanceDeleteCommand_NotFound(t *testing.T) {
@@ -361,7 +345,7 @@ func TestMaintenanceDeleteCommand_NotFound(t *testing.T) {
 	// Mock 404 response
 	resp := &http.Response{
 		StatusCode: http.StatusNotFound,
-		Body:       io.NopCloser(strings.NewReader("No maintenance task is running for this type")),
+		Body:       io.NopCloser(strings.NewReader("No maintenance task is running for type tikv")),
 	}
 	oldClient := dialClient
 	dialClient = &http.Client{Transport: &mockRoundTripper{resp: resp}}
@@ -369,22 +353,22 @@ func TestMaintenanceDeleteCommand_NotFound(t *testing.T) {
 
 	cmd := newMaintenanceDeleteCommand()
 	cmd.Flags().String("pd", "http://mock-pd:2379", "")
-	cmd.SetArgs([]string{"nonexistent", "task1"})
+	cmd.SetArgs([]string{"tikv", "task1"})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "Failed to delete maintenance task: No maintenance task is running for type nonexistent")
+	re.Contains(result, "Failed to delete maintenance task:")
+	re.Contains(result, "[404]")
 }
 
 func TestMaintenanceDeleteCommand_Conflict(t *testing.T) {
 	re := require.New(t)
-	// Mock 409 conflict response with existing task details
-	conflictResp := `{"error":"Task ID does not match the current task","existing_task":{"type":"tikv","id":"current_task","start_timestamp":1234567890,"description":"current maintenance task"}}`
+	// Mock 409 conflict response
 	resp := &http.Response{
 		StatusCode: http.StatusConflict,
-		Body:       io.NopCloser(strings.NewReader(conflictResp)),
+		Body:       io.NopCloser(strings.NewReader(`{"error":"Task ID does not match the current task","existing_task":{"type":"tikv","id":"task1","start_timestamp":1234567890,"description":"current task"}}`)),
 	}
 	oldClient := dialClient
 	dialClient = &http.Client{Transport: &mockRoundTripper{resp: resp}}
@@ -398,8 +382,6 @@ func TestMaintenanceDeleteCommand_Conflict(t *testing.T) {
 	cmd.SetErr(&out)
 	cmd.Execute()
 	result := out.String()
-	re.Contains(result, "Failed to delete maintenance task: Task ID does not match the current task")
-	re.Contains(result, "Current task details:")
-	re.Contains(result, "current_task")
-	re.Contains(result, "current maintenance task")
+	re.Contains(result, "Failed to delete maintenance task:")
+	re.Contains(result, "[409]")
 }
