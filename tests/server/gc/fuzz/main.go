@@ -58,7 +58,9 @@ func advanceGCSafePoint(ctx context.Context, cli gc.InternalController, target u
 		result, err := cli.AdvanceGCSafePoint(ctx, target)
 		if err != nil {
 			errStr := err.Error()
-			if strings.Contains(err.Error(), "not leader") || strings.Contains(errStr, "DeadlineExceeded") {
+			if strings.Contains(errStr, "not leader") ||
+				strings.Contains(errStr, "DeadlineExceeded") ||
+				strings.Contains(errStr, "ErrEtcdTxnConflict") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
@@ -117,6 +119,45 @@ func (f fuzzSetGCBarrier) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 			return
 		}
 		fmt.Printf("SetGCBarrier error = %+v\n", err)
+	}
+}
+
+func deleteGCBarrier(ctx context.Context, cli gc.GCStatesClient, barrierID string) (*gc.GCBarrierInfo, error) {
+	for {
+		barrierInfo, err := cli.DeleteGCBarrier(ctx, barrierID)
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "not leader") ||
+				strings.Contains(errStr, "DeadlineExceeded") ||
+				strings.Contains(errStr, "ErrEtcdTxnConflict") {
+				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
+				continue
+			}
+		}
+		return barrierInfo, err
+	}
+}
+
+type fuzzDelGCBarrier struct {
+	cli pd.Client
+	barrierID string
+}
+
+func (f fuzzDelGCBarrier) fuzz(ctx context.Context, wg *sync.WaitGroup) {
+	if rand.Intn(100) >= 20 {
+		return
+	}
+
+	// only take 20% change to do this fuzz operation
+	keyspaceID := uint32(1)
+	gcCli := f.cli.GetGCStatesClient(keyspaceID)
+	_, err := deleteGCBarrier(ctx, gcCli, f.barrierID)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "context canceled") && ctx.Err() != nil {
+			return
+		}
+		fmt.Printf("DeleteGCBarrier error = %+v\n", err)
 	}
 }
 
@@ -288,6 +329,8 @@ func fuzzGoroutine(ctx context.Context, wg *sync.WaitGroup, pdcli pd.Client) {
 		fuzzSetGCBarrier{pdcli, "barrier2"},
 		fuzzAdvanceTxnSafePoint{pdcli.GetGCInternalController(keyspaceID)},
 		fuzzAdvanceGCSafePoint{pdcli.GetGCInternalController(keyspaceID)},
+		fuzzDelGCBarrier{pdcli, "barrier1"},
+		fuzzDelGCBarrier{pdcli, "barrier2"},
 	}
 	for {
 		// check exit signal
@@ -353,6 +396,24 @@ func putKVToETCD(ctx context.Context, etcdCli *clientv3.Client, key, val string)
 	return nil
 }
 
+func deleteKVFromETCD(ctx context.Context, etcdCli *clientv3.Client, key string) error {
+	var err error
+	for {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+
+		childCtx, cancel := context.WithTimeout(ctx, 2 * time.Second)
+		_, err = etcdCli.Delete(childCtx, key)
+		cancel()
+		if err == nil {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	return nil
+}
+
 var globalMinStartTS map[string]uint64
 var checkMinStartTSMutex sync.RWMutex
 
@@ -384,11 +445,21 @@ func fuzzMinStartTS(ctx context.Context, wg *sync.WaitGroup, id string, cli *cli
 		}
 
 		checkMinStartTSMutex.Lock()
-		err := putKVToETCD(ctx, cli, minStartTSPath, strconv.FormatUint(minStartTS, 10))
-		if err != nil {
-			fmt.Println("put key to etcd error:", err)
+		if rand.Intn(100) < 10 {
+			err := deleteKVFromETCD(ctx, cli, minStartTSPath)
+			if err != nil {
+				fmt.Println("del key from etcd error:", err)
+			} else {
+				delete(globalMinStartTS, id)
+			}
+		} else {
+			err := putKVToETCD(ctx, cli, minStartTSPath, strconv.FormatUint(minStartTS, 10))
+			if err != nil {
+				fmt.Println("put key to etcd error:", err)
+			} else {
+				globalMinStartTS[id] = minStartTS
+			}
 		}
-		globalMinStartTS[id] = minStartTS
 		checkMinStartTSMutex.Unlock()
 
 		// fmt.Println("min start ts for", id, "===", minStartTS)
