@@ -127,7 +127,7 @@ type fuzzAdvanceTxnSafePoint struct {
 func (f fuzzAdvanceTxnSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
 	target := oracle.GoTimeToTS(time.Now()) -
-		uint64(10 * time.Minute - 10 * time.Second) +
+		uint64(10 * time.Minute + 10 * time.Second) +
 		uint64(rand.Int63n(20000)) * uint64(time.Millisecond)
 	_, err := advanceTxnSafePoint(ctx, f.cli, target)
 	if err != nil {
@@ -149,7 +149,7 @@ type fuzzAdvanceGCSafePoint struct {
 func (f fuzzAdvanceGCSafePoint) fuzz(ctx context.Context, wg *sync.WaitGroup) {
 	// advance txn safe point use a random value between now - 10min + rand(-10s, 10s)
 	target := oracle.GoTimeToTS(time.Now() ) -
-		uint64(10 * time.Minute - 10 * time.Second) +
+		uint64(10 * time.Minute + 10 * time.Second) +
 		uint64(rand.Int63n(20000)) * uint64(time.Millisecond)
 	_, err := advanceGCSafePoint(ctx, f.cli, target)
 	if err != nil {
