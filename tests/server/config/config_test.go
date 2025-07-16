@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -36,6 +37,10 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestRateLimitConfigReload(t *testing.T) {
 	re := require.New(t)
@@ -58,7 +63,8 @@ func TestRateLimitConfigReload(t *testing.T) {
 	}
 	data, err := json.Marshal(input)
 	re.NoError(err)
-	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	re.NoError(err)
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
@@ -66,7 +72,8 @@ func TestRateLimitConfigReload(t *testing.T) {
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
 
 	oldLeaderName := leader.GetServer().Name()
-	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
+	err = leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
+	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	leader = cluster.GetLeaderServer()
 	re.NotNil(leader)

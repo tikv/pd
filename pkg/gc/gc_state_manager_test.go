@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -39,8 +40,13 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type gcStateManagerTestSuite struct {
 	suite.Suite
@@ -49,6 +55,7 @@ type gcStateManagerTestSuite struct {
 	provider endpoint.GCStateProvider
 	manager  *GCStateManager
 	clean    func()
+	cancel   context.CancelFunc
 
 	keyspacePresets struct {
 		// A set of shortcuts for different kinds of keyspaces. Initialized in SetupTest.
@@ -74,7 +81,7 @@ func TestGCStateManager(t *testing.T) {
 	suite.Run(t, new(gcStateManagerTestSuite))
 }
 
-func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func()) {
+func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
 
@@ -92,11 +99,12 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 		Member: "member1",
 		Step:   keyspace.AllocStep,
 	})
-	kgm := keyspace.NewKeyspaceGroupManager(context.Background(), s, client)
-	keyspaceManager := keyspace.NewKeyspaceManager(context.Background(), s, mockcluster.NewCluster(context.Background(), config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm)
+	ctx, cancel := context.WithCancel(context.Background())
+	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
+	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
 
-	err = kgm.Bootstrap(context.Background())
+	err = kgm.Bootstrap(ctx)
 	re.NoError(err)
 	err = keyspaceManager.Bootstrap()
 	re.NoError(err)
@@ -137,11 +145,11 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	re.NoError(err)
 	re.Equal(uint32(4), ks4.Id)
 
-	return s, s.GetGCStateProvider(), gcStateManager, clean
+	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel
 }
 
 func (s *gcStateManagerTestSuite) SetupTest() {
-	s.storage, s.provider, s.manager, s.clean = newGCStateManagerForTest(s.T())
+	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T())
 
 	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, 0, 1, 2, 3}
 	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
@@ -152,6 +160,7 @@ func (s *gcStateManagerTestSuite) SetupTest() {
 }
 
 func (s *gcStateManagerTestSuite) TearDownTest() {
+	s.cancel()
 	s.clean()
 }
 
@@ -474,7 +483,8 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	go func() {
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
-		min, updated, _ := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+		re.NoError(err)
 		re.True(updated)
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
 		re.Equal(gcWorkerSafePoint, min.SafePoint)

@@ -120,7 +120,7 @@ func TestTIFLASHEngine(t *testing.T) {
 
 	startKey := fmt.Sprintf("%20d0", 1)
 	endKey := fmt.Sprintf("%20d0", 10)
-	tc.SetRule(&placement.Rule{
+	err := tc.SetRule(&placement.Rule{
 		GroupID:  "tiflash",
 		ID:       "1",
 		Role:     placement.Learner,
@@ -131,6 +131,7 @@ func TestTIFLASHEngine(t *testing.T) {
 			{Key: "engine", Op: "in", Values: []string{"tiflash"}},
 		},
 	})
+	re.NoError(err)
 
 	// generate a balance range scheduler with tiflash engine
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),

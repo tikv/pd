@@ -279,7 +279,7 @@ linters:
     rules:
       - linters:
           - errcheck
-        path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
+        path: (pkg/mock/.*\.go)
       - linters:
           - errcheck
         path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)

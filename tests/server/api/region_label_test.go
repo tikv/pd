@@ -71,7 +71,8 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	}
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
-		data, _ := json.Marshal(rule)
+		data, err := json.Marshal(rule)
+		re.NoError(err)
 		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/rule", data, testutil.StatusOK(re))
 		re.NoError(err)
 	}
@@ -100,7 +101,8 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 		},
 		DeleteRules: []string{"rule1"},
 	}
-	data, _ := json.Marshal(patch)
+	data, err := json.Marshal(patch)
+	re.NoError(err)
 	err = testutil.CheckPatchJSON(tests.TestDialClient, urlPrefix+"/rules", data, testutil.StatusOK(re))
 	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/rules", &resp)

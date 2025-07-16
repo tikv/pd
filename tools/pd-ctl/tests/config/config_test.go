@@ -377,7 +377,8 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
 
-	f, _ := os.CreateTemp("", "pd_tests")
+	f, err := os.CreateTemp("", "pd_tests")
+	re.NoError(err)
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -487,7 +488,8 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 				checkRules(rules, isFromPDService)
 			} else if options[0] == "load" {
 				var rules []*placement.Rule
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				re.NoError(json.Unmarshal(b, &rules))
 				checkRules(rules, isFromPDService)
 			} else if options[0] == "rule-group" {
@@ -500,7 +502,8 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 				checkRules(bundle.Rules, isFromPDService)
 			} else if options[0] == "rule-bundle" && options[1] == "load" {
 				var bundles []placement.GroupBundle
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				re.NoError(json.Unmarshal(b, &bundles), string(output))
 				checkRules(bundles[0].Rules, isFromPDService)
 			} else {
@@ -594,7 +597,8 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	// test show
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
-	f, _ := os.CreateTemp("", "pd_tests")
+	f, err := os.CreateTemp("", "pd_tests")
+	re.NoError(err)
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -614,7 +618,8 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	b, _ := json.Marshal(rules)
+	b, err := json.Marshal(rules)
+	re.NoError(err)
 	os.WriteFile(fname, b, 0600)
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
@@ -629,7 +634,8 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	// test delete
 	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
 	rules[0].Count = 0
-	b, _ = json.Marshal(rules)
+	b, err = json.Marshal(rules)
+	re.NoError(err)
 	os.WriteFile(fname, b, 0600)
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
@@ -847,7 +853,8 @@ func checkLoadRuleBundle(re *require.Assertions, pdAddr string, fname string, ex
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 		re.NoError(err)
-		b, _ := os.ReadFile(fname)
+		b, err := os.ReadFile(fname)
+		re.NoError(err)
 		re.NoError(json.Unmarshal(b, &bundles))
 		return len(bundles) == len(expectValues)
 	})
@@ -860,7 +867,8 @@ func checkLoadRule(re *require.Assertions, pdAddr string, fname string, expectVa
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
 		re.NoError(err)
-		b, _ := os.ReadFile(fname)
+		b, err := os.ReadFile(fname)
+		re.NoError(err)
 		re.NoError(json.Unmarshal(b, &rules))
 		return len(rules) == len(expectValues)
 	})
@@ -1230,18 +1238,18 @@ func (suite *configTestSuite) checkMaxReplicaChanged(cluster *pdTests.TestCluste
 	re.Contains(string(output), "Success!")
 	re.NotContains(string(output), "which is less than the current replicas")
 	// test meet error when get config failed
-	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(200)`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(200)`))
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	re.Contains(string(output), "Failed to unmarshal config when checking config")
-	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
-	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(500)`)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(500)`))
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	re.Contains(string(output), "Failed to get config when checking config")
-	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed"))
 }
 
 func (suite *configTestSuite) TestPDServerConfig() {

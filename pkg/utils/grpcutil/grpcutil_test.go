@@ -24,12 +24,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 var (
 	certPath   = filepath.Join("..", "..", "..", "tests", "integrations", "client") + string(filepath.Separator)

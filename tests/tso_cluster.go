@@ -24,7 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 
-	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/keyspace"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -184,7 +184,8 @@ func (tc *TestTSOCluster) WaitForPrimaryServing(re *require.Assertions, keyspace
 
 // WaitForDefaultPrimaryServing waits for one of servers being elected to be the primary/leader of the default keyspace.
 func (tc *TestTSOCluster) WaitForDefaultPrimaryServing(re *require.Assertions) *tso.Server {
-	return tc.WaitForPrimaryServing(re, constant.DefaultKeyspaceID)
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	return tc.WaitForPrimaryServing(re, keyspaceID)
 }
 
 // GetServer returns the TSO server by the given address.

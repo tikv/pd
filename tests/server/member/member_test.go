@@ -115,12 +115,13 @@ func checkMemberList(re *require.Assertions, clientURL string, configs []*config
 	if res.StatusCode != http.StatusOK {
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
 	}
-	data := make(map[string][]*pdpb.Member)
-	json.Unmarshal(buf, &data)
-	if len(data["members"]) != len(configs) {
-		return errors.Errorf("member length not match, %v vs %v", len(data["members"]), len(configs))
+	data := &pdpb.GetMembersResponse{}
+	err = json.Unmarshal(buf, &data)
+	re.NoError(err)
+	if len(data.GetMembers()) != len(configs) {
+		return errors.Errorf("member length not match, %v vs %v", len(data.GetMembers()), len(configs))
 	}
-	for _, member := range data["members"] {
+	for _, member := range data.GetMembers() {
 		for _, cfg := range configs {
 			if member.GetName() == cfg.Name {
 				re.Equal([]string{cfg.ClientUrls}, member.ClientUrls)
@@ -287,9 +288,10 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 
 func TestMoveLeader(t *testing.T) {
 	re := require.New(t)
+	serverCount := 3
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 5)
+	cluster, err := tests.NewTestCluster(ctx, serverCount)
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -298,15 +300,24 @@ func TestMoveLeader(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(serverCount)
 	for _, s := range cluster.GetServers() {
 		go func(s *tests.TestServer) {
 			defer wg.Done()
 			if s.IsLeader() {
-				s.ResignLeader()
+				testutil.Eventually(re, func() bool {
+					err = s.ResignLeader()
+					return err == nil
+				})
 			} else {
-				old, _ := s.GetEtcdLeaderID()
-				s.MoveEtcdLeader(old, s.GetServerID())
+				testutil.Eventually(re, func() bool {
+					old, err := s.GetEtcdLeaderID()
+					if err != nil {
+						return false
+					}
+					err = s.MoveEtcdLeader(old, s.GetServerID())
+					return err == nil
+				})
 			}
 		}(s)
 	}

@@ -21,13 +21,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 const (
 	leaderPath = "/pd/0/leader"
@@ -87,9 +93,9 @@ func TestIDAllocationEndValue(t *testing.T) {
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
 	checkIDAllocationEndValue(t, client, uint64(constant.MaxValidKeyspaceID))
-	failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`))
 	defer func() {
-		failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
 	}()
 	checkIDAllocationEndValue(t, client, constant.ReservedKeyspaceIDStart-1)
 }

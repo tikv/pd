@@ -39,6 +39,7 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -198,7 +199,8 @@ func (s *Server) Close() {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.IsKeyspaceServing(constant.DefaultKeyspaceID)
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	return s.IsKeyspaceServing(keyspaceID)
 }
 
 // IsKeyspaceServingByGroup returns whether the server is the primary of the given keyspace.
@@ -239,8 +241,9 @@ func (s *Server) checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID uint32
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
 	member, err := s.keyspaceGroupManager.GetElectionMember(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return nil
@@ -434,9 +437,9 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	log.Info("TSO service config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
-	metricutil.Push(&cfg.Metric)
-
 	ctx, cancel := context.WithCancel(context.Background())
+	metricutil.Push(ctx, &cfg.Metric)
+
 	svr := CreateServer(ctx, cfg)
 
 	sc := make(chan os.Signal, 1)

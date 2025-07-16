@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -36,7 +37,12 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{
@@ -312,12 +318,15 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	defer cancel()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport", fmt.Sprintf("return(\"%s\")", defaultResourceGroupName)))
-	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport")
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport", fmt.Sprintf("return(\"%s\")", "test-group")))
-	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport")
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport"))
+	}()
 
 	mockProvider := newMockResourceGroupProvider()
-	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
 	controller.Start(ctx)
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
@@ -368,7 +377,11 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 		for _, req := range request.Requests {
 			if req.ResourceGroupName == defaultResourceGroupName {
 				// no response the default group request, that's mean `len(c.run.currentRequests) != 0` always.
-				time.Sleep(100 * time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(100 * time.Second):
+				}
 				responses = append(responses, &rmpb.TokenBucketResponse{
 					ResourceGroupName: defaultResourceGroupName,
 					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
@@ -418,7 +431,8 @@ func TestTryGetController(t *testing.T) {
 	defer cancel()
 
 	mockProvider := newMockResourceGroupProvider()
-	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
 	controller.Start(ctx)
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
@@ -482,8 +496,10 @@ func TestGetResourceGroup(t *testing.T) {
 	defer cancel()
 
 	// Enable the failpoint to simulate an error when getting the resource group.
-	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
-	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
+	}()
 
 	mockProvider := newMockResourceGroupProvider()
 
@@ -504,7 +520,8 @@ func TestGetResourceGroup(t *testing.T) {
 
 	opts := []ResourceControlCreateOption{WithDegradedRUSettings(expectRUSettings)}
 
-	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, opts...)
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, opts...)
+	re.NoError(err)
 	controller.Start(ctx)
 
 	testResourceGroup := &rmpb.ResourceGroup{
@@ -531,16 +548,19 @@ func TestGetResourceGroup(t *testing.T) {
 	re.Equal(expectResourceGroup, gc.getMeta())
 
 	// case3: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
-	failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
 
 	// case4: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
-	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
-	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
+	}()
 
-	controller02, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	controller02, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
 	controller02.Start(ctx)
 
 	gc02, err := controller02.tryGetResourceGroupController(ctx, "test-group", false)

@@ -116,7 +116,8 @@ func TestRegion(t *testing.T) {
 	defer cluster.Destroy()
 
 	getRegionsByType := func(storeID uint64, regionType core.SubTreeRegionType) []*core.RegionInfo {
-		regions, _ := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		regions, err := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		re.NoError(err)
 		return regions
 	}
 
@@ -446,9 +447,9 @@ func (suite *patrolTestSuite) checkPatrolWithHollowRegion(cluster *pdTests.TestC
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 	pdAddr := cluster.GetLeaderServer().GetAddr()
-	failpoint.Enable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion", "return(true)")
+	re.NoError(failpoint.Enable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion", "return(true)"))
 	defer func() {
-		failpoint.Disable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion")
+		re.NoError(failpoint.Disable("github.com/tikv/pd/tools/pd-ctl/pdctl/command/fastCheckRegion"))
 	}()
 
 	// Region 101: [ "", "key_A" )  <- This is the special region.

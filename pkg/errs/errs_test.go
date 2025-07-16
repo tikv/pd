@@ -21,11 +21,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 // testingWriter is a WriteSyncer that writes to the the messages.
 type testingWriter struct {
@@ -60,28 +65,29 @@ func (logger *verifyLogger) Message() string {
 	return logger.w.messages[len(logger.w.messages)-1]
 }
 
-func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
+func newZapTestLogger(cfg *log.Config, opts ...zap.Option) (verifyLogger, error) {
 	// TestingWriter is used to write to memory.
 	// Used in the verify logger.
 	writer := newTestingWriter()
-	lg, _, _ := log.InitLoggerWithWriteSyncer(cfg, writer, writer, opts...)
+	lg, _, err := log.InitLoggerWithWriteSyncer(cfg, writer, writer, opts...)
 
 	return verifyLogger{
 		Logger: lg,
 		w:      writer,
-	}
+	}, err
 }
 
 func TestError(t *testing.T) {
 	re := require.New(t)
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
-	lg := newZapTestLogger(conf)
+	lg, err := newZapTestLogger(conf)
+	re.NoError(err)
 	log.ReplaceGlobals(lg.Logger, nil)
 
 	rfc := `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found`
 	log.Error("test", zap.Error(ErrEtcdLeaderNotFound.FastGenByArgs()))
 	re.Contains(lg.Message(), rfc)
-	err := errors.New("test error")
+	err = errors.New("test error")
 	// use Info() because of no stack for comparing.
 	log.Info("test", ZapError(ErrEtcdLeaderNotFound, err))
 	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found: test error`
@@ -136,10 +142,11 @@ func TestZapError(_ *testing.T) {
 func TestErrorWithStack(t *testing.T) {
 	re := require.New(t)
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
-	lg := newZapTestLogger(conf)
+	lg, err := newZapTestLogger(conf)
+	re.NoError(err)
 	log.ReplaceGlobals(lg.Logger, nil)
 
-	_, err := strconv.ParseUint("-42", 10, 64)
+	_, err = strconv.ParseUint("-42", 10, 64)
 	log.Error("test", ZapError(ErrStrconvParseInt.Wrap(err).GenWithStackByCause()))
 	m1 := lg.Message()
 	log.Error("test", zap.Error(errors.WithStack(err)))
