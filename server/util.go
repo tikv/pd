@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
 )
 
