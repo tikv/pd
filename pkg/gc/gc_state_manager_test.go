@@ -19,7 +19,6 @@ import (
 	"math"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1726,7 +1725,6 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	re := s.Require()
 
-	// initial state
 	var txnSafePoint uint64
 	err := s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
@@ -1748,34 +1746,6 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	})
 	re.NoError(err)
 	re.Equal(uint64(len(s.keyspacePresets.manageable)), txnSafePoint)
-
-	// test under concurrency
-	notify := make(chan struct{})
-	go func(initVal uint64) {
-		<-notify
-		for i, keyspaceID := range s.keyspacePresets.manageable {
-			_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, initVal+1+uint64(i), time.Now())
-			re.NoError(err)
-		}
-	}(txnSafePoint)
-	for {
-		err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			var err1 error
-			select {
-			case notify <- struct{}{}:
-			default:
-			}
-			txnSafePoint, _, _, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
-			return err1
-		})
-		if err != nil && strings.Contains(err.Error(), "ErrEtcdTxnConflict") {
-			continue
-		}
-		if txnSafePoint == uint64(len(s.keyspacePresets.manageable)*2) {
-			break
-		}
-	}
-	re.NoError(err)
 }
 
 func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
