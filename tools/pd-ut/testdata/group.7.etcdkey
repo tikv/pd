@@ -26,11 +26,15 @@
 /pd//gc/safe_point/service/BBB save
 /pd//gc/safe_point/service/CCC remove
 /pd//gc/safe_point/service/CCC save
+/pd//gc/safe_point/service/_ get
+/pd//gc/safe_point/service/_ remove
+/pd//gc/safe_point/service/a get
 /pd//gc/safe_point/service/a remove
 /pd//gc/safe_point/service/a save
 /pd//gc/safe_point/service/b get
 /pd//gc/safe_point/service/b remove
 /pd//gc/safe_point/service/b save
+/pd//gc/safe_point/service/c get
 /pd//gc/safe_point/service/c remove
 /pd//gc/safe_point/service/c save
 /pd//gc/safe_point/service/gc_worker remove
@@ -39,7 +43,6 @@
 /pd//keyspaces/alloc_id get
 /pd//keyspaces/gc_safe_point/ get
 /pd//keyspaces/gc_safe_point/ save
-/pd//keyspaces/gc_safe_point/ watch
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
 /pd//keyspaces/id/SYSTEM get
