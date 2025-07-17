@@ -58,6 +58,7 @@
 /pd//keyspaces/service_safe_point//gc_worker remove
 /pd//keyspaces/service_safe_point//gc_worker save
 /pd//keyspaces/service_safe_point//svc get
+/pd//keyspaces/service_safe_point//svc remove
 /pd//keyspaces/service_safe_point//svc save
 /pd//leader save
 /pd//region_label get
