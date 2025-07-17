@@ -831,13 +831,14 @@ func TestConciliateFillRate(t *testing.T) {
 			serviceLimit:          60,
 			priorityList:          []uint32{2, 2, 1},
 			fillRateSettingList:   []uint64{20, 30, 40},
-			burstLimitSettingList: []int64{10, 15, 20},
+			burstLimitSettingList: []int64{20, 30, 40},
 			ruDemandList:          []float64{25, 40, 50}, // Basic: 20,30,40=90; Burst: 5,10,10=25; Total: 115
 			// Priority 2: demand 65 > service limit 60, basic demand 50 < service limit 60, basic satisfied, burst gets: 60-50=10
-			// Burst allocation: 10*(5/15)=3.33, 10*(10/15)=6.67, so burst limits: min(20+3.33, 10), min(30+6.67, 15)
-			// Priority 1: gets 0 (no remaining service limit)
-			expectedOverrideFillRateList:   []float64{-1, -1, 0},
-			expectedOverrideBurstLimitList: []int64{10, 15, 0},
+			// Burst allocation: 10*(5/15)=3.33, 10*(10/15)=6.67, so burst limits: min(20+3.33, 20)=20, min(30+6.67, 30)=30
+			// After allocation, remaining service limit is still 10.
+			// Priority 1: gets 10
+			expectedOverrideFillRateList:   []float64{-1, -1, 10},
+			expectedOverrideBurstLimitList: []int64{20, 30, 10},
 		},
 		{
 			name:                  "Partial burst demand satisfied with unlimited burst limit",
