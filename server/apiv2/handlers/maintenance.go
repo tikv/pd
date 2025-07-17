@@ -112,7 +112,7 @@ func GetMaintenanceTask(c *gin.Context) {
 
 	err := svr.GetStorage().LoadAllMaintenanceTasks(func(k, v string) {
 		// Skip the lock key
-		if k == keypath.MaintenanceTaskPath("__maintenance_lock__") {
+		if k == keypath.MaintenanceTaskPath(endpoint.MaintenanceLockName) {
 			return
 		}
 		task := &endpoint.MaintenanceTask{} // Heap allocation
