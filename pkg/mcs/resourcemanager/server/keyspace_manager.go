@@ -251,6 +251,10 @@ func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) 
 	krgm.RUnlock()
 	// Set the new service limit to the limiter.
 	sl.setServiceLimit(serviceLimit)
+	// Cleanup the overrides if the service limit is set to 0.
+	if serviceLimit <= 0 {
+		krgm.cleanupOverrides()
+	}
 }
 
 func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
@@ -451,20 +455,21 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 		if totalRUDemand >= remainingServiceLimit {
 			// If the basic RU demand already exceeds the remaining service limit, then we can only try to meet the basic needs of
 			// the resource groups through proportional allocation of the fill rate setting.
+			basicCapacity := remainingServiceLimit
 			if totalBasicRUDemand >= remainingServiceLimit {
 				for _, group := range queue {
 					basicRUDemand := basicRUDemandMap[group.Name]
 					// Allocate the remaining service limit proportionally based on basic demand.
 					overrideFillRate := math.Min(
-						remainingServiceLimit*basicRUDemand/totalBasicRUDemand,
+						basicCapacity*basicRUDemand/totalBasicRUDemand,
 						group.getFillRateSetting(), // Should not exceed the original fill rate setting.
 					)
 					// Do not allow the resource group to consume extra tokens in this case,
 					// so the override burst limit is set to the same as the override fill rate.
 					group.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
+					// Deduct the basic capacity from the remaining service limit.
+					remainingServiceLimit -= overrideFillRate
 				}
-				// After allocation, all remaining service limit is consumed.
-				remainingServiceLimit = 0
 			} else {
 				// If the basic RU demand can be fully met, we can further satisfy burst RU demands.
 				burstCapacity := remainingServiceLimit - totalBasicRUDemand
@@ -528,4 +533,12 @@ func (krgm *keyspaceResourceGroupManager) getPriorityQueues() [][]*ResourceGroup
 		n++
 	}
 	return priorityQueues[:n]
+}
+
+func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
+	krgm.RLock()
+	for _, group := range krgm.groups {
+		group.overrideFillRateAndBurstLimit(-1, -1)
+	}
+	krgm.RUnlock()
 }

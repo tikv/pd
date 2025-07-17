@@ -927,5 +927,12 @@ func TestConciliateFillRate(t *testing.T) {
 				"check burst limit of case %s, group %d", tc.name, i,
 			)
 		}
+		// Test the cleanup overrides.
+		krgm.setServiceLimit(0)
+		for i := range tc.priorityList {
+			group := krgm.getMutableResourceGroup(genGroupName(idx, i))
+			re.Equal(float64(-1), group.getOverrideFillRate(), "check fill rate of case %s, group %d", tc.name, i)
+			re.Equal(int64(-1), group.getOverrideBurstLimit(), "check burst limit of case %s, group %d", tc.name, i)
+		}
 	}
 }
