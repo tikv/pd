@@ -54,7 +54,7 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 
 	// Verify the default resource group has unlimited rate and burst limit.
 	re.Equal(float64(unlimitedRate), defaultGroup.getFillRate())
-	re.Equal(int64(unlimitedBurstLimit), defaultGroup.getBurstLimitSetting())
+	re.Equal(float64(unlimitedBurstLimit), defaultGroup.getBurstLimitSetting())
 }
 
 func TestAddResourceGroup(t *testing.T) {
