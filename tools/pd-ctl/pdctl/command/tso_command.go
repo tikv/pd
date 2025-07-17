@@ -35,12 +35,12 @@ func NewTSOCommand() *cobra.Command {
 		Short: "parse TSO to the system and logic time",
 		Run:   showTSOCommandFunc,
 	}
-	cmd.AddCommand(NewTSOMemberCommand())
+	cmd.AddCommand(NewTSOMicroServiceCommand())
 	return cmd
 }
 
-// NewTSOMemberCommand return a leader subcommand of tsoCmd
-func NewTSOMemberCommand() *cobra.Command {
+// NewTSOMicroServiceCommand return a leader subcommand of tsoCmd
+func NewTSOMicroServiceCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "ms <subcommand>",
 		Short: "ms commands",

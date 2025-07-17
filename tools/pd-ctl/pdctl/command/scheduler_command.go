@@ -35,6 +35,9 @@ var (
 	schedulerDiagnosticPrefix = "pd/api/v1/schedulers/diagnostic"
 	evictLeaderSchedulerName  = "evict-leader-scheduler"
 	grantLeaderSchedulerName  = "grant-leader-scheduler"
+
+	schedulingPrimaryUri = "/pd/api/v2/ms/primary/scheduling"
+	schedulingMembersUri = "/pd/api/v2/ms/members/scheduling"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -50,7 +53,45 @@ func NewSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewResumeSchedulerCommand())
 	c.AddCommand(NewConfigSchedulerCommand())
 	c.AddCommand(NewDescribeSchedulerCommand())
+	c.AddCommand(NewMicroServiceCommand())
 	return c
+}
+
+// NewMicroServiceCommand returns a micro-service command.
+func NewMicroServiceCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "ms",
+		Short: "micro-service commands",
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "primary",
+		Short: "show the primary member status",
+		Run:   getSchedulingPrimaryCommandFunc,
+	})
+	c.AddCommand(&cobra.Command{
+		Use:   "members",
+		Short: "show the primary member status",
+		Run:   getSchedulingMembersCommandFunc,
+	})
+	return c
+}
+
+func getSchedulingMembersCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := doRequest(cmd, schedulingMembersUri, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func getSchedulingPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := doRequest(cmd, schedulingPrimaryUri, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 // NewPauseSchedulerCommand returns a command to pause a scheduler.
