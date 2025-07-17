@@ -373,7 +373,7 @@ func (rt *ruTracker) getRUPerSec() float64 {
 //     - Fully satisfy all basic demands first (overrideFillRate = -1)
 //     - Distribute remaining capacity proportionally among burst demands:
 //     overrideBurstLimit = fillRateSetting + remainingCapacity * (burstDemand / totalBurstDemand)
-//     - Set remaining service limit to 0
+//     - Deduct the burst capacity from the remaining service limit.
 //  3. Continue to next priority level until all groups are processed or service limit is exhausted.
 //  4. If service limit is exhausted, set overrideFillRate = 0 for all remaining lower priority groups
 //     (only for active groups where RU tracker exists and getRUPerSec() > 0).
@@ -463,13 +463,15 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 					// so the override burst limit is set to the same as the override fill rate.
 					group.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
 				}
+				// After allocation, all remaining service limit is consumed.
+				remainingServiceLimit = 0
 			} else {
 				// If the basic RU demand can be fully met, we can further satisfy burst RU demands.
-				remainingServiceLimit -= totalBasicRUDemand
+				burstCapacity := remainingServiceLimit - totalBasicRUDemand
 				for _, group := range queue {
 					burstRUDemand := burstRUDemandMap[group.Name]
 					// Allocate the remaining service limit proportionally based on burst demand.
-					overrideBurstLimit := group.getFillRateSetting() + remainingServiceLimit*burstRUDemand/totalBurstRUDemand
+					overrideBurstLimit := group.getFillRateSetting() + burstCapacity*burstRUDemand/totalBurstRUDemand
 					// Should not exceed the original burst limit setting if it's greater than 0.
 					if burstLimit := group.getBurstLimitSetting(); burstLimit > 0 {
 						overrideBurstLimit = math.Min(overrideBurstLimit, burstLimit)
@@ -478,10 +480,10 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 					// to allow the resource group to consume as many RUs as they originally need
 					// according to its fill rate setting.
 					group.overrideFillRateAndBurstLimit(-1, int64(overrideBurstLimit))
+					// Deduct the burst capacity from the remaining service limit.
+					remainingServiceLimit -= overrideBurstLimit
 				}
 			}
-			// After allocation, all remaining service limit is consumed.
-			remainingServiceLimit = 0
 		} else {
 			// If the total real-time RU demand is less than the remaining service limit, no need to divide the service limit,
 			// just set the override fill rate to -1 to allow the resource group to consume as many RUs as they originally
