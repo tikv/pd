@@ -53,7 +53,6 @@ const (
 	keyspacePrefix             = "keyspaces"
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
-	keyspaceAllocID            = "alloc_id"
 	gcSafePointInfix           = "gc_safe_point"
 	serviceSafePointInfix      = "service_safe_point"
 	regionPathPrefix           = "raft/r"
@@ -283,12 +282,6 @@ func KeyspaceMetaPath(spaceID uint32) string {
 // Path: keyspaces/id/{name}
 func KeyspaceIDPath(name string) string {
 	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
-}
-
-// KeyspaceIDAlloc returns the path of the keyspace id's persistent window boundary.
-// Path: keyspaces/alloc_id
-func KeyspaceIDAlloc() string {
-	return path.Join(keyspacePrefix, keyspaceAllocID)
 }
 
 // EncodeKeyspaceID from uint32 to string.
