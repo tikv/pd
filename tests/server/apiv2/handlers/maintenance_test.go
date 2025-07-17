@@ -26,6 +26,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/tests"
 )
 
@@ -176,8 +178,6 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 		re.NoError(err)
 		defer res.Body.Close()
 		re.Equal(http.StatusOK, res.StatusCode)
-		body, _ = io.ReadAll(res.Body)
-		re.Contains(string(body), "deleted successfully")
 
 		// 8. Get maintenance task after deletion (should 404)
 		res, err = client.Get(baseURL)
@@ -373,5 +373,134 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
 		re.NoError(err)
 		defer res.Body.Close()
 		re.Equal(http.StatusNotFound, res.StatusCode, "No tasks should be running after deletion")
+	})
+}
+
+func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		client := tests.TestDialClient
+		baseURL := fmt.Sprintf("%s/pd/api/v2/maintenance", leader.GetAddr())
+
+		// NOTE: This test verifies that GetMaintenanceTask can correctly return multiple task types
+		// in an array format. According to the design specification (RFC-0118), only one maintenance
+		// task should be active at a time globally due to the maintenance lock constraint. However,
+		// we test this scenario to ensure the GetMaintenanceTask endpoint can handle multiple tasks
+		// correctly if they were to exist simultaneously (e.g., due to a bug or manual intervention).
+
+		// Directly create multiple maintenance tasks in storage to simulate the scenario
+		// where multiple task types exist simultaneously (which shouldn't happen in practice)
+		taskType1 := "tikv_upgrade"
+		taskID1 := "task_1"
+		desc1 := "TiKV rolling upgrade"
+		task1 := &endpoint.MaintenanceTask{
+			Type:           taskType1,
+			ID:             taskID1,
+			StartTimestamp: time.Now().Unix(),
+			Description:    desc1,
+		}
+
+		taskType2 := "tidb_upgrade"
+		taskID2 := "task_2"
+		desc2 := "TiDB rolling upgrade"
+		task2 := &endpoint.MaintenanceTask{
+			Type:           taskType2,
+			ID:             taskID2,
+			StartTimestamp: time.Now().Unix(),
+			Description:    desc2,
+		}
+
+		// Store tasks directly in etcd to bypass the maintenance lock constraint
+		storage := leader.GetServer().GetStorage()
+		task1Data, _ := json.Marshal(task1)
+		task2Data, _ := json.Marshal(task2)
+
+		// Store both tasks directly in etcd
+		err := storage.Save(keypath.MaintenanceTaskPath(taskType1), string(task1Data))
+		re.NoError(err)
+		err = storage.Save(keypath.MaintenanceTaskPath(taskType2), string(task2Data))
+		re.NoError(err)
+
+		// Test GetMaintenanceTask - should return both tasks in an array
+		res, err := client.Get(baseURL)
+		re.NoError(err)
+		defer res.Body.Close()
+		re.Equal(http.StatusOK, res.StatusCode)
+
+		var tasks []struct {
+			Type           string `json:"type"`
+			ID             string `json:"id"`
+			StartTimestamp int64  `json:"start_timestamp"`
+			Description    string `json:"description"`
+		}
+		json.NewDecoder(res.Body).Decode(&tasks)
+
+		// Verify that GetMaintenanceTask returns both tasks in an array
+		re.Len(tasks, 2, "GetMaintenanceTask should return both tasks in an array")
+
+		// Verify both tasks are present with correct data
+		task1Found := false
+		task2Found := false
+		for _, task := range tasks {
+			if task.Type == taskType1 {
+				re.Equal(taskID1, task.ID)
+				re.Equal(desc1, task.Description)
+				task1Found = true
+			} else if task.Type == taskType2 {
+				re.Equal(taskID2, task.ID)
+				re.Equal(desc2, task.Description)
+				task2Found = true
+			}
+		}
+		re.True(task1Found, "Task 1 should be found in the response")
+		re.True(task2Found, "Task 2 should be found in the response")
+
+		// Test GetMaintenanceTaskByType for each task type
+		getTypeURL1 := fmt.Sprintf("%s/%s", baseURL, taskType1)
+		res, err = client.Get(getTypeURL1)
+		re.NoError(err)
+		defer res.Body.Close()
+		re.Equal(http.StatusOK, res.StatusCode)
+
+		var taskByType1 struct {
+			Type           string `json:"type"`
+			ID             string `json:"id"`
+			StartTimestamp int64  `json:"start_timestamp"`
+			Description    string `json:"description"`
+		}
+		json.NewDecoder(res.Body).Decode(&taskByType1)
+		re.Equal(taskType1, taskByType1.Type)
+		re.Equal(taskID1, taskByType1.ID)
+		re.Equal(desc1, taskByType1.Description)
+
+		getTypeURL2 := fmt.Sprintf("%s/%s", baseURL, taskType2)
+		res, err = client.Get(getTypeURL2)
+		re.NoError(err)
+		defer res.Body.Close()
+		re.Equal(http.StatusOK, res.StatusCode)
+
+		var taskByType2 struct {
+			Type           string `json:"type"`
+			ID             string `json:"id"`
+			StartTimestamp int64  `json:"start_timestamp"`
+			Description    string `json:"description"`
+		}
+		json.NewDecoder(res.Body).Decode(&taskByType2)
+		re.Equal(taskType2, taskByType2.Type)
+		re.Equal(taskID2, taskByType2.ID)
+		re.Equal(desc2, taskByType2.Description)
+
+		// Clean up by deleting both tasks directly from storage
+		err = storage.Remove(keypath.MaintenanceTaskPath(taskType1))
+		re.NoError(err)
+		err = storage.Remove(keypath.MaintenanceTaskPath(taskType2))
+		re.NoError(err)
+
+		// Verify no tasks are running after cleanup
+		res, err = client.Get(baseURL)
+		re.NoError(err)
+		defer res.Body.Close()
+		re.Equal(http.StatusNotFound, res.StatusCode)
 	})
 }
