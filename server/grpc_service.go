@@ -49,7 +49,6 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -2766,7 +2765,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := etcdutil.Watch(ctx, s.client, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
+	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
 	for {
 		select {
 		case <-ctx.Done():

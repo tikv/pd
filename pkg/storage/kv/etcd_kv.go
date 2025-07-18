@@ -96,7 +96,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
 	})
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
 
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
@@ -113,8 +112,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 // Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
-
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -218,8 +215,6 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 // Save puts a put operation into operations.
 // Note that save result are not immediately observable before current transaction commit.
 func (txn *etcdTxn) Save(key, value string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
-
 	operation := clientv3.OpPut(key, value)
 	txn.operations = append(txn.operations, operation)
 
@@ -228,8 +223,6 @@ func (txn *etcdTxn) Save(key, value string) error {
 
 // Remove puts a delete operation into operations.
 func (txn *etcdTxn) Remove(key string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
-
 	operation := clientv3.OpDelete(key)
 	txn.operations = append(txn.operations, operation)
 	return nil
@@ -355,7 +348,6 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
-	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
 	l.inner = l.inner.Then(convertedOps...)
 	return l
 }
@@ -364,7 +356,6 @@ func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
 	convertedOps := convertOps(ops)
-	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
 	l.inner = l.inner.Else(convertedOps...)
 	return l
 }
