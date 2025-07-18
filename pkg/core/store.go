@@ -416,7 +416,12 @@ func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	}
 
 	if s.GetRegionSize() != 0 {
-		U += U * (float64(delta)) / float64(s.GetRegionSize())
+		U1 := U + U*(float64(delta))/float64(s.GetRegionSize())
+		// The used size of the store can't be increase/decrease too more than before to avoid too large score change.
+		if U1 < 2*U && U1 > U*0.5 {
+			U = U1
+		}
+		// The available size of the store can't reach out the capacity
 		if A1 := C - U - diff; A1 > 0 && A1 < C {
 			A = A1
 		}
