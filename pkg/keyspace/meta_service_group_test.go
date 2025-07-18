@@ -52,62 +52,78 @@ func (suite *metaServiceGroupTestSuite) TearDownTest() {
 	suite.cancel()
 }
 
-func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
+func (suite *metaServiceGroupTestSuite) TestInitialState() {
 	re := suite.Require()
-	counts, err := suite.manager.GetAssignmentCounts()
+	statusMap, err := suite.manager.GetStatus()
 	re.NoError(err)
-
-	for grp := range mockMetaServiceGroups() {
-		val, exists := counts[grp]
-		re.True(exists, "expected group %q to be present in counts", grp)
-		re.Equal(0, val, "expected initial count of %q to be 0", grp)
+	for id := range mockMetaServiceGroups() {
+		status, exists := statusMap[id]
+		re.True(exists)
+		re.Zero(status.AssignmentCount)
+		re.False(status.Enabled)
 	}
+	// Assign should return error due to no available groups.
+	_, err = suite.manager.AssignToGroup(1)
+	re.Error(err)
 }
 
 func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 	re := suite.Require()
+	for groupID := range mockMetaServiceGroups() {
+		enable := true
+		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
+			Enabled: &enable,
+		}))
+	}
 	request := 5
 	assigned, err := suite.manager.AssignToGroup(request)
 	re.NoError(err)
-	re.NotEmpty(assigned, "expected some non-empty group name")
+	re.NotEmpty(assigned)
 
 	// Verify the returned group is one of the mockMetaServiceGroups keys.
 	_, isValid := mockMetaServiceGroups()[assigned]
-	re.True(isValid, "assigned group must be from mockMetaServiceGroups")
+	re.True(isValid)
 
 	// Verify the chosen group's count increments by 'request'.
-	counts, err := suite.manager.GetAssignmentCounts()
+	statusMap, err := suite.manager.GetStatus()
 	re.NoError(err)
-	re.Equal(request, counts[assigned], "chosen group's count should equal the requested increment")
+	re.Contains(statusMap, assigned)
+	re.Equal(request, statusMap[assigned].AssignmentCount)
 
 	// All other groups must remain at 0.
-	for grp := range mockMetaServiceGroups() {
-		if grp == assigned {
+	for groupID := range mockMetaServiceGroups() {
+		if groupID == assigned {
 			continue
 		}
-		re.Equal(0, counts[grp], "other groups should remain at 0")
+		re.Contains(statusMap, groupID)
+		re.Equal(0, statusMap[groupID].AssignmentCount)
 	}
 }
 
 func (suite *metaServiceGroupTestSuite) TestUpdateAssignment() {
 	re := suite.Require()
+	for groupID := range mockMetaServiceGroups() {
+		enable := true
+		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
+			Enabled: &enable,
+		}))
+	}
 	err := suite.manager.UpdateAssignment("", "etcd-group-0")
 	re.NoError(err)
-
-	counts, err := suite.manager.GetAssignmentCounts()
+	statusMap, err := suite.manager.GetStatus()
 	re.NoError(err)
-	re.Equal(1, counts["etcd-group-0"])
-	re.Equal(0, counts["etcd-group-1"])
-	re.Equal(0, counts["etcd-group-2"])
+	re.Equal(1, statusMap["etcd-group-0"].AssignmentCount)
+	re.Equal(0, statusMap["etcd-group-1"].AssignmentCount)
+	re.Equal(0, statusMap["etcd-group-2"].AssignmentCount)
 
 	err = suite.manager.UpdateAssignment("etcd-group-0", "etcd-group-1")
 	re.NoError(err)
 
-	counts, err = suite.manager.GetAssignmentCounts()
+	statusMap, err = suite.manager.GetStatus()
 	re.NoError(err)
-	re.Equal(0, counts["etcd-group-0"], "expected decremented back to 0")
-	re.Equal(1, counts["etcd-group-1"], "expected incremented to 1")
-	re.Equal(0, counts["etcd-group-2"], "unchanged")
+	re.Equal(0, statusMap["etcd-group-0"].AssignmentCount)
+	re.Equal(1, statusMap["etcd-group-1"].AssignmentCount)
+	re.Equal(0, statusMap["etcd-group-2"].AssignmentCount)
 }
 
 func (suite *metaServiceGroupTestSuite) TestUpdateAssignmentUnknownNewGroup() {
@@ -157,13 +173,20 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpoints() {
 
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment() {
 	re := suite.Require()
+	for groupID := range mockMetaServiceGroups() {
+		enable := true
+		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
+			Enabled: &enable,
+		}))
+	}
 	// Assign to some existing group
 	assigned, err := suite.manager.AssignToGroup(1)
 	re.NoError(err)
 	re.NotEmpty(assigned, "expected AssignToGroup to return a non-empty group")
-	counts, err := suite.manager.GetAssignmentCounts()
+	statusMap, err := suite.manager.GetStatus()
 	re.NoError(err)
-	re.Equal(1, counts[assigned], "assigned group should have count 1")
+	re.Contains(statusMap, assigned, "assigned group should be in status map")
+	re.Equal(1, statusMap[assigned].AssignmentCount, "assigned group should have count 1")
 
 	// Add a new group "etcd-group-3"
 	newMap := mockMetaServiceGroups()
@@ -176,16 +199,16 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 
 	// the original group should have decreased from 1 → 0
 	// "etcd-group-3" should have increased from 0 → 1
-	counts, err = suite.manager.GetAssignmentCounts()
+	statusMap, err = suite.manager.GetStatus()
 	re.NoError(err)
-	re.Equal(0, counts[assigned], "original group should have count 0 after moving assignment")
-	re.Equal(1, counts["etcd-group-3"], "new group should have count 1")
+	re.Equal(0, statusMap[assigned].AssignmentCount, "original group should have count 0 after moving assignment")
+	re.Equal(1, statusMap["etcd-group-3"].AssignmentCount, "new group should have count 1")
 
 	// All other preexisting groups (besides assigned and etcd-group-3) remain at 0
-	for grp := range mockMetaServiceGroups() {
-		if grp == assigned {
+	for groupID := range mockMetaServiceGroups() {
+		if groupID == assigned {
 			continue
 		}
-		re.Equal(0, counts[grp], "other original groups should remain at 0")
+		re.Equal(0, statusMap[groupID].AssignmentCount, "other original groups should remain at 0")
 	}
 }

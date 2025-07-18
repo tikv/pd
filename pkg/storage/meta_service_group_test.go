@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
@@ -30,37 +31,47 @@ type metaServiceGroupTestCase struct {
 
 func mustRunTestCase(re *require.Assertions, store Storage, testCase metaServiceGroupTestCase) {
 	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
-		return store.IncrementAssignmentCount(txn, testCase.id, testCase.delta)
-	}))
-	var currentCount int
-	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
-		assignmentCount, err := store.GetAssignmentCount(txn, map[string]string{testCase.id: ""})
+		statusMap, err := store.LoadMetaServiceGroupStatus(txn, map[string]string{testCase.id: ""})
 		if err != nil {
 			return err
 		}
-		currentCount = assignmentCount[testCase.id]
+		status, exists := statusMap[testCase.id]
+		re.True(exists)
+		status.AssignmentCount += testCase.delta
+		return store.SaveMetaServiceGroupStatus(txn, testCase.id, status)
+	}))
+	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		statusMap, err := store.LoadMetaServiceGroupStatus(txn, map[string]string{testCase.id: ""})
+		if err != nil {
+			return err
+		}
+		status, exists := statusMap[testCase.id]
+		re.True(exists)
+		re.Equal(testCase.expectedCount, status.AssignmentCount)
 		return nil
 	}))
-	re.Equal(testCase.expectedCount, currentCount)
 }
 
 func checkAssignmentCount(re *require.Assertions, store Storage, expectedAssignment map[string]int) {
 	var (
-		currentAssignment map[string]int
-		err               error
+		statusMap map[string]*endpoint.MetaServiceGroupStatus
+		err       error
 	)
 	groups := make(map[string]string)
 	for id := range expectedAssignment {
 		groups[id] = ""
 	}
 	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
-		currentAssignment, err = store.GetAssignmentCount(txn, groups)
+		statusMap, err = store.LoadMetaServiceGroupStatus(txn, groups)
 		if err != nil {
 			return err
 		}
 		return nil
 	}))
-	re.Equal(expectedAssignment, currentAssignment)
+	for id, count := range expectedAssignment {
+		re.Contains(statusMap, id)
+		re.Equal(count, statusMap[id].AssignmentCount)
+	}
 }
 
 func TestMetaServiceGroupStorage(t *testing.T) {
@@ -120,4 +131,31 @@ func TestMetaServiceGroupStorage(t *testing.T) {
 		"group5": 0,
 	}
 	checkAssignmentCount(re, store, extraGroups)
+
+	testGroup1 := "group1"
+	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		statusMap, err := store.LoadMetaServiceGroupStatus(txn, map[string]string{testGroup1: ""})
+		if err != nil {
+			return err
+		}
+		status, exists := statusMap[testGroup1]
+		re.True(exists)
+		// Meta service group should be disabled by default
+		re.False(status.Enabled)
+		// Set enable
+		status.Enabled = true
+		return store.SaveMetaServiceGroupStatus(txn, testGroup1, status)
+	}))
+
+	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		statusMap, err := store.LoadMetaServiceGroupStatus(txn, map[string]string{testGroup1: ""})
+		if err != nil {
+			return err
+		}
+		status, exists := statusMap[testGroup1]
+		re.True(exists)
+		// Should now be enabled
+		re.True(status.Enabled)
+		return nil
+	}))
 }

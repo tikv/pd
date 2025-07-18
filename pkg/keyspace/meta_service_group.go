@@ -48,45 +48,81 @@ func NewMetaServiceGroupManager(
 }
 
 // GetAssignmentCounts returns the count of each meta-service group.
-func (m *MetaServiceGroupManager) GetAssignmentCounts() (map[string]int, error) {
+func (m *MetaServiceGroupManager) GetStatus() (map[string]*endpoint.MetaServiceGroupStatus, error) {
 	m.RLock()
 	defer m.RUnlock()
 	var (
-		err   error
-		count map[string]int
+		err       error
+		statusMap map[string]*endpoint.MetaServiceGroupStatus
 	)
 	err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		count, err = m.store.GetAssignmentCount(txn, m.metaServiceGroups)
+		statusMap, err = m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
 		if err != nil {
-			return nil
+			return err
 		}
 		return nil
 	})
-	return count, err
+	return statusMap, err
 }
 
-// AssignToGroup increments count of the meta-service group with least assigned keyspaces.
+// MetaServiceGroupStatusPatch represents a patch operation for a meta-service group.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type MetaServiceGroupStatusPatch struct {
+	AssignedCount *int  `json:"assigned_count,omitempty"` // nil means no change, 0 means reset to 0
+	Enabled       *bool `json:"enabled,omitempty"`        // nil means no change, true means enable, false means disable
+}
+
+// PatchStatus applies a patch to the status of a meta-service group.
+func (m *MetaServiceGroupManager) PatchStatus(groupID string, patch *MetaServiceGroupStatusPatch) error {
+	m.RLock()
+	defer m.RUnlock()
+	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
+		if err != nil {
+			return err
+		}
+		status, exists := statusMap[groupID]
+		if !exists {
+			return errUnknownMetaServiceGroup
+		}
+		if patch.AssignedCount != nil {
+			status.AssignmentCount = *patch.AssignedCount
+		}
+		if patch.Enabled != nil {
+			status.Enabled = *patch.Enabled
+		}
+		return m.store.SaveMetaServiceGroupStatus(txn, groupID, status)
+	})
+}
+
+// AssignToGroup increments count of the enabled meta-service group with least assigned keyspaces.
 // It returns the assigned meta-service group and an error if any.
 func (m *MetaServiceGroupManager) AssignToGroup(count int) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
-	var assignedGroup string
+	var (
+		assignedGroup       string
+		assignedGroupStatus *endpoint.MetaServiceGroupStatus
+	)
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		countMap, err := m.store.GetAssignmentCount(txn, m.metaServiceGroups)
+		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
 		if err != nil {
 			return err
 		}
 		minCount := math.MaxInt
-		for currentGroup, currentCount := range countMap {
-			if currentCount < minCount {
-				minCount = currentCount
+		for currentGroup, currentGroupStatus := range statusMap {
+			// only consider enabled groups
+			if currentGroupStatus.Enabled && currentGroupStatus.AssignmentCount < minCount {
+				minCount = currentGroupStatus.AssignmentCount
 				assignedGroup = currentGroup
+				assignedGroupStatus = currentGroupStatus
 			}
 		}
 		if assignedGroup == "" {
 			return errNoAvailableMetaServiceGroups
 		}
-		return m.store.IncrementAssignmentCount(txn, assignedGroup, count)
+		assignedGroupStatus.AssignmentCount += count
+		return m.store.SaveMetaServiceGroupStatus(txn, assignedGroup, assignedGroupStatus)
 	}); err != nil {
 		return "", err
 	}
@@ -103,13 +139,19 @@ func (m *MetaServiceGroupManager) UpdateAssignment(oldGroupID, newGroupID string
 		return errUnknownMetaServiceGroup
 	}
 	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		if oldGroupID != "" {
-			if err := m.store.IncrementAssignmentCount(txn, oldGroupID, -1); err != nil {
+		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
+		if err != nil {
+			return err
+		}
+		if status, exists := statusMap[oldGroupID]; exists {
+			status.AssignmentCount--
+			if err := m.store.SaveMetaServiceGroupStatus(txn, oldGroupID, status); err != nil {
 				return err
 			}
 		}
-		if newGroupID != "" {
-			if err := m.store.IncrementAssignmentCount(txn, newGroupID, 1); err != nil {
+		if status, exists := statusMap[newGroupID]; exists {
+			status.AssignmentCount++
+			if err := m.store.SaveMetaServiceGroupStatus(txn, newGroupID, status); err != nil {
 				return err
 			}
 		}

@@ -16,7 +16,7 @@ package endpoint
 
 import (
 	"context"
-	"strconv"
+	"encoding/json"
 
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -24,48 +24,53 @@ import (
 
 // MetaServiceGroupStorage defines storage operations on meta-service group related data.
 type MetaServiceGroupStorage interface {
-	IncrementAssignmentCount(txn kv.Txn, id string, delta int) error
-	GetAssignmentCount(txn kv.Txn, ids map[string]string) (map[string]int, error)
+	SaveMetaServiceGroupStatus(txn kv.Txn, id string, status *MetaServiceGroupStatus) error
+	LoadMetaServiceGroupStatus(txn kv.Txn, ids map[string]string) (map[string]*MetaServiceGroupStatus, error)
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
-// IncrementAssignmentCount increments the assignment count of the designated meta-service group by delta
-func (*StorageEndpoint) IncrementAssignmentCount(txn kv.Txn, id string, delta int) error {
-	count, err := loadAssignmentCount(txn, id)
+// MetaServiceGroupStatus represents the status of a meta-service group.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type MetaServiceGroupStatus struct {
+	AssignmentCount int  `json:"assignment_count"`
+	Enabled         bool `json:"enabled"`
+}
+
+// SaveMetaServiceGroupStatus saves the meta service group status to the storage.
+func (*StorageEndpoint) SaveMetaServiceGroupStatus(txn kv.Txn, id string, status *MetaServiceGroupStatus) error {
+	statusPath := keypath.MetaServiceGroupStatusPath(id)
+	statusVal, err := json.Marshal(status)
 	if err != nil {
 		return err
 	}
-	count += delta
-	return saveAssignmentCount(txn, id, count)
+	return txn.Save(statusPath, string(statusVal))
 }
 
-// GetAssignmentCount returns the assignment count of the designated meta-service group.
-func (*StorageEndpoint) GetAssignmentCount(txn kv.Txn, ids map[string]string) (map[string]int, error) {
-	counts := make(map[string]int)
+// LoadMetaServiceGroupStatus returns the status of the designated meta-service group.
+func (*StorageEndpoint) LoadMetaServiceGroupStatus(txn kv.Txn, ids map[string]string) (map[string]*MetaServiceGroupStatus, error) {
+	statusMap := make(map[string]*MetaServiceGroupStatus)
 	for id := range ids {
-		count, err := loadAssignmentCount(txn, id)
+		status, err := loadMetaServiceGroupStatus(txn, id)
 		if err != nil {
 			return nil, err
 		}
-		counts[id] = count
+		statusMap[id] = status
 	}
-	return counts, nil
+	return statusMap, nil
 }
 
-func loadAssignmentCount(txn kv.Txn, id string) (int, error) {
-	countPath := keypath.MetaServiceGroupAssignmentCountPath(id)
-	countVal, err := txn.Load(countPath)
+func loadMetaServiceGroupStatus(txn kv.Txn, id string) (*MetaServiceGroupStatus, error) {
+	statusPath := keypath.MetaServiceGroupStatusPath(id)
+	statusVal, err := txn.Load(statusPath)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if countVal == "" {
-		return 0, nil
+	status := &MetaServiceGroupStatus{}
+	if statusVal == "" {
+		return status, nil
 	}
-	return strconv.Atoi(countVal)
-}
-
-func saveAssignmentCount(txn kv.Txn, id string, count int) error {
-	countPath := keypath.MetaServiceGroupAssignmentCountPath(id)
-	countVal := strconv.Itoa(count)
-	return txn.Save(countPath, countVal)
+	if err = json.Unmarshal([]byte(statusVal), status); err != nil {
+		return nil, err
+	}
+	return status, nil
 }

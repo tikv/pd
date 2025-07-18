@@ -287,6 +287,22 @@ func mustLoadMetaServiceGroups(re *require.Assertions, server *tests.TestServer)
 	return groups
 }
 
+func mustEnableMetaServiceGroup(re *require.Assertions, server *tests.TestServer, groupID string) {
+	url := fmt.Sprintf("%s%s/%s/status", server.GetAddr(), metaServiceGroupsPrefix, groupID)
+	enabled := true
+	patch := &keyspace.MetaServiceGroupStatusPatch{
+		Enabled: &enabled,
+	}
+	body, err := json.Marshal(patch)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(body))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+}
+
 func mustAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, patch map[string]*string) []*handlers.MetaServiceGroupStatus {
 	data, err := json.Marshal(patch)
 	re.NoError(err)

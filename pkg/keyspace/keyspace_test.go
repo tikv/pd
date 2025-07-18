@@ -113,14 +113,21 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	egm := NewMetaServiceGroupManager(suite.ctx, store, true, mockMetaServiceGroups())
+	mgm := NewMetaServiceGroupManager(suite.ctx, store, true, mockMetaServiceGroups())
+	mustEnableMetaServiceGroups(re, mgm, mockMetaServiceGroups())
 	var err error
-	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, egm)
+	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, mgm)
 	re.NoError(err)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
 }
 
+func mustEnableMetaServiceGroups(re *require.Assertions, manager *MetaServiceGroupManager, groups map[string]string) {
+	for groupID := range groups {
+		enabled := true
+		re.NoError(manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	}
+}
 func (suite *keyspaceTestSuite) TearDownTest() {
 	suite.cancel()
 }
