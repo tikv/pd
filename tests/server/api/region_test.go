@@ -409,7 +409,9 @@ func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 		core.SetWrittenBytes(100*units.MiB),
 		core.SetWrittenKeys(1*units.MiB),
 		core.SetReadBytes(200*units.MiB),
-		core.SetReadKeys(2*units.MiB))
+		core.SetReadKeys(2*units.MiB),
+		core.SetApproximateKvSize(4*units.MiB),
+	)
 	buckets := &metapb.Buckets{
 		RegionId: 2,
 		Keys:     [][]byte{[]byte("a"), []byte("b")},
