@@ -811,8 +811,8 @@ func TestConciliateFillRate(t *testing.T) {
 			ruDemandList:          []float64{35, 45, 22, 20}, // Basic: 30,40,20,30=120; Burst: 5,5,2,0=12; Total: 132
 			// Priority 2: demand 80, gets full allocation (remaining: 20)
 			// Priority 1: demand 42 > remaining 20, basic demand 50 > remaining 20, proportional allocation: 20*(20/40)=10, 20*(20/40)=10
-			expectedOverrideFillRateList:   []float64{-1, -1, 10, 10}, // Priority 2 gets full, priority 1 gets basic demand proportionally
-			expectedOverrideBurstLimitList: []int64{-1, -1, 10, 10},
+			expectedOverrideFillRateList:   []float64{-1, -1, 8, 12}, // Priority 2 gets full, priority 1 gets basic demand proportionally
+			expectedOverrideBurstLimitList: []int64{-1, -1, 8, 12},
 		},
 		{
 			name:                  "Unlimited burst limit with service limit constraint",
@@ -864,6 +864,24 @@ func TestConciliateFillRate(t *testing.T) {
 			// Basic demand 1000 > service limit 100, so gets proportional allocation: 100*(1000/1000)=100
 			expectedOverrideFillRateList:   []float64{100},
 			expectedOverrideBurstLimitList: []int64{100},
+		},
+		{
+			name:                           "Proportional allocation with normalization check - case 1",
+			serviceLimit:                   100,
+			priorityList:                   []uint32{1, 1, 1},
+			fillRateSettingList:            []uint64{100, 100, 100},
+			ruDemandList:                   []float64{40, 80, 10},
+			expectedOverrideFillRateList:   []float64{40, 50, 10},
+			expectedOverrideBurstLimitList: []int64{40, 50, 10},
+		},
+		{
+			name:                           "Proportional allocation with normalization check - case 2",
+			serviceLimit:                   90,
+			priorityList:                   []uint32{1, 1, 1},
+			fillRateSettingList:            []uint64{100, 100, 100},
+			ruDemandList:                   []float64{50, 60, 70},
+			expectedOverrideFillRateList:   []float64{30, 30, 30},
+			expectedOverrideBurstLimitList: []int64{30, 30, 30},
 		},
 	}
 	genGroupName := func(caseIdx, i int) string {

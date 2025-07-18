@@ -361,27 +361,32 @@ func (rt *ruTracker) getRUPerSec() float64 {
 // The conciliation algorithm works as follows:
 //  1. Sort resource groups by priority in descending order (higher priority first).
 //  2. For each priority level (from highest to lowest):
-//     a. Calculate total basic RU demand and total burst RU demand for all groups in this priority.
+//     a. Skip groups without RU tracker (inactive groups).
+//     b. Calculate demands for all active groups in this priority level:
 //     - Basic RU demand: min(realtime_RU_per_sec, fill_rate_setting)
 //     - Burst RU demand: max(0, realtime_RU_per_sec - fill_rate_setting)
-//     b. Determine allocation strategy based on remaining service limit:
-//     - Case 1: If total RU demand (basic + burst) ≤ remaining service limit:
+//     * If burst_limit_setting >= 0: burst_demand = min(burst_demand, burst_limit_setting)
+//     c. Determine allocation strategy based on remaining service limit:
+//     - Case 1: If total RU demand (basic + burst) < remaining service limit:
 //     * Grant all groups their full demanded resources (overrideFillRate = -1, overrideBurstLimit = -1)
 //     * Deduct total RU demand from remaining service limit
-//     - Case 2: If total RU demand > remaining service limit:
-//     * Sub-case 2.1: If basic RU demand ≥ remaining service limit:
-//     - Only satisfy basic needs proportionally: overrideFillRate = remainingLimit * (basicDemand / totalBasicDemand)
-//     - Do not allow the resource group to consume extra tokens in this case: overrideBurstLimit = overrideFillRate
-//     - Cannot exceed original fillRateSetting
-//     - Set remaining service limit to 0
+//     - Case 2: If total RU demand >= remaining service limit:
+//     * Sub-case 2.1: If basic RU demand >= remaining service limit:
+//     - Sort groups by normalized RU demand (basicDemand / fillRateSetting) in ascending order
+//     - Allocate proportionally based on fill rate settings:
+//     overrideFillRate = min(basicDemand, remainingLimit * (fillRateSetting / totalFillRate))
+//     - Set overrideBurstLimit = overrideFillRate (no extra burst allowed)
+//     - Deduct allocated amount from remaining service limit and totalFillRate
 //     * Sub-case 2.2: If basic RU demand < remaining service limit:
 //     - Fully satisfy all basic demands first (overrideFillRate = -1)
-//     - Distribute remaining capacity proportionally among burst demands:
-//     overrideBurstLimit = fillRateSetting + remainingCapacity * (burstDemand / totalBurstDemand)
-//     - Deduct the burst capacity from the remaining service limit.
+//     - Calculate burst capacity: remainingLimit - totalBasicDemand
+//     - Distribute burst capacity proportionally among burst demands:
+//     overrideBurstLimit = fillRateSetting + burstCapacity * (burstDemand / totalBurstDemand)
+//     - Respect original burst_limit_setting if > 0
+//     - Deduct burst capacity from remaining service limit
 //  3. Continue to next priority level until all groups are processed or service limit is exhausted.
-//  4. If service limit is exhausted, set overrideFillRate = 0 for all remaining lower priority groups
-//     (only for active groups where RU tracker exists and getRUPerSec() > 0).
+//  4. If service limit is exhausted (remainingServiceLimit == 0), set overrideFillRate = 0 and
+//     overrideBurstLimit = 0 for all remaining lower priority groups (only for active groups).
 //
 // This ensures:
 // - Higher priority groups get resources first
@@ -419,6 +424,7 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 		}
 
 		var (
+			totalFillRate      = 0.0
 			totalBasicRUDemand = 0.0
 			totalBurstRUDemand = 0.0
 			basicRUDemandMap   = make(map[string]float64, len(queue))
@@ -448,28 +454,51 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 			}
 			totalBurstRUDemand += burstRUDemand
 			burstRUDemandMap[group.Name] = burstRUDemand
+			// Calculate the total fill rate of all the resource groups in this priority level.
+			totalFillRate += fillRateSetting
 		}
 
 		totalRUDemand := totalBasicRUDemand + totalBurstRUDemand
 		// If the total real-time RU demand is greater than or equal to the remaining service limit,
 		// we need to divide the remaining service limit proportionally within the same priority level.
 		if totalRUDemand >= remainingServiceLimit {
+			type groupInfo struct {
+				group              *ResourceGroup
+				basicRUDemand      float64
+				normalizedRUDemand float64
+			}
+			groupInfos := make([]*groupInfo, 0, len(queue))
+			for _, group := range queue {
+				basicRUDemand := basicRUDemandMap[group.Name]
+				groupInfos = append(groupInfos, &groupInfo{
+					group:         group,
+					basicRUDemand: basicRUDemand,
+					// The normalized RU demand is the basic RU demand divided by the fill rate setting.
+					// This can represent its demand level under the fill rate setting.
+					normalizedRUDemand: basicRUDemand / group.getFillRateSetting(),
+				})
+			}
+			// Sort the group infos by the normalized RU demand in ascending order, low demand first.
+			sort.Slice(groupInfos, func(i, j int) bool {
+				return groupInfos[i].normalizedRUDemand < groupInfos[j].normalizedRUDemand
+			})
 			// If the basic RU demand already exceeds the remaining service limit, then we can only try to meet the basic needs of
 			// the resource groups through proportional allocation of the fill rate setting.
-			basicCapacity := remainingServiceLimit
 			if totalBasicRUDemand >= remainingServiceLimit {
-				for _, group := range queue {
-					basicRUDemand := basicRUDemandMap[group.Name]
+				for _, gi := range groupInfos {
+					fillRateSetting := gi.group.getFillRateSetting()
+					proportionalFillRate := remainingServiceLimit * fillRateSetting / totalFillRate
 					// Allocate the remaining service limit proportionally based on basic demand.
 					overrideFillRate := math.Min(
-						basicCapacity*basicRUDemand/totalBasicRUDemand,
-						group.getFillRateSetting(), // Should not exceed the original fill rate setting.
+						gi.basicRUDemand,
+						proportionalFillRate,
 					)
 					// Do not allow the resource group to consume extra tokens in this case,
 					// so the override burst limit is set to the same as the override fill rate.
-					group.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
-					// Deduct the basic capacity from the remaining service limit.
+					gi.group.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
+					// Deduct the basic RU demand from the remaining service limit.
 					remainingServiceLimit -= overrideFillRate
+					totalFillRate -= fillRateSetting
 				}
 			} else {
 				// If the basic RU demand can be fully met, we can further satisfy burst RU demands.
