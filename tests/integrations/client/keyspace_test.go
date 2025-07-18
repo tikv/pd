@@ -15,20 +15,26 @@
 package client_test
 
 import (
+	"context"
 	"fmt"
 	"math"
+	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 const (
@@ -214,4 +220,73 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 	})
 	re.NoError(err)
 	re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+}
+
+func TestProtectedKeyspace(t *testing.T) {
+	re := require.New(t)
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+	}()
+	const classic = `return(false)`
+	const nextGen = `return(true)`
+
+	cases := []struct {
+		name                  string
+		nextGenFlag           string
+		protectedKeyspaceID   uint32
+		protectedKeyspaceName string
+		gcConfig              string
+	}{
+		{
+			name:                  "legacy_default_keyspace",
+			nextGenFlag:           classic,
+			protectedKeyspaceID:   constant.DefaultKeyspaceID,
+			protectedKeyspaceName: constant.DefaultKeyspaceName,
+			gcConfig:              "",
+		},
+		{
+			name:                  "nextgen_system_keyspace",
+			nextGenFlag:           nextGen,
+			protectedKeyspaceID:   constant.SystemKeyspaceID,
+			protectedKeyspaceName: constant.SystemKeyspaceName,
+			gcConfig:              keyspace.KeyspaceLevelGC,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(_ *testing.T) {
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", c.nextGenFlag))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+				conf.Keyspace.WaitRegionSplit = false
+			})
+			re.NoError(err)
+			defer tc.Destroy()
+			pdAddr := tc.GetConfig().GetClientURL()
+			err = tc.RunInitialServers()
+			re.NoError(err)
+			tc.WaitLeader()
+			leaderServer := tc.GetLeaderServer()
+			re.NoError(leaderServer.BootstrapCluster())
+			tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
+			re.NoError(err)
+			defer tsoCluster.Destroy()
+			tsoCluster.WaitForDefaultPrimaryServing(re)
+
+			// Test split keyspace
+			kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
+			re.NotNil(kgm)
+			err = kgm.SplitKeyspaceGroupByID(0, 1, []uint32{c.protectedKeyspaceID})
+			re.Error(err)
+			re.Contains(err.Error(), "cannot modify")
+
+			// Test tso forward
+			cli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+				leaderServer.GetLeader().GetClientUrls(), pd.SecurityOption{})
+			re.NoError(err)
+			_, _, err = cli.GetTS(ctx)
+			re.NoError(err)
+		})
+	}
 }

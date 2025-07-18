@@ -23,10 +23,17 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestBackoffer(t *testing.T) {
 	re := require.New(t)
@@ -159,11 +166,12 @@ func TestBackofferWithLog(t *testing.T) {
 	defer cancel()
 
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
-	lg := newZapTestLogger(conf)
+	lg, err := newZapTestLogger(conf)
+	re.NoError(err)
 	log.ReplaceGlobals(lg.Logger, nil)
 
 	bo := InitialBackoffer(time.Millisecond*10, time.Millisecond*100, time.Millisecond*1000, withMinLogInterval(time.Millisecond*100))
-	err := bo.Exec(ctx, testFn)
+	err = bo.Exec(ctx, testFn)
 	re.ErrorIs(err, errTest)
 
 	ms := lg.Messages()
@@ -233,13 +241,13 @@ func (logger *verifyLogger) Messages() []string {
 	return logger.w.messages
 }
 
-func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
+func newZapTestLogger(cfg *log.Config, opts ...zap.Option) (verifyLogger, error) {
 	// TestingWriter is used to write to memory.
 	// Used in the verify logger.
 	writer := newTestingWriter()
-	lg, _, _ := log.InitLoggerWithWriteSyncer(cfg, writer, writer, opts...)
+	lg, _, err := log.InitLoggerWithWriteSyncer(cfg, writer, writer, opts...)
 	return verifyLogger{
 		Logger: lg,
 		w:      writer,
-	}
+	}, err
 }

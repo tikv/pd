@@ -388,7 +388,8 @@ func (suite *adminTestSuite) checkCleanPath(cluster *tests.TestCluster) {
 
 	// handled by router
 	response := httptest.NewRecorder()
-	r, _, _ := api.NewHandler(context.Background(), leader.GetServer())
+	r, _, err := api.NewHandler(context.Background(), leader.GetServer())
+	re.NoError(err)
 	request, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	r.ServeHTTP(response, request)

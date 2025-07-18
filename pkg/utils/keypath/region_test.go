@@ -37,6 +37,6 @@ func TestRegionPath(t *testing.T) {
 
 func BenchmarkRegionPath(b *testing.B) {
 	for i := range b.N {
-		_ = RegionPath(uint64(i))
+		RegionPath(uint64(i))
 	}
 }

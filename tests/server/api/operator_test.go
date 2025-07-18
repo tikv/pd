@@ -209,10 +209,12 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), testutil.StatusOK(re))
 	re.NoError(err)
 
-	testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), testutil.StatusOK(re))
+	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), testutil.StatusOK(re))
+	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), testutil.StatusOK(re))
 	re.NoError(err)
-	testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), testutil.StatusOK(re))
+	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), testutil.StatusOK(re))
+	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
 		testutil.StatusNotOK(re), testutil.StringContain(re, "not adjacent"))
 	re.NoError(err)

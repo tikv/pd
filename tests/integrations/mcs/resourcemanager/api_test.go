@@ -338,11 +338,12 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 
 	// Prepare the keyspace for later test.
 	leaderServer := suite.cluster.GetLeaderServer()
-	leaderServer.GetKeyspaceManager().CreateKeyspace(
+	_, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
 		&keyspace.CreateKeyspaceRequest{
 			Name: "test_keyspace",
 		},
 	)
+	re.NoError(err)
 	for _, keyspaceName := range []string{"", "test_keyspace"} {
 		// Get the keyspace service limit.
 		limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)

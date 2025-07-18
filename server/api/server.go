@@ -20,7 +20,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"

@@ -162,7 +162,6 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetEnablePlacementRules(true)
 	ruleManager := testCluster.RuleManager
-	ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	err := ruleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "test",
@@ -198,6 +197,8 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 			LocationLabels: []string{"dc", "zone", "host"},
 		},
 	})
+	re.NoError(err)
+	err = ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	re.NoError(err)
 	stores := []struct {
 		storeID     uint64

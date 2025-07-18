@@ -37,7 +37,8 @@ func TestIsHot(t *testing.T) {
 	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
 		cluster := core.NewBasicCluster()
 		cache := NewHotCache(ctx, cluster)
-		region := buildRegion(cluster, i, 3, 60)
+		region, err := buildRegion(cluster, i, 3, 60)
+		re.NoError(err)
 		stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
 		cache.Update(stats[0], i)
 		for range 100 {

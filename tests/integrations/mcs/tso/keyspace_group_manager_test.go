@@ -69,7 +69,9 @@ type tsoKeyspaceGroupManagerTestSuite struct {
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) allocID() uint32 {
-	id, _, _ := suite.allocator.Alloc(1)
+	re := suite.Require()
+	id, _, err := suite.allocator.Alloc(1)
+	re.NoError(err)
 	return uint32(id)
 }
 
@@ -94,7 +96,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 2, suite.pdLeaderServer.GetAddr())
 	re.NoError(err)
 	suite.allocator = mockid.NewIDAllocator()
-	suite.allocator.SetBase(uint64(time.Now().Second()))
+	err = suite.allocator.SetBase(uint64(time.Now().Second()))
+	re.NoError(err)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownSuite() {
@@ -783,11 +786,15 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.False(kg1.IsSplitting())
 
 	// Let group 0 and group 1 have different primary node.
-	kgm.SetPriorityForKeyspaceGroup(0, kg0.Members[0].Address, 100)
-	kgm.SetPriorityForKeyspaceGroup(1, kg1.Members[1].Address, 100)
+	err = kgm.SetPriorityForKeyspaceGroup(0, kg0.Members[0].Address, 100)
+	re.NoError(err)
+	err = kgm.SetPriorityForKeyspaceGroup(1, kg1.Members[1].Address, 100)
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		p0, _ := kgm.GetKeyspaceGroupPrimaryByID(0)
-		p1, _ := kgm.GetKeyspaceGroupPrimaryByID(1)
+		p0, err := kgm.GetKeyspaceGroupPrimaryByID(0)
+		re.NoError(err)
+		p1, err := kgm.GetKeyspaceGroupPrimaryByID(1)
+		re.NoError(err)
 		return p0 == kg0.Members[0].Address && p1 == kg1.Members[1].Address
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
