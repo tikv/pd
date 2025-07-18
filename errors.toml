@@ -851,6 +851,7 @@ error = '''
 reset user timestamp failed, %s
 '''
 
+<<<<<<< HEAD
 ["PD:tso:ErrSetLocalTSOConfig"]
 error = '''
 set local tso config failed, %s
@@ -859,6 +860,11 @@ set local tso config failed, %s
 ["PD:tso:ErrSyncMaxTS"]
 error = '''
 sync max ts failed, %s
+=======
+["PD:tso:ErrSaveTimestamp"]
+error = '''
+save timestamp failed, %s
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 '''
 
 ["PD:tso:ErrUpdateTimestamp"]
