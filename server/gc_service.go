@@ -376,7 +376,16 @@ func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.
-func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (*pdpb.GetAllGCSafePointV2Response, error) {
+func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (resp *pdpb.GetAllGCSafePointV2Response, errRet error) {
+	log.Warn("deprecated API GetAllGCSafePointV2 is called")
+	defer func() {
+		if errRet != nil {
+			log.Error("deprecated API GetAllGCSafePointV2 encountered error", zap.Error(errRet))
+		} else {
+			log.Warn("deprecated API GetAllGCSafePointV2 returned", zap.Stringers("resp-safe-point", resp.GetGcSafePoints()), zap.Int64("resp-revision", resp.GetRevision()))
+		}
+	}()
+
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
