@@ -24,14 +24,6 @@ var (
 			Name:      "event_count",
 			Help:      "Counter of checker events.",
 		}, []string{"type", "name"})
-	regionListGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "checker",
-			Name:      "region_list",
-			Help:      "Number of region about different type.",
-		}, []string{"type"})
-
 	patrolCheckRegionsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -43,7 +35,6 @@ var (
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
-	prometheus.MustRegister(regionListGauge)
 	prometheus.MustRegister(patrolCheckRegionsGauge)
 }
 

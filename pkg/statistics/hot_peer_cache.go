@@ -293,7 +293,6 @@ func (f *HotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 				utils.ByteDim:  hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, kind),
 				utils.KeyDim:   hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, kind),
 				utils.QueryDim: hotCacheStatusGauge.WithLabelValues("query-rate-threshold", store, kind),
-				utils.DimLen:   hotCacheStatusGauge.WithLabelValues("total_length", store, kind),
 			},
 		}
 	}
