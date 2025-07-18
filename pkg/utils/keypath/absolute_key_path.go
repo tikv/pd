@@ -58,6 +58,9 @@ const (
 	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
+	// Maintenance task path format
+	maintenanceTaskPathFormat = "/pd/%d/maintenance/%s" // "/pd/{cluster_id}/maintenance/{task_type}"
+
 	// "%08d" adds extra padding to make encoded ID ordered.
 	// Encoded ID can be decoded directly with strconv.ParseUint. Width of the
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
