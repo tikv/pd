@@ -542,7 +542,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 						continue
 					}
 					metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
-					metrics.setGroup(group)
+					metrics.setGroup(group, keyspaceName)
 					// Record the tracked RU per second.
 					if rt := krgm.getRUTracker(groupName); rt != nil {
 						metrics.setSampledRUPerSec(rt.getRUPerSec())

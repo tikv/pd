@@ -121,23 +121,17 @@ func (rg *ResourceGroup) getPriority() float64 {
 	return float64(rg.Priority)
 }
 
-// getFillRateSetting returns the fill rate setting of the resource group.
-// It is the fill rate setting in the resource group settings without considering the override.
-func (rg *ResourceGroup) getFillRateSetting() float64 {
-	rg.RLock()
-	defer rg.RUnlock()
-	return rg.RUSettings.RU.getFillRateSetting()
-}
-
 // getFillRate returns the fill rate of the resource group.
-// It is the fill rate setting in the resource group settings that takes into account the override.
-func (rg *ResourceGroup) getFillRate() float64 {
+// It will ignore the override fill rate and return the fill rate setting if the `ignoreOverride` is true.
+func (rg *ResourceGroup) getFillRate(ignoreOverride ...bool) float64 {
 	rg.RLock()
 	defer rg.RUnlock()
+	if len(ignoreOverride) > 0 && ignoreOverride[0] {
+		return rg.RUSettings.RU.getFillRateSetting()
+	}
 	return rg.RUSettings.RU.getFillRate()
 }
 
-// getOverrideFillRate returns the override fill rate of the resource group.
 func (rg *ResourceGroup) getOverrideFillRate() float64 {
 	rg.RLock()
 	defer rg.RUnlock()
@@ -166,15 +160,14 @@ func (rg *ResourceGroup) overrideFillRateLocked(new float64) {
 	}
 }
 
-func (rg *ResourceGroup) getBurstLimitSetting() float64 {
+// getBurstLimit returns the burst limit of the resource group.
+// It will ignore the override burst limit and return the burst limit setting if the `ignoreOverride` is true.
+func (rg *ResourceGroup) getBurstLimit(ignoreOverride ...bool) int64 {
 	rg.RLock()
 	defer rg.RUnlock()
-	return float64(rg.RUSettings.RU.getBurstLimitSetting())
-}
-
-func (rg *ResourceGroup) getBurstLimit() int64 {
-	rg.RLock()
-	defer rg.RUnlock()
+	if len(ignoreOverride) > 0 && ignoreOverride[0] {
+		return rg.RUSettings.RU.getBurstLimitSetting()
+	}
 	return rg.RUSettings.RU.getBurstLimit()
 }
 

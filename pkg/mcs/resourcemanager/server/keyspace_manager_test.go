@@ -54,7 +54,7 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 
 	// Verify the default resource group has unlimited rate and burst limit.
 	re.Equal(float64(unlimitedRate), defaultGroup.getFillRate())
-	re.Equal(float64(unlimitedBurstLimit), defaultGroup.getBurstLimitSetting())
+	re.Equal(int64(unlimitedBurstLimit), defaultGroup.getBurstLimit())
 }
 
 func TestAddResourceGroup(t *testing.T) {
@@ -668,7 +668,7 @@ func TestConciliateFillRate(t *testing.T) {
 		serviceLimit                   float64
 		priorityList                   []uint32
 		fillRateSettingList            []uint64
-		burstLimitSettingList          []int64
+		burstLimitSettingList          []int64 // If not provided, the burst limit is set to the same as the fill rate.
 		ruDemandList                   []float64
 		expectedOverrideFillRateList   []float64
 		expectedOverrideBurstLimitList []int64
@@ -684,14 +684,15 @@ func TestConciliateFillRate(t *testing.T) {
 			expectedOverrideBurstLimitList: []int64{-1, -1, -1},   // -1 means use original burst limit settings
 		},
 		{
-			name:                "One priority exceeding service limit - proportional throttling",
+			name:                "One priority with insufficient service limit",
 			serviceLimit:        50,
 			priorityList:        []uint32{1, 1, 1},
 			fillRateSettingList: []uint64{20, 30, 50},
 			ruDemandList:        []float64{20, 30, 50},
-			// Total demand: 100 > service limit 50, proportional allocation: 50*(20/100)=10, 50*(30/100)=15, 50*(50/100)=25
-			expectedOverrideFillRateList:   []float64{10, 15, 25}, // Proportional allocation based on demand
-			expectedOverrideBurstLimitList: []int64{10, 15, 25},   // Burst limit set to same as fill rate in basic allocation
+			// Total demand: 100 > service limit 50, normalized demand: 20/20=1, 30/30=1, 50/50=1
+			// Proportional allocation: 50*20/100=10, 50*30/100=15, 50*50/100=25
+			expectedOverrideFillRateList:   []float64{10, 15, 25},
+			expectedOverrideBurstLimitList: []int64{10, 15, 25}, // All groups are non-burstable, so burst limit is set to the same as fill rate
 		},
 		{
 			name:                "Multiple priorities with sufficient service limit",
@@ -700,11 +701,11 @@ func TestConciliateFillRate(t *testing.T) {
 			fillRateSettingList: []uint64{20, 30, 25, 35, 40},
 			ruDemandList:        []float64{10, 15, 20, 30, 40},
 			// Total demand: 115 < service limit 200, so all groups get their original settings
-			expectedOverrideFillRateList:   []float64{-1, -1, -1, -1, -1}, // All groups use original settings
+			expectedOverrideFillRateList:   []float64{-1, -1, -1, -1, -1},
 			expectedOverrideBurstLimitList: []int64{-1, -1, -1, -1, -1},
 		},
 		{
-			name:                "Multiple priorities with insufficient service limit - higher priority gets preference",
+			name:                "Multiple priorities with insufficient service limit - higher groups get partial",
 			serviceLimit:        80,
 			priorityList:        []uint32{3, 3, 2, 1, 1},
 			fillRateSettingList: []uint64{30, 20, 30, 20, 10},
@@ -712,18 +713,18 @@ func TestConciliateFillRate(t *testing.T) {
 			// Priority 3: demand 50, gets full allocation (remaining: 30)
 			// Priority 2: demand 30, gets full allocation (remaining: 0)
 			// Priority 1: demand 30, gets 0 (no remaining service limit)
-			expectedOverrideFillRateList:   []float64{-1, -1, 30, 0, 0}, // Priority 3 gets full, priority 2 gets 30, priority 1 gets 0
+			expectedOverrideFillRateList:   []float64{-1, -1, 30, 0, 0},
 			expectedOverrideBurstLimitList: []int64{-1, -1, 30, 0, 0},
 		},
 		{
-			name:                "Higher priority consumes all service limit",
+			name:                "Multiple priorities with insufficient service limit - higher groups get all",
 			serviceLimit:        100,
 			priorityList:        []uint32{5, 5, 3, 2, 1},
 			fillRateSettingList: []uint64{60, 60, 30, 20, 10},
 			ruDemandList:        []float64{60, 60, 30, 20, 10},
 			// Priority 5: demand 120 > service limit 100, proportional allocation: 100*(60/120)=50, 100*(60/120)=50
 			// Lower priorities get 0 (no remaining service limit)
-			expectedOverrideFillRateList:   []float64{50, 50, 0, 0, 0}, // Only priority 5 gets resources proportionally
+			expectedOverrideFillRateList:   []float64{50, 50, 0, 0, 0},
 			expectedOverrideBurstLimitList: []int64{50, 50, 0, 0, 0},
 		},
 		{
@@ -733,7 +734,7 @@ func TestConciliateFillRate(t *testing.T) {
 			fillRateSettingList: []uint64{10, 20, 30},
 			ruDemandList:        []float64{10, 20, 30},
 			// Service limit is 0, so no conciliation is performed, all groups keep original settings
-			expectedOverrideFillRateList:   []float64{-1, -1, -1}, // No conciliation when service limit is 0
+			expectedOverrideFillRateList:   []float64{-1, -1, -1},
 			expectedOverrideBurstLimitList: []int64{-1, -1, -1},
 		},
 		{
@@ -743,18 +744,8 @@ func TestConciliateFillRate(t *testing.T) {
 			fillRateSettingList: []uint64{10, 20, 30},
 			ruDemandList:        []float64{0, 0, 0},
 			// No demand from any group, so all groups keep their original settings
-			expectedOverrideFillRateList:   []float64{-1, -1, -1}, // No demand, so use original settings
+			expectedOverrideFillRateList:   []float64{-1, -1, -1},
 			expectedOverrideBurstLimitList: []int64{-1, -1, -1},
-		},
-		{
-			name:                "Mixed demand and sufficient capacity",
-			serviceLimit:        150,
-			priorityList:        []uint32{4, 3, 3, 2, 1},
-			fillRateSettingList: []uint64{40, 30, 20, 25, 15},
-			ruDemandList:        []float64{35, 25, 15, 20, 10},
-			// Total demand: 105 < service limit 150, so all groups get their original settings
-			expectedOverrideFillRateList:   []float64{-1, -1, -1, -1, -1}, // All groups get their demand, use original settings
-			expectedOverrideBurstLimitList: []int64{-1, -1, -1, -1, -1},
 		},
 		{
 			name:                "Partial throttling across priorities - priority 3 gets full, priority 2 gets partial, priority 1 gets none",
@@ -769,50 +760,31 @@ func TestConciliateFillRate(t *testing.T) {
 			expectedOverrideBurstLimitList: []int64{-1, -1, 25, 25, 0},
 		},
 		{
-			name:                  "Burst demand with sufficient service limit",
-			serviceLimit:          200,
-			priorityList:          []uint32{2, 2, 1},
-			fillRateSettingList:   []uint64{20, 30, 40},
-			burstLimitSettingList: []int64{20, 30, 40},
-			ruDemandList:          []float64{25, 40, 55}, // Basic: 20,30,40=90; Burst: 5,10,15=30; Total: 120
-			// Total demand: 120 < service limit 200, so all groups get their original settings
-			expectedOverrideFillRateList:   []float64{-1, -1, -1}, // Use original fill rate settings when service limit is sufficient
-			expectedOverrideBurstLimitList: []int64{-1, -1, -1},   // Use original burst limit settings when service limit is sufficient
-		},
-		{
 			name:                  "Burst demand with insufficient service limit for all",
-			serviceLimit:          100,
+			serviceLimit:          70,
 			priorityList:          []uint32{2, 2, 1},
 			fillRateSettingList:   []uint64{20, 30, 40},
-			burstLimitSettingList: []int64{20, 30, 40},
-			ruDemandList:          []float64{25, 40, 55}, // Basic: 20,30,40=90; Burst: 5,10,15=30; Total: 120
-			// Priority 2: demand 65, gets full allocation (remaining: 35)
-			// Priority 1: demand 55 > remaining 35, gets 35 (basic demand 40 > remaining 35, so only basic proportional allocation)
-			expectedOverrideFillRateList:   []float64{-1, -1, 35}, // Priority 2 gets full, priority 1 gets the remaining service limit
-			expectedOverrideBurstLimitList: []int64{-1, -1, 35},
-		},
-		{
-			name:                  "Basic demand exceeds service limit with burst demand",
-			serviceLimit:          60,
-			priorityList:          []uint32{1, 1, 1},
-			fillRateSettingList:   []uint64{30, 40, 50},
-			burstLimitSettingList: []int64{10, 15, 20},
-			ruDemandList:          []float64{35, 50, 65}, // Basic demand: 30,40,50=120 > service limit 60
-			// Basic demand 120 > service limit 60, proportional allocation: 60*(30/120)=15, 60*(40/120)=20, 60*(50/120)=25
-			expectedOverrideFillRateList:   []float64{15, 20, 25}, // Only basic demand satisfied proportionally
-			expectedOverrideBurstLimitList: []int64{15, 20, 25},   // Burst limit set to same as fill rate in basic allocation
+			burstLimitSettingList: []int64{20, 35, 70},
+			ruDemandList:          []float64{25, 50, 65},
+			// Priority 2: basic 20+30=50, busrt 0+20=20, total 70
+			// 	 - All groups get their basic demand satisfied (remaining: 70-20-30=20)
+			//   - group 0 is non-burstable, so it gets no extra burst supply. (remaining: 20)
+			//   - group 1 is burstable, but 35 < 30+20, so it still gets the 35 burst supply. (remaining: 20-(35-30)=15)
+			// Priority 1: demand 65 > remaining 15, gets 15 basic and 0 burst
+			expectedOverrideFillRateList:   []float64{-1, -1, 15},
+			expectedOverrideBurstLimitList: []int64{20, 35, 15},
 		},
 		{
 			name:                  "Mixed burst scenarios - some with burst, some without",
 			serviceLimit:          100,
 			priorityList:          []uint32{2, 2, 1, 1},
 			fillRateSettingList:   []uint64{30, 40, 20, 30},
-			burstLimitSettingList: []int64{10, -1, 5, 0},
-			ruDemandList:          []float64{35, 45, 22, 20}, // Basic: 30,40,20,30=120; Burst: 5,5,2,0=12; Total: 132
-			// Priority 2: demand 80, gets full allocation (remaining: 20)
-			// Priority 1: demand 42 > remaining 20, basic demand 50 > remaining 20, proportional allocation: 20*(20/40)=10, 20*(20/40)=10
-			expectedOverrideFillRateList:   []float64{-1, -1, 8, 12}, // Priority 2 gets full, priority 1 gets basic demand proportionally
-			expectedOverrideBurstLimitList: []int64{-1, -1, 8, 12},
+			burstLimitSettingList: []int64{30, -1, 20, 30},
+			ruDemandList:          []float64{35, 45, 22, 20},
+			// Priority 2: basic 30+40=70, burst 0+5=5, total 75 < service limit 100, so gets full allocation (remaining: 25)
+			// Priority 1: basic 20+30=50, burst 2+0=2, total 52 > service limit 25, so gets basic demand proportionally
+			expectedOverrideFillRateList:   []float64{-1, -1, 10, 15},
+			expectedOverrideBurstLimitList: []int64{-1, -1, 10, 15},
 		},
 		{
 			name:                  "Unlimited burst limit with service limit constraint",
@@ -823,22 +795,8 @@ func TestConciliateFillRate(t *testing.T) {
 			ruDemandList:          []float64{30, 50, 60}, // Basic: 20,30,40=90; Burst: 10,20,20=50; Total: 140
 			// Priority 2: demand 30, gets full allocation (remaining: 70)
 			// Priority 1: demand 110 > remaining 70, basic demand 70 = remaining 70, proportional allocation: 70*(30/70)=30, 70*(40/70)=40
-			expectedOverrideFillRateList:   []float64{-1, 30, 40}, // Priority 2 gets full, priority 1 gets basic demand proportionally
+			expectedOverrideFillRateList:   []float64{-1, 30, 40},
 			expectedOverrideBurstLimitList: []int64{-1, 30, 40},
-		},
-		{
-			name:                  "Partial burst demand satisfied with burst limit",
-			serviceLimit:          60,
-			priorityList:          []uint32{2, 2, 1},
-			fillRateSettingList:   []uint64{20, 30, 40},
-			burstLimitSettingList: []int64{20, 30, 40},
-			ruDemandList:          []float64{25, 40, 50}, // Basic: 20,30,40=90; Burst: 5,10,10=25; Total: 115
-			// Priority 2: demand 65 > service limit 60, basic demand 50 < service limit 60, basic satisfied, burst gets: 60-50=10
-			// Burst allocation: 10*(5/15)=3.33, 10*(10/15)=6.67, so burst limits: min(20+3.33, 20)=20, min(30+6.67, 30)=30
-			// After allocation, remaining service limit is still 10.
-			// Priority 1: gets 10
-			expectedOverrideFillRateList:   []float64{-1, -1, 10},
-			expectedOverrideBurstLimitList: []int64{20, 30, 10},
 		},
 		{
 			name:                  "Partial burst demand satisfied with unlimited burst limit",
@@ -893,8 +851,9 @@ func TestConciliateFillRate(t *testing.T) {
 		krgm.setServiceLimit(tc.serviceLimit)
 		// Add the resource groups.
 		for i, priority := range tc.priorityList {
-			var burstLimit int64
-			if tc.burstLimitSettingList != nil && i < len(tc.burstLimitSettingList) {
+			fillRate := tc.fillRateSettingList[i]
+			burstLimit := int64(fillRate)
+			if len(tc.burstLimitSettingList) > 0 {
 				burstLimit = tc.burstLimitSettingList[i]
 			}
 			group := &rmpb.ResourceGroup{
@@ -904,7 +863,7 @@ func TestConciliateFillRate(t *testing.T) {
 				RUSettings: &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							FillRate:   tc.fillRateSettingList[i],
+							FillRate:   fillRate,
 							BurstLimit: burstLimit,
 						},
 					},

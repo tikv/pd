@@ -385,14 +385,26 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 	}
 }
 
-func (m *gaugeMetrics) setGroup(group *ResourceGroup) {
+func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
 	ru := math.Max(group.getRUToken(), 0)
 	m.availableRUCounter.Set(ru)
 	m.priorityResourceGroupConfigGauge.Set(group.getPriority())
-	m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRateSetting())
-	m.ruCapacityResourceGroupConfigGauge.Set(group.getBurstLimitSetting())
-	m.overrideFillRateGauge.Set(group.getOverrideFillRate())
-	m.overrideBurstLimitGauge.Set(float64(group.getOverrideBurstLimit()))
+	m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRate(true))
+	m.ruCapacityResourceGroupConfigGauge.Set(float64(group.getBurstLimit(true)))
+
+	// Set the override fill rate and burst limit and delete the metrics if the override is not set.
+	overrideFillRate := group.getOverrideFillRate()
+	if overrideFillRate == -1 {
+		overrideSettings.DeleteLabelValues(group.Name, keyspaceName, fillRateLabel)
+	} else {
+		m.overrideFillRateGauge.Set(overrideFillRate)
+	}
+	overrideBurstLimit := group.getOverrideBurstLimit()
+	if overrideBurstLimit == -1 {
+		overrideSettings.DeleteLabelValues(group.Name, keyspaceName, burstLimitLabel)
+	} else {
+		m.overrideBurstLimitGauge.Set(float64(overrideBurstLimit))
+	}
 }
 
 func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
