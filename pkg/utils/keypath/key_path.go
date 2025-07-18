@@ -382,6 +382,12 @@ func SchedulingPrimaryPath() string {
 	return path.Join(SchedulingSvcRootPath(), constant.PrimaryKey)
 }
 
+// ResourceManagerPrimaryPath returns the path of resource manager primary.
+// Path: /ms/{cluster_id}/resource_manager/primary
+func ResourceManagerPrimaryPath() string {
+	return path.Join(ResourceManagerSvcRootPath(), constant.PrimaryKey)
+}
+
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.
 // default keyspace group: "/ms/{cluster_id}/tso/00000".
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".

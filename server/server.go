@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
@@ -233,11 +234,12 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry                 *registry.ServiceRegistry
-	mode                     string
-	servicePrimaryMap        sync.Map /* Store as map[string]string */
-	tsoPrimaryWatcher        *etcdutil.LoopWatcher
-	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+	registry                      *registry.ServiceRegistry
+	mode                          string
+	servicePrimaryMap             sync.Map /* Store as map[string]string */
+	tsoPrimaryWatcher             *etcdutil.LoopWatcher
+	schedulingPrimaryWatcher      *etcdutil.LoopWatcher
+	resourceManagerPrimaryWatcher *etcdutil.LoopWatcher
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -306,7 +308,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		s.registry = registry.ServerServiceRegistry
 	})
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
-	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	if !s.IsAPIServiceMode() {
+		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	}
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
@@ -315,6 +319,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
+		if s.IsAPIServiceMode() {
+			// resource manager proxy
+			resource_manager.RegisterResourceManagerServer(gs, &resourceGroupProxyServer{GrpcServer: grpcServer})
+		}
 		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
 		s.grpcServer = gs
@@ -670,6 +678,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	if s.IsAPIServiceMode() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
+		s.initResourceManagerPrimaryWatcher()
 	}
 }
 
@@ -2037,6 +2046,13 @@ func (s *Server) initSchedulingPrimaryWatcher() {
 	primaryKey := keypath.SchedulingPrimaryPath()
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
+}
+
+func (s *Server) initResourceManagerPrimaryWatcher() {
+	serviceName := constant.ResourceManagerServiceName
+	primaryKey := keypath.ResourceManagerPrimaryPath()
+	s.resourceManagerPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
+	s.resourceManagerPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string) *etcdutil.LoopWatcher {
