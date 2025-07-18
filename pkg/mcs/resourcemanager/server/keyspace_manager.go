@@ -252,9 +252,10 @@ func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) 
 	// Set the new service limit to the limiter.
 	sl.setServiceLimit(serviceLimit)
 	// Cleanup the overrides if the service limit is set to 0.
-	if serviceLimit <= 0 {
-		krgm.cleanupOverrides()
+	if serviceLimit > 0 {
+		return
 	}
+	krgm.cleanupOverrides()
 }
 
 func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
@@ -537,8 +538,13 @@ func (krgm *keyspaceResourceGroupManager) getPriorityQueues() [][]*ResourceGroup
 
 func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
 	krgm.RLock()
+	groups := make([]*ResourceGroup, 0, len(krgm.groups))
 	for _, group := range krgm.groups {
-		group.overrideFillRateAndBurstLimit(-1, -1)
+		groups = append(groups, group)
 	}
 	krgm.RUnlock()
+	// Cleanup the overrides for all the resource groups without holding the lock.
+	for _, group := range groups {
+		group.overrideFillRateAndBurstLimit(-1, -1)
+	}
 }

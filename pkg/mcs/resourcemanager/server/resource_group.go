@@ -147,6 +147,10 @@ func (rg *ResourceGroup) getOverrideFillRate() float64 {
 func (rg *ResourceGroup) overrideFillRate(new float64) {
 	rg.Lock()
 	defer rg.Unlock()
+	rg.overrideFillRateLocked(new)
+}
+
+func (rg *ResourceGroup) overrideFillRateLocked(new float64) {
 	original := rg.RUSettings.RU.overrideFillRate
 	// If the fill rate has not been set before or the new value is negative,
 	// set it to the new fill rate directly without checking the tolerance.
@@ -180,15 +184,15 @@ func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
 	return rg.RUSettings.RU.overrideBurstLimit
 }
 
-func (rg *ResourceGroup) overrideBurstLimit(new int64) {
-	rg.Lock()
-	defer rg.Unlock()
+func (rg *ResourceGroup) overrideBurstLimitLocked(new int64) {
 	rg.RUSettings.RU.overrideBurstLimit = new
 }
 
 func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLimit int64) {
-	rg.overrideFillRate(fillRate)
-	rg.overrideBurstLimit(burstLimit)
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideFillRateLocked(fillRate)
+	rg.overrideBurstLimitLocked(burstLimit)
 }
 
 // PatchSettings patches the resource group settings.
