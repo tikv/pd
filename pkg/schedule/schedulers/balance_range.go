@@ -366,6 +366,7 @@ type balanceRangeScheduler struct {
 	handler       http.Handler
 	filters       []filter.Filter
 	filterCounter *filter.Counter
+	plan          *balanceRangeSchedulerPlan
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -392,7 +393,6 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 			km := cluster.GetKeyRangeManager()
 			km.Append(job.Ranges)
 		}
-		// todo: add other conditions such as the diff of the score between the source and target store.
 		if time.Since(*job.Start) > job.Timeout {
 			if err := s.conf.finish(index); err != nil {
 				return false
@@ -400,6 +400,26 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 			km := cluster.GetKeyRangeManager()
 			km.Delete(job.Ranges)
 			balanceRangeExpiredCounter.Inc()
+		}
+
+		opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+		// todo: don't prepare every times, the prepare information can be reused.
+		plan, err := s.prepare(cluster, opInfluence, job)
+		if err != nil {
+			log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
+			balanceRangePrepareFailedCounter.Inc()
+			return false
+		}
+		s.plan = plan
+		if s.plan.isBalanced() {
+			if err := s.conf.finish(index); err != nil {
+				return false
+			}
+			km := cluster.GetKeyRangeManager()
+			km.Delete(job.Ranges)
+			balanceRangeScheduledCounter.Inc()
+			// wait next round for the new job
+			return false
 		}
 	}
 	return allowed
@@ -438,14 +458,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	}
 	defer s.filterCounter.Flush()
 
-	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
-	// todo: don't prepare every times, the prepare information can be reused.
-	plan, err := s.prepare(cluster, opInfluence, job)
-	if err != nil {
-		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
-		return nil, nil
-	}
-
+	plan := s.plan
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
@@ -575,17 +588,20 @@ type balanceRangeSchedulerPlan struct {
 	// stores is sorted by score desc
 	stores []*core.StoreInfo
 	// scoreMap records the storeID -> score
-	scoreMap     map[uint64]int64
-	source       *core.StoreInfo
-	sourceScore  int64
-	target       *core.StoreInfo
-	targetScore  int64
-	region       *core.RegionInfo
-	fit          *placement.RegionFit
+	scoreMap    map[uint64]int64
+	source      *core.StoreInfo
+	sourceScore int64
+	target      *core.StoreInfo
+	targetScore int64
+	region      *core.RegionInfo
+	fit         *placement.RegionFit
+	job         *balanceRangeSchedulerJob
+	opInfluence operator.OpInfluence
+	tolerate    int64
+
 	averageScore int64
-	job          *balanceRangeSchedulerJob
-	opInfluence  operator.OpInfluence
-	tolerate     int64
+	maxScore     int64
+	minScore     int64
 }
 
 func fetchAllRegions(cluster sche.SchedulerCluster, ranges *keyutil.KeyRanges) []*core.RegionInfo {
@@ -657,8 +673,15 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 
 	averageScore := int64(0)
 	averageScore = totalScore / int64(len(sources))
+	maxScore := scoreMap[sources[0].GetID()]
+	minScore := scoreMap[sources[len(sources)-1].GetID()]
 
-	tolerantSizeRatio := int64(float64(len(scanRegions)) * adjustRatio)
+	ratio := cluster.GetSchedulerConfig().GetTolerantSizeRatio()
+	if ratio == 0 {
+		ratio = adjustRatio
+	}
+
+	tolerantSizeRatio := int64(float64(len(scanRegions)) * ratio)
 	if tolerantSizeRatio < 1 {
 		tolerantSizeRatio = 1
 	}
@@ -669,11 +692,19 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		source:           nil,
 		target:           nil,
 		region:           nil,
-		averageScore:     averageScore,
 		job:              job,
 		opInfluence:      opInfluence,
 		tolerate:         tolerantSizeRatio,
+		averageScore:     averageScore,
+		maxScore:         maxScore,
+		minScore:         minScore,
 	}, nil
+}
+
+func (p *balanceRangeSchedulerPlan) isBalanced() bool {
+	// If the max score subtracted by the min score is less than the average score multiplied by the threshold,
+	// we can consider the key ranges are balanced.
+	return p.maxScore-p.minScore <= p.tolerate
 }
 
 func (p *balanceRangeSchedulerPlan) sourceStoreID() uint64 {
