@@ -26,6 +26,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -120,7 +121,14 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
+	testutil.Eventually(re, func() bool {
+		err = leaderServer.BootstrapCluster()
+		if err != nil {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+		}
+		return err == nil
+	})
 
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
@@ -322,8 +330,14 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
+	testutil.Eventually(re, func() bool {
+		err = leaderServer.BootstrapCluster()
+		if err != nil {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+		}
+		return err == nil
+	})
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
@@ -577,7 +591,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		output, err := tests.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
 		if strings.Contains(string(output), "Failed") {
-			// It may be failed when meets error, such as [PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.Contains(string(output), "ErrEtcdTxnConflict", "output: %s", string(output))
 			return false
 		}
