@@ -24,6 +24,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
@@ -38,6 +39,7 @@ func RegisterMetaServiceGroup(r *gin.RouterGroup) {
 	router.Use(middlewares.BootstrapChecker())
 	router.GET("", GetMetaServiceGroups)
 	router.PATCH("", PatchMetaServiceGroups)
+	router.PATCH("/:id/status", PatchMetaServiceGroupStatus)
 }
 
 // MetaServiceGroupStatus represents the status of a meta-service group.
@@ -47,7 +49,10 @@ type MetaServiceGroupStatus struct {
 	ID string `json:"id"`
 	// Addresses is a comma-separated list of addresses for the meta-service group.
 	Addresses string `json:"addresses"`
-	// AssignedKeyspaces is the number of keyspaces assigned to this meta-service group.
+	// Status is the persisted status (assignment count and enabled state).
+	Status *endpoint.MetaServiceGroupStatus `json:"status,omitempty"`
+	// AssignedKeyspaces is kept for backward compatibility with existing
+	// clients. It mirrors Status.AssignmentCount; prefer Status going forward.
 	AssignedKeyspaces int `json:"assigned_keyspaces"`
 }
 
@@ -165,19 +170,68 @@ func GetMetaServiceGroups(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, status)
 }
 
+// PatchMetaServiceGroupStatus patches the status of a specific meta-service group.
+//
+// @Tags     meta-service-groups
+// @Summary  Patch meta-service groups status.
+// @Param    body  body  object  true  "Patch for meta-service status"
+// @Produce  json
+// @Success  200  {array}   MetaServiceGroupStatus    "List of all meta-service groups after patch"
+// @Failure  400  {string}  string                    "Bad request (invalid JSON or invalid operation)"
+// @Failure  404  {string}  string                    "The meta-service group does not exist"
+// @Failure  500  {string}  string                    "Internal server error"
+// @Router   /meta-service-groups/{id}/status [patch]
+func PatchMetaServiceGroupStatus(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetMetaServiceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, metaServiceGroupUninitializedErr)
+		return
+	}
+	groupID := c.Param("id")
+	patch := &keyspace.MetaServiceGroupStatusPatch{}
+	if err := c.ShouldBindJSON(patch); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	if err := manager.PatchStatus(c.Request.Context(), groupID, patch); err != nil {
+		if errors.Is(err, keyspace.ErrUnknownMetaServiceGroup) {
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, keyspace.ErrInvalidAssignmentCount) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	status, err := buildMetaServiceGroupStatus(c, manager)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, status)
+}
+
 func buildMetaServiceGroupStatus(c *gin.Context, manager *keyspace.MetaServiceGroupManager) ([]MetaServiceGroupStatus, error) {
 	currentGroups := manager.GetGroups()
-	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
+	statuses, err := manager.GetStatus(c.Request.Context())
 	if err != nil {
 		return nil, err
 	}
 
 	status := make([]MetaServiceGroupStatus, 0, len(currentGroups))
 	for id, addresses := range currentGroups {
+		var assignedKeyspaces int
+		if s := statuses[id]; s != nil {
+			assignedKeyspaces = s.AssignmentCount
+		}
 		status = append(status, MetaServiceGroupStatus{
 			ID:                id,
 			Addresses:         addresses,
-			AssignedKeyspaces: assignmentCounts[id],
+			Status:            statuses[id],
+			AssignedKeyspaces: assignedKeyspaces,
 		})
 	}
 	// sort for deterministic output

@@ -55,18 +55,23 @@ func (suite *metaServiceGroupTestSuite) TearDownTest() {
 
 func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
 	re := suite.Require()
-	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
 	re.NoError(err)
 
 	for grp := range mockMetaServiceGroups() {
-		val, exists := counts[grp]
+		status, exists := statusMap[grp]
 		re.True(exists, "expected group %q to be present in counts", grp)
-		re.Equal(0, val, "expected initial count of %q to be 0", grp)
+		re.Equal(0, status.AssignmentCount, "expected initial count of %q to be 0", grp)
+		re.False(status.Enabled, "expected initial status of %q to be disabled", grp)
 	}
+
+	_, err = suite.manager.AssignToGroup(suite.ctx, 1)
+	re.Error(err)
 }
 
 func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 	re := suite.Require()
+	suite.enableAllGroups()
 	request := 5
 	assigned, err := suite.manager.AssignToGroup(suite.ctx, request)
 	re.NoError(err)
@@ -92,6 +97,7 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 
 func (suite *metaServiceGroupTestSuite) TestPickGroup() {
 	re := suite.Require()
+	suite.enableAllGroups()
 	assigned, err := suite.manager.PickGroup(suite.ctx)
 	re.NoError(err)
 	re.NotEmpty(assigned, "expected PickGroup to return a non-empty group")
@@ -162,6 +168,7 @@ func (suite *metaServiceGroupTestSuite) TestGetGroupsReturnsCopy() {
 
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment() {
 	re := suite.Require()
+	suite.enableAllGroups()
 	// Assign to some existing group
 	assigned, err := suite.manager.AssignToGroup(suite.ctx, 1)
 	re.NoError(err)
@@ -203,10 +210,10 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 // a group with real keyspaces is still protected.
 func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeCount() {
 	re := suite.Require()
-	// Simulate a stale persisted counter: etcd-group-2 reports assigned keyspaces
+	// Simulate a stale persisted status: etcd-group-2 reports assigned keyspaces
 	// even though none actually reference it.
 	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return suite.manager.store.IncrementAssignmentCount(txn, "etcd-group-2", 3)
+		return suite.manager.store.SaveMetaServiceGroupStatus(txn, "etcd-group-2", &endpoint.MetaServiceGroupStatus{AssignmentCount: 3})
 	})
 	re.NoError(err)
 
@@ -229,16 +236,16 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	re.NoError(err)
 	re.True(persisted, "deletion of an actually-empty group must be persisted")
 
-	// The persisted counter for the deleted group must be cleared, so re-adding
+	// The persisted status for the deleted group must be cleared, so re-adding
 	// the same ID later does not inherit the stale count.
-	var residual map[string]int
+	var residual map[string]*endpoint.MetaServiceGroupStatus
 	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		var err error
-		residual, err = suite.manager.store.GetAssignmentCount(txn, map[string]string{"etcd-group-2": ""})
+		residual, err = suite.manager.store.LoadMetaServiceGroupStatus(txn, map[string]string{"etcd-group-2": ""})
 		return err
 	})
 	re.NoError(err)
-	re.Equal(0, residual["etcd-group-2"], "deleted group's persisted count must be cleared")
+	re.Equal(0, residual["etcd-group-2"].AssignmentCount, "deleted group's persisted count must be cleared")
 
 	// A group with real keyspaces must still be rejected.
 	actual["etcd-group-1"] = 1
@@ -248,4 +255,14 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups2, []string{"etcd-group-1"},
 		func() error { return nil }, nil)
 	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
+}
+
+func (suite *metaServiceGroupTestSuite) enableAllGroups() {
+	re := suite.Require()
+	enabled := true
+	for groupID := range mockMetaServiceGroups() {
+		re.NoError(suite.manager.PatchStatus(suite.ctx, groupID, &MetaServiceGroupStatusPatch{
+			Enabled: &enabled,
+		}))
+	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -58,6 +59,7 @@ func (suite *metaServiceGroupTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
 		conf.Keyspace.MetaServiceGroups = mockMetaServiceGroups()
 		conf.Keyspace.WaitRegionSplit = false
 	})
@@ -85,14 +87,17 @@ func collectStatus(re *require.Assertions, keyspaces []*keyspacepb.KeyspaceMeta)
 		re.NotEmpty(id)
 		if collectedStatuses[id] == nil {
 			collectedStatuses[id] = &handlers.MetaServiceGroupStatus{
-				ID:                id,
-				Addresses:         addresses,
-				AssignedKeyspaces: 1,
+				ID:        id,
+				Addresses: addresses,
+				Status: &endpoint.MetaServiceGroupStatus{
+					Enabled:         true,
+					AssignmentCount: 1,
+				},
 			}
 		} else {
 			re.Equal(id, collectedStatuses[id].ID)
 			re.Equal(addresses, collectedStatuses[id].Addresses)
-			collectedStatuses[id].AssignedKeyspaces++
+			collectedStatuses[id].Status.AssignmentCount++
 		}
 	}
 	return collectedStatuses
@@ -152,6 +157,11 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	defaultKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupIDKey)
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupAddressesKey)
+	// Meta-service groups are disabled by default and must be enabled before assignment.
+	for _, group := range mustLoadMetaServiceGroups(re, suite.server) {
+		re.False(group.Status.Enabled)
+		mustEnableMetaServiceGroup(re, suite.server, group.ID)
+	}
 	// Create keyspaces and collect their meta-service group configs.
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 20)
 	collectedGroups := collectStatus(re, keyspaces)
@@ -162,9 +172,9 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		collectedStatus := collectedGroups[group.ID]
 		re.Equal(collectedStatus.ID, group.ID)
 		re.Equal(collectedStatus.Addresses, group.Addresses)
-		re.Equal(collectedStatus.AssignedKeyspaces, group.AssignedKeyspaces)
+		re.Equal(collectedStatus.Status.AssignmentCount, group.Status.AssignmentCount)
 		// Make sure keyspaces are relatively evenly distributed among meta-service groups.
-		re.InDelta(collectedStatus.AssignedKeyspaces, len(keyspaces)/len(groups), 1)
+		re.InDelta(collectedStatus.Status.AssignmentCount, len(keyspaces)/len(groups), 1)
 	}
 	// Add two more meta-service groups.
 	addr4 := "etcd-group-4.tidb-serverless.cluster.svc.local"
@@ -173,13 +183,16 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		"etcd-group-4": &addr4,
 		"etcd-group-5": &addr5,
 	}
-
 	groups = mustPatchMetaServiceGroups(re, suite.server, patch)
+	// Newly added groups are disabled by default; enable them so they become
+	// eligible for keyspace assignment.
+	mustEnableMetaServiceGroup(re, suite.server, "etcd-group-4")
+	mustEnableMetaServiceGroup(re, suite.server, "etcd-group-5")
 	re.Equal(len(groups), len(mockMetaServiceGroups())+len(patch))
 	// Newly assigned meta-service group should have no assigned keyspace.
 	for _, group := range groups {
 		if collectedGroups[group.ID] == nil {
-			re.Zero(group.AssignedKeyspaces)
+			re.Zero(group.Status.AssignmentCount)
 		}
 	}
 	// Create more keyspaces and check that newly added meta-service groups are used.
@@ -190,9 +203,9 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		collectedStatus := collectedGroups[group.ID]
 		re.Equal(collectedStatus.ID, group.ID)
 		re.Equal(collectedStatus.Addresses, group.Addresses)
-		re.Equal(collectedStatus.AssignedKeyspaces, group.AssignedKeyspaces)
+		re.Equal(collectedStatus.Status.AssignmentCount, group.Status.AssignmentCount)
 		// Make sure keyspaces are relatively evenly distributed among meta-service groups.
-		re.InDelta(collectedStatus.AssignedKeyspaces, len(keyspaces)/len(groups), 1)
+		re.InDelta(collectedStatus.Status.AssignmentCount, len(keyspaces)/len(groups), 1)
 	}
 	// Modify address of etcd-group-1
 	newAddr := "etcd-group-1-modified.tidb-serverless.cluster.svc.local"

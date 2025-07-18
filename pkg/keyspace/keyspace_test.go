@@ -1105,8 +1105,11 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	re.NoError(err)
 	re.Empty(loaded.GetConfig()[MetaServiceGroupIDKey])
 
-	// A present group is still assigned.
+	// A present, enabled group is still assigned. Groups are disabled by
+	// default, so it must be enabled before it is eligible for assignment.
 	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"})
+	enabled := true
+	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
 	cfg2 := map[string]string{}
 	ks2 := &keyspacepb.KeyspaceMeta{Id: 101, Name: "ks-with-group", Config: cfg2}
