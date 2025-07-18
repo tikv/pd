@@ -102,7 +102,7 @@ func TestInitManager(t *testing.T) {
 	re.NotNil(rg)
 	// Verify the default resource group settings are updated. This is to ensure the default resource group
 	// can be loaded from the storage correctly rather than created as a new one.
-	re.Equal(defaultGroup.RUSettings.RU.getFillRateSetting(), rg.RUSettings.RU.getFillRateSetting())
+	re.Equal(defaultGroup.getFillRate(), rg.getFillRate())
 }
 
 func TestBackgroundMetricsFlush(t *testing.T) {
