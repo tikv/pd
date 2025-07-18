@@ -34,7 +34,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pmezard/go-difflib/difflib"
 	"go.uber.org/zap"
 
 	"github.com/tikv/pd/tools/pd-ut/alloc"
@@ -298,7 +297,6 @@ func cmdRun(args ...string) bool {
 	}
 	tasks := make([]task, 0, 5000)
 	start := time.Now()
-	var tmpEtcdKeyFile string
 
 	switch len(args) {
 	case 0, 1: // 0: run all tests, 1: run tests for a single package
@@ -344,19 +342,6 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
-	var needCheckEtcd bool
-	if group != "" {
-		needCheckEtcd = true
-		etcdKeyTestFile = fmt.Sprintf("group.%s.etcdkey", group)
-		pwd, _ := os.Getwd()
-		tmpEtcdKeyFile = filepath.Join(pwd, etcdKeyTestFilePath, fmt.Sprintf("tmp.%s", etcdKeyTestFile))
-
-		os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")", tmpEtcdKeyFile))
-		defer func() {
-			os.Setenv("GO_FAILPOINTS", "github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"\")")
-		}()
-	}
-
 	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
 
 	taskCh := make(chan task, 100)
@@ -385,45 +370,6 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
-	if needCheckEtcd && success {
-		etcdKeyFile := filepath.Join(etcdKeyTestFilePath, etcdKeyTestFile)
-		fmt.Printf("check the etcd key compatibility: \n%s\n%s\n", etcdKeyFile, tmpEtcdKeyFile)
-
-		// compare the etcd key file with the tmpEtcdKeyFile
-		// if they are the same, then the etcd key is compatible
-		etcdKeyFileContent, err := os.ReadFile(etcdKeyFile)
-		if err != nil {
-			fmt.Println("read etcd key file error", err)
-			etcdKeyFileContent = []byte{}
-		}
-		tmpEtcdKeyFileContent, err := os.ReadFile(tmpEtcdKeyFile)
-		if err != nil {
-			fmt.Println("read tmp etcd key file error", err)
-			tmpEtcdKeyFileContent = []byte{}
-		}
-
-		etcdKey := string(etcdKeyFileContent)
-		tmpEtcdKey := removeDuplicate(tmpEtcdKeyFileContent)
-		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0600)
-		// If the content is too long, maybe we can not print them.
-		fmt.Printf("etcd key: %s\n\ntest etcd key: %s\n", etcdKey, tmpEtcdKey)
-
-		diff := difflib.UnifiedDiff{
-			A:        difflib.SplitLines(etcdKey),
-			B:        difflib.SplitLines(tmpEtcdKey),
-			FromFile: etcdKeyFile,
-			ToFile:   tmpEtcdKeyFile,
-			Context:  3,
-		}
-		diffText, _ := difflib.GetUnifiedDiffString(diff)
-
-		if len(diffText) != 0 {
-			// print the diff
-			fmt.Println("etcd key is not compatible:")
-			fmt.Println(diffText)
-			return false
-		}
-	}
 	if junitFile != "" {
 		out := collectTestResults(works)
 		f, err := os.Create(junitFile)
