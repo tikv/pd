@@ -360,7 +360,10 @@ func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
 
 // RunTestInNonMicroserviceEnv is to run test in non-microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
-	s.t.Logf("start test %s in non-microservice environment", getTestName())
+	name := getTestName()
+	if !strings.Contains(name, "TearDownTest") {
+		s.t.Logf("start test %s in non-microservice environment", name)
+	}
 	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
 		s.startCluster(NonMicroserviceEnv)
 	}
@@ -390,7 +393,10 @@ func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestClus
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
-	s.t.Logf("start test %s in microservice environment", getTestName())
+	name := getTestName()
+	if !strings.Contains(name, "TearDownTest") {
+		s.t.Logf("start test %s in microservice environment", getTestName())
+	}
 	if _, ok := s.clusters[MicroserviceEnv]; !ok {
 		s.startCluster(MicroserviceEnv)
 	}
