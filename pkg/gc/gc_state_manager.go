@@ -436,7 +436,7 @@ func (*GCStateManager) logAdvancingTxnSafePoint(keyspaceID uint32, result Advanc
 // GC barrier should never expire. The ttl might be rounded up, and the actual ttl is guaranteed no less than the
 // specified duration.
 //
-// The barrierID must be non-empty. For NullKeyspace, "gc_worker" is a reserved name and cannot be used as a barrierID.
+// The barrierID must be non-empty. "gc_worker" is a reserved name and cannot be used as a barrierID.
 //
 // The given barrierTS must be greater than or equal to the current txn safe point, or an error will be returned.
 //

@@ -41,6 +41,7 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	defer func() { metrics.CmdDurationUpdateGCSafePointV2.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	//nolint:staticcheck
 	req := &pdpb.UpdateGCSafePointV2Request{
 		Header:     c.requestHeader(),
 		KeyspaceId: keyspaceID,
@@ -51,7 +52,7 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 		cancel()
 		return 0, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.UpdateGCSafePointV2(ctx, req)
+	resp, err := protoClient.UpdateGCSafePointV2(ctx, req) //nolint:staticcheck
 	cancel()
 
 	if err = c.respForErr(metrics.CmdFailedDurationUpdateGCSafePointV2, start, err, resp.GetHeader()); err != nil {
@@ -71,6 +72,7 @@ func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 	defer func() { metrics.CmdDurationUpdateServiceSafePointV2.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	//nolint:staticcheck
 	req := &pdpb.UpdateServiceSafePointV2Request{
 		Header:     c.requestHeader(),
 		KeyspaceId: keyspaceID,
@@ -83,7 +85,7 @@ func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 		cancel()
 		return 0, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.UpdateServiceSafePointV2(ctx, req)
+	resp, err := protoClient.UpdateServiceSafePointV2(ctx, req) //nolint:staticcheck
 	cancel()
 	if err = c.respForErr(metrics.CmdFailedDurationUpdateServiceSafePointV2, start, err, resp.GetHeader()); err != nil {
 		return 0, err

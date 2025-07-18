@@ -35,6 +35,9 @@ import (
 )
 
 // UpdateGCSafePoint implements gRPC PDServer.
+// Deprecated: Use AdvanceGCSafePoint instead. Note that it's only for use of GC internal.
+//
+//nolint:staticcheck
 func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (resp *pdpb.UpdateGCSafePointResponse, errRet error) {
 	log.Warn("deprecated API UpdateGCSafePoint is called", zap.Uint64("req-safe-point", request.GetSafePoint()))
 	defer func() {
@@ -89,6 +92,9 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 }
 
 // GetGCSafePoint implements gRPC PDServer.
+// Deprecated: Use GetGCState instead.
+//
+//nolint:staticcheck
 func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (resp *pdpb.GetGCSafePointResponse, errRet error) {
 	log.Warn("deprecated API GetGCSafePoint is called")
 	defer func() {
@@ -132,6 +138,9 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 }
 
 // UpdateServiceGCSafePoint update the safepoint for specific service
+// Deprecated: Use SetGCBarrier instead.
+//
+//nolint:staticcheck
 func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (resp *pdpb.UpdateServiceGCSafePointResponse, errRet error) {
 	log.Warn("deprecated API UpdateServiceGCSafePoint is called",
 		zap.String("req-service-id", string(request.GetServiceId())),
@@ -200,6 +209,9 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 }
 
 // GetGCSafePointV2 return gc safe point for the given keyspace.
+// Deprecated: Use GetGCState instead
+//
+//nolint:staticcheck
 func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (resp *pdpb.GetGCSafePointV2Response, errRet error) {
 	log.Warn("deprecated API GetGCSafePointV2 is called", zap.Uint32("keyspace-id", request.GetKeyspaceId()))
 	defer func() {
@@ -246,6 +258,9 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 }
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
+// Deprecated: Use AdvanceGCSafePoint instead. Note that it's only for use of GC internal.
+//
+//nolint:staticcheck
 func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (resp *pdpb.UpdateGCSafePointV2Response, errRet error) {
 	log.Warn("deprecated API UpdateGCSafePointV2 is called", zap.Uint32("keyspace-id", request.GetKeyspaceId()), zap.Uint64("req-safe-point", request.GetSafePoint()))
 	defer func() {
@@ -302,6 +317,9 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 }
 
 // UpdateServiceSafePointV2 update service safe point for the given keyspace.
+// Deprecated: Use SetGCBarrier instead.
+//
+//nolint:staticcheck
 func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (resp *pdpb.UpdateServiceSafePointV2Response, errRet error) {
 	log.Warn("deprecated API UpdateServiceSafePointV2 is called",
 		zap.Uint32("keyspace-id", request.GetKeyspaceId()),
@@ -370,12 +388,18 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 }
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
+// Deprecated: Poll GetAllKeyspacesGCStates instead.
+//
+//nolint:staticcheck
 func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.PD_WatchGCSafePointV2Server) error {
 	log.Error("removed API WatchGCSafePointV2 is called")
 	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.
+// Deprecated: Use GetAllKeyspacesGCStates instead.
+//
+//nolint:staticcheck
 func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (resp *pdpb.GetAllGCSafePointV2Response, errRet error) {
 	log.Warn("deprecated API GetAllGCSafePointV2 is called")
 	defer func() {
