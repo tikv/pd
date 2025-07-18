@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -96,8 +95,6 @@ go tool cover --func=xxx`
 var (
 	modulePath           = filepath.Join("github.com", "tikv", "pd")
 	integrationsTestPath = filepath.Join("tests", "integrations")
-	etcdKeyTestFilePath  = filepath.Join("tools", "pd-ut", "testdata")
-	etcdKeyTestFile      string
 )
 
 var (
@@ -111,7 +108,6 @@ var (
 	coverProfile string
 	ignoreDirs   string
 	cache        bool
-	group        string
 )
 
 func main() {
@@ -121,7 +117,6 @@ func main() {
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDirs = stripFlag("--ignore")
 	cache = handleFlag("--cache")
-	group = stripFlag("--group")
 
 	if coverProfile != "" {
 		var err error
@@ -984,23 +979,4 @@ type JUnitFailure struct {
 	Message  string `xml:"message,attr"`
 	Type     string `xml:"type,attr"`
 	Contents string `xml:",chardata"`
-}
-
-func removeDuplicate(content []byte) string {
-	lines := strings.Split(string(content), "\n")
-	unique := make(map[string]struct{})
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
-		unique[line] = struct{}{}
-	}
-	var res []string
-	for k := range unique {
-		res = append(res, k)
-	}
-
-	// sort the result
-	sort.Strings(res)
-	return strings.Join(res, "\n")
 }
