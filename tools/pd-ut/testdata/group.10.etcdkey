@@ -19,9 +19,9 @@
 /pd//alloc_id get
 /pd//config get
 /pd//config save
-/pd//gc/safe_point/service/ get
+/pd//gc/gc_state_revision get
+/pd//gc/gc_state_revision save
 /pd//gc/safe_point/service/a save
-/pd//gc/safe_point/service/gc_worker save
 /pd//gc/safe_point/service/service- save
 /pd//keyspaces/alloc_id get
 /pd//keyspaces/id/DEFAULT get

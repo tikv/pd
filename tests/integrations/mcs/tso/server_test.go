@@ -388,7 +388,7 @@ func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
 		// try to update gc safe point
-		min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
+		min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1) //nolint:staticcheck
 		re.NoError(err)
 		re.Equal(uint64(0), min)
 	})
@@ -476,7 +476,7 @@ func (suite *PDServiceForward) checkUnavailableTSO(re *require.Assertions) {
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.Error(err)
 	// try to update gc safe point
-	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
+	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1) //nolint:staticcheck
 	re.Error(err)
 	// try to set external ts
 	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
@@ -489,7 +489,7 @@ func (suite *PDServiceForward) checkAvailableTSO(re *require.Assertions) {
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.NoError(err)
 	// try to update gc safe point
-	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
+	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1) //nolint:staticcheck
 	re.NoError(err)
 	re.Equal(uint64(0), min)
 	// try to set external ts
@@ -524,7 +524,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 			defer pdClient.Close()
 			for range 10 {
 				testutil.Eventually(re, func() bool {
-					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
 					return err == nil && min == 0
 				})
 			}
@@ -568,7 +568,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 					go func() {
 						defer wg.Done()
 						for range 1000 {
-							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
 							re.NoError(err)
 							re.Equal(uint64(0), min)
 						}

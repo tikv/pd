@@ -13,6 +13,8 @@
 /pd//config get
 /pd//config save
 /pd//config watch
+/pd//gc/gc_state_revision get
+/pd//gc/gc_state_revision save
 /pd//gc/safe_point get
 /pd//gc/safe_point save
 /pd//gc/safe_point/service/ get
@@ -126,6 +128,9 @@
 /pd//tso/keyspace_groups/membership/ get
 /pd//tso/keyspace_groups/membership/ save
 /pd/cluster_id get
+/tidb/server/minstartts/ get
+/tidb/store/gcworker/saved_safe_point get
+/tidb/store/gcworker/saved_safe_point save
 encryption_keys get
 encryption_keys watch
 resource_group/controller get
