@@ -19,6 +19,11 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+<<<<<<< HEAD
+=======
+	"github.com/urfave/negroni/v3"
+
+>>>>>>> 735fcade5 (deps(master): update to fix the vulnerabilities (#9559))
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	mcs "github.com/tikv/pd/pkg/mcs/utils"

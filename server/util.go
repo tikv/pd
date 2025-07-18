@@ -22,6 +22,12 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+<<<<<<< HEAD
+=======
+	"github.com/urfave/negroni/v3"
+	"go.uber.org/zap"
+
+>>>>>>> 735fcade5 (deps(master): update to fix the vulnerabilities (#9559))
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"

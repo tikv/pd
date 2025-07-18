@@ -19,6 +19,12 @@ import (
 	"net/http"
 	"time"
 
+<<<<<<< HEAD
+=======
+	"github.com/unrolled/render"
+	"github.com/urfave/negroni/v3"
+
+>>>>>>> 735fcade5 (deps(master): update to fix the vulnerabilities (#9559))
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"

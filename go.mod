@@ -56,6 +56,7 @@ require (
 	github.com/swaggo/swag v1.8.3
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
+<<<<<<< HEAD
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20240320135013-950cd5fbe6ca
 	go.uber.org/atomic v1.10.0
@@ -64,6 +65,16 @@ require (
 	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a
 	golang.org/x/text v0.21.0
 	golang.org/x/time v0.1.0
+=======
+	github.com/urfave/negroni/v3 v3.1.1
+	go.etcd.io/etcd/api/v3 v3.5.15
+	go.etcd.io/etcd/client/pkg/v3 v3.5.15
+	go.etcd.io/etcd/client/v3 v3.5.15
+	go.etcd.io/etcd/server/v3 v3.5.15
+	go.uber.org/goleak v1.3.0
+	go.uber.org/zap v1.27.0
+	golang.org/x/time v0.5.0
+>>>>>>> 735fcade5 (deps(master): update to fix the vulnerabilities (#9559))
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d
 	google.golang.org/grpc v1.59.0
 	gotest.tools/gotestsum v1.7.0
@@ -163,6 +174,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect

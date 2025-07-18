@@ -19,7 +19,14 @@ import (
 	"net/url"
 	"strings"
 
+<<<<<<< HEAD
 	"github.com/pingcap/failpoint"
+=======
+	"github.com/urfave/negroni/v3"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+>>>>>>> 735fcade5 (deps(master): update to fix the vulnerabilities (#9559))
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
