@@ -275,7 +275,7 @@ func (rg *ResourceGroup) RequestRU(
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
 		if rg.getBurstLimitLocked() > 0 {
-			rg.RUSettings.RU.lastLimitedTokens += grantedTokens - limitedTokens
+			rg.RUSettings.RU.reservedServiceTokens += grantedTokens - limitedTokens
 		}
 	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
