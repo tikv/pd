@@ -36,8 +36,8 @@ var (
 	evictLeaderSchedulerName  = "evict-leader-scheduler"
 	grantLeaderSchedulerName  = "grant-leader-scheduler"
 
-	schedulingPrimaryUri = "/pd/api/v2/ms/primary/scheduling"
-	schedulingMembersUri = "/pd/api/v2/ms/members/scheduling"
+	schedulingPrimaryURI = "/pd/api/v2/ms/primary/scheduling"
+	schedulingMembersURI = "/pd/api/v2/ms/members/scheduling"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -77,7 +77,7 @@ func NewMicroServiceCommand() *cobra.Command {
 }
 
 func getSchedulingMembersCommandFunc(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, schedulingMembersUri, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, schedulingMembersURI, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
 		return
@@ -86,7 +86,7 @@ func getSchedulingMembersCommandFunc(cmd *cobra.Command, _ []string) {
 }
 
 func getSchedulingPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, schedulingPrimaryUri, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, schedulingPrimaryURI, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
 		return

@@ -24,8 +24,8 @@ import (
 )
 
 var (
-	tsoPrimaryUri = "/pd/api/v2/ms/primary/tso"
-	tsoMembersUri = "/pd/api/v2/ms/members/tso"
+	tsoPrimaryURI = "/pd/api/v2/ms/primary/tso"
+	tsoMembersURI = "/pd/api/v2/ms/members/tso"
 )
 
 // NewTSOCommand return a TSO subcommand of rootCmd
@@ -59,7 +59,7 @@ func NewTSOMicroServiceCommand() *cobra.Command {
 }
 
 func getTsoMembersCommandFunc(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, tsoMembersUri, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, tsoMembersURI, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
 		return
@@ -68,7 +68,7 @@ func getTsoMembersCommandFunc(cmd *cobra.Command, _ []string) {
 }
 
 func getTsoPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, tsoPrimaryUri, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, tsoPrimaryURI, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
 		return
