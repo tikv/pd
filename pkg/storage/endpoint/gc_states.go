@@ -527,21 +527,6 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*Se
 		return nil, nil, err
 	}
 
-	prefix = keypath.GlobalGCBarrierPrefix()
-	keys1, barriers, err := loadJSONByPrefix[*GlobalGCBarrier](p.storage, prefix, 0)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	for i, barrier := range barriers {
-		keys = append(keys, keys1[i])
-		ssps = append(ssps, &ServiceSafePoint{
-			ServiceID:  barrier.BarrierID,
-			SafePoint:  barrier.BarrierTS,
-			ExpiredAt:  barrier.ExpirationTime.unixSeconds(),
-			KeyspaceID: constant.NullKeyspaceID,
-		})
-	}
 	if len(keys) == 0 {
 		return []string{}, []*ServiceSafePoint{}, nil
 	}

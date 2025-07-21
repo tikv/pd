@@ -243,7 +243,7 @@ func TestGCOperations(t *testing.T) {
 			continue
 		}
 		re.Equal(gcState.KeyspaceScope.KeyspaceId != constant.NullKeyspaceID, gcState.GetIsKeyspaceLevelGc())
-		// re.Equal(uint64(15), gcState.GetTxnSafePoint())
+		re.Equal(uint64(15), gcState.GetTxnSafePoint())
 		re.Equal(uint64(8), gcState.GetGcSafePoint())
 		re.Len(gcState.GetGcBarriers(), 1)
 		re.Equal("b1", gcState.GetGcBarriers()[0].GetBarrierId())

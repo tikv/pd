@@ -969,7 +969,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 		re.Equal(uint64(10), res.OldTxnSafePoint)
 		re.Equal(uint64(10), res.NewTxnSafePoint)
 		re.Equal(uint64(15), res.Target)
-		re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+		re.Contains(res.BlockerDescription, "GlobalGCBarrier { BarrierID: \"b1\"")
 		s.checkTxnSafePoint(keyspaceID, 10)
 	}
 
@@ -1176,14 +1176,6 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	re.NoError(err)
 	re.Equal(uint64(220), res.NewTxnSafePoint)
 	re.Contains(res.BlockerDescription, "BarrierID: \"b3\"")
-
-	// Clear.
-	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b1")
-	re.NoError(err)
-	_, err = s.manager.DeleteGCBarrier(ks1, "b2")
-	re.NoError(err)
-	_, err = s.manager.DeleteGCBarrier(ks2, "b3")
-	re.NoError(err)
 }
 
 func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
@@ -1480,15 +1472,19 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	// keyspace has larger txn safe point than the given service safe point value
 	_, err = s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 25, time.Now())
 	re.NoError(err)
-	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 16, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 16, math.MaxInt64, now)
 	re.NoError(err)
 	re.False(updated) // the call failed, but this is not an error
-	_, err = s.manager.AdvanceTxnSafePoint(2, 22, time.Now())
+	re.Equal(uint64(25), minSsp.SafePoint)
+
+	res, err = s.manager.AdvanceTxnSafePoint(2, 22, time.Now())
+	re.NoError(err)
+	re.Equal(uint64(22), res.NewTxnSafePoint)
+	// now there are two barriers on different keyspace
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 20, math.MaxInt64, now)
 	re.NoError(err)
 	re.False(updated)
-	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 20, math.MaxInt64, now)
-	re.NoError(err)
-	re.False(updated)
+	re.Equal(uint64(25), minSsp.SafePoint)
 
 	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("native_br", 32, math.MaxInt64, now)
 	re.NoError(err)
@@ -1726,13 +1722,17 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	re := s.Require()
 
 	var txnSafePoint uint64
+	var keyspaceName string
+	var keyspaceID uint32
 	err := s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		txnSafePoint, _, _, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
 		return err1
 	})
 	re.NoError(err)
 	re.Equal(uint64(0), txnSafePoint)
+	re.Empty(keyspaceName)
+	re.Equal(uint32(0), keyspaceID)
 
 	// change the value and check again
 	for i, keyspaceID := range s.keyspacePresets.manageable {
@@ -1741,11 +1741,13 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	}
 	err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		txnSafePoint, _, _, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
 		return err1
 	})
 	re.NoError(err)
 	re.Equal(uint64(len(s.keyspacePresets.manageable)), txnSafePoint)
+	re.Equal("ks2", keyspaceName)
+	re.Equal(uint32(2), keyspaceID)
 }
 
 func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
