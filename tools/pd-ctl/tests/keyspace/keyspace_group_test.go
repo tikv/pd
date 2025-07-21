@@ -26,7 +26,6 @@ import (
 
 	"github.com/pingcap/failpoint"
 
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -121,14 +120,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	testutil.Eventually(re, func() bool {
-		err = leaderServer.BootstrapCluster()
-		if err != nil {
-			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
-		}
-		return err == nil
-	})
+	re.NoError(leaderServer.BootstrapCluster())
 
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
@@ -310,7 +302,8 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
 	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
-	for i := range 129 {
+	keyspaceCount := 129
+	for i := range keyspaceCount {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
@@ -330,14 +323,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	testutil.Eventually(re, func() bool {
-		err = leaderServer.BootstrapCluster()
-		if err != nil {
-			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-			re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
-		}
-		return err == nil
-	})
+	re.NoError(leaderServer.BootstrapCluster())
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
@@ -368,8 +354,8 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	var keyspaceGroup endpoint.KeyspaceGroup
 	err = json.Unmarshal(output, &keyspaceGroup)
-	re.NoError(err)
-	re.Len(keyspaceGroup.Keyspaces, 130)
+	re.NoError(err, string(output))
+	re.Len(keyspaceGroup.Keyspaces, keyspaceCount+1)
 	re.Nil(keyspaceGroup.MergeState)
 
 	// split keyspace group multiple times.
@@ -404,7 +390,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	err = json.Unmarshal(output, &keyspaceGroup)
 	re.NoError(err)
-	re.Len(keyspaceGroup.Keyspaces, 130)
+	re.Len(keyspaceGroup.Keyspaces, keyspaceCount+1)
 	re.Nil(keyspaceGroup.MergeState)
 
 	// merge keyspace group with wrong args.
