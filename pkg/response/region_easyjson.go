@@ -52,7 +52,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse(in *jlexer.Lexer, out *Rep
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(out *jwriter.Writer, in ReplicationStatus) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(out *jwriter.Writer, in *ReplicationStatus) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -146,7 +146,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse1(in *jlexer.Lexer, out *Re
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(out *jwriter.Writer, in RegionsInfo) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(out *jwriter.Writer, in *RegionsInfo) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -364,7 +364,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in RegionInfo) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in *RegionInfo) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -614,7 +614,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse3(in *jlexer.Lexer, out *PD
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(out *jwriter.Writer, in PDPeerStats) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(out *jwriter.Writer, in *PDPeerStats) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -696,7 +696,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse4(in *jlexer.Lexer, out *Me
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(out *jwriter.Writer, in MetaPeer) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(out *jwriter.Writer, in *MetaPeer) {
 	out.RawByte('{')
 	first := true
 	_ = first
