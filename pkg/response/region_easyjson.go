@@ -70,14 +70,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(out *jwriter.Writer, in Re
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v ReplicationStatus) MarshalJSON() ([]byte, error) {
+func (v *ReplicationStatus) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v ReplicationStatus) MarshalEasyJSON(w *jwriter.Writer) {
+func (v *ReplicationStatus) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(w, v)
 }
 
@@ -175,14 +175,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(out *jwriter.Writer, in R
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v RegionsInfo) MarshalJSON() ([]byte, error) {
+func (v *RegionsInfo) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v RegionsInfo) MarshalEasyJSON(w *jwriter.Writer) {
+func (v *RegionsInfo) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(w, v)
 }
 
@@ -503,14 +503,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in R
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v RegionInfo) MarshalJSON() ([]byte, error) {
+func (v *RegionInfo) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v RegionInfo) MarshalEasyJSON(w *jwriter.Writer) {
+func (v *RegionInfo) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(w, v)
 }
 
@@ -632,14 +632,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(out *jwriter.Writer, in P
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v PDPeerStats) MarshalJSON() ([]byte, error) {
+func (v *PDPeerStats) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v PDPeerStats) MarshalEasyJSON(w *jwriter.Writer) {
+func (v *PDPeerStats) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(w, v)
 }
 
@@ -734,14 +734,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(out *jwriter.Writer, in M
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v MetaPeer) MarshalJSON() ([]byte, error) {
+func (v *MetaPeer) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v MetaPeer) MarshalEasyJSON(w *jwriter.Writer) {
+func (v *MetaPeer) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(w, v)
 }
 
