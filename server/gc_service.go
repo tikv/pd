@@ -374,7 +374,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
 
 	serviceID := string(request.ServiceId)
-	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTtl(), now)
+	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), now)
 
 	if err != nil {
 		return nil, err
