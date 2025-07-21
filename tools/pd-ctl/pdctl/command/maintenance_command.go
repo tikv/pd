@@ -29,6 +29,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const maintenancePrefixURI = "pd/api/v2/maintenance"
+
 // NewMaintenanceCommand returns the maintenance subcommand for pd-ctl
 func NewMaintenanceCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -51,7 +53,7 @@ func newMaintenanceSetCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			taskType := args[0]
 			taskID := args[1]
-			path := fmt.Sprintf("pd/api/v2/maintenance/%s/%s", taskType, taskID)
+			path := fmt.Sprintf(maintenancePrefixURI+"/%s/%s", taskType, taskID)
 
 			var resp string
 			var err error
@@ -83,9 +85,9 @@ func newMaintenanceShowCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			var path string
 			if len(args) == 0 {
-				path = "pd/api/v2/maintenance"
+				path = maintenancePrefixURI
 			} else {
-				path = fmt.Sprintf("pd/api/v2/maintenance/%s", args[0])
+				path = fmt.Sprintf(maintenancePrefixURI+"/%s", args[0])
 			}
 
 			resp, err := doRequest(cmd, path, http.MethodGet, http.Header{})
@@ -109,7 +111,7 @@ func newMaintenanceDeleteCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			taskType := args[0]
 			taskID := args[1]
-			path := fmt.Sprintf("pd/api/v2/maintenance/%s/%s", taskType, taskID)
+			path := fmt.Sprintf(maintenancePrefixURI+"/%s/%s", taskType, taskID)
 
 			resp, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
 			if err != nil {
