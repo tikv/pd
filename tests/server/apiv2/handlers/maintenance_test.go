@@ -383,10 +383,10 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
 		client := tests.TestDialClient
 		baseURL := fmt.Sprintf("%s/pd/api/v2/maintenance", leader.GetAddr())
 
-		// NOTE: This test verifies that GetMaintenanceTask can correctly return multiple task types
+		// NOTE: This test verifies that GetMaintenanceTasks can correctly return multiple task types
 		// in an array format. According to the design specification (RFC-0118), only one maintenance
 		// task should be active at a time globally due to the maintenance lock constraint. However,
-		// we test this scenario to ensure the GetMaintenanceTask endpoint can handle multiple tasks
+		// we test this scenario to ensure the GetMaintenanceTasks endpoint can handle multiple tasks
 		// correctly if they were to exist simultaneously (e.g., due to a bug or manual intervention).
 
 		// Directly create multiple maintenance tasks in storage to simulate the scenario
@@ -422,7 +422,7 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
 		err = storage.Save(keypath.MaintenanceTaskPath(taskType2), string(task2Data))
 		re.NoError(err)
 
-		// Test GetMaintenanceTask - should return both tasks in an array
+		// Test GetMaintenanceTasks - should return both tasks in an array
 		res, err := client.Get(baseURL)
 		re.NoError(err)
 		defer res.Body.Close()
@@ -436,8 +436,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
 		}
 		json.NewDecoder(res.Body).Decode(&tasks)
 
-		// Verify that GetMaintenanceTask returns both tasks in an array
-		re.Len(tasks, 2, "GetMaintenanceTask should return both tasks in an array")
+		// Verify that GetMaintenanceTasks returns both tasks in an array
+		re.Len(tasks, 2, "GetMaintenanceTasks should return both tasks in an array")
 
 		// Verify both tasks are present with correct data
 		task1Found := false

@@ -26,8 +26,10 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"go.uber.org/zap"
 )
 
 // MaintenanceLockName is the name used for the maintenance lock key.
@@ -82,6 +84,8 @@ func (se *StorageEndpoint) LoadAllMaintenanceTasks(f func(k, v string)) error {
 // TryStartMaintenanceTaskAtomic tries to start a maintenance task atomically.
 // Returns (true, nil) if success, (false, existingTask, nil) if conflict, (false, nil, err) if error.
 func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task *MaintenanceTask) (bool, *MaintenanceTask, error) {
+	logger := logutil.BgLogger().With(zap.String("component", "maintenance"), zap.String("op", "TryStartMaintenanceTaskAtomic"))
+	logger.Debug("Attempting to start maintenance task", zap.String("type", task.Type), zap.String("id", task.ID))
 	// Use a single atomic transaction with proper etcd pattern
 	rawTxn := se.CreateRawTxn()
 
@@ -99,6 +103,7 @@ func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task
 	// Then: put both the lock and the task
 	val, err := json.Marshal(task)
 	if err != nil {
+		logger.Error("Failed to marshal maintenance task", zap.Error(err), zap.Any("task", task))
 		return false, nil, err
 	}
 
@@ -127,16 +132,19 @@ func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task
 	// Execute the transaction: if no maintenance running, put lock and task; else get all tasks
 	resp, err := rawTxn.If(cond).Then(lockOp, taskOp).Else(getAllOp).Commit()
 	if err != nil {
+		logger.Error("Transaction commit failed", zap.Error(err))
 		return false, nil, err
 	}
 
 	// Check if the transaction succeeded (lock and task were put)
 	if resp.Succeeded {
+		logger.Info("Maintenance task started successfully", zap.String("type", task.Type), zap.String("id", task.ID))
 		return true, nil, nil
 	}
 
 	// Transaction failed, meaning there was an existing lock
 	// Get all tasks and find the one that's currently running
+	logger.Debug("Transaction failed, checking for existing tasks")
 	if len(resp.Responses) > 0 && len(resp.Responses[0].KeyValuePairs) > 0 {
 		var existingTask *MaintenanceTask
 		taskCount := 0
@@ -158,21 +166,25 @@ func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task
 		// Assert that there should be only one task
 		if taskCount > 1 {
 			// This shouldn't happen - multiple tasks running simultaneously
+			logger.Error("Multiple maintenance tasks running simultaneously", zap.Int("count", taskCount))
 			return false, nil, fmt.Errorf("multiple maintenance tasks running simultaneously: found %d tasks", taskCount)
 		}
 
 		// Return the single task that's running
 		if existingTask != nil {
+			logger.Info("Found existing maintenance task", zap.Any("existingTask", existingTask))
 			return false, existingTask, nil
 		}
 	}
-
+	logger.Debug("No existing maintenance task found")
 	return false, nil, nil
 }
 
 // TryDeleteMaintenanceTaskAtomic tries to delete a maintenance task atomically.
 // Returns (true, nil) if success, (false, existingTask, nil) if conflict, (false, nil, err) if error.
 func (se *StorageEndpoint) TryDeleteMaintenanceTaskAtomic(_ context.Context, taskType, taskID string) (bool, *MaintenanceTask, error) {
+	logger := logutil.BgLogger().With(zap.String("component", "maintenance"), zap.String("op", "TryDeleteMaintenanceTaskAtomic"))
+	logger.Debug("Attempting to delete maintenance task", zap.String("type", taskType), zap.String("id", taskID))
 	// Use a single atomic transaction
 	rawTxn := se.CreateRawTxn()
 
@@ -209,16 +221,19 @@ func (se *StorageEndpoint) TryDeleteMaintenanceTaskAtomic(_ context.Context, tas
 	// Execute the transaction: if lock matches "task_type/task_id", delete both; else get all tasks
 	resp, err := rawTxn.If(cond).Then(lockDeleteOp, taskDeleteOp).Else(getAllOp).Commit()
 	if err != nil {
+		logger.Error("Transaction commit failed", zap.Error(err))
 		return false, nil, err
 	}
 
 	// Check if the transaction succeeded (deletes were executed)
 	if resp.Succeeded {
+		logger.Info("Maintenance task deleted successfully", zap.String("type", taskType), zap.String("id", taskID))
 		return true, nil, nil
 	}
 
 	// Transaction failed, meaning we got all tasks
 	// Check if there's a task running for the requested type
+	logger.Debug("Transaction failed, checking for existing tasks")
 	if len(resp.Responses) > 0 && len(resp.Responses[0].KeyValuePairs) > 0 {
 		for _, kv := range resp.Responses[0].KeyValuePairs {
 			// Skip the lock key itself
@@ -232,12 +247,12 @@ func (se *StorageEndpoint) TryDeleteMaintenanceTaskAtomic(_ context.Context, tas
 				// Check if this is the task type we're looking for
 				if existingTask.Type == taskType {
 					// Found a task for this type, return it as conflict
+					logger.Info("Found existing maintenance task for type", zap.Any("existingTask", existingTask))
 					return false, &existingTask, nil
 				}
 			}
 		}
 	}
-
-	// No task found for this type
+	logger.Debug("No maintenance task found for type", zap.String("type", taskType))
 	return false, nil, nil
 }

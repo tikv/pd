@@ -40,7 +40,7 @@ import (
 func RegisterMaintenance(r *gin.RouterGroup) {
 	router := r.Group("maintenance")
 	router.PUT("/:task_type/:task_id", StartMaintenanceTask)
-	router.GET("", GetMaintenanceTask)
+	router.GET("", GetMaintenanceTasks)
 	router.GET("/:task_type", GetMaintenanceTaskByType)
 	router.DELETE("/:task_type/:task_id", DeleteMaintenanceTask)
 }
@@ -98,15 +98,15 @@ func StartMaintenanceTask(c *gin.Context) {
 	c.JSON(http.StatusOK, "Maintenance task started successfully.")
 }
 
-// GetMaintenanceTask gets information about the ongoing maintenance task.
+// GetMaintenanceTasks gets information about all ongoing maintenance tasks.
 // @Tags     maintenance
-// @Summary  Get information about the ongoing maintenance task.
+// @Summary  Get information about all ongoing maintenance tasks.
 // @Produce  json
 // @Success  200  {array}  endpoint.MaintenanceTask
 // @Failure  404  {string}  string  "No maintenance task is running."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /maintenance [get]
-func GetMaintenanceTask(c *gin.Context) {
+func GetMaintenanceTasks(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	var tasks []*endpoint.MaintenanceTask
 
