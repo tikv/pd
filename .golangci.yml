@@ -45,6 +45,10 @@ linters:
         - (net/http.ResponseWriter).Write
         - github.com/pingcap/log.Sync
         - (github.com/tikv/pd/pkg/ratelimit.Runner).RunTask
+    recvcheck:
+      exclude-receivers:
+        - (github.com/tikv/pd/pkg/response).MarshalEasyJSON
+        - (github.com/tikv/pd/pkg/response).MarshalJSON
     gocritic:
       disabled-checks:
         - regexpMust

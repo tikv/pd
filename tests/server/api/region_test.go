@@ -427,8 +427,8 @@ func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 	r1 := &response.RegionInfo{}
 	r1m := make(map[string]any)
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, r1))
-	re.Equal(r1.BucketVersion, uint64(1))
-	re.Equal(r1.ApproximateKvSize, int64(4*units.MiB))
+	re.Equal(uint64(1), r1.BucketVersion)
+	re.Equal(int64(4*units.MiB), r1.ApproximateKvSize)
 	r1.Adjust()
 	re.Equal(response.NewAPIRegionInfo(r), r1)
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, &r1m))
