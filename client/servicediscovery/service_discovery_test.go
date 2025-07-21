@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
@@ -43,6 +44,10 @@ import (
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type testGRPCServer struct {
 	pb.UnimplementedGreeterServer
