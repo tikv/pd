@@ -26,7 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/tikv/pd/pkg/logutil"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"go.uber.org/zap"
@@ -84,7 +84,7 @@ func (se *StorageEndpoint) LoadAllMaintenanceTasks(f func(k, v string)) error {
 // TryStartMaintenanceTaskAtomic tries to start a maintenance task atomically.
 // Returns (true, nil) if success, (false, existingTask, nil) if conflict, (false, nil, err) if error.
 func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task *MaintenanceTask) (bool, *MaintenanceTask, error) {
-	logger := logutil.BgLogger().With(zap.String("component", "maintenance"), zap.String("op", "TryStartMaintenanceTaskAtomic"))
+	logger := log.L().With(zap.String("component", "maintenance"), zap.String("op", "TryStartMaintenanceTaskAtomic"))
 	logger.Debug("Attempting to start maintenance task", zap.String("type", task.Type), zap.String("id", task.ID))
 	// Use a single atomic transaction with proper etcd pattern
 	rawTxn := se.CreateRawTxn()
@@ -183,7 +183,7 @@ func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task
 // TryDeleteMaintenanceTaskAtomic tries to delete a maintenance task atomically.
 // Returns (true, nil) if success, (false, existingTask, nil) if conflict, (false, nil, err) if error.
 func (se *StorageEndpoint) TryDeleteMaintenanceTaskAtomic(_ context.Context, taskType, taskID string) (bool, *MaintenanceTask, error) {
-	logger := logutil.BgLogger().With(zap.String("component", "maintenance"), zap.String("op", "TryDeleteMaintenanceTaskAtomic"))
+	logger := log.L().With(zap.String("component", "maintenance"), zap.String("op", "TryDeleteMaintenanceTaskAtomic"))
 	logger.Debug("Attempting to delete maintenance task", zap.String("type", taskType), zap.String("id", taskID))
 	// Use a single atomic transaction
 	rawTxn := se.CreateRawTxn()
