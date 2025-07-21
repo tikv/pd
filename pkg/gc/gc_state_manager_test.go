@@ -1493,11 +1493,9 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.Equal(uint64(25), minSsp.SafePoint)
 	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
 	re.NoError(err)
-	re.Len(allSsp, 2)
+	re.Len(allSsp, 1)
 	re.Equal("gc_worker", allSsp[0].ServiceID)
 	re.Equal(uint64(25), allSsp[0].SafePoint)
-	re.Equal("native_br", allSsp[1].ServiceID)
-	re.Equal(uint64(32), allSsp[1].SafePoint)
 
 	// native_br should block all keyspaces
 	for _, keyspaceID := range s.keyspacePresets.manageable {
@@ -1520,11 +1518,9 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 
 	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
 	re.NoError(err)
-	re.Len(allSsp, 2)
+	re.Len(allSsp, 1)
 	re.Equal("gc_worker", allSsp[0].ServiceID)
-	re.Equal(uint64(32), allSsp[1].SafePoint)
-	re.Equal("native_br", allSsp[1].ServiceID)
-	re.Equal(uint64(32), allSsp[1].SafePoint)
+	re.Equal(uint64(32), allSsp[0].SafePoint)
 }
 
 func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
