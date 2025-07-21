@@ -57,8 +57,8 @@ func (suite *storeTestSuite) TearDownSuite() {
 }
 func (suite *storeTestSuite) TearDownTest() {
 	re := suite.Require()
-	suite.env.RunTest(cleanRules(re))
-	suite.env.RunTest(cleanStoresAndRegions(re))
+	suite.env.RunFunc(cleanRules(re))
+	suite.env.RunFunc(cleanStoresAndRegions(re))
 }
 
 func (suite *storeTestSuite) TestStoresList() {

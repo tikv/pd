@@ -455,6 +455,12 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 	}
 }
 
+// RunFunc runs a given function on the active test cluster.
+func (s *SchedulingTestEnvironment) RunFunc(f func(*TestCluster)) {
+	// The implementation can simply reuse the existing RunTest logic.
+	s.RunTest(f)
+}
+
 type idAllocator struct {
 	allocator *mockid.IDAllocator
 }
