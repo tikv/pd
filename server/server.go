@@ -302,8 +302,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
+	runResourceManager := !s.IsServiceIndependent(mcs.ResourceManagerServiceName) || cfg.Microservice.IsResourceManagerFallbackEnabled()
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
-	if !s.IsServiceIndependent(mcs.ResourceManagerServiceName) {
+	if runResourceManager {
 		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	}
 	// Register the micro services REST path.
@@ -314,7 +315,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		if !s.IsServiceIndependent(mcs.ResourceManagerServiceName) {
+		if !runResourceManager {
+			// resource manager proxy
 			resource_manager.RegisterResourceManagerServer(gs, &resourceGroupProxyServer{GrpcServer: grpcServer})
 		}
 		// Register the micro services GRPC service.
