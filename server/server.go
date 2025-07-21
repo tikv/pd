@@ -307,8 +307,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
+	runResourceManager := !s.IsAPIServiceMode() || cfg.MicroService.IsResourceManagerFallbackEnabled()
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
-	if !s.IsAPIServiceMode() {
+	if runResourceManager {
 		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	}
 	// Register the micro services REST path.
@@ -319,7 +320,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		if s.IsAPIServiceMode() {
+		if !runResourceManager {
 			// resource manager proxy
 			resource_manager.RegisterResourceManagerServer(gs, &resourceGroupProxyServer{GrpcServer: grpcServer})
 		}

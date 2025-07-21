@@ -259,6 +259,8 @@ const (
 
 	defaultEnableSchedulingFallback = true
 
+	defaultEnableResourceManagerFallback = true
+
 	// The checking of store compatibility has a drawback that it may block the downgrade process.
 	// In serverless, it's safe to disable this checking as cluster is managed, and the compatibility is guaranteed.
 	defaultEnableCheckStoreCompatible = false
@@ -851,12 +853,16 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // MicroServiceConfig is the configuration for micro service.
 type MicroServiceConfig struct {
-	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableSchedulingFallback      bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableResourceManagerFallback bool `toml:"enable-resource-manager-fallback" json:"enable-resource-manager-fallback,string"`
 }
 
 func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-scheduling-fallback") {
 		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
+	}
+	if !meta.IsDefined("enable-resource-manager-fallback") {
+		c.EnableResourceManagerFallback = defaultEnableResourceManagerFallback
 	}
 }
 
@@ -869,6 +875,11 @@ func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
 // IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
 func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
+}
+
+// IsResourceManagerFallbackEnabled returns whether to enable resource manager service fallback to api service.
+func (c *MicroServiceConfig) IsResourceManagerFallbackEnabled() bool {
+	return c.EnableResourceManagerFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
