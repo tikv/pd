@@ -162,12 +162,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	server := cluster.GetSchedulingPrimaryServer()
 	if server != nil {
 		address := server.GetAddr()
-		res := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "ms", "primary"}, nil)
+		res := mustExec(re, cmd, []string{"-u", pdAddr, "ms", "scheduling", "primary"}, nil)
 		primaryAddress := strings.Trim(res, "\"\n")
 		suite.Equal(address, primaryAddress)
 
 		v := make([]any, 0)
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "ms", "members"}, &v)
+		mustExec(re, cmd, []string{"-u", pdAddr, "ms", "scheduling", "members"}, &v)
 		re.Len(v, 1)
 	}
 

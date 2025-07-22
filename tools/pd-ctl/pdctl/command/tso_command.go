@@ -15,17 +15,11 @@
 package command
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tikv/pd/pkg/utils/tsoutil"
-)
-
-var (
-	tsoPrimaryURI = "/pd/api/v2/ms/primary/tso"
-	tsoMembersURI = "/pd/api/v2/ms/members/tso"
 )
 
 // NewTSOCommand return a TSO subcommand of rootCmd
@@ -35,45 +29,7 @@ func NewTSOCommand() *cobra.Command {
 		Short: "parse TSO to the system and logic time",
 		Run:   showTSOCommandFunc,
 	}
-	cmd.AddCommand(NewTSOMicroServiceCommand())
 	return cmd
-}
-
-// NewTSOMicroServiceCommand return a leader subcommand of tsoCmd
-func NewTSOMicroServiceCommand() *cobra.Command {
-	d := &cobra.Command{
-		Use:   "ms <subcommand>",
-		Short: "ms commands",
-	}
-	d.AddCommand(&cobra.Command{
-		Use:   "primary",
-		Short: "show the primary member status",
-		Run:   getTsoPrimaryCommandFunc,
-	})
-	d.AddCommand(&cobra.Command{
-		Use:   "members",
-		Short: "show the primary member status",
-		Run:   getTsoMembersCommandFunc,
-	})
-	return d
-}
-
-func getTsoMembersCommandFunc(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, tsoMembersURI, http.MethodGet, http.Header{})
-	if err != nil {
-		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
-		return
-	}
-	cmd.Println(r)
-}
-
-func getTsoPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, tsoPrimaryURI, http.MethodGet, http.Header{})
-	if err != nil {
-		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
-		return
-	}
-	cmd.Println(r)
 }
 
 func showTSOCommandFunc(cmd *cobra.Command, args []string) {
