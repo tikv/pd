@@ -302,7 +302,8 @@ func TestMoveLeader(t *testing.T) {
 	re.NotNil(originalLeaderServer)
 
 	// First, resign the original leader.
-	originalLeaderServer.ResignLeaderWithRetry(re)
+	err = originalLeaderServer.ResignLeaderWithRetry()
+	re.NoError(err)
 	newLeader := cluster.WaitLeader()
 	re.NotEmpty(newLeader)
 	re.NotEqual(originalLeader, newLeader)

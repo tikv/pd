@@ -517,7 +517,8 @@ func TestTSONotLeaderWhenRebaseErr(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
 	// Resign the leader to trigger the rebase error.
-	pdLeader.ResignLeaderWithRetry(re)
+	err = pdLeader.ResignLeaderWithRetry()
+	re.NoError(err)
 	// Trying to get TSO should fail with "not leader" error.
 	_, _, err = pdClient.GetTS(ctx)
 	re.ErrorContains(err, "not leader")
@@ -569,7 +570,8 @@ func TestMixedTSODeployment(t *testing.T) {
 	for range 2 {
 		n := r.Intn(2) + 1
 		time.Sleep(time.Duration(n) * time.Second)
-		leaderServer.ResignLeaderWithRetry(re)
+		err = leaderServer.ResignLeaderWithRetry()
+		re.NoError(err)
 		leaderServer = cluster.GetServer(cluster.WaitLeader())
 		re.NotNil(leaderServer)
 	}
@@ -708,7 +710,8 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 
 	for range 5 {
 		time.Sleep(time.Second)
-		pdLeader.ResignLeaderWithRetry(re)
+		err = pdLeader.ResignLeaderWithRetry()
+		re.NoError(err)
 		leaderName = pdCluster.WaitLeader()
 		re.NotEmpty(leaderName)
 		pdLeader = pdCluster.GetServer(leaderName)

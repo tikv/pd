@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/errors"
@@ -42,7 +41,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -170,13 +168,25 @@ func (s *TestServer) ResignLeader() error {
 }
 
 // ResignLeaderWithRetry resigns the leader of the server with retry.
-func (s *TestServer) ResignLeaderWithRetry(re *require.Assertions) {
+func (s *TestServer) ResignLeaderWithRetry() (err error) {
 	if !s.IsLeader() {
 		return
 	}
-	testutil.Eventually(re, func() bool {
-		return s.ResignLeader() == nil
-	})
+	// The default timeout of moving an etcd leader is 5 seconds,
+	// set the retry times to 3 will get a maximum of ~15 seconds of trying.
+	const retryCount = 3
+	for retry := range retryCount {
+		err = s.ResignLeader()
+		if err == nil {
+			return
+		}
+		// Do not retry if the last attempt fails.
+		if retry == retryCount-1 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return
 }
 
 // State returns the current TestServer's state.
