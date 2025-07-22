@@ -404,19 +404,23 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			// keyspaces are from different keyspace groups, otherwise multiple goroutines below could
 			// try to resign the primary of the same keyspace group and cause race condition.
 			keyspaceIDs := make([]uint32, 0)
+			keyspaceGroups := make(map[uint32]uint32, 0)
 			for _, keyspaceGroup := range suite.keyspaceGroups {
 				if len(keyspaceGroup.keyspaceIDs) > 0 {
-					keyspaceIDs = append(keyspaceIDs, keyspaceGroup.keyspaceIDs[0])
+					keyspaceID := keyspaceGroup.keyspaceIDs[0]
+					keyspaceIDs = append(keyspaceIDs, keyspaceID)
+					keyspaceGroups[keyspaceID] = keyspaceGroup.keyspaceGroupID
 				}
 			}
 			wg.Add(len(keyspaceIDs))
 			for _, keyspaceID := range keyspaceIDs {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID)
-					err := suite.tsoCluster.ResignPrimary(keyspaceID, constant.DefaultKeyspaceGroupID)
+					keyspaceGroupID := keyspaceGroups[keyspaceID]
+					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					err := suite.tsoCluster.ResignPrimary(keyspaceID, keyspaceGroupID)
 					re.NoError(err)
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID)
+					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
 				}(keyspaceID)
 			}
 			wg.Wait()
