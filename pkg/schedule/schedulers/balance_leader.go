@@ -429,7 +429,15 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), s.conf.getRanges()),
+	rs := s.conf.getRanges()
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			// todo: check all key ranges not only the first
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
+	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
@@ -473,7 +481,14 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), s.conf.getRanges()),
+	rs := s.conf.getRanges()
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
+	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
 		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.targetStoreID()))

@@ -96,8 +96,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 			}
 		}
 	}
-	suite.env.RunTest(cleanFunc)
-	suite.env.Cleanup()
+	suite.env.RunFunc(cleanFunc)
 }
 
 func (suite *schedulerTestSuite) checkDefaultSchedulers(re *require.Assertions, cmd *cobra.Command, pdAddr string) {
@@ -556,7 +555,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		jobConf = rangeConf[0]
 		return jobConf["rule"] == "learner-scatter" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
 	})
-	re.Equal(float64(time.Hour.Nanoseconds()), jobConf["timeout"])
+	re.Equal(float64(30*time.Minute.Nanoseconds()), jobConf["timeout"])
 	re.Equal("running", jobConf["status"])
 	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
 	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])

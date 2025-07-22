@@ -25,17 +25,23 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 const (
 	testConfig  = "test config"
@@ -147,6 +153,50 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	// Create a keyspace with empty name must return error.
 	_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{Name: ""})
 	re.Error(err)
+}
+
+func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
+	re := suite.Require()
+	manager := suite.manager
+
+	now := time.Now().Unix()
+	const classic = `return(false)`
+	const nextGen = `return(true)`
+
+	type testCase struct {
+		nextGenFlag      string
+		gcManagementType string
+		expect           string
+	}
+
+	cases := []testCase{
+		{classic, "", ""},
+		{classic, UnifiedGC, UnifiedGC},
+		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
+		{nextGen, "", KeyspaceLevelGC},
+		{nextGen, UnifiedGC, UnifiedGC},
+		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
+	}
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+	}()
+	for idx, tc := range cases {
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag))
+		cfg := make(map[string]string)
+		if tc.gcManagementType != "" {
+			cfg[GCManagementType] = tc.gcManagementType
+		}
+		req := &CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("test_gc_management_type_%d", idx),
+			CreateTime: now,
+			Config:     cfg,
+		}
+		created, err := manager.CreateKeyspace(req)
+		re.NoError(err)
+		loaded, err := manager.LoadKeyspaceByID(created.Id)
+		re.NoError(err)
+		re.Equal(tc.expect, loaded.Config[GCManagementType])
+	}
 }
 
 func makeCreateKeyspaceByIDRequests(count int) []*CreateKeyspaceByIDRequest {

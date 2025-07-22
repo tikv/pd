@@ -73,6 +73,7 @@ var (
 // grpcutil errors
 var (
 	ErrSecurityConfig = errors.Normalize("security config error: %s", errors.RFCCodeText("PD:grpcutil:ErrSecurityConfig"))
+	ErrTLSConfig      = errors.Normalize("TLS config error", errors.RFCCodeText("PD:grpcutil:ErrTLSConfig"))
 )
 
 // The third-party project error.
@@ -87,11 +88,6 @@ var (
 	ErrCloseGRPCConn = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
 )
 
-// etcd errors
-var (
-	ErrEtcdTLSConfig = errors.Normalize("etcd TLS config error", errors.RFCCodeText("PD:etcd:ErrEtcdTLSConfig"))
-)
-
 // crypto
 var (
 	ErrCryptoX509KeyPair        = errors.Normalize("x509 keypair error", errors.RFCCodeText("PD:crypto:ErrCryptoX509KeyPair"))
@@ -100,9 +96,10 @@ var (
 
 // resource group errors
 var (
-	ErrClientListResourceGroup              = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
-	ErrClientResourceGroupConfigUnavailable = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
-	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation, estimated wait time %s, ltb state is %.2f:%.2f", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
+	ErrClientListResourceGroup                  = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
+	ErrClientResourceGroupConfigUnavailable     = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
+	ErrClientResourceGroupThrottled             = errors.Normalize("exceeded resource group quota limitation, estimated wait time %s, ltb state is %.2f:%.2f", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
+	ErrClientPutResourceGroupMismatchKeyspaceID = errors.Normalize("resource group keyspace ID %d does not match inner client keyspace ID %d", errors.RFCCodeText("PD:client:ErrClientPutResourceGroupMismatchKeyspaceID"))
 )
 
 // ErrClientGetResourceGroup is the error type for getting resource group.

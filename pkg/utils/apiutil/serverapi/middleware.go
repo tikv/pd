@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -48,7 +48,6 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		next(w, r)
 		return
 	}
-
 	http.Error(w, "no service", http.StatusServiceUnavailable)
 }
 
@@ -224,7 +223,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	} else {
 		// Prevent more than one redirection among PD.
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
+		log.Warn("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
 		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
 		return
 	}

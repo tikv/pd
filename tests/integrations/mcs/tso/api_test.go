@@ -29,9 +29,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -263,6 +263,7 @@ func (suite *tsoAPITestSuite) TestStatus() {
 	re.Equal(versioninfo.PDBuildTS, s.BuildTS)
 	re.Equal(versioninfo.PDGitHash, s.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, s.Version)
+	re.Equal(versioninfo.PDKernelType, s.KernelType)
 }
 
 func (suite *tsoAPITestSuite) TestConfig() {

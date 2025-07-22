@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -55,52 +54,6 @@ const (
 	updateTSORetryInterval = 50 * time.Millisecond
 )
 
-// ElectionMember defines the interface for the election related logic.
-type ElectionMember interface {
-	// ID returns the unique ID in the election group. For example, it can be unique
-	// server id of a cluster or the unique keyspace group replica id of the election
-	// group composed of the replicas of a keyspace group.
-	ID() uint64
-	// Name returns the unique name in the election group.
-	Name() string
-	// MemberValue returns the member value.
-	MemberValue() string
-	// GetMember returns the current member
-	GetMember() any
-	// Client returns the etcd client.
-	Client() *clientv3.Client
-	// IsLeader returns whether the participant is the leader or not by checking its
-	// leadership's lease and leader info.
-	IsLeader() bool
-	// IsLeaderElected returns true if the leader exists; otherwise false.
-	IsLeaderElected() bool
-	// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
-	// otherwise returns a bool which indicates if it is needed to check later.
-	CheckLeader() (leader member.ElectionLeader, checkAgain bool)
-	// EnableLeader declares the member itself to be the leader.
-	EnableLeader()
-	// KeepLeader is used to keep the leader's leadership.
-	KeepLeader(ctx context.Context)
-	// CampaignLeader is used to campaign the leadership and make it become a leader in an election group.
-	CampaignLeader(ctx context.Context, leaseTimeout int64) error
-	// ResetLeader is used to reset the member's current leadership.
-	// Basically it will reset the leader lease and unset leader info.
-	ResetLeader()
-	// GetLeaderListenUrls returns current leader's listen urls
-	// The first element is the leader/primary url
-	GetLeaderListenUrls() []string
-	// GetLeaderID returns current leader's member ID.
-	GetLeaderID() uint64
-	// GetLeaderPath returns the path of the leader.
-	GetLeaderPath() string
-	// GetLeadership returns the leadership of the election member.
-	GetLeadership() *election.Leadership
-	// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
-	GetLastLeaderUpdatedTime() time.Time
-	// PreCheckLeader does some pre-check before checking whether it's the leader.
-	PreCheckLeader() error
-}
-
 // Allocator is the global single point TSO allocator.
 type Allocator struct {
 	ctx    context.Context
@@ -111,7 +64,7 @@ type Allocator struct {
 	// keyspaceGroupID is the keyspace group ID of the allocator.
 	keyspaceGroupID uint32
 	// for election use
-	member ElectionMember
+	member member.ElectionMember
 	// expectedPrimaryLease is used to store the expected primary lease.
 	expectedPrimaryLease atomic.Value // store as *election.LeaderLease
 	timestampOracle      *timestampOracle
@@ -125,7 +78,7 @@ type Allocator struct {
 func NewAllocator(
 	ctx context.Context,
 	keyspaceGroupID uint32,
-	member ElectionMember,
+	member member.ElectionMember,
 	storage endpoint.TSOStorage,
 	cfg Config,
 ) *Allocator {
@@ -299,7 +252,7 @@ func (a *Allocator) primaryElectionLoop() {
 		if len(expectedPrimary) > 0 && !strings.Contains(a.member.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of tso primary and check later", append(a.logFields,
 				zap.String("expected-primary-id", expectedPrimary),
-				zap.String("cur-member-value", a.member.MemberValue()))...)
+				zap.String("cur-member-value", a.member.MemberString()))...)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -355,7 +308,7 @@ func (a *Allocator) campaignLeader() {
 		leaderLease, &keypath.MsParam{
 			ServiceName: constant.TSOServiceName,
 			GroupID:     a.keyspaceGroupID,
-		}, a.member.MemberValue())
+		}, a.member)
 	if err != nil {
 		log.Error("prepare tso primary watch error", append(a.logFields, errs.ZapError(err))...)
 		return
@@ -407,7 +360,7 @@ func (a *Allocator) GetPrimaryAddr() string {
 }
 
 // GetMember returns the member of the allocator.
-func (a *Allocator) GetMember() ElectionMember {
+func (a *Allocator) GetMember() member.ElectionMember {
 	return a.member
 }
 

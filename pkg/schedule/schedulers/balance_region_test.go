@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -565,10 +566,12 @@ func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules 
 	// ensure store score without operator influence : store 4 > store 3
 	// and store score with operator influence : store 3 > store 4
 	for i := 1; i <= 8; i++ {
-		id, _, _ := tc.Alloc(1)
+		id, _, err := tc.Alloc(1)
+		re.NoError(err)
 		origin := tc.AddLeaderRegion(id, 4)
 		newPeer := &metapb.Peer{StoreId: 3, Role: metapb.PeerRole_Voter}
-		op, _ := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
+		op, err := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
+		re.NoError(err)
 		re.NotNil(op)
 		oc.AddOperator(op)
 	}
@@ -654,9 +657,16 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 		core.SetApproximateKeys(1),
 	)
 	tc.PutRegion(region)
+
+	tc.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
 	operators, _ := sb.Schedule(tc, false)
+	re.Empty(operators)
+	tc.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+
+	operators, _ = sb.Schedule(tc, false)
 	re.NotEmpty(operators)
 
+	// reject the empty regions if the cluster has more regions.
 	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
@@ -680,7 +690,7 @@ func TestConcurrencyUpdateConfig(t *testing.T) {
 				return
 			default:
 			}
-			sche.config.buildWithArgs(args)
+			re.NoError(sche.config.buildWithArgs(args))
 			re.NoError(sche.config.persist())
 		}
 	}()

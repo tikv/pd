@@ -311,38 +311,6 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 	return errs.ErrOptionNotExist.FastGenByArgs(option)
 }
 
-// CollectKeyRangesOption is used to collect key ranges using from input map for given option
-func CollectKeyRangesOption(input map[string]any, collectors ...func(v string)) error {
-	startKeyStr, ok := input["start-key"].(string)
-	if !ok {
-		return errs.ErrInvalidArgument.FastGenByArgs("start-key")
-	}
-	endKeyStr, ok := input["end-key"].(string)
-	if !ok {
-		return errs.ErrInvalidArgument.FastGenByArgs("end-key")
-	}
-	startKeys := strings.Split(startKeyStr, ",")
-	endKeys := strings.Split(endKeyStr, ",")
-	if len(startKeys) != len(endKeys) {
-		return errs.ErrInvalidArgument.FastGenByArgs(startKeyStr, endKeyStr)
-	}
-	for i := range startKeys {
-		startKey, err := url.QueryUnescape(startKeys[i])
-		if err != nil {
-			return err
-		}
-		endKey, err := url.QueryUnescape(endKeys[i])
-		if err != nil {
-			return err
-		}
-		for _, c := range collectors {
-			c(startKey)
-			c(endKey)
-		}
-	}
-	return nil
-}
-
 // CollectStringOption is used to collect string using from input map for given option
 func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
@@ -497,7 +465,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
+			log.Warn("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
 		var reader io.ReadCloser
@@ -535,7 +503,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		resp.Body.Close()
 		reader.Close()
 		if err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
+			log.Warn("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.
 			continue
 		}

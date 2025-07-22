@@ -20,18 +20,24 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestDiscover(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
+	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", DefaultLeaseInSeconds)
 	err := sr1.Register()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr2.Register()
 	re.NoError(err)
 
@@ -43,7 +49,8 @@ func TestDiscover(t *testing.T) {
 
 	sr1.cancel()
 	sr2.cancel()
-	time.Sleep(3 * time.Second)
+	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
+	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
 	endpoints, err = Discover(client, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)
@@ -56,13 +63,13 @@ func TestServiceRegistryEntry(t *testing.T) {
 	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
 	s1, err := entry1.Serialize()
 	re.NoError(err)
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, 1)
+	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, DefaultLeaseInSeconds)
 	err = sr1.Register()
 	re.NoError(err)
 	entry2 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:2"}
 	s2, err := entry2.Serialize()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", s2, 1)
+	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", s2, DefaultLeaseInSeconds)
 	err = sr2.Register()
 	re.NoError(err)
 
@@ -70,15 +77,18 @@ func TestServiceRegistryEntry(t *testing.T) {
 	re.NoError(err)
 	re.Len(endpoints, 2)
 	returnedEntry1 := &ServiceRegistryEntry{}
-	returnedEntry1.Deserialize([]byte(endpoints[0]))
+	err = returnedEntry1.Deserialize([]byte(endpoints[0]))
+	re.NoError(err)
 	re.Equal("127.0.0.1:1", returnedEntry1.ServiceAddr)
 	returnedEntry2 := &ServiceRegistryEntry{}
-	returnedEntry2.Deserialize([]byte(endpoints[1]))
+	err = returnedEntry2.Deserialize([]byte(endpoints[1]))
+	re.NoError(err)
 	re.Equal("127.0.0.1:2", returnedEntry2.ServiceAddr)
 
 	sr1.cancel()
 	sr2.cancel()
-	time.Sleep(3 * time.Second)
+	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
+	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
 	endpoints, err = Discover(client, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)

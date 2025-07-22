@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/constants"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
@@ -57,13 +58,14 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs/utils"
 )
 
 const (
@@ -213,7 +215,8 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	oldNames := make([]string, 0)
 	for _, s := range oldServers {
 		oldNames = append(oldNames, s.GetServer().GetMemberInfo().GetName())
-		s.Stop()
+		err = s.Stop()
+		re.NoError(err)
 	}
 	newLeaderName := cluster.WaitLeader()
 	re.NotEqual(oldLeaderName, newLeaderName)
@@ -375,7 +378,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	time.Sleep(100 * time.Millisecond)
-	cli := mcs.SetupClientWithKeyspaceID(ctx, re, constants.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
+	cli := utils.SetupClientWithKeyspaceID(ctx, re, constants.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
 	re.NotNil(cli)
 	defer cli.Close()
 	// TSO service does not support the follower proxy, so enabling it should fail.
@@ -423,10 +426,12 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
-		leader.Stop()
+		err = leader.Stop()
+		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
-		tests.RunServers([]*tests.TestServer{leader})
+		err = tests.RunServers([]*tests.TestServer{leader})
+		re.NoError(err)
 	}()
 	wg.Wait()
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
@@ -439,7 +444,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
-		leader.Stop()
+		err = leader.Stop()
+		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
 		leaderReadyTime = time.Now()
@@ -636,8 +642,9 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
 	re.NotNil(r)
-	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(),
+	err = leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(),
 		leader.GetServer().Name(), follower.GetServer().Name())
+	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -692,11 +699,13 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
 
-	cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
+	err := cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
+	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 
 	// here is just for trigger the leader change.
-	cli.GetRegion(context.Background(), []byte("a"))
+	_, err = cli.GetRegion(context.Background(), []byte("a"))
+	re.Error(err)
 
 	testutil.Eventually(re, func() bool {
 		return cli.GetLeaderURL() == follower.GetAddr()
@@ -706,7 +715,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	re.Nil(r)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2"))
-	cli.GetServiceDiscovery().CheckMemberChanged()
+	err = cli.GetServiceDiscovery().CheckMemberChanged()
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		r, err = cli.GetRegion(context.Background(), []byte("a"))
 		if err == nil && r != nil {
@@ -724,7 +734,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	cluster := suite.cluster
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
-	cli.UpdateOption(opt.EnableFollowerHandle, true)
+	err := cli.UpdateOption(opt.EnableFollowerHandle, true)
+	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	testutil.Eventually(re, func() bool {
@@ -977,6 +988,7 @@ type idAllocator struct {
 }
 
 func (i *idAllocator) alloc() uint64 {
+	// This error will be always nil.
 	id, _, _ := i.allocator.Alloc(1)
 	return id
 }
@@ -1049,7 +1061,7 @@ func (suite *clientTestSuiteImpl) setup() {
 	re.NotNil(cluster)
 	now := time.Now().UnixNano()
 	for _, store := range stores {
-		suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		_, err = suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: newHeader(),
 			Store: &metapb.Store{
 				Id:            store.Id,
@@ -1057,8 +1069,9 @@ func (suite *clientTestSuiteImpl) setup() {
 				LastHeartbeat: now,
 			},
 		})
+		re.NoError(err)
 
-		suite.grpcSvr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+		_, err = suite.grpcSvr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
 			Header: newHeader(),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
@@ -1067,6 +1080,7 @@ func (suite *clientTestSuiteImpl) setup() {
 				Available: uint64(1 * units.GiB),
 			},
 		})
+		re.NoError(err)
 	}
 	cluster.GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 }
@@ -1156,15 +1170,18 @@ func (suite *clientStatelessTestSuite) TestScanRegions() {
 
 	// Set leader of region3 to nil.
 	region3 := core.NewRegionInfo(regions[3], nil)
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	err := suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	re.NoError(err)
 
 	// Add down peer for region4.
 	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	re.NoError(err)
 
 	// Add pending peers for region5.
 	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	re.NoError(err)
 
 	t := suite.T()
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
@@ -1303,8 +1320,10 @@ func (suite *clientStatelessTestSuite) TestScatterRegion() {
 			return false
 		}
 		if scatterResp.FinishedPercentage != uint64(100) {
+			re.Contains(scatterResp.FailedRegionsId, regionID)
 			return false
 		}
+		re.Empty(scatterResp.FailedRegionsId)
 		resp, err := suite.client.GetOperator(context.Background(), regionID)
 		if err != nil {
 			return false
@@ -1389,9 +1408,12 @@ func TestWatch(t *testing.T) {
 	cli, err := clientv3.NewFromURLs(endpoints)
 	re.NoError(err)
 	defer cli.Close()
-	cli.Put(context.Background(), key, "1")
-	cli.Put(context.Background(), key, "2")
-	cli.Delete(context.Background(), key)
+	_, err = cli.Put(context.Background(), key, "1")
+	re.NoError(err)
+	_, err = cli.Put(context.Background(), key, "2")
+	re.NoError(err)
+	_, err = cli.Delete(context.Background(), key)
+	re.NoError(err)
 	<-exit
 }
 
@@ -1582,19 +1604,23 @@ func (suite *clientStatelessTestSuite) TestBatchScanRegions() {
 
 	// Set leader of region3 to nil.
 	region3 := core.NewRegionInfo(regions[3], nil)
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	err := suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	re.NoError(err)
 
 	// Add down peer for region4.
 	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	re.NoError(err)
 
 	// Add pending peers for region5.
 	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	re.NoError(err)
 
 	// Add buckets for region6.
 	region6 := core.NewRegionInfo(regions[6], regions[6].Peers[0], core.SetBuckets(&metapb.Buckets{RegionId: regions[6].Id, Version: 2}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region6)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region6)
+	re.NoError(err)
 
 	t := suite.T()
 	var outputMustContainAllKeyRangeOptions []bool
@@ -1676,7 +1702,7 @@ func (suite *clientStatelessTestSuite) TestBatchScanRegions() {
 	}, 10, []*metapb.Region{regions[9]})
 
 	// invalid ranges
-	_, err := suite.client.BatchScanRegions(
+	_, err = suite.client.BatchScanRegions(
 		ctx,
 		[]router.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
 		10,
@@ -1928,7 +1954,8 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		b, _ := os.ReadFile(fname)
+		b, err := os.ReadFile(fname)
+		re.NoError(err)
 		l := string(b)
 		// We need to check the log to see if the circuit breaker is half open
 		return strings.Contains(l, "Transitioning to half-open state to test the service")
@@ -2163,12 +2190,21 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 	re.Equal(uint64(10), minSsp.SafePoint)
 	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 
-	// Force delete gc_worker, then the min service safepoint is 11 of "a".
+	// Force delete gc_worker, then the min service safe point was 11 of "a" in previous implementation, but 0
+	// for compatibility of txn safe point.
 	err = s.srv.GetStorage().Remove(gcWorkerKey)
 	re.NoError(err)
 	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	re.NoError(err)
+	re.Equal(uint64(0), minSsp.SafePoint)
+
+	// Advancing txn safe point also affects the gc_worker's service safe point.
+	_, err = s.client.GetGCInternalController(constants.NullKeyspaceID).AdvanceTxnSafePoint(context.Background(), 11)
+	re.NoError(err)
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	re.NoError(err)
 	re.Equal(uint64(11), minSsp.SafePoint)
+
 	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
 	// will be newly created.
 	// Increase "a" so that "gc_worker" is the only minimum that will be returned by LoadMinServiceGCSafePoint.
@@ -2404,4 +2440,24 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 		// The existing GC barrier remains unchanged.
 		s.checkGCBarrier(re, keyspaceID, "b1", 22)
 	}
+}
+
+func TestDecodeHttpKeyRange(t *testing.T) {
+	re := require.New(t)
+	input := make(map[string]any)
+	startStrs := make([]string, 0)
+	endStrs := make([]string, 0)
+	for _, kr := range []*pdHttp.KeyRange{
+		pdHttp.NewKeyRange([]byte("100"), []byte("200")),
+		pdHttp.NewKeyRange([]byte("300"), []byte("400")),
+	} {
+		startStr, endStr := kr.EscapeAsUTF8Str()
+		startStrs = append(startStrs, startStr)
+		endStrs = append(endStrs, endStr)
+	}
+	input["start-key"] = strings.Join(startStrs, ",")
+	input["end-key"] = strings.Join(endStrs, ",")
+	ret, err := keyutil.DecodeHTTPKeyRanges(input)
+	re.NoError(err)
+	re.Equal([]string{"100", "200", "300", "400"}, ret)
 }

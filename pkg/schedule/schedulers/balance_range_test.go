@@ -61,6 +61,14 @@ func TestTIKVEngine(t *testing.T) {
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+	re.True(scheduler.IsScheduleAllowed(tc))
+	km := tc.GetKeyRangeManager()
+	kr := keyutil.NewKeyRange("", "")
+	ranges := km.GetNonOverlappingKeyRanges(&kr)
+	re.Len(ranges, 2)
+	re.Equal(ranges[0], keyutil.NewKeyRange("", "100"))
+	re.Equal(ranges[1], keyutil.NewKeyRange("200", ""))
+
 	re.NoError(err)
 	ops, _ := scheduler.Schedule(tc, true)
 	re.Empty(ops)
@@ -76,23 +84,24 @@ func TestTIKVEngine(t *testing.T) {
 	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
-	tc.AddLeaderRegionWithRange(5, "180", "200", 3, 1, 2)
+	tc.AddLeaderRegionWithRange(6, "180", "200", 3, 1, 2)
 	// case1: transfer leader from store 1 to store 3
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("1", op.GetAdditionalInfo("targetScore"))
-	re.Contains(op.Brief(), "transfer leader: store 1 to")
-	tc.AddLeaderStore(4, 0)
+	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
-	// case2: move peer from store 1 to store 4
+	// case2: move leader from store 1 to store 4
+	tc.AddLeaderStore(4, 0)
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("0", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
+	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
 
 func TestTIFLASHEngine(t *testing.T) {
@@ -111,7 +120,7 @@ func TestTIFLASHEngine(t *testing.T) {
 
 	startKey := fmt.Sprintf("%20d0", 1)
 	endKey := fmt.Sprintf("%20d0", 10)
-	tc.SetRule(&placement.Rule{
+	err := tc.SetRule(&placement.Rule{
 		GroupID:  "tiflash",
 		ID:       "1",
 		Role:     placement.Learner,
@@ -122,6 +131,7 @@ func TestTIFLASHEngine(t *testing.T) {
 			{Key: "engine", Op: "in", Values: []string{"tiflash"}},
 		},
 	})
+	re.NoError(err)
 
 	// generate a balance range scheduler with tiflash engine
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
@@ -172,6 +182,7 @@ func TestFetchAllRegions(t *testing.T) {
 func TestCodecConfig(t *testing.T) {
 	re := require.New(t)
 	job := &balanceRangeSchedulerJob{
+		Alias:  "test.t",
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		JobID:  1,
@@ -189,6 +200,7 @@ func TestCodecConfig(t *testing.T) {
 	re.Equal(conf1.jobs, conf.jobs)
 
 	job1 := &balanceRangeSchedulerJob{
+		Alias:  "test.t2",
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		Status: running,
@@ -196,6 +208,7 @@ func TestCodecConfig(t *testing.T) {
 		JobID:  2,
 	}
 	re.NoError(conf.addJob(job1))
+	re.Error(conf.addJob(job1))
 	re.NoError(conf.load(&conf1))
 	re.Equal(conf1.jobs, conf.jobs)
 
@@ -271,7 +284,9 @@ func TestPersistFail(t *testing.T) {
 	}
 	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
 	errMsg := "fail to persist"
-	newJob := &balanceRangeSchedulerJob{}
+	newJob := &balanceRangeSchedulerJob{
+		Alias: "test.t",
+	}
 	re.ErrorContains(conf.addJob(newJob), errMsg)
 	re.Len(conf.jobs, 1)
 

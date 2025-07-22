@@ -30,7 +30,9 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -126,7 +128,7 @@ func (f *tsoForwarder) forwardTSORequest(
 		Header: &tsopb.RequestHeader{
 			ClusterId:       request.GetHeader().GetClusterId(),
 			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: request.GetCount(),
@@ -168,7 +170,7 @@ func (s *GrpcServer) handleTSOForwarding(
 	tsDeadlineCh chan<- *tsoutil.TSDeadline,
 ) (tsoStreamErr, sendErr error) {
 	// Get the latest TSO primary address.
-	targetHost, ok := s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+	targetHost, ok := s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 	if !ok || len(targetHost) == 0 {
 		return errors.WithStack(errs.ErrNotFoundTSOAddr), nil
 	}
@@ -387,7 +389,7 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 		return client.(*grpc.ClientConn), nil
 	}
 
-	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	tlsConfig, err := s.GetTLSConfig().ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -434,13 +436,13 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if !s.IsServiceIndependent(constant.TSOServiceName) {
+	if !s.IsServiceIndependent(mcs.TSOServiceName) {
 		return s.tsoAllocator.GenerateTSO(ctx, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       keypath.ClusterID(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
@@ -471,7 +473,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		if i > 0 {
 			time.Sleep(retryIntervalRequestTSOServer)
 		}
-		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 		if !ok || forwardedHost == "" {
 			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}

@@ -49,10 +49,14 @@ ifeq ($(PLUGIN), 1)
 endif
 
 ifeq ($(ENABLE_FIPS), 1)
-	BUILD_TAGS+=boringcrypto
-	BUILD_GOEXPERIMENT=boringcrypto
+	BUILD_TAGS += boringcrypto
+	BUILD_GOEXPERIMENT = boringcrypto
 	BUILD_CGO_ENABLED := 1
 	BUILD_TOOL_CGO_ENABLED := 1
+endif
+
+ifeq ($(NEXT_GEN), 1)
+	BUILD_TAGS += nextgen
 endif
 
 RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
@@ -187,6 +191,9 @@ static: install-tools pre-build
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+	@ echo "leakcheck ..."
+	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
+
 
 # Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
 fmt:

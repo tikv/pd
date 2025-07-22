@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -58,10 +59,11 @@ import (
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
@@ -335,7 +337,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
 	}
@@ -376,7 +378,7 @@ func (s *Server) initGRPCServiceLabels() {
 }
 
 func (s *Server) startClient() error {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
 	}
@@ -1396,7 +1398,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
 	if s.isKeyspaceGroupEnabled && !s.IsClosed() {
-		if name == constant.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+		if name == mcs.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			return true
 		}
 		return s.cluster.IsServiceIndependent(name)
@@ -1747,7 +1749,7 @@ func (s *Server) campaignLeader() {
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info("PD leader is ready to serve", zap.String("leader-name", s.Name()))
 
-	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
+	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -1896,7 +1898,23 @@ func (s *Server) SaveTTLConfig(data map[string]any, ttl time.Duration) error {
 		}
 	}
 	for k, v := range data {
-		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl); err != nil {
+		var valueStr string
+		switch val := v.(type) {
+		case float64:
+			// math.Trunc(val) returns the integer part of val
+			if val == math.Trunc(val) {
+				valueStr = strconv.FormatInt(int64(val), 10)
+			} else {
+				valueStr = strconv.FormatFloat(val, 'f', -1, 64)
+			}
+		case int, int8, int16, int32, int64:
+			valueStr = fmt.Sprintf("%d", val)
+		case uint, uint8, uint16, uint32, uint64:
+			valueStr = fmt.Sprintf("%d", val)
+		default:
+			valueStr = fmt.Sprint(v)
+		}
+		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, valueStr, ttl); err != nil {
 			return err
 		}
 	}
@@ -1974,9 +1992,9 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 }
 
 func (s *Server) initTSOPrimaryWatcher() {
-	serviceName := constant.TSOServiceName
+	serviceName := mcs.TSOServiceName
 	tsoServicePrimaryKey := keypath.LeaderPath(&keypath.MsParam{
-		ServiceName: constant.TSOServiceName,
+		ServiceName: mcs.TSOServiceName,
 		GroupID:     constant.DefaultKeyspaceGroupID,
 	})
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
@@ -1984,9 +2002,9 @@ func (s *Server) initTSOPrimaryWatcher() {
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
-	serviceName := constant.SchedulingServiceName
+	serviceName := mcs.SchedulingServiceName
 	primaryKey := keypath.LeaderPath(&keypath.MsParam{
-		ServiceName: constant.SchedulingServiceName,
+		ServiceName: mcs.SchedulingServiceName,
 	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()

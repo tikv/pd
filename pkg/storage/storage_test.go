@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,7 +35,12 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestBasic(t *testing.T) {
 	re := require.New(t)
@@ -192,11 +198,12 @@ func TestLoadMinServiceGCSafePoint(t *testing.T) {
 		re.NoError(storage.SaveServiceGCSafePoint(ssp))
 	}
 
-	// gc_worker's safepoint will be automatically inserted when loading service safepoints. Here the returned
-	// safepoint can be either of "gc_worker" or "2".
+	// gc_worker's service safe point will be automatically inserted with initial value 0. If txn safe point was set,
+	// the initial value of gc_worker's service safe point would be the same value as the txn safe point; however we
+	// didn't.
 	ssp, err := storage.LoadMinServiceGCSafePoint(time.Now())
 	re.NoError(err)
-	re.Equal(uint64(2), ssp.SafePoint)
+	re.Equal(uint64(0), ssp.SafePoint)
 
 	// Advance gc_worker's safepoint
 	re.NoError(storage.SaveServiceGCSafePoint(&endpoint.ServiceSafePoint{
@@ -231,6 +238,7 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(coreStorage)
 	re.NotNil(storage)
 	re.Equal(regionStorage, storage)
+	re.NoError(regionStorage.Close())
 	// Raw LevelDB backend integrated into core storage.
 	defaultStorage = NewStorageWithMemoryBackend()
 	regionStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
@@ -239,6 +247,7 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(coreStorage)
 	re.NotNil(storage)
 	re.Equal(regionStorage, storage)
+	re.NoError(regionStorage.Close())
 	defaultStorage = NewStorageWithMemoryBackend()
 	regionStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
 	re.NoError(err)
@@ -246,6 +255,7 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(coreStorage)
 	re.NotNil(storage)
 	re.Equal(regionStorage, storage)
+	re.NoError(regionStorage.Close())
 	// Without core storage.
 	defaultStorage = NewStorageWithMemoryBackend()
 	storage = RetrieveRegionStorage(defaultStorage)
@@ -256,11 +266,13 @@ func TestTryGetLocalRegionStorage(t *testing.T) {
 	storage = RetrieveRegionStorage(defaultStorage)
 	re.NotNil(storage)
 	re.Equal(defaultStorage, storage)
+	re.NoError(defaultStorage.Close())
 	defaultStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
 	re.NoError(err)
 	storage = RetrieveRegionStorage(defaultStorage)
 	re.NotNil(storage)
 	re.Equal(defaultStorage, storage)
+	re.NoError(defaultStorage.Close())
 }
 
 func TestLoadRegions(t *testing.T) {
@@ -465,19 +477,13 @@ func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
 	ctx := context.Background()
 	dir := b.TempDir()
 	regionStorage, err := NewRegionStorageWithLevelDBBackend(ctx, dir, nil)
-	if err != nil {
-		b.Fatal(err)
-	}
+	re.NoError(err)
 	cluster := core.NewBasicCluster()
 	err = saveRegions(regionStorage, n, ratio)
-	if err != nil {
-		b.Fatal(err)
-	}
+	re.NoError(err)
 	defer func() {
 		err = regionStorage.Close()
-		if err != nil {
-			b.Fatal(err)
-		}
+		re.NoError(err)
 	}()
 
 	b.ResetTimer()

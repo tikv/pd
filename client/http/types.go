@@ -57,6 +57,7 @@ type State struct {
 	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
 	StartTimestamp int64  `json:"start_timestamp"`
+	KernelType     string `json:"kernel_type"`
 }
 
 // KeyRange alias pd.KeyRange to avoid break client compatibility.
@@ -80,6 +81,8 @@ type RegionInfo struct {
 	PendingPeers    []RegionPeer     `json:"pending_peers"`
 	WrittenBytes    uint64           `json:"written_bytes"`
 	ReadBytes       uint64           `json:"read_bytes"`
+	WrittenKeys     uint64           `json:"written_keys"`
+	ReadKeys        uint64           `json:"read_keys"`
 	ApproximateSize int64            `json:"approximate_size"`
 	ApproximateKeys int64            `json:"approximate_keys"`
 

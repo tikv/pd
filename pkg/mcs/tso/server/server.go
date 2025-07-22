@@ -39,10 +39,12 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
@@ -56,7 +58,7 @@ import (
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ tso.ElectionMember = (*member.Participant)(nil)
+var _ member.ElectionMember = (*member.Participant)(nil)
 
 const serviceName = "TSO Service"
 
@@ -155,7 +157,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	if s.serviceID, s.serviceRegister, err = utils.Register(s, constant.TSOServiceName); err != nil {
+	if s.serviceID, s.serviceRegister, err = utils.Register(s, mcs.TSOServiceName); err != nil {
 		return err
 	}
 
@@ -197,16 +199,26 @@ func (s *Server) Close() {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.IsKeyspaceServing(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	return s.IsKeyspaceServingByGroup(keyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
-// IsKeyspaceServing returns whether the server is the primary of the given keyspace.
-// TODO: update basicserver interface to support keyspace.
-func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
+// IsKeyspaceServingByGroup returns whether the server is the primary of the given keyspace.
+// It only returns true when the keyspace ID matches the keyspace group ID.
+func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bool {
 	if atomic.LoadInt64(&s.isRunning) == 0 {
 		return false
 	}
+	// We need to check if the keyspace group ID is expected for the given keyspace ID.
+	// It is necessary because checkKeyspaceGroupLeadership will correct the keyspace group ID automatically if keyspace serves.
+	_, _, expected, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if keyspaceGroupID != expected || err != nil {
+		return false
+	}
+	return s.checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID)
+}
 
+func (s *Server) checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID uint32) bool {
 	member, err := s.keyspaceGroupManager.GetElectionMember(
 		keyspaceID, keyspaceGroupID)
 	if err != nil {
@@ -219,8 +231,9 @@ func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
 	member, err := s.keyspaceGroupManager.GetElectionMember(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return nil
@@ -230,7 +243,7 @@ func (s *Server) GetLeaderListenUrls() []string {
 }
 
 // GetMember returns the election member of the given keyspace and keyspace group.
-func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMember, error) {
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.ElectionMember, error) {
 	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
@@ -414,9 +427,9 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	log.Info("TSO service config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
-	metricutil.Push(&cfg.Metric)
-
 	ctx, cancel := context.WithCancel(context.Background())
+	metricutil.Push(ctx, &cfg.Metric)
+
 	svr := CreateServer(ctx, cfg)
 
 	sc := make(chan os.Signal, 1)

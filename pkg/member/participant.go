@@ -110,6 +110,14 @@ func (m *Participant) MemberValue() string {
 	return m.memberValue
 }
 
+// MemberString returns the member string.
+func (m *Participant) MemberString() string {
+	if m.member == nil {
+		return ""
+	}
+	return m.member.String()
+}
+
 // Client returns the etcd client.
 func (m *Participant) Client() *clientv3.Client {
 	return m.client

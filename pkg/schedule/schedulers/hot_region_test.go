@@ -249,8 +249,9 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	tc.SetRegionBucketEnabled(true)
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	expectOp, _ := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
 		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 13))})
+	re.NoError(err)
 	re.Equal(expectOp.Brief(), ops[0].Brief())
 	re.Equal(expectOp.Kind(), ops[0].Kind())
 
@@ -264,12 +265,14 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
 	})
-	hb, _ = CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb, err = CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
 	hb.(*hotScheduler).types = []resourceType{writePeer}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	expectOp, _ = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+	expectOp, err = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
 		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 12))})
+	re.NoError(err)
 	re.Equal(expectOp.Brief(), ops[0].Brief())
 	re.Equal(expectOp.Kind(), ops[0].Kind())
 	re.Equal(operator.OpSplit, ops[0].Kind())
@@ -304,13 +307,16 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z2", "host": "h4"})
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z2", "host": "h5"})
 	tc.AddLabelsStore(6, 2, map[string]string{"zone": "z2", "host": "h6"})
-	tc.SetRule(&placement.Rule{
+	err = tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "leader", Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z1"}}},
 	})
-	tc.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "voter", Role: placement.Follower, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
 	})
-	tc.RuleManager.DeleteRule("pd", "default")
+	re.NoError(err)
+	err = tc.RuleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
 
 	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 0)
@@ -331,10 +337,12 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 
-	tc.SetRule(&placement.Rule{
+	err = tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "voter", Role: placement.Voter, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
 	})
-	tc.RuleManager.DeleteRule("pd", "follower")
+	re.NoError(err)
+	err = tc.RuleManager.DeleteRule("pd", "follower")
+	re.NoError(err)
 	ops, _ = hb.Schedule(tc, false)
 	re.NotEmpty(ops)
 	re.NotContains(ops[0].Step(1).String(), "transfer leader")
