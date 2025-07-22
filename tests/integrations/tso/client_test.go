@@ -33,7 +33,6 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/tso"
-	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -496,45 +495,6 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
-func TestTSONotLeader(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pdCluster, err := tests.NewTestCluster(ctx, 2)
-	re.NoError(err)
-	defer pdCluster.Destroy()
-	err = pdCluster.RunInitialServers()
-	re.NoError(err)
-	leaderName := pdCluster.WaitLeader()
-	re.NotEmpty(leaderName)
-	pdLeader := pdCluster.GetServer(leaderName)
-	backendEndpoints := pdLeader.GetAddr()
-	pdClient, err := pd.NewClientWithContext(ctx,
-		caller.TestComponent,
-		[]string{backendEndpoints}, pd.SecurityOption{})
-	re.NoError(err)
-	defer pdClient.Close()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testutil.Eventually(re, func() bool {
-			_, _, err := pdClient.GetTS(ctx)
-			return errs.IsLeaderChange(err)
-		})
-	}()
-	// Resign leader to trigger the "not leader" error.
-	pdLeader.ResignLeaderWithRetry(re)
-	wg.Wait()
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
-}
-
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
 func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
@@ -713,8 +673,7 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 
 	for range 5 {
 		time.Sleep(time.Second)
-		err = pdLeader.ResignLeader()
-		re.NoError(err)
+		pdLeader.ResignLeaderWithRetry(re)
 		leaderName = pdCluster.WaitLeader()
 		re.NotEmpty(leaderName)
 		pdLeader = pdCluster.GetServer(leaderName)

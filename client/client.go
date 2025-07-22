@@ -550,9 +550,6 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 		log.Debug("[pd] get tso failed, retrying",
 			zap.Int("retry-count", retryCount),
 			zap.Error(err))
-		failpoint.Inject("skipRetry", func() {
-			failpoint.Return(physical, logical, err)
-		})
 
 		// If the leader changes, we need to retry.
 		// For the first time, we retry immediately to avoid impacting the latency.
