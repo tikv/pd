@@ -305,10 +305,7 @@ func TestMoveLeader(t *testing.T) {
 		go func(s *tests.TestServer) {
 			defer wg.Done()
 			if s.IsLeader() {
-				testutil.Eventually(re, func() bool {
-					err = s.ResignLeader()
-					return err == nil
-				})
+				s.ResignLeaderWithRetry(re)
 			} else {
 				testutil.Eventually(re, func() bool {
 					old, err := s.GetEtcdLeaderID()

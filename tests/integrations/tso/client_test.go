@@ -33,6 +33,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/tso"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -500,7 +501,7 @@ func TestTSONotLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	pdCluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
 	defer pdCluster.Destroy()
 	err = pdCluster.RunInitialServers()
@@ -516,17 +517,20 @@ func TestTSONotLeader(t *testing.T) {
 	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
+
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func(client pd.Client) {
+	go func() {
 		defer wg.Done()
-		err = pdLeader.ResignLeader()
-		re.NoError(err)
-		_, _, err := client.GetTS(ctx)
-		re.ErrorContains(err, "not leader")
-	}(pdClient)
-
+		testutil.Eventually(re, func() bool {
+			_, _, err := pdClient.GetTS(ctx)
+			return errs.IsLeaderChange(err)
+		})
+	}()
+	// Resign leader to trigger the "not leader" error.
+	pdLeader.ResignLeaderWithRetry(re)
 	wg.Wait()
+
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
 }
@@ -567,19 +571,14 @@ func TestMixedTSODeployment(t *testing.T) {
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	checkTSO(ctx1, re, &wg, backendEndpoints)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for range 2 {
-			n := r.Intn(2) + 1
-			time.Sleep(time.Duration(n) * time.Second)
-			err = leaderServer.ResignLeader()
-			re.NoError(err)
-			leaderServer = cluster.GetServer(cluster.WaitLeader())
-			re.NotNil(leaderServer)
-		}
-		cancel1()
-	}()
+	for range 2 {
+		n := r.Intn(2) + 1
+		time.Sleep(time.Duration(n) * time.Second)
+		leaderServer.ResignLeaderWithRetry(re)
+		leaderServer = cluster.GetServer(cluster.WaitLeader())
+		re.NotNil(leaderServer)
+	}
+	cancel1()
 	wg.Wait()
 }
 

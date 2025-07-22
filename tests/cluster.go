@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/errors"
@@ -41,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -165,6 +167,16 @@ func (s *TestServer) ResignLeader() error {
 	defer s.Unlock()
 	s.server.GetMember().ResetLeader()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
+}
+
+// ResignLeaderWithRetry resigns the leader of the server with retry.
+func (s *TestServer) ResignLeaderWithRetry(re *require.Assertions) {
+	if !s.IsLeader() {
+		return
+	}
+	testutil.Eventually(re, func() bool {
+		return s.ResignLeader() == nil
+	})
 }
 
 // State returns the current TestServer's state.
