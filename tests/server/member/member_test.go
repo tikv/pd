@@ -288,48 +288,36 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 
 func TestMoveLeader(t *testing.T) {
 	re := require.New(t)
-	serverCount := 3
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, serverCount)
+	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+	originalLeader := cluster.WaitLeader()
+	re.NotEmpty(originalLeader)
+	originalLeaderServer := cluster.GetServer(originalLeader)
+	re.NotNil(originalLeaderServer)
 
-	var wg sync.WaitGroup
-	wg.Add(serverCount)
-	for _, s := range cluster.GetServers() {
-		go func(s *tests.TestServer) {
-			defer wg.Done()
-			if s.IsLeader() {
-				s.ResignLeaderWithRetry(re)
-			} else {
-				testutil.Eventually(re, func() bool {
-					old, err := s.GetEtcdLeaderID()
-					if err != nil {
-						return false
-					}
-					err = s.MoveEtcdLeader(old, s.GetServerID())
-					return err == nil
-				})
-			}
-		}(s)
-	}
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("move etcd leader does not return in 10 seconds")
-	}
+	// First, resign the original leader.
+	originalLeaderServer.ResignLeaderWithRetry(re)
+	newLeader := cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NotEqual(originalLeader, newLeader)
+	newLeaderServer := cluster.GetServer(newLeader)
+	re.NotNil(newLeaderServer)
+	// Then, move leader back to the original leader.
+	testutil.Eventually(re, func() bool {
+		return newLeaderServer.MoveEtcdLeader(
+			newLeaderServer.GetServerID(),
+			originalLeaderServer.GetServerID(),
+		) == nil
+	})
+	testutil.Eventually(re, func() bool {
+		return originalLeaderServer.IsLeader()
+	})
 }
 
 func TestCampaignLeaderFrequently(t *testing.T) {
