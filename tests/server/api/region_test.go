@@ -409,7 +409,9 @@ func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 		core.SetWrittenBytes(100*units.MiB),
 		core.SetWrittenKeys(1*units.MiB),
 		core.SetReadBytes(200*units.MiB),
-		core.SetReadKeys(2*units.MiB))
+		core.SetReadKeys(2*units.MiB),
+		core.SetApproximateKvSize(4*units.MiB),
+	)
 	buckets := &metapb.Buckets{
 		RegionId: 2,
 		Keys:     [][]byte{[]byte("a"), []byte("b")},
@@ -425,6 +427,8 @@ func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 	r1 := &response.RegionInfo{}
 	r1m := make(map[string]any)
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, r1))
+	re.Equal(uint64(1), r1.BucketVersion)
+	re.Equal(int64(4*units.MiB), r1.ApproximateKvSize)
 	r1.Adjust()
 	re.Equal(response.NewAPIRegionInfo(r), r1)
 	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, &r1m))
