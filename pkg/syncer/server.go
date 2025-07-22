@@ -349,7 +349,7 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 			}
 			err := sender.Send(regions)
 			if err != nil {
-				log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
+				log.Warn("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
 				failed = append(failed, name)
 			}
 		}
