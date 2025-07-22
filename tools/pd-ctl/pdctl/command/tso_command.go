@@ -25,7 +25,7 @@ import (
 // NewTSOCommand return a TSO subcommand of rootCmd
 func NewTSOCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tso <timestamp|leader>",
+		Use:   "tso <timestamp>",
 		Short: "parse TSO to the system and logic time",
 		Run:   showTSOCommandFunc,
 	}

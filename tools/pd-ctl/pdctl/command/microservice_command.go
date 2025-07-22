@@ -32,13 +32,12 @@ func NewMsCommand() *cobra.Command {
 		Use:   "ms <command>",
 		Short: "microservice commands",
 	}
-	m.AddCommand(newTsoCommand())
-	m.AddCommand(newSchedulerCommand())
+	m.AddCommand(newMSTsoCommand())
+	m.AddCommand(newMSSchedulerCommand())
 	return m
 }
 
-// newTsoCommand return a subcommand of tsoCmd
-func newTsoCommand() *cobra.Command {
+func newMSTsoCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "tso <primary|members>",
 		Short: "ms commands",
@@ -56,8 +55,7 @@ func newTsoCommand() *cobra.Command {
 	return d
 }
 
-// newSchedulerCommand returns a scheduler command.
-func newSchedulerCommand() *cobra.Command {
+func newMSSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scheduling <primary|members>",
 		Short: "micro-service commands",
