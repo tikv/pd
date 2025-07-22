@@ -495,6 +495,41 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
+func TestTSONotLeaderWhenRebaseErr(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(ctx,
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
+	// Resign the leader to trigger the rebase error.
+	pdLeader.ResignLeaderWithRetry(re)
+	// Trying to get TSO should fail with "not leader" error.
+	_, _, err = pdClient.GetTS(ctx)
+	re.ErrorContains(err, "not leader")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+	// The TSO should be eventually available.
+	testutil.Eventually(re, func() bool {
+		_, _, err := pdClient.GetTS(ctx)
+		return err == nil
+	})
+}
+
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
 func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
