@@ -900,6 +900,9 @@ type KeyspaceConfig struct {
 	AutoAssignMetaServiceGroups bool `toml:"auto-assign-meta-service-groups" json:"auto-assign-meta-service-groups,string"`
 	// MetaServiceGroups is the available external meta-service groups.
 	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
+	// MetaServiceGroupsFallbackRatio specifies the probability that a newly created keyspace will not be assigned a meta-service group.
+	// Valid range is [0, 1], where 0 means no fallback and 1 means always fallback to pd only.
+	MetaServiceGroupsFallbackRatio float64 `toml:"meta-service-groups-fallback-ratio" json:"meta-service-groups-fallback-ratio"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -915,6 +918,9 @@ func (c *KeyspaceConfig) Validate() error {
 		if endpoint == "" {
 			return errors.New("[keyspace] meta-service group addresses cannot be empty")
 		}
+	}
+	if c.MetaServiceGroupsFallbackRatio < 0 || c.MetaServiceGroupsFallbackRatio > 1 {
+		return errors.New("[keyspace] meta-service-groups-fallback-ratio should be in range [0, 1]")
 	}
 	return nil
 }
@@ -998,4 +1004,14 @@ func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 // SetMetaServiceGroups set the current meta-service group configuration map.
 func (c *KeyspaceConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
 	c.MetaServiceGroups = metaServiceGroups
+}
+
+// GetMetaServiceGroupsFallbackRatio returns the fallback ratio for meta-service groups.
+func (c *KeyspaceConfig) GetMetaServiceGroupsFallbackRatio() float64 {
+	return c.MetaServiceGroupsFallbackRatio
+}
+
+// SetMetaServiceGroupsFallbackRatio sets the fallback ratio for meta-service groups.
+func (c *KeyspaceConfig) SetMetaServiceGroupsFallbackRatio(fallbackRatio float64) {
+	c.MetaServiceGroupsFallbackRatio = fallbackRatio
 }

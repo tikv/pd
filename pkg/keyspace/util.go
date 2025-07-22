@@ -91,8 +91,7 @@ var (
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
 	ErrUnsupportedOperationInKeyspace = errors.New("it's a unsupported operation")
 
-	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
-	errUnknownMetaServiceGroup      = errors.New("unknown meta-service group")
+	errUnknownMetaServiceGroup = errors.New("unknown meta-service group")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.

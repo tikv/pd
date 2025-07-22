@@ -53,14 +53,15 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 type mockConfig struct {
-	PreAlloc                    []string
-	WaitRegionSplit             bool
-	DisableRawKVRegionSplit     bool
-	WaitRegionSplitTimeout      typeutil.Duration
-	CheckRegionSplitInterval    typeutil.Duration
-	EnableGlobalSafePointV2     bool
-	AutoAssignMetaServiceGroups bool
-	MetaServiceGroups           map[string]string
+	PreAlloc                       []string
+	WaitRegionSplit                bool
+	DisableRawKVRegionSplit        bool
+	WaitRegionSplitTimeout         typeutil.Duration
+	CheckRegionSplitInterval       typeutil.Duration
+	EnableGlobalSafePointV2        bool
+	AutoAssignMetaServiceGroups    bool
+	MetaServiceGroups              map[string]string
+	MetaServiceGroupsFallbackRatio float64
 }
 
 func (m *mockConfig) SetEnableGlobalSafePointV2(isEnable bool) {
@@ -107,16 +108,28 @@ func (m *mockConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
 	m.MetaServiceGroups = metaServiceGroups
 }
 
+func (m *mockConfig) GetMetaServiceGroupsFallbackRatio() float64 {
+	return m.MetaServiceGroupsFallbackRatio
+}
+
+func (m *mockConfig) SetMetaServiceGroupsFallbackRatio(ratio float64) {
+	m.MetaServiceGroupsFallbackRatio = ratio
+}
+
 func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
+	cfg := mockConfig{
+		AutoAssignMetaServiceGroups: true,
+		MetaServiceGroups:           mockMetaServiceGroups(),
+	}
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	mgm := NewMetaServiceGroupManager(suite.ctx, store, true, mockMetaServiceGroups())
+	mgm := NewMetaServiceGroupManager(suite.ctx, store, &cfg)
 	mustEnableMetaServiceGroups(re, mgm, mockMetaServiceGroups())
 	var err error
-	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, mgm)
+	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &cfg, kgm, mgm)
 	re.NoError(err)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())

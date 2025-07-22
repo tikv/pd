@@ -17,10 +17,13 @@ package keyspace
 import (
 	"context"
 	"math"
+	"math/rand"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 // MetaServiceGroupManager manages external meta-service groups.
@@ -30,20 +33,21 @@ type MetaServiceGroupManager struct {
 	syncutil.RWMutex
 	autoAssign        bool
 	metaServiceGroups map[string]string
+	fallbackRatio     float64
 }
 
 // NewMetaServiceGroupManager creates a new MetaServiceGroupManager.
 func NewMetaServiceGroupManager(
 	ctx context.Context,
 	store endpoint.MetaServiceGroupStorage,
-	autoAssign bool,
-	metaServiceGroups map[string]string,
+	config Config,
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
 		ctx:               ctx,
 		store:             store,
-		autoAssign:        autoAssign,
-		metaServiceGroups: metaServiceGroups,
+		autoAssign:        config.GetAutoAssignMetaServiceGroups(),
+		metaServiceGroups: config.GetMetaServiceGroups(),
+		fallbackRatio:     config.GetMetaServiceGroupsFallbackRatio(),
 	}
 }
 
@@ -100,6 +104,13 @@ func (m *MetaServiceGroupManager) PatchStatus(groupID string, patch *MetaService
 func (m *MetaServiceGroupManager) AssignToGroup(count int) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
+	if roll := rand.Float64(); roll < m.fallbackRatio {
+		log.Info("[keyspace] fallback meta-service group assignment to PD due to fallback ratio",
+			zap.Float64("roll", roll),
+			zap.Float64("fallback ratio", m.fallbackRatio),
+		)
+		return "", nil
+	}
 	var (
 		assignedGroup       string
 		assignedGroupStatus *endpoint.MetaServiceGroupStatus
@@ -119,7 +130,10 @@ func (m *MetaServiceGroupManager) AssignToGroup(count int) (string, error) {
 			}
 		}
 		if assignedGroup == "" {
-			return errNoAvailableMetaServiceGroups
+			log.Warn("[keyspace] fallback meta-service group assignment to PD due to no available meta-service group",
+				zap.Any("meta-service groups status", statusMap),
+			)
+			return nil
 		}
 		assignedGroupStatus.AssignmentCount += count
 		return m.store.SaveMetaServiceGroupStatus(txn, assignedGroup, assignedGroupStatus)
@@ -187,9 +201,10 @@ func (m *MetaServiceGroupManager) GetAutoAssign() bool {
 }
 
 // updateConfig updates currently available meta-service groups.
-func (m *MetaServiceGroupManager) updateConfig(autoAssign bool, metaServiceGroups map[string]string) {
+func (m *MetaServiceGroupManager) updateConfig(autoAssign bool, metaServiceGroups map[string]string, fallbackRatio float64) {
 	m.Lock()
 	defer m.Unlock()
 	m.autoAssign = autoAssign
 	m.metaServiceGroups = metaServiceGroups
+	m.fallbackRatio = fallbackRatio
 }

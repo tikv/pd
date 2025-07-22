@@ -83,6 +83,8 @@ type Config interface {
 	GetAutoAssignMetaServiceGroups() bool
 	SetMetaServiceGroups(map[string]string)
 	GetMetaServiceGroups() map[string]string
+	GetMetaServiceGroupsFallbackRatio() float64
+	SetMetaServiceGroupsFallbackRatio(float64)
 }
 
 // Manager manages keyspace related data.
@@ -244,6 +246,7 @@ func (manager *Manager) UpdateConfig(cfg Config) error {
 		manager.mgm.updateConfig(
 			cfg.GetAutoAssignMetaServiceGroups(),
 			cfg.GetMetaServiceGroups(),
+			cfg.GetMetaServiceGroupsFallbackRatio(),
 		)
 	}
 	return manager.SetGlobalSafePointV2()
@@ -285,9 +288,16 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if assignToMetaServiceGroup {
 		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
 		if err != nil {
+			log.Error("[keyspace] failed to assign keyspace to meta-service group",
+				zap.Uint32("keyspace-id", newID),
+				zap.String("name", request.Name),
+				zap.Error(err),
+			)
 			return nil, err
 		}
-		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
+		if metaServiceGroup != "" {
+			request.Config[MetaServiceGroupIDKey] = metaServiceGroup
+		}
 	}
 
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.

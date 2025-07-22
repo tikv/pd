@@ -45,7 +45,11 @@ func mockMetaServiceGroups() map[string]string {
 func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewMetaServiceGroupManager(suite.ctx, store, true, mockMetaServiceGroups())
+	cfg := mockConfig{
+		AutoAssignMetaServiceGroups: true,
+		MetaServiceGroups:           mockMetaServiceGroups(),
+	}
+	suite.manager = NewMetaServiceGroupManager(suite.ctx, store, &cfg)
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
@@ -62,9 +66,10 @@ func (suite *metaServiceGroupTestSuite) TestInitialState() {
 		re.Zero(status.AssignmentCount)
 		re.False(status.Enabled)
 	}
-	// Assign should return error due to no available groups.
-	_, err = suite.manager.AssignToGroup(1)
-	re.Error(err)
+	// Assignment should fallback to PD
+	group, err := suite.manager.AssignToGroup(1)
+	re.NoError(err)
+	re.Empty(group)
 }
 
 func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
@@ -165,7 +170,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpoints() {
 	newMap := map[string]string{
 		"foo": "foo.bar.local",
 	}
-	suite.manager.updateConfig(true, newMap)
+	suite.manager.updateConfig(true, newMap, 0)
 	config := map[string]string{MetaServiceGroupIDKey: "foo"}
 	suite.manager.AttachEndpoints(config)
 	re.Equal("foo.bar.local", config[MetaServiceGroupAddressesKey], "should read from updated metaServiceGroups map")
@@ -191,7 +196,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 	// Add a new group "etcd-group-3"
 	newMap := mockMetaServiceGroups()
 	newMap["etcd-group-3"] = "etcd-group-3.tidb-serverless.cluster.svc.local"
-	suite.manager.updateConfig(true, newMap)
+	suite.manager.updateConfig(true, newMap, 0)
 
 	// Move the assignment from the originally assigned group to "etcd-group-3"
 	err = suite.manager.UpdateAssignment(assigned, "etcd-group-3")
@@ -211,4 +216,45 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 		}
 		re.Equal(0, statusMap[groupID].AssignmentCount, "other original groups should remain at 0")
 	}
+}
+
+func (suite *metaServiceGroupTestSuite) TestFallbackRatio() {
+	re := suite.Require()
+	for groupID := range mockMetaServiceGroups() {
+		enable := true
+		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
+			Enabled: &enable,
+		}))
+	}
+	// Fallback ratio defaults to 0, all keyspace should be assigned to a group.
+	for range 10 {
+		assigned, err := suite.manager.AssignToGroup(1)
+		re.NoError(err)
+		re.NotEmpty(assigned, "expected AssignToGroup to return a non-empty group")
+	}
+	// Fallback ratio set to 0.5, some keyspace should be assigned to a group, some should fallback.
+	batchSize := 100
+	expectedFallbackRatio := 0.5
+	suite.manager.fallbackRatio = expectedFallbackRatio
+	totalFallback := 0
+	for range batchSize {
+		assigned, err := suite.manager.AssignToGroup(1)
+		re.NoError(err)
+		if assigned == "" {
+			totalFallback++
+		}
+	}
+	re.InDelta(expectedFallbackRatio, float64(totalFallback)/float64(batchSize), 0.1)
+
+	// Fallback ratio set to 1, all keyspace should fallback to pd.
+	suite.manager.fallbackRatio = 1.0
+	totalFallback = 0
+	for range batchSize {
+		assigned, err := suite.manager.AssignToGroup(1)
+		re.NoError(err)
+		if assigned == "" {
+			totalFallback++
+		}
+	}
+	re.Equal(batchSize, totalFallback, "all keyspace should fallback to pd when fallback ratio is 1.0")
 }
