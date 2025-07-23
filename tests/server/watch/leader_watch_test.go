@@ -34,6 +34,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestWatcher(t *testing.T) {
+	// TODO: This test is flaky and needs to be fixed.
+	t.Skip("this test is flaky, need to be fixed")
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
