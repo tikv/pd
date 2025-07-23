@@ -34,7 +34,9 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	ks "github.com/tikv/pd/pkg/keyspace/constant"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -485,6 +487,7 @@ type TestCluster struct {
 		pool map[uint64]struct{}
 	}
 	schedulingCluster *TestSchedulingCluster
+	tsoCluster        *TestTSOCluster
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -826,6 +829,9 @@ func (c *TestCluster) Destroy() {
 	if c.schedulingCluster != nil {
 		c.schedulingCluster.Destroy()
 	}
+	if c.tsoCluster != nil {
+		c.tsoCluster.Destroy()
+	}
 }
 
 // CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.
@@ -847,9 +853,22 @@ func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
 	return c.schedulingCluster.GetPrimaryServer()
 }
 
+// GetTsoDefaultSpacePrimaryServer returns the primary TSO server for the default keyspace and keyspace group.
+func (c *TestCluster) GetTsoDefaultSpacePrimaryServer() *tso.Server {
+	if c.tsoCluster == nil {
+		return nil
+	}
+	return c.tsoCluster.GetPrimaryServer(ks.DefaultKeyspaceID, ks.DefaultKeyspaceGroupID)
+}
+
 // SetSchedulingCluster sets the scheduling cluster.
 func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
 	c.schedulingCluster = cluster
+}
+
+// SetTsoCluster sets the TSO cluster.
+func (c *TestCluster) SetTsoCluster(cluster *TestTSOCluster) {
+	c.tsoCluster = cluster
 }
 
 // WaitOp represent the wait configuration

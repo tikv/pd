@@ -78,7 +78,7 @@ func getMembersCommandFunc(cmd *cobra.Command, _ []string) {
 	uri := fmt.Sprintf(msMembersPrefix, parent)
 	r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
+		cmd.Printf("Failed to get the microservice members: %s\n", err)
 		return
 	}
 	cmd.Println(r)
@@ -89,7 +89,7 @@ func getPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
 	uri := fmt.Sprintf(msPrimaryPrefix, parent)
 	r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
+		cmd.Printf("Failed to get the microservice primary: %s\n", err)
 		return
 	}
 	cmd.Println(r)
