@@ -133,7 +133,6 @@ func TestSafepoint(t *testing.T) {
 
 	// This should be rejected previously, but as GC barrier became the replacement of services safe points and we no
 	// longer require the service safe point of "gc_worker", the deletion is now still allowed.
-	// re.Equal("Failed to delete service GC safepoint: request pd http api failed with status: '500 Internal Server Error', body: '\"cannot remove service safe point of gc_worker\"'\n", string(output))
 	var msg string
 	re.NoError(json.Unmarshal(output, &msg))
 	re.Equal("Delete service GC safepoint successfully.", msg)
