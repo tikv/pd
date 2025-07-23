@@ -45,12 +45,15 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -383,6 +386,121 @@ func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestC
 func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestCluster)) {
 	s.t.Logf("start test %s in microservice environment", getTestName())
 	s.runFuncInMicroserviceEnv(test)
+}
+
+// Reset is to reset the environment.
+// It will reset stores, regions, rules and schedulers.
+func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
+	resetFunc := func(cluster *TestCluster) {
+		// replace rules with default rule
+		defaultRule := placement.GroupBundle{
+			ID: placement.DefaultGroupID,
+			Rules: []*placement.Rule{
+				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3},
+			},
+		}
+		data, err := json.Marshal([]placement.GroupBundle{defaultRule})
+		re.NoError(err)
+		urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+		ruleURL := fmt.Sprintf("%s/config/placement-rule", urlPrefix)
+		err = testutil.CheckPostJSON(TestDialClient, ruleURL, data, testutil.StatusOK(re))
+		re.NoError(err)
+		respBundle := make([]placement.GroupBundle, 0)
+		testutil.Eventually(re, func() bool {
+			err = testutil.CheckGetJSON(TestDialClient, ruleURL, nil,
+				testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
+			re.NoError(err)
+			return len(respBundle) == 1 && respBundle[0].ID == placement.DefaultGroupID && len(respBundle[0].Rules) == 1 &&
+				respBundle[0].Rules[0].ID == placement.DefaultRuleID && respBundle[0].Rules[0].Count == 3 && respBundle[0].Rules[0].Role == placement.Voter
+		})
+		// clean region cache
+		for _, server := range cluster.GetServers() {
+			pdAddr := cluster.GetConfig().GetClientURL()
+			for _, region := range server.GetRegions() {
+				url := fmt.Sprintf("%s/pd/api/v1/admin/cache/region/%d", pdAddr, region.GetID())
+				err := testutil.CheckDelete(TestDialClient, url, testutil.StatusOK(re))
+				re.NoError(err)
+			}
+			re.Empty(server.GetRegions())
+		}
+
+		// clean stores
+		leader := cluster.GetLeaderServer()
+		for _, store := range leader.GetStores() {
+			if store.NodeState == metapb.NodeState_Removed {
+				continue
+			}
+			err := cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true)
+			if err != nil {
+				re.ErrorIs(err, errs.ErrStoreRemoved)
+			}
+			re.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
+		}
+		re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
+		re.Empty(leader.GetStores())
+		testutil.Eventually(re, func() bool {
+			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+				for _, s := range sche.GetBasicCluster().GetStores() {
+					if s.GetState() != metapb.StoreState_Tombstone {
+						return false
+					}
+				}
+			}
+			return true
+		})
+		// clean schedulers
+		schedulerURL := fmt.Sprintf("%s/schedulers", urlPrefix)
+		testutil.Eventually(re, func() bool {
+			// get current schedulers
+			var currentSchedulers []string
+			err := testutil.CheckGetJSON(http.DefaultClient, schedulerURL, nil,
+				testutil.StatusOK(re), testutil.ExtractJSON(re, &currentSchedulers))
+			re.NoError(err)
+			// compare schedulers
+			defaultSet := make(map[string]struct{}, len(types.DefaultSchedulers))
+			for _, s := range types.DefaultSchedulers {
+				defaultSet[s.String()] = struct{}{}
+			}
+			currentSet := make(map[string]struct{}, len(currentSchedulers))
+			for _, s := range currentSchedulers {
+				currentSet[s] = struct{}{}
+			}
+			var toAdd, toRemove []string
+			for name := range defaultSet {
+				if _, ok := currentSet[name]; !ok {
+					toAdd = append(toAdd, name)
+				}
+			}
+			for name := range currentSet {
+				if _, ok := defaultSet[name]; !ok {
+					toRemove = append(toRemove, name)
+				}
+			}
+			if len(toAdd) == 0 && len(toRemove) == 0 {
+				return true
+			}
+			// sync schedulers
+			for _, name := range toAdd {
+				input := map[string]any{"name": name}
+				body, err := json.Marshal(input)
+				re.NoError(err)
+				err = testutil.CheckPostJSON(http.DefaultClient, schedulerURL, body)
+				re.NoError(err)
+			}
+			for _, name := range toRemove {
+				err = testutil.CheckDelete(http.DefaultClient, schedulerURL+"/"+name)
+				re.NoError(err)
+			}
+			return false
+		})
+		// clean hot cache
+		hotStat := leader.GetRaftCluster().GetHotStat()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			hotStat = sche.GetCluster().GetHotStat()
+		}
+		hotStat.CleanCache()
+	}
+	s.RunFunc(resetFunc)
 }
 
 // Cleanup is to cleanup the environment.

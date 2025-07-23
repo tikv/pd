@@ -65,15 +65,8 @@ func (suite *hotTestSuite) TearDownSuite() {
 }
 
 func (suite *hotTestSuite) TearDownTest() {
-	cleanFunc := func(cluster *pdTests.TestCluster) {
-		leader := cluster.GetLeaderServer()
-		hotStat := leader.GetRaftCluster().GetHotStat()
-		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			hotStat = sche.GetCluster().GetHotStat()
-		}
-		hotStat.CleanCache()
-	}
-	suite.env.RunFunc(cleanFunc)
+	re := suite.Require()
+	suite.env.Reset(re)
 }
 
 func (suite *hotTestSuite) TestHot() {
