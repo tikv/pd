@@ -2130,6 +2130,9 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 	var size int64
 	for {
 		r.t.RLock()
+		if len(startKey) == 0 && len(endKey) == 0 {
+			return r.tree.totalSize
+		}
 		var cnt int
 		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
 			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
