@@ -495,7 +495,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
-func TestTSONotLeader(t *testing.T) {
+func TestTSONotLeaderWhenRebaseErr(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -516,19 +516,19 @@ func TestTSONotLeader(t *testing.T) {
 	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func(client pd.Client) {
-		defer wg.Done()
-		err = pdLeader.ResignLeader()
-		re.NoError(err)
-		_, _, err := client.GetTS(ctx)
-		re.ErrorContains(err, "not leader")
-	}(pdClient)
-
-	wg.Wait()
+	// Resign the leader to trigger the rebase error.
+	err = pdLeader.ResignLeaderWithRetry()
+	re.NoError(err)
+	// Trying to get TSO should fail with "not leader" error.
+	_, _, err = pdClient.GetTS(ctx)
+	re.ErrorContains(err, "not leader")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+	// The TSO should be eventually available.
+	testutil.Eventually(re, func() bool {
+		_, _, err := pdClient.GetTS(ctx)
+		return err == nil
+	})
 }
 
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
@@ -567,19 +567,15 @@ func TestMixedTSODeployment(t *testing.T) {
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	checkTSO(ctx1, re, &wg, backendEndpoints)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for range 2 {
-			n := r.Intn(2) + 1
-			time.Sleep(time.Duration(n) * time.Second)
-			err = leaderServer.ResignLeader()
-			re.NoError(err)
-			leaderServer = cluster.GetServer(cluster.WaitLeader())
-			re.NotNil(leaderServer)
-		}
-		cancel1()
-	}()
+	for range 2 {
+		n := r.Intn(2) + 1
+		time.Sleep(time.Duration(n) * time.Second)
+		err = leaderServer.ResignLeaderWithRetry()
+		re.NoError(err)
+		leaderServer = cluster.GetServer(cluster.WaitLeader())
+		re.NotNil(leaderServer)
+	}
+	cancel1()
 	wg.Wait()
 }
 
@@ -714,7 +710,7 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 
 	for range 5 {
 		time.Sleep(time.Second)
-		err = pdLeader.ResignLeader()
+		err = pdLeader.ResignLeaderWithRetry()
 		re.NoError(err)
 		leaderName = pdCluster.WaitLeader()
 		re.NotEmpty(leaderName)
