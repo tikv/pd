@@ -361,14 +361,6 @@ func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*Re
 	return krgm.getResourceGroupList(withStats, true), nil
 }
 
-func (m *Manager) getRUTracker(keyspaceID uint32, name string) *ruTracker {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return nil
-	}
-	return krgm.getOrCreateRUTracker(name)
-}
-
 func (m *Manager) persistLoop(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(persistLoopInterval)
@@ -514,15 +506,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			now := time.Now()
-			sinceLastRecord := m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig, now)
-			resourceGroupName := consumptionInfo.resourceGroupName
+			m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig, time.Now())
 			// TODO: maybe we need to distinguish background ru.
-			if rg, _ := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
+			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
-			}
-			if rt := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
-				rt.sample(now, consumptionInfo.RRU+consumptionInfo.WRU, sinceLastRecord)
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
@@ -539,6 +526,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+				// Conciliate the fill rates.
+				krgm.conciliateFillRates()
+				// Record the metrics.
 				keyspaceName, err := m.getKeyspaceNameByID(ctx, krgm.keyspaceID)
 				if err != nil {
 					continue
@@ -552,7 +542,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 						continue
 					}
 					metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
-					metrics.setGroup(group)
+					metrics.setGroup(group, keyspaceName)
 					// Record the tracked RU per second.
 					if rt := krgm.getRUTracker(groupName); rt != nil {
 						metrics.setSampledRUPerSec(rt.getRUPerSec())

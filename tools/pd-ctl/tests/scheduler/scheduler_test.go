@@ -96,8 +96,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 			}
 		}
 	}
-	suite.env.RunTest(cleanFunc)
-	suite.env.Cleanup()
+	suite.env.RunFunc(cleanFunc)
 }
 
 func (suite *schedulerTestSuite) checkDefaultSchedulers(re *require.Assertions, cmd *cobra.Command, pdAddr string) {

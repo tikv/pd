@@ -73,7 +73,7 @@ func (suite *hotTestSuite) TearDownTest() {
 		}
 		hotStat.CleanCache()
 	}
-	suite.env.RunTest(cleanFunc)
+	suite.env.RunFunc(cleanFunc)
 }
 
 func (suite *hotTestSuite) TestHot() {

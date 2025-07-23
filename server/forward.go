@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -127,7 +128,7 @@ func (f *tsoForwarder) forwardTSORequest(
 		Header: &tsopb.RequestHeader{
 			ClusterId:       request.GetHeader().GetClusterId(),
 			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: request.GetCount(),
@@ -441,7 +442,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       keypath.ClusterID(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: 1,

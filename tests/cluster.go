@@ -167,6 +167,28 @@ func (s *TestServer) ResignLeader() error {
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
+// ResignLeaderWithRetry resigns the leader of the server with retry.
+func (s *TestServer) ResignLeaderWithRetry() (err error) {
+	if !s.IsLeader() {
+		return
+	}
+	// The default timeout of moving an etcd leader is 5 seconds,
+	// set the retry times to 3 will get a maximum of ~15 seconds of trying.
+	const retryCount = 3
+	for retry := range retryCount {
+		err = s.ResignLeader()
+		if err == nil {
+			return
+		}
+		// Do not retry if the last attempt fails.
+		if retry == retryCount-1 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return
+}
+
 // State returns the current TestServer's state.
 func (s *TestServer) State() int32 {
 	s.RLock()
@@ -406,7 +428,7 @@ func (s *TestServer) WaitLeader() bool {
 }
 
 func (s *TestServer) waitPreAllocKeyspaces() error {
-	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
 	if len(keyspaces) == 0 {
 		return nil
 	}
@@ -417,11 +439,12 @@ Outer:
 	for range WaitPreAllocKeyspacesRetryTimes {
 		for idx < len(keyspaces) {
 			_, err := manager.LoadKeyspace(keyspaces[idx])
-			if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) {
-				time.Sleep(WaitPreAllocKeyspacesInterval)
-				continue Outer
-			}
 			if err != nil {
+				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+				if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) || errors.ErrorEqual(err, errs.ErrEtcdTxnConflict) {
+					time.Sleep(WaitPreAllocKeyspacesInterval)
+					continue Outer
+				}
 				return errors.Trace(err)
 			}
 
@@ -434,7 +457,7 @@ Outer:
 
 // GetPreAllocKeyspaceIDs returns the pre-allocated keyspace IDs.
 func (s *TestServer) GetPreAllocKeyspaceIDs() ([]uint32, error) {
-	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
 	ids := make([]uint32, 0, len(keyspaces))
 	manager := s.GetKeyspaceManager()
 	for _, keyspace := range keyspaces {
