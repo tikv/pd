@@ -165,6 +165,10 @@ func (rg *ResourceGroup) overrideFillRateLocked(new float64) {
 func (rg *ResourceGroup) getBurstLimit(ignoreOverride ...bool) int64 {
 	rg.RLock()
 	defer rg.RUnlock()
+	return rg.getBurstLimitLocked(ignoreOverride...)
+}
+
+func (rg *ResourceGroup) getBurstLimitLocked(ignoreOverride ...bool) int64 {
 	if len(ignoreOverride) > 0 && ignoreOverride[0] {
 		return rg.RUSettings.RU.getBurstLimitSetting()
 	}
@@ -258,19 +262,20 @@ func (rg *ResourceGroup) RequestRU(
 	sl *serviceLimiter,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
+	defer rg.Unlock()
+
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
 	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
-	rg.Unlock()
 	// Then, try to apply the service limit.
 	grantedTokens := tb.GetTokens()
 	limitedTokens := sl.applyServiceLimit(now, grantedTokens)
 	if limitedTokens < grantedTokens {
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
-		if rg.getBurstLimit() > 0 {
+		if rg.getBurstLimitLocked() > 0 {
 			rg.RUSettings.RU.lastLimitedTokens += grantedTokens - limitedTokens
 		}
 	}
