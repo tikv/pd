@@ -170,7 +170,7 @@ func testTLSReload(
 					CAPath:   testClientTLSInfo.TrustedCAFile,
 					CertPath: testClientTLSInfo.CertFile,
 					KeyPath:  testClientTLSInfo.KeyFile,
-				}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+				})
 			if err != nil {
 				errc <- err
 				dcancel()
@@ -203,7 +203,7 @@ func testTLSReload(
 			CAPath:   testClientTLSInfo.TrustedCAFile,
 			CertPath: testClientTLSInfo.CertFile,
 			KeyPath:  testClientTLSInfo.KeyFile,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		})
 	re.NoError(err)
 	dcancel()
 	cli.Close()
@@ -218,7 +218,7 @@ func testTLSReload(
 			SSLCABytes:   caData,
 			SSLCertBytes: certData,
 			SSLKEYBytes:  keyData,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		})
 	re.NoError(err)
 	defer cli.Close()
 	cancel1()
