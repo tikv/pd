@@ -206,6 +206,16 @@ func (krgm *keyspaceResourceGroupManager) getMutableResourceGroup(name string) *
 	return krgm.groups[name]
 }
 
+func (krgm *keyspaceResourceGroupManager) getMutableResourceGroupList() []*ResourceGroup {
+	krgm.Lock()
+	defer krgm.Unlock()
+	res := make([]*ResourceGroup, 0, len(krgm.groups))
+	for _, group := range krgm.groups {
+		res = append(res, group)
+	}
+	return res
+}
+
 func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats, includeDefault bool) []*ResourceGroup {
 	krgm.RLock()
 	res := make([]*ResourceGroup, 0, len(krgm.groups))
@@ -254,6 +264,8 @@ func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) 
 	// Cleanup the overrides if the service limit is set to 0.
 	if serviceLimit <= 0 {
 		krgm.cleanupOverrides()
+	} else {
+		krgm.invalidateBurstability(serviceLimit)
 	}
 }
 
@@ -439,7 +451,12 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 			// just set the override fill rate to -1 to allow the resource group to consume as many RUs as they originally
 			// need according to its fill rate setting.
 			for _, group := range queue {
-				group.overrideFillRateAndBurstLimit(-1, -1)
+				if group.getBurstLimit(true) >= 0 {
+					group.overrideFillRateAndBurstLimit(-1, -1)
+				} else {
+					// If the original burst limit is not set, set the override burst limit to the remaining service limit.
+					group.overrideFillRateAndBurstLimit(-1, int64(remainingServiceLimit))
+				}
 			}
 			// Although this priority level does not require resource limiting, it still needs to deduct the actual
 			// RU consumption from `remainingServiceLimit` to reflect the concept of priority, so that the
@@ -609,15 +626,21 @@ func (di *demandInfo) allocateBurstRUDemand(
 	return remainingServiceLimit
 }
 
+// Cleanup the overrides for all the resource groups.
 func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
-	krgm.RLock()
-	groups := make([]*ResourceGroup, 0, len(krgm.groups))
-	for _, group := range krgm.groups {
-		groups = append(groups, group)
-	}
-	krgm.RUnlock()
-	// Cleanup the overrides for all the resource groups without holding the lock.
-	for _, group := range groups {
+	for _, group := range krgm.getMutableResourceGroupList() {
 		group.overrideFillRateAndBurstLimit(-1, -1)
+	}
+}
+
+// Since the burstable resource groups won't require tokens from the server anymore,
+// we have to override the burst limit of all the resource groups to the service limit.
+// This ensures the burstability of the resource groups can be properly invalidated.
+func (krgm *keyspaceResourceGroupManager) invalidateBurstability(serviceLimit float64) {
+	for _, group := range krgm.getMutableResourceGroupList() {
+		if group.getBurstLimit() >= 0 {
+			continue
+		}
+		group.overrideBurstLimit(int64(serviceLimit))
 	}
 }

@@ -177,6 +177,12 @@ func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
 	return rg.RUSettings.RU.overrideBurstLimit
 }
 
+func (rg *ResourceGroup) overrideBurstLimit(new int64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideBurstLimitLocked(new)
+}
+
 func (rg *ResourceGroup) overrideBurstLimitLocked(new int64) {
 	rg.RUSettings.RU.overrideBurstLimit = new
 }
@@ -252,13 +258,12 @@ func (rg *ResourceGroup) RequestRU(
 	sl *serviceLimiter,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
-	defer rg.Unlock()
-
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
 	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
+	rg.Unlock()
 	// Then, try to apply the service limit.
 	grantedTokens := tb.GetTokens()
 	limitedTokens := sl.applyServiceLimit(now, grantedTokens)
