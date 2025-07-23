@@ -756,11 +756,15 @@ func TestGetRegionSizeByRange(t *testing.T) {
 	}
 	totalSize := regions.GetRegionSizeByRange([]byte(""), []byte(""))
 	require.Equal(t, int64(nums*10), totalSize)
+	totalCount := regions.GetRegionCountByRange([]byte(""), []byte(""))
+	require.Equal(t, nums, totalCount)
 	for i := 1; i < 10; i++ {
 		verifyNum := nums / i
 		endKey := fmt.Sprintf("%20d", verifyNum)
 		totalSize := regions.GetRegionSizeByRange([]byte(""), []byte(endKey))
 		require.Equal(t, int64(verifyNum*10), totalSize)
+		totalCount := regions.GetRegionCountByRange([]byte(""), []byte(endKey))
+		require.Equal(t, verifyNum, totalCount)
 	}
 }
 

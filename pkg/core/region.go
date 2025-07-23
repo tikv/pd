@@ -2125,6 +2125,41 @@ func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(regi
 	r.tree.scanRange(startKey, iterator)
 }
 
+// GetRegionCountByRange scans regions intersecting [start key, end key), returns the count of regions in this range.
+func (r *RegionsInfo) GetRegionCountByRange(startKey, endKey []byte) int {
+	if len(startKey) == 0 && len(endKey) == 0 {
+		r.t.RLock()
+		defer r.t.RUnlock()
+		return r.tree.length()
+	}
+	var total int
+	for {
+		r.t.RLock()
+		var cnt int
+		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if cnt >= scanRegionLimit {
+				return false
+			}
+			cnt++
+			startKey = region.GetEndKey()
+			return true
+		})
+		r.t.RUnlock()
+		total += cnt
+		if cnt == 0 {
+			break
+		}
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
+	return total
+}
+
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 	var size int64
