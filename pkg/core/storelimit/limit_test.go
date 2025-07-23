@@ -16,7 +16,6 @@ package storelimit
 
 import (
 	"container/list"
-	"context"
 	"math/rand"
 	"testing"
 	"time"
@@ -119,8 +118,8 @@ func TestWindow(t *testing.T) {
 }
 
 func TestFeedback(t *testing.T) {
-	s := NewSlidingWindows()
 	re := require.New(t)
+	s := NewSlidingWindows()
 	type SnapshotStats struct {
 		expectCost int64
 		remaining  int64
@@ -131,8 +130,6 @@ func TestFeedback(t *testing.T) {
 	// the best strategy is that the tikv executing queue equals the wait.
 	const regionSize, limit, wait = int64(10000), int64(100), int64(4)
 	iter := 100
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// receive the operator
 	queue := list.List{}
@@ -158,36 +155,31 @@ func TestFeedback(t *testing.T) {
 
 	// tick is the time that the snapshot has been executed.
 	tick := int64(0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			tick++
-			generateOp(tick)
-			first := queue.Front()
-			if first == nil {
-				continue
-			}
-			stats := first.Value.(*SnapshotStats)
-			if stats.remaining > 0 {
-				stats.remaining -= limit
-				continue
-			}
-			cost := tick - stats.start
-			exec := stats.expectCost
-			if exec < 5 {
-				exec = 5
-			}
-			err := exec*wait - cost
-			queue.Remove(first)
-			s.Feedback(float64(err))
-			if iter <= 0 {
-				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
-				re.Less(float64(s.GetCap()), float64(regionSize*wait))
-				return
-			}
-			s.Ack(stats.size, SendSnapshot)
+	for range ticker.C {
+		tick++
+		generateOp(tick)
+		first := queue.Front()
+		if first == nil {
+			continue
 		}
+		stats := first.Value.(*SnapshotStats)
+		if stats.remaining > 0 {
+			stats.remaining -= limit
+			continue
+		}
+		cost := tick - stats.start
+		exec := stats.expectCost
+		if exec < 5 {
+			exec = 5
+		}
+		err := exec*wait - cost
+		queue.Remove(first)
+		s.Feedback(float64(err))
+		if iter <= 0 {
+			re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
+			re.Less(float64(s.GetCap()), float64(regionSize*wait))
+			return
+		}
+		s.Ack(stats.size, SendSnapshot)
 	}
 }
