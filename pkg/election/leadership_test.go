@@ -125,9 +125,9 @@ func TestExitWatch(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Case1: close the client before the watch loop starts
 	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		client.Close()
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case2: close the client when the watch loop is running
@@ -146,9 +146,9 @@ func TestExitWatch(t *testing.T) {
 	})
 	// Case4: close the server before the watch loop starts
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		server.Close()
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case5: close the server when the watch loop is running
