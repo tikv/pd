@@ -302,7 +302,8 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
 	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
-	for i := range 129 {
+	keyspaceCount := 129
+	for i := range keyspaceCount {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
@@ -323,7 +324,6 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
@@ -354,8 +354,8 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	var keyspaceGroup endpoint.KeyspaceGroup
 	err = json.Unmarshal(output, &keyspaceGroup)
-	re.NoError(err)
-	re.Len(keyspaceGroup.Keyspaces, 130)
+	re.NoError(err, string(output))
+	re.Len(keyspaceGroup.Keyspaces, keyspaceCount+1)
 	re.Nil(keyspaceGroup.MergeState)
 
 	// split keyspace group multiple times.
@@ -390,7 +390,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	err = json.Unmarshal(output, &keyspaceGroup)
 	re.NoError(err)
-	re.Len(keyspaceGroup.Keyspaces, 130)
+	re.Len(keyspaceGroup.Keyspaces, keyspaceCount+1)
 	re.Nil(keyspaceGroup.MergeState)
 
 	// merge keyspace group with wrong args.
@@ -577,7 +577,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		output, err := tests.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
 		if strings.Contains(string(output), "Failed") {
-			// It may be failed when meets error, such as [PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.Contains(string(output), "ErrEtcdTxnConflict", "output: %s", string(output))
 			return false
 		}

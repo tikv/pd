@@ -63,20 +63,7 @@ func (suite *ruleTestSuite) TearDownSuite() {
 
 func (suite *ruleTestSuite) TearDownTest() {
 	re := suite.Require()
-	cleanFunc := func(cluster *tests.TestCluster) {
-		def := placement.GroupBundle{
-			ID: "pd",
-			Rules: []*placement.Rule{
-				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
-			},
-		}
-		data, err := json.Marshal([]placement.GroupBundle{def})
-		re.NoError(err)
-		urlPrefix := cluster.GetLeaderServer().GetAddr()
-		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
-		re.NoError(err)
-	}
-	suite.env.RunTest(cleanFunc)
+	suite.env.RunFunc(cleanRules(re))
 }
 
 func (suite *ruleTestSuite) TestSet() {
@@ -289,7 +276,8 @@ func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 	leaderServer.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
 	defaultRule := leaderServer.GetRaftCluster().GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	defaultRule.LocationLabels = []string{"host"}
-	leaderServer.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
+	err := leaderServer.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
+	re.NoError(err)
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	re.NoError(err)
@@ -1341,7 +1329,7 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	}
 
 	ruleManager := leaderServer.GetRaftCluster().GetRuleManager()
-	ruleManager.SetRule(&placement.Rule{
+	err := ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test2",
 		StartKeyHex: hex.EncodeToString([]byte("ghi")),
@@ -1349,7 +1337,8 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		Role:        placement.Learner,
 		Count:       1,
 	})
-	ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test3",
 		StartKeyHex: hex.EncodeToString([]byte("ooo")),
@@ -1357,10 +1346,11 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		Role:        placement.Learner,
 		Count:       1,
 	})
+	re.NoError(err)
 	fit := &placement.RegionFit{}
 
 	u := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
 	re.NoError(err)
 	re.Len(fit.RuleFits, 1)
 	re.Len(fit.OrphanPeers, 1)

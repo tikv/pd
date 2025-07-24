@@ -164,23 +164,24 @@ func TestTIKVEngine(t *testing.T) {
 	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
-	tc.AddLeaderRegionWithRange(5, "180", "200", 3, 1, 2)
+	tc.AddLeaderRegionWithRange(6, "180", "200", 3, 1, 2)
 	// case1: transfer leader from store 1 to store 3
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("1", op.GetAdditionalInfo("targetScore"))
-	re.Contains(op.Brief(), "transfer leader: store 1 to")
-	tc.AddLeaderStore(4, 0)
+	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
-	// case2: move peer from store 1 to store 4
+	// case2: move leader from store 1 to store 4
+	tc.AddLeaderStore(4, 0)
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("0", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
+	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
 
 func TestTIFLASHEngine(t *testing.T) {
@@ -199,7 +200,7 @@ func TestTIFLASHEngine(t *testing.T) {
 
 	startKey := fmt.Sprintf("%20d0", 1)
 	endKey := fmt.Sprintf("%20d0", 10)
-	tc.SetRule(&placement.Rule{
+	err := tc.SetRule(&placement.Rule{
 		GroupID:  "tiflash",
 		ID:       "1",
 		Role:     placement.Learner,
@@ -210,6 +211,7 @@ func TestTIFLASHEngine(t *testing.T) {
 			{Key: "engine", Op: "in", Values: []string{"tiflash"}},
 		},
 	})
+	re.NoError(err)
 
 	// generate a balance range scheduler with tiflash engine
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),

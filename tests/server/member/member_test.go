@@ -115,12 +115,13 @@ func checkMemberList(re *require.Assertions, clientURL string, configs []*config
 	if res.StatusCode != http.StatusOK {
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
 	}
-	data := make(map[string][]*pdpb.Member)
-	json.Unmarshal(buf, &data)
-	if len(data["members"]) != len(configs) {
-		return errors.Errorf("member length not match, %v vs %v", len(data["members"]), len(configs))
+	data := &pdpb.GetMembersResponse{}
+	err = json.Unmarshal(buf, &data)
+	re.NoError(err)
+	if len(data.GetMembers()) != len(configs) {
+		return errors.Errorf("member length not match, %v vs %v", len(data.GetMembers()), len(configs))
 	}
-	for _, member := range data["members"] {
+	for _, member := range data.GetMembers() {
 		for _, cfg := range configs {
 			if member.GetName() == cfg.Name {
 				re.Equal([]string{cfg.ClientUrls}, member.ClientUrls)
@@ -289,39 +290,35 @@ func TestMoveLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 5)
+	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+	originalLeader := cluster.WaitLeader()
+	re.NotEmpty(originalLeader)
+	originalLeaderServer := cluster.GetServer(originalLeader)
+	re.NotNil(originalLeaderServer)
 
-	var wg sync.WaitGroup
-	wg.Add(5)
-	for _, s := range cluster.GetServers() {
-		go func(s *tests.TestServer) {
-			defer wg.Done()
-			if s.IsLeader() {
-				s.ResignLeader()
-			} else {
-				old, _ := s.GetEtcdLeaderID()
-				s.MoveEtcdLeader(old, s.GetServerID())
-			}
-		}(s)
-	}
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("move etcd leader does not return in 10 seconds")
-	}
+	// First, resign the original leader.
+	err = originalLeaderServer.ResignLeaderWithRetry()
+	re.NoError(err)
+	newLeader := cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NotEqual(originalLeader, newLeader)
+	newLeaderServer := cluster.GetServer(newLeader)
+	re.NotNil(newLeaderServer)
+	// Then, move leader back to the original leader.
+	testutil.Eventually(re, func() bool {
+		return newLeaderServer.MoveEtcdLeader(
+			newLeaderServer.GetServerID(),
+			originalLeaderServer.GetServerID(),
+		) == nil
+	})
+	testutil.Eventually(re, func() bool {
+		return originalLeaderServer.IsLeader()
+	})
 }
 
 func TestCampaignLeaderFrequently(t *testing.T) {

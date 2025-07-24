@@ -93,15 +93,17 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg, err := s.manager.GetResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName, req.WithRuStats)
+	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
+	rg, err := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
 	if err != nil {
 		return nil, err
 	}
 	if rg == nil {
 		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
 	}
+	resp := rg.IntoProtoResourceGroup(keyspaceID)
 	return &rmpb.GetResourceGroupResponse{
-		Group: rg.IntoProtoResourceGroup(),
+		Group: resp,
 	}, nil
 }
 
@@ -110,17 +112,19 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups, err := s.manager.GetResourceGroupList(ExtractKeyspaceID(req.GetKeyspaceId()), req.WithRuStats)
+	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
+	groups, err := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
 	if err != nil {
 		return nil, err
 	}
-	resp := &rmpb.ListResourceGroupsResponse{
+	resps := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
 	for _, group := range groups {
-		resp.Groups = append(resp.Groups, group.IntoProtoResourceGroup())
+		resp := group.IntoProtoResourceGroup(keyspaceID)
+		resps.Groups = append(resps.Groups, resp)
 	}
-	return resp, nil
+	return resps, nil
 }
 
 // AddResourceGroup implements ResourceManagerServer.AddResourceGroup.
@@ -216,13 +220,17 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				ResourceGroupName: rg.Name,
 				KeyspaceId:        &rmpb.KeyspaceIDValue{Value: keyspaceID},
 			}
+			requiredToken := 0.0
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
+						requiredToken = re.GetValue()
+						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
 					}
+					// Sample the latest RU demand.
+					krgm.getOrCreateRUTracker(rg.Name).sample(now, requiredToken)
 					if tokens == nil {
 						continue
 					}

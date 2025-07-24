@@ -358,43 +358,31 @@ func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
 	}
 }
 
+// RunFunc runs a given function on the active test cluster.
+// If env not set, it will run test in both non-microservice env and microservice env.
+// It is used to run some helper functions.
+func (s *SchedulingTestEnvironment) RunFunc(f func(*TestCluster)) {
+	switch s.Env {
+	case NonMicroserviceEnv:
+		s.runFuncInNonMicroserviceEnv(f)
+	case MicroserviceEnv:
+		s.runFuncInMicroserviceEnv(f)
+	default:
+		s.runFuncInNonMicroserviceEnv(f)
+		s.runFuncInMicroserviceEnv(f)
+	}
+}
+
 // RunTestInNonMicroserviceEnv is to run test in non-microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
 	s.t.Logf("start test %s in non-microservice environment", getTestName())
-	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
-		s.startCluster(NonMicroserviceEnv)
-	}
-	test(s.clusters[NonMicroserviceEnv])
-}
-
-func getTestName() string {
-	pc, _, _, _ := runtime.Caller(2)
-	caller := runtime.FuncForPC(pc)
-	if caller == nil || strings.Contains(caller.Name(), "RunTest") {
-		pc, _, _, _ = runtime.Caller(3)
-		caller = runtime.FuncForPC(pc)
-	}
-	if caller != nil {
-		elements := strings.Split(caller.Name(), ".")
-		return elements[len(elements)-1]
-	}
-	return ""
+	s.runFuncInNonMicroserviceEnv(test)
 }
 
 // RunTestInMicroserviceEnv is to run test in microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestCluster)) {
-	re := require.New(s.t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
-	}()
 	s.t.Logf("start test %s in microservice environment", getTestName())
-	if _, ok := s.clusters[MicroserviceEnv]; !ok {
-		s.startCluster(MicroserviceEnv)
-	}
-	test(s.clusters[MicroserviceEnv])
+	s.runFuncInMicroserviceEnv(test)
 }
 
 // Cleanup is to cleanup the environment.
@@ -405,6 +393,27 @@ func (s *SchedulingTestEnvironment) Cleanup() {
 	for _, cancel := range s.cancels {
 		cancel()
 	}
+}
+
+func (s *SchedulingTestEnvironment) runFuncInNonMicroserviceEnv(f func(*TestCluster)) {
+	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
+		s.startCluster(NonMicroserviceEnv)
+	}
+	f(s.clusters[NonMicroserviceEnv])
+}
+
+func (s *SchedulingTestEnvironment) runFuncInMicroserviceEnv(f func(*TestCluster)) {
+	re := require.New(s.t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	}()
+	if _, ok := s.clusters[MicroserviceEnv]; !ok {
+		s.startCluster(MicroserviceEnv)
+	}
+	f(s.clusters[MicroserviceEnv])
 }
 
 func (s *SchedulingTestEnvironment) startCluster(m Env) {
@@ -441,12 +450,25 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		tc.WaitForPrimaryServing(re)
 		tc.GetPrimaryServer().GetCluster().SetPrepared()
 		cluster.SetSchedulingCluster(tc)
-		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 		testutil.Eventually(re, func() bool {
 			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
 		s.clusters[MicroserviceEnv] = cluster
 	}
+}
+
+func getTestName() string {
+	pc, _, _, _ := runtime.Caller(2)
+	caller := runtime.FuncForPC(pc)
+	if caller == nil || strings.Contains(caller.Name(), "RunTest") {
+		pc, _, _, _ = runtime.Caller(3)
+		caller = runtime.FuncForPC(pc)
+	}
+	if caller != nil {
+		elements := strings.Split(caller.Name(), ".")
+		return elements[len(elements)-1]
+	}
+	return ""
 }
 
 type idAllocator struct {

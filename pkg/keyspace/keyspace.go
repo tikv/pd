@@ -143,21 +143,17 @@ func NewKeyspaceManager(
 		cluster:           cluster,
 		config:            config,
 		kgm:               kgm,
-		nextPatrolStartID: constant.DefaultKeyspaceID,
+		nextPatrolStartID: constant.StartKeyspaceID,
 	}
 }
 
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
-	err := manager.initReserveKeyspace(constant.DefaultKeyspaceID, constant.DefaultKeyspaceName)
+	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
+	bootstrapKeyspaceName := GetBootstrapKeyspaceName()
+	err := manager.initReserveKeyspace(bootstrapKeyspaceID, bootstrapKeyspaceName)
 	if err != nil {
 		return err
-	}
-	if kerneltype.IsNextGen() {
-		err = manager.initReserveKeyspace(constant.SystemKeyspaceID, constant.SystemKeyspaceName)
-		if err != nil {
-			return err
-		}
 	}
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.GetPreAlloc()
@@ -205,6 +201,10 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
 	if err != nil {
 		return err
+	}
+	// It is needed to set for system keyspace in next-gen.
+	if id == constant.SystemKeyspaceID {
+		config[GCManagementType] = KeyspaceLevelGC
 	}
 	meta.Config = config
 	err = manager.saveNewKeyspace(meta)
@@ -666,18 +666,10 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // UpdateKeyspaceState updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
-	// Changing the state of default keyspace is not allowed.
-	if name == constant.DefaultKeyspaceName {
-		log.Warn("[keyspace] failed to update keyspace config",
-			errs.ZapError(errs.ErrModifyDefaultKeyspace),
-		)
-		return nil, errs.ErrModifyDefaultKeyspace
-	}
-	if kerneltype.IsNextGen() && name == constant.SystemKeyspaceName {
-		log.Warn("[keyspace] failed to update keyspace config",
-			errs.ZapError(errs.ErrModifySystemKeyspace),
-		)
-		return nil, errs.ErrModifySystemKeyspace
+	if isProtectedKeyspaceName(name) {
+		err := newModifyProtectedKeyspaceError()
+		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
+		return nil, err
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -724,18 +716,10 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
-	// Changing the state of default keyspace is not allowed.
-	if id == constant.DefaultKeyspaceID {
-		log.Warn("[keyspace] failed to update keyspace config",
-			errs.ZapError(errs.ErrModifyDefaultKeyspace),
-		)
-		return nil, errs.ErrModifyDefaultKeyspace
-	}
-	if checkReservedID(id) {
-		log.Warn("[keyspace] failed to update keyspace config",
-			errs.ZapError(errs.ErrModifySystemKeyspace),
-		)
-		return nil, errs.ErrModifySystemKeyspace
+	if isProtectedKeyspaceID(id) {
+		err := newModifyProtectedKeyspaceError()
+		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
+		return nil, err
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	var err error

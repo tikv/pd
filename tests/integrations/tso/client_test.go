@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
@@ -34,13 +35,13 @@ import (
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
@@ -48,6 +49,10 @@ import (
 	"github.com/tikv/pd/tests/integrations/mcs/utils"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
@@ -182,7 +187,7 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 			for _, keyspaceID := range keyspaceGroup.keyspaceIDs {
 				served := false
 				for _, server := range suite.tsoCluster.GetServers() {
-					if server.IsKeyspaceServing(keyspaceID, keyspaceGroup.keyspaceGroupID) {
+					if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroup.keyspaceGroupID) {
 						served = true
 						break
 					}
@@ -208,7 +213,8 @@ func (suite *tsoClientTestSuite) TearDownTest() {
 }
 
 func (suite *tsoClientTestSuite) TearDownSuite() {
-	failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval")
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 	suite.cancel()
 	if !suite.legacy {
 		suite.tsoCluster.Destroy()
@@ -398,18 +404,23 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			// keyspaces are from different keyspace groups, otherwise multiple goroutines below could
 			// try to resign the primary of the same keyspace group and cause race condition.
 			keyspaceIDs := make([]uint32, 0)
+			keyspaceGroups := make(map[uint32]uint32, 0)
 			for _, keyspaceGroup := range suite.keyspaceGroups {
 				if len(keyspaceGroup.keyspaceIDs) > 0 {
-					keyspaceIDs = append(keyspaceIDs, keyspaceGroup.keyspaceIDs[0])
+					keyspaceID := keyspaceGroup.keyspaceIDs[0]
+					keyspaceIDs = append(keyspaceIDs, keyspaceID)
+					keyspaceGroups[keyspaceID] = keyspaceGroup.keyspaceGroupID
 				}
 			}
 			wg.Add(len(keyspaceIDs))
 			for _, keyspaceID := range keyspaceIDs {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
-					err := suite.tsoCluster.ResignPrimary(keyspaceID, constant.DefaultKeyspaceGroupID)
+					keyspaceGroupID := keyspaceGroups[keyspaceID]
+					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+					err := suite.tsoCluster.ResignPrimary(keyspaceID, keyspaceGroupID)
 					re.NoError(err)
-					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, 0)
+					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
 				}(keyspaceID)
 			}
 			wg.Wait()
@@ -484,7 +495,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
-func TestTSONotLeader(t *testing.T) {
+func TestTSONotLeaderWhenRebaseErr(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -498,25 +509,26 @@ func TestTSONotLeader(t *testing.T) {
 	re.NotEmpty(leaderName)
 	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
-	pdClient, err := pd.NewClientWithContext(context.Background(),
+	pdClient, err := pd.NewClientWithContext(ctx,
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func(client pd.Client) {
-		defer wg.Done()
-		pdLeader.ResignLeader()
-		_, _, err := client.GetTS(ctx)
-		re.ErrorContains(err, "not leader")
-	}(pdClient)
-
-	wg.Wait()
+	// Resign the leader to trigger the rebase error.
+	err = pdLeader.ResignLeaderWithRetry()
+	re.NoError(err)
+	// Trying to get TSO should fail with "not leader" error.
+	_, _, err = pdClient.GetTS(ctx)
+	re.ErrorContains(err, "not leader")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+	// The TSO should be eventually available.
+	testutil.Eventually(re, func() bool {
+		_, _, err := pdClient.GetTS(ctx)
+		return err == nil
+	})
 }
 
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
@@ -555,18 +567,15 @@ func TestMixedTSODeployment(t *testing.T) {
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	checkTSO(ctx1, re, &wg, backendEndpoints)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for range 2 {
-			n := r.Intn(2) + 1
-			time.Sleep(time.Duration(n) * time.Second)
-			leaderServer.ResignLeader()
-			leaderServer = cluster.GetServer(cluster.WaitLeader())
-			re.NotNil(leaderServer)
-		}
-		cancel1()
-	}()
+	for range 2 {
+		n := r.Intn(2) + 1
+		time.Sleep(time.Duration(n) * time.Second)
+		err = leaderServer.ResignLeaderWithRetry()
+		re.NoError(err)
+		leaderServer = cluster.GetServer(cluster.WaitLeader())
+		re.NotNil(leaderServer)
+	}
+	cancel1()
 	wg.Wait()
 }
 
@@ -590,7 +599,7 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 
 	// Create a PD client in microservice env to let the PD leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
-	pdClient, err := pd.NewClientWithContext(context.Background(),
+	pdClient, err := pd.NewClientWithContext(ctx,
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 	re.NoError(err)
@@ -670,7 +679,7 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 	re.NotEmpty(leaderName)
 	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
-	pdClient, err := pd.NewClientWithContext(context.Background(),
+	pdClient, err := pd.NewClientWithContext(ctx,
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
@@ -701,7 +710,7 @@ func TestRetryGetTSNotLeader(t *testing.T) {
 
 	for range 5 {
 		time.Sleep(time.Second)
-		err = pdLeader.ResignLeader()
+		err = pdLeader.ResignLeaderWithRetry()
 		re.NoError(err)
 		leaderName = pdCluster.WaitLeader()
 		re.NotEmpty(leaderName)
@@ -728,7 +737,7 @@ func TestGetTSRetry(t *testing.T) {
 	re.NotEmpty(leaderName)
 	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
-	pdClient, err := pd.NewClientWithContext(context.Background(),
+	pdClient, err := pd.NewClientWithContext(ctx,
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)

@@ -47,16 +47,16 @@ func TestReadyAPI(t *testing.T) {
 	checkReadyAPI(re, followerURL, true)
 
 	// check ready status when region is not loaded for leader
-	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+leader.GetAddr()+`")`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+leader.GetAddr()+`")`))
 	checkReadyAPI(re, leaderURL, false)
 	checkReadyAPI(re, followerURL, true)
 
 	// check ready status when region is not loaded for follower
-	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+followerServer.GetAddr()+`")`)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+followerServer.GetAddr()+`")`))
 	checkReadyAPI(re, leaderURL, true)
 	checkReadyAPI(re, followerURL, false)
 
-	failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow"))
 }
 
 func checkReadyAPI(re *require.Assertions, url string, isReady bool) {

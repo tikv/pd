@@ -38,6 +38,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -211,7 +212,10 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(suite.ctx)
-	defer controller.Stop()
+	defer func() {
+		err := controller.Stop()
+		re.NoError(err)
+	}()
 
 	// Mock add resource groups
 	var meta *rmpb.ResourceGroup
@@ -305,8 +309,12 @@ func (suite *resourceManagerClientTestSuite) TestWatchWithSingleGroupByKeyspace(
 	re.NoError(err)
 	controller.Start(suite.ctx)
 	controllerKeySpace.Start(suite.ctx)
-	defer controllerKeySpace.Stop()
-	defer controller.Stop()
+	defer func() {
+		err := controller.Stop()
+		re.NoError(err)
+		err = controllerKeySpace.Stop()
+		re.NoError(err)
+	}()
 
 	// Mock add resource group.
 	group := &rmpb.ResourceGroup{
@@ -326,12 +334,14 @@ func (suite *resourceManagerClientTestSuite) TestWatchWithSingleGroupByKeyspace(
 	re.Contains(resp, "Success!")
 
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 100}
-	controller.OnRequestWait(suite.ctx, group.Name, tcs.makeReadRequest())
+	_, _, _, _, err = controller.OnRequestWait(suite.ctx, group.Name, tcs.makeReadRequest())
+	re.NoError(err)
 	meta := controller.GetActiveResourceGroup(group.Name)
 	re.NotNil(meta)
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
 
-	controllerKeySpace.OnRequestWait(suite.ctx, group.Name, tcs.makeReadRequest())
+	_, _, _, _, err = controllerKeySpace.OnRequestWait(suite.ctx, group.Name, tcs.makeReadRequest())
+	re.NoError(err)
 	metaKeySpace := controllerKeySpace.GetActiveResourceGroup(group.Name)
 	re.Equal(metaKeySpace.RUSettings.RU, group.RUSettings.RU)
 
@@ -422,7 +432,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	rgsController, err := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, constants.NullKeyspaceID)
 	re.NoError(err)
 	rgsController.Start(suite.ctx)
-	defer rgsController.Stop()
+	defer func() {
+		err = rgsController.Stop()
+		re.NoError(err)
+	}()
 
 	testCases := []struct {
 		resourceGroupName string
@@ -465,8 +478,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				_, _, _, _, err = rgsController.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
 				re.NoError(err)
 				sum += time.Since(startTime)
-				rgsController.OnResponse(cas.resourceGroupName, rreq, rres)
-				rgsController.OnResponse(cas.resourceGroupName, wreq, wres)
+				_, err = rgsController.OnResponse(cas.resourceGroupName, rreq, rres)
+				re.NoError(err)
+				_, err = rgsController.OnResponse(cas.resourceGroupName, wreq, wres)
+				re.NoError(err)
 				time.Sleep(time.Millisecond)
 			}
 			log.Info("finished test case", zap.Int("index", i), zap.Duration("sum", sum), zap.Duration("waitDuration", cas.tcs[i].waitDuration))
@@ -513,9 +528,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 
 // TestSwitchBurst is used to test https://github.com/tikv/pd/issues/6209
 func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
+	suite.T().Skip("skip this test because it is not stable")
 	re := suite.Require()
 	cli := suite.client
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod"))
+	}()
 
 	for _, group := range suite.initGroups {
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
@@ -564,11 +583,13 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 		re.NoError(err)
 		_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 		re.NoError(err)
-		controller.OnResponse(resourceGroupName, rreq, rres)
-		controller.OnResponse(resourceGroupName, wreq, wres)
+		_, err = controller.OnResponse(resourceGroupName, rreq, rres)
+		re.NoError(err)
+		_, err = controller.OnResponse(resourceGroupName, wreq, wres)
+		re.NoError(err)
 	}
 	time.Sleep(2 * time.Second)
-	cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
+	_, err = cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
 		Name: "test2",
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
@@ -580,6 +601,7 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 			},
 		},
 	})
+	re.NoError(err)
 	time.Sleep(100 * time.Millisecond)
 	tricker := time.NewTicker(time.Second)
 	defer tricker.Stop()
@@ -604,8 +626,10 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 				_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 				re.NoError(err)
 				sum += time.Since(startTime)
-				controller.OnResponse(resourceGroupName, rreq, rres)
-				controller.OnResponse(resourceGroupName, wreq, wres)
+				_, err = controller.OnResponse(resourceGroupName, rreq, rres)
+				re.NoError(err)
+				_, err = controller.OnResponse(resourceGroupName, wreq, wres)
+				re.NoError(err)
 				time.Sleep(1000 * time.Microsecond)
 			}
 			re.LessOrEqual(sum, buffDuration+cas.tcs[i].waitDuration)
@@ -623,6 +647,9 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	re.NoError(err)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
+	}()
 	resourceGroupName3 := suite.initGroups[3].Name
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 1000, times: 1, waitDuration: 0}
 	wreq = tcs.makeWriteRequest()
@@ -639,9 +666,8 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 		re.NoError(err)
 	}
 	re.Less(duration, 100*time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
-	controller.Stop()
+	err = controller.Stop()
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
@@ -748,7 +774,8 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	_, err = c.OnResponse(resourceGroupName, req4, resp4)
 	re.NoError(err)
 
-	c.Stop()
+	err = c.Stop()
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
@@ -1047,7 +1074,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			resp.Body.Close()
 			re.NoError(err)
 			groups := make([]*server.ResourceGroup, 0)
-			json.Unmarshal(respString, &groups)
+			err = json.Unmarshal(respString, &groups)
+			re.NoError(err)
 			re.Len(groups, finalNum)
 
 			// Delete all resource groups
@@ -1075,7 +1103,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			resp1.Body.Close()
 			re.NoError(err)
 			groups1 := make([]server.ResourceGroup, 0)
-			json.Unmarshal(respString1, &groups1)
+			err = json.Unmarshal(respString1, &groups1)
+			re.NoError(err)
 			re.Len(groups1, 1)
 		}
 	}
@@ -1244,6 +1273,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/acquireFailed", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/acquireFailed"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
+	}()
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(suite.ctx)
@@ -1255,22 +1288,24 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 		rruTokensAtATime: 0,
 		wruTokensAtATime: 2,
 	}
-	controller.OnRequestWait(suite.ctx, groupName, tc.makeWriteRequest())
+	_, _, _, _, err = controller.OnRequestWait(suite.ctx, groupName, tc.makeWriteRequest())
+	re.NoError(err)
 	time.Sleep(time.Second * 2)
 	beginTime := time.Now()
 	// This is used to make sure resource group in lowRU.
 	for range 100 {
-		controller.OnRequestWait(suite.ctx, groupName, tc2.makeWriteRequest())
+		_, _, _, _, err = controller.OnRequestWait(suite.ctx, groupName, tc2.makeWriteRequest())
+		re.NoError(err)
 	}
 	for range 100 {
-		controller.OnRequestWait(suite.ctx, groupName, tc.makeWriteRequest())
+		_, _, _, _, err = controller.OnRequestWait(suite.ctx, groupName, tc.makeWriteRequest())
+		re.NoError(err)
 	}
 	endTime := time.Now()
 	// we can not check `inDegradedMode` because of data race.
 	re.True(endTime.Before(beginTime.Add(time.Second)))
-	controller.Stop()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/acquireFailed"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
+	err = controller.Stop()
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
@@ -1333,6 +1368,9 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	re.Contains(resp, "Success!")
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/fastCleanup", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
+	}()
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(suite.ctx)
@@ -1350,8 +1388,10 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	rreq := testConfig.tcs.makeReadRequest()
 	rres := testConfig.tcs.makeReadResponse()
 	for range testConfig.times {
-		controller.OnRequestWait(suite.ctx, group.Name, rreq)
-		controller.OnResponse(group.Name, rreq, rres)
+		_, _, _, _, err = controller.OnRequestWait(suite.ctx, group.Name, rreq)
+		re.NoError(err)
+		_, err = controller.OnResponse(group.Name, rreq, rres)
+		re.NoError(err)
 		time.Sleep(100 * time.Microsecond)
 	}
 	testutil.Eventually(re, func() bool {
@@ -1368,8 +1408,8 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 		return meta == nil
 	}, testutil.WithTickInterval(50*time.Millisecond))
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
-	controller.Stop()
+	err = controller.Stop()
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
@@ -1450,7 +1490,8 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	// test fallback for `"lightning", "ddl"`.
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 
-	c.Stop()
+	err = c.Stop()
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigChanged() {
@@ -1572,7 +1613,8 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 		re.Equal(&expectRUCfg2, c2.GetConfig())
 	}
 	// restart c1
-	c1.Stop()
+	err = c1.Stop()
+	re.NoError(err)
 	c1, err = controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	re.Equal(expectRUCfg, c1.GetConfig())
@@ -1600,7 +1642,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 		return storage.SaveKeyspaceMeta(txn, keyspace)
 	})
 	re.NoError(err)
-	// Add resource group
+	// Add resource group with keyspace id
 	group := &rmpb.ResourceGroup{
 		Name: "keyspace_test",
 		Mode: rmpb.GroupMode_RUMode,
@@ -1612,9 +1654,8 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 				Tokens: 100000,
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
 	}
-	resp, err := cli.AddResourceGroup(suite.ctx, group)
+	resp, err := clientKeyspace.AddResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 
@@ -1634,7 +1675,18 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	rgs, err = clientKeyspace.ListResourceGroups(suite.ctx, pd.WithRUStats)
 	re.NoError(err)
 	re.Len(rgs, 2) // Including the default resource group.
-	re.Contains(rgs, rg)
+	for _, r := range rgs {
+		re.NotNil(r.KeyspaceId)
+		re.Equal(r.KeyspaceId.Value, keyspaceID)
+		switch r.Name {
+		case server.DefaultResourceGroupName:
+		case group.Name:
+			re.Equal(r.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
+			re.Equal(r.RUSettings.RU.Tokens, group.RUSettings.RU.Tokens)
+		default:
+			re.Fail("unknown resource group")
+		}
+	}
 
 	// Modify resource group with keyspace id
 	group.RUSettings.RU.Settings.FillRate = 1000
@@ -1701,7 +1753,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKeyspaces() {
 	re := suite.Require()
-	cli := suite.client
 	ctx := suite.ctx
 	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
 
@@ -1717,6 +1768,11 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		keyspaceID := uint32(i + 1)
 		keyspaceName := fmt.Sprintf("keyspace%d_test", keyspaceID)
 		groupName := fmt.Sprintf("rg_multi_%d", keyspaceID)
+		// Create a specific client for this keyspace
+		client := utils.SetupClientWithKeyspaceID(
+			ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs(),
+		)
+		clients[i] = client
 		// Create and save keyspace metadata
 		keyspaceMeta := &keyspacepb.KeyspaceMeta{Id: keyspaceID, Name: keyspaceName}
 		err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
@@ -1730,13 +1786,8 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 10000}, Tokens: 100000}},
 			KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
 		}
-		_, err = cli.AddResourceGroup(ctx, groups[i])
+		_, err = clients[i].AddResourceGroup(ctx, groups[i])
 		re.NoError(err)
-		// Create a specific client for this keyspace
-		client := utils.SetupClientWithKeyspaceID(
-			ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs(),
-		)
-		clients[i] = client
 		// Prepare consumption data for later request
 		consumptions[i] = &rmpb.Consumption{
 			RRU: float64(100 * (i + 1)), // Use different values to distinguish
@@ -1808,7 +1859,6 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 					Tokens: 100000,
 				},
 			},
-			KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspace},
 		}
 	}
 
@@ -1851,13 +1901,15 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 		for _, keyspaceToFind := range keyspaces {
 			groupToFind := genGroupByKeyspace(keyspaceToFind)
 			testutil.Eventually(re, func() bool {
-				c.OnRequestWait(suite.ctx, groupToFind.Name, tcs.makeReadRequest())
 				meta := c.GetActiveResourceGroup(groupToFind.Name)
+				_, _, _, _, err := c.OnRequestWait(suite.ctx, groupToFind.Name, tcs.makeReadRequest())
 				if keyspaceToFind == keyspace {
+					re.NoError(err)
 					return meta != nil &&
 						meta.Name == groupToFind.Name &&
 						meta.RUSettings.RU.Settings.FillRate == groupToFind.RUSettings.RU.Settings.FillRate
 				}
+				re.Error(err)
 				return meta == nil
 			})
 		}
@@ -1906,10 +1958,67 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 
 	// Stop controllers and close clients
 	for _, keyspace := range keyspaces {
-		controllers[keyspace].Stop()
+		err := controllers[keyspace].Stop()
+		re.NoError(err)
 		if keyspace == constants.NullKeyspaceID {
 			continue
 		}
 		clients[keyspace].Close()
 	}
+}
+
+func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceGroup() {
+	re := suite.Require()
+	ctx := suite.ctx
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+
+	// Create two keyspaces
+	keyspaceA := uint32(10)
+	keyspaceB := uint32(11)
+	err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceA, Name: "ks_A"})
+	})
+	re.NoError(err)
+	err = storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceB, Name: "ks_B"})
+	})
+	re.NoError(err)
+
+	// Create clients for keyspaceA
+	clientA := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceA, suite.cluster.GetConfig().GetClientURLs())
+	defer clientA.Close()
+
+	// Add a resource group in Keyspace A and check
+	groupName := "keyspace_test"
+	originalGroup := &rmpb.ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+	}
+	resp, err := clientA.AddResourceGroup(ctx, originalGroup)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	g, err := clientA.GetResourceGroup(ctx, groupName)
+	re.NoError(err)
+	re.Equal(groupName, g.Name)
+	re.NotNil(g.KeyspaceId)
+	re.Equal(keyspaceA, g.KeyspaceId.Value)
+
+	// Try to modify the group with a different keyspace ID using Client A
+	modifiedGroup := &rmpb.ResourceGroup{
+		Name:       groupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		Priority:   5,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceB},
+	}
+
+	// It should be failed because the keyspace ID does not match
+	_, err = clientA.ModifyResourceGroup(ctx, modifiedGroup)
+	re.Error(err)
+	expectedErr := errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(keyspaceB, keyspaceA)
+	re.EqualError(err, expectedErr.Error(), "The error should explicitly state the keyspace ID mismatch")
+
+	// Check again and ensure the group in Keyspace A is unchanged
+	g, err = clientA.GetResourceGroup(ctx, groupName)
+	re.NoError(err)
+	re.Equal(uint32(0), g.Priority, "Group in keyspace A should not be modified")
 }

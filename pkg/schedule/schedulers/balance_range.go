@@ -18,10 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -103,46 +101,35 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 			input["engine"].(string)))
 		return
 	}
+
 	job.Alias = input["alias"].(string)
-	startKeyStr, err := url.QueryUnescape(input["start-key"].(string))
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("start key:%s can't be unescaped", input["start-key"].(string)))
-		return
+	timeoutStr, ok := input["timeout"].(string)
+	if ok && len(timeoutStr) > 0 {
+		timeout, err := time.ParseDuration(timeoutStr)
+		if err != nil {
+			handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", input["timeout"].(string)))
+			return
+		}
+		job.Timeout = timeout
 	}
 
-	endKeyStr, err := url.QueryUnescape(input["end-key"].(string))
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("end key:%s can't be unescaped", input["end-key"].(string)))
-		return
-	}
-	log.Info("add balance key range job", zap.String("alias", job.Alias))
-	rs, err := decodeKeyRanges(endKeyStr, startKeyStr)
+	keys, err := keyutil.DecodeHTTPKeyRanges(input)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	job.Ranges = rs
+	krs, err := getKeyRanges(keys)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	log.Info("add balance key range job", zap.String("alias", job.Alias))
+	job.Ranges = krs
 	if err := handler.config.addJob(job); err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
-}
-
-func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]keyutil.KeyRange, error) {
-	startKeys := strings.Split(startKeyStr, ",")
-	endKeys := strings.Split(endKeyStr, ",")
-	if len(startKeys) != len(endKeys) {
-		return nil, errs.ErrInvalidArgument.FastGenByArgs("the length of start key doesn't equal to end key")
-	}
-	rs := make([]keyutil.KeyRange, len(startKeys))
-	for i := range startKeys {
-		if startKeys[i] == "" && endKeys[i] == "" {
-			return nil, errs.ErrInvalidArgument.FastGenByArgs("start key and end key cannot both be nil")
-		}
-		rs[i] = keyutil.NewKeyRange(startKeys[i], endKeys[i])
-	}
-	return rs, nil
 }
 
 func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r *http.Request) {
@@ -449,6 +436,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		balanceRangeNoJobCounter.Inc()
 		return nil, nil
 	}
+	defer s.filterCounter.Flush()
 
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
 	// todo: don't prepare every times, the prepare information can be reused.
@@ -524,10 +512,12 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		excludeTargets[store.GetID()] = struct{}{}
 	}
 	conf := plan.GetSchedulerConfig()
-	filters := []filter.Filter{
+	filters := s.filters
+	filters = append(filters,
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
 		filter.NewPlacementSafeguard(s.GetName(), conf, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, plan.fit),
-	}
+	)
+
 	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
 	for i := range candidates.Stores {
 		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
@@ -560,7 +550,11 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 			op, err = operator.CreateTransferLeaderOperator(s.GetName(), plan, plan.region, plan.targetStoreID(), []uint64{}, operator.OpRange)
 		} else {
 			newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-			op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+			if plan.region.GetLeader().GetStoreId() == sourceID {
+				op, err = operator.CreateReplaceLeaderPeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer, newPeer)
+			} else {
+				op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+			}
 		}
 
 		if err != nil {

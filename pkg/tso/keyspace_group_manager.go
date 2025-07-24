@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -54,7 +55,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -854,10 +854,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				j++
 			}
 		}
-		kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.DefaultKeyspaceID)
-		if kerneltype.IsNextGen() {
-			kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.SystemKeyspaceID)
-		}
+		keyspaceID := keyspace.GetBootstrapKeyspaceID()
+		kgm.checkReserveKeyspace(newGroup, newKeyspaces, keyspaceID)
 	}
 	// Check the split state.
 	if oldGroup != nil {
@@ -941,10 +939,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 }
 
 func (kgm *KeyspaceGroupManager) genDefaultKeyspaceGroupMeta() *endpoint.KeyspaceGroup {
-	keyspaces := []uint32{constant.DefaultKeyspaceID}
-	if kerneltype.IsNextGen() {
-		keyspaces = append(keyspaces, constant.SystemKeyspaceID)
-	}
+	keyspaces := []uint32{keyspace.GetBootstrapKeyspaceID()}
 	return &endpoint.KeyspaceGroup{
 		ID: constant.DefaultKeyspaceGroupID,
 		Members: []endpoint.KeyspaceGroupMember{{

@@ -227,6 +227,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 			re.Contains(string(b), "Reset ts successfully.")
 			return true
 		case http.StatusServiceUnavailable:
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
 			return false
 		default:
@@ -388,7 +389,8 @@ func (suite *adminTestSuite) checkCleanPath(cluster *tests.TestCluster) {
 
 	// handled by router
 	response := httptest.NewRecorder()
-	r, _, _ := api.NewHandler(context.Background(), leader.GetServer())
+	r, _, err := api.NewHandler(context.Background(), leader.GetServer())
+	re.NoError(err)
 	request, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	r.ServeHTTP(response, request)

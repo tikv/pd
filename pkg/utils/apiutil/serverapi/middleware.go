@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -48,7 +48,6 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		next(w, r)
 		return
 	}
-
 	http.Error(w, "no service", http.StatusServiceUnavailable)
 }
 

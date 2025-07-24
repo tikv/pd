@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/constants"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
@@ -57,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -213,7 +215,8 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	oldNames := make([]string, 0)
 	for _, s := range oldServers {
 		oldNames = append(oldNames, s.GetServer().GetMemberInfo().GetName())
-		s.Stop()
+		err = s.Stop()
+		re.NoError(err)
 	}
 	newLeaderName := cluster.WaitLeader()
 	re.NotEqual(oldLeaderName, newLeaderName)
@@ -423,10 +426,12 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
-		leader.Stop()
+		err = leader.Stop()
+		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
-		tests.RunServers([]*tests.TestServer{leader})
+		err = tests.RunServers([]*tests.TestServer{leader})
+		re.NoError(err)
 	}()
 	wg.Wait()
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
@@ -439,7 +444,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
-		leader.Stop()
+		err = leader.Stop()
+		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
 		leaderReadyTime = time.Now()
@@ -636,8 +642,9 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
 	re.NotNil(r)
-	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(),
+	err = leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(),
 		leader.GetServer().Name(), follower.GetServer().Name())
+	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -692,11 +699,13 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
 
-	cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
+	err := cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
+	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 
 	// here is just for trigger the leader change.
-	cli.GetRegion(context.Background(), []byte("a"))
+	_, err = cli.GetRegion(context.Background(), []byte("a"))
+	re.Error(err)
 
 	testutil.Eventually(re, func() bool {
 		return cli.GetLeaderURL() == follower.GetAddr()
@@ -706,7 +715,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	re.Nil(r)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2"))
-	cli.GetServiceDiscovery().CheckMemberChanged()
+	err = cli.GetServiceDiscovery().CheckMemberChanged()
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		r, err = cli.GetRegion(context.Background(), []byte("a"))
 		if err == nil && r != nil {
@@ -724,7 +734,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	cluster := suite.cluster
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
-	cli.UpdateOption(opt.EnableFollowerHandle, true)
+	err := cli.UpdateOption(opt.EnableFollowerHandle, true)
+	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	testutil.Eventually(re, func() bool {
@@ -977,6 +988,7 @@ type idAllocator struct {
 }
 
 func (i *idAllocator) alloc() uint64 {
+	// This error will be always nil.
 	id, _, _ := i.allocator.Alloc(1)
 	return id
 }
@@ -1049,7 +1061,7 @@ func (suite *clientTestSuiteImpl) setup() {
 	re.NotNil(cluster)
 	now := time.Now().UnixNano()
 	for _, store := range stores {
-		suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		_, err = suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: newHeader(),
 			Store: &metapb.Store{
 				Id:            store.Id,
@@ -1057,8 +1069,9 @@ func (suite *clientTestSuiteImpl) setup() {
 				LastHeartbeat: now,
 			},
 		})
+		re.NoError(err)
 
-		suite.grpcSvr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+		_, err = suite.grpcSvr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
 			Header: newHeader(),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
@@ -1067,6 +1080,7 @@ func (suite *clientTestSuiteImpl) setup() {
 				Available: uint64(1 * units.GiB),
 			},
 		})
+		re.NoError(err)
 	}
 	cluster.GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 }
@@ -1156,15 +1170,18 @@ func (suite *clientStatelessTestSuite) TestScanRegions() {
 
 	// Set leader of region3 to nil.
 	region3 := core.NewRegionInfo(regions[3], nil)
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	err := suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	re.NoError(err)
 
 	// Add down peer for region4.
 	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	re.NoError(err)
 
 	// Add pending peers for region5.
 	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	re.NoError(err)
 
 	t := suite.T()
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
@@ -1391,9 +1408,12 @@ func TestWatch(t *testing.T) {
 	cli, err := clientv3.NewFromURLs(endpoints)
 	re.NoError(err)
 	defer cli.Close()
-	cli.Put(context.Background(), key, "1")
-	cli.Put(context.Background(), key, "2")
-	cli.Delete(context.Background(), key)
+	_, err = cli.Put(context.Background(), key, "1")
+	re.NoError(err)
+	_, err = cli.Put(context.Background(), key, "2")
+	re.NoError(err)
+	_, err = cli.Delete(context.Background(), key)
+	re.NoError(err)
 	<-exit
 }
 
@@ -1584,19 +1604,23 @@ func (suite *clientStatelessTestSuite) TestBatchScanRegions() {
 
 	// Set leader of region3 to nil.
 	region3 := core.NewRegionInfo(regions[3], nil)
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	err := suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	re.NoError(err)
 
 	// Add down peer for region4.
 	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	re.NoError(err)
 
 	// Add pending peers for region5.
 	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	re.NoError(err)
 
 	// Add buckets for region6.
 	region6 := core.NewRegionInfo(regions[6], regions[6].Peers[0], core.SetBuckets(&metapb.Buckets{RegionId: regions[6].Id, Version: 2}))
-	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region6)
+	err = suite.srv.GetRaftCluster().HandleRegionHeartbeat(region6)
+	re.NoError(err)
 
 	t := suite.T()
 	var outputMustContainAllKeyRangeOptions []bool
@@ -1678,7 +1702,7 @@ func (suite *clientStatelessTestSuite) TestBatchScanRegions() {
 	}, 10, []*metapb.Region{regions[9]})
 
 	// invalid ranges
-	_, err := suite.client.BatchScanRegions(
+	_, err = suite.client.BatchScanRegions(
 		ctx,
 		[]router.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
 		10,
@@ -1930,7 +1954,8 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		b, _ := os.ReadFile(fname)
+		b, err := os.ReadFile(fname)
+		re.NoError(err)
 		l := string(b)
 		// We need to check the log to see if the circuit breaker is half open
 		return strings.Contains(l, "Transitioning to half-open state to test the service")
@@ -2017,24 +2042,74 @@ func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspac
 	}
 }
 
-func (s *clientStatefulTestSuite) TestUpdateGCSafePoint() {
+func (s *clientStatefulTestSuite) testUpdateGCSafePointImpl(keyspaceID uint32) {
 	re := s.Require()
-	s.checkGCSafePoint(re, constants.NullKeyspaceID, 0)
-	for _, safePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
-		newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), safePoint)
+	client := s.client
+	if keyspaceID != constants.NullKeyspaceID {
+		// UpdateGCSafePoint works according to the keyspace property set in the client.
+		client = utils.SetupClientWithKeyspaceID(context.Background(), re, keyspaceID, s.srv.GetEndpoints())
+		defer client.Close()
+	}
+
+	s.checkGCSafePoint(re, keyspaceID, 0)
+	for _, gcSafePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
+		// Now GC safe point is not allowed to be advanced before advancing the txn safe point. Advance txn safe point
+		// first.
+		_, err := s.client.GetGCInternalController(keyspaceID).AdvanceTxnSafePoint(context.Background(), gcSafePoint)
 		re.NoError(err)
-		re.Equal(safePoint, newSafePoint)
-		s.checkGCSafePoint(re, constants.NullKeyspaceID, safePoint)
+		newSafePoint, err := client.UpdateGCSafePoint(context.Background(), gcSafePoint) //nolint:staticcheck
+		re.NoError(err)
+		re.Equal(gcSafePoint, newSafePoint)
+		s.checkGCSafePoint(re, keyspaceID, gcSafePoint)
 	}
 	// If the new safe point is less than the old one, it should not be updated.
-	newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), 1)
+	newSafePoint, err := client.UpdateGCSafePoint(context.Background(), 1) //nolint:staticcheck
 	re.Equal(uint64(math.MaxUint64), newSafePoint)
 	re.NoError(err)
-	s.checkGCSafePoint(re, constants.NullKeyspaceID, math.MaxUint64)
+	s.checkGCSafePoint(re, keyspaceID, math.MaxUint64)
 }
 
-func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
+func (s *clientStatefulTestSuite) TestUpdateGCSafePoint() {
+	s.prepareKeyspacesForGCTest()
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		s.testUpdateGCSafePointImpl(keyspaceID)
+	}
+}
+
+func (s *clientStatefulTestSuite) testUpdateServiceGCSafePointImpl(keyspaceID uint32) {
 	re := s.Require()
+
+	client := s.client
+	if keyspaceID != constants.NullKeyspaceID {
+		// UpdateServiceGCSafePoint works according to the keyspace property set in the client.
+		client = utils.SetupClientWithKeyspaceID(context.Background(), re, keyspaceID, s.srv.GetEndpoints())
+		defer client.Close()
+	}
+
+	loadMinServiceGCSafePoint := func() *endpoint.ServiceSafePoint {
+		res, _, err := s.srv.GetGCStateManager().CompatibleUpdateServiceGCSafePoint(keyspaceID, "_", 0, 0, time.Now())
+		re.NoError(err)
+		return res
+	}
+
+	// Suppress the unuseful lint warning.
+	//nolint:unparam
+	loadServiceGCSafePointByServiceID := func(serviceID string) *endpoint.ServiceSafePoint {
+		gcStates, err := s.srv.GetGCStateManager().GetGCState(keyspaceID)
+		re.NoError(err)
+		for _, b := range gcStates.GCBarriers {
+			if b.BarrierID == serviceID {
+				return b.ToServiceSafePoint(keyspaceID)
+			}
+		}
+		return nil
+	}
+
+	// Wrap in a function to avoid writing the nolint directive everywhere.
+	updateServiceGCSafePoint := func(serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+		return client.UpdateServiceGCSafePoint(context.Background(), serviceID, ttl, safePoint) //nolint:staticcheck
+	}
+
 	serviceSafePoints := []struct {
 		ServiceID string
 		TTL       int64
@@ -2045,113 +2120,107 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 		{"c", 1000, 3},
 	}
 	for _, ssp := range serviceSafePoints {
-		min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
-			ssp.ServiceID, 1000, ssp.SafePoint)
+		min, err := updateServiceGCSafePoint(ssp.ServiceID, 1000, ssp.SafePoint)
 		re.NoError(err)
 		// An service safepoint of ID "gc_worker" is automatically initialized as 0
 		re.Equal(uint64(0), min)
 	}
 
-	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
-		"gc_worker", math.MaxInt64, 10)
+	min, err := updateServiceGCSafePoint("gc_worker", math.MaxInt64, 10)
 	re.NoError(err)
 	re.Equal(uint64(1), min)
 
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"a", 1000, 4)
+	// Note that as the service safe points became a compatibility layer over the GC barriers and the txn safe point,
+	// the (simulated) service safe point of "gc_worker" is no longer able to be advanced over the minimal existing
+	// GC barrier.
+
+	min, err = updateServiceGCSafePoint("a", 1000, 4)
+	re.NoError(err)
+	re.Equal(uint64(1), min)
+	min, err = updateServiceGCSafePoint("gc_worker", math.MaxInt64, 10)
 	re.NoError(err)
 	re.Equal(uint64(2), min)
 
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"b", -100, 2)
+	min, err = updateServiceGCSafePoint("b", -100, 2)
+	re.NoError(err)
+	re.Equal(uint64(2), min)
+	min, err = updateServiceGCSafePoint("gc_worker", math.MaxInt64, 10)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
 
 	// Minimum safepoint does not regress
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"b", 1000, 2)
+	min, err = updateServiceGCSafePoint("b", 1000, 2)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
 
-	// Update only the TTL of the minimum safepoint
-	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
+	// Update only the TTL of the service safe point "c"
+	oldMinSsp := loadServiceGCSafePointByServiceID("c")
 	re.Equal("c", oldMinSsp.ServiceID)
 	re.Equal(uint64(3), oldMinSsp.SafePoint)
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"c", 2000, 3)
+	min, err = updateServiceGCSafePoint("c", 2000, 3)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
-	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
+	minSsp := loadServiceGCSafePointByServiceID("c")
 	re.Equal("c", minSsp.ServiceID)
-	re.Equal(uint64(3), oldMinSsp.SafePoint)
+	re.Equal(uint64(3), minSsp.SafePoint)
 	s.GreaterOrEqual(minSsp.ExpiredAt-oldMinSsp.ExpiredAt, int64(1000))
 
 	// Shrinking TTL is also allowed
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"c", 1, 3)
+	min, err = updateServiceGCSafePoint("c", 1, 3)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadServiceGCSafePointByServiceID("c")
 	re.NoError(err)
 	re.Equal("c", minSsp.ServiceID)
 	re.Less(minSsp.ExpiredAt, oldMinSsp.ExpiredAt)
 
 	// TTL can be infinite (represented by math.MaxInt64)
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"c", math.MaxInt64, 3)
+	min, err = updateServiceGCSafePoint("c", math.MaxInt64, 3)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadServiceGCSafePointByServiceID("c")
 	re.NoError(err)
 	re.Equal("c", minSsp.ServiceID)
 	re.Equal(minSsp.ExpiredAt, int64(math.MaxInt64))
 
 	// Delete "a" and "c"
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"c", -1, 3)
+	_, err = updateServiceGCSafePoint("c", -1, 3)
 	re.NoError(err)
-	re.Equal(uint64(4), min)
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"a", -1, 4)
+	_, err = updateServiceGCSafePoint("a", -1, 4)
 	re.NoError(err)
-	// Now gc_worker is the only remaining service safe point.
+	// Now the service safe point of gc_worker can be advanced as other service safe points are all deleted.
+	min, err = updateServiceGCSafePoint("gc_worker", math.MaxInt64, 10)
+	re.NoError(err)
 	re.Equal(uint64(10), min)
 
 	// gc_worker cannot be deleted.
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"gc_worker", -1, 10)
+	_, err = updateServiceGCSafePoint("gc_worker", -1, 10)
 	re.Error(err)
 
 	// Cannot set non-infinity TTL for gc_worker
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"gc_worker", 10000000, 10)
+	_, err = updateServiceGCSafePoint("gc_worker", 10000000, 10)
 	re.Error(err)
 
 	// Service safepoint must have a non-empty ID
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"", 1000, 15)
+	_, err = updateServiceGCSafePoint("", 1000, 15)
 	re.Error(err)
 
 	// Put some other safepoints to test fixing gc_worker's safepoint when there exists other safepoints.
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"a", 1000, 11)
+	_, err = updateServiceGCSafePoint("a", 1000, 11)
 	re.NoError(err)
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"b", 1000, 12)
+	_, err = updateServiceGCSafePoint("b", 1000, 12)
 	re.NoError(err)
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"c", 1000, 13)
+	_, err = updateServiceGCSafePoint("c", 1000, 13)
 	re.NoError(err)
 
 	// Force set invalid ttl to gc_worker
 	gcWorkerKey := keypath.ServiceGCSafePointPath("gc_worker")
 	{
 		gcWorkerSsp := &endpoint.ServiceSafePoint{
-			ServiceID: "gc_worker",
-			ExpiredAt: -12345,
-			SafePoint: 10,
+			ServiceID:  "gc_worker",
+			ExpiredAt:  -12345,
+			SafePoint:  10,
+			KeyspaceID: keyspaceID,
 		}
 		value, err := json.Marshal(gcWorkerSsp)
 		re.NoError(err)
@@ -2159,39 +2228,26 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 		re.NoError(err)
 	}
 
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadMinServiceGCSafePoint()
 	re.NoError(err)
 	re.Equal("gc_worker", minSsp.ServiceID)
 	re.Equal(uint64(10), minSsp.SafePoint)
 	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 
-	// Force delete gc_worker, then the min service safe point was 11 of "a" in previous implementation, but 0
-	// for compatibility of txn safe point.
-	err = s.srv.GetStorage().Remove(gcWorkerKey)
-	re.NoError(err)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal(uint64(0), minSsp.SafePoint)
-
 	// Advancing txn safe point also affects the gc_worker's service safe point.
-	_, err = s.client.GetGCInternalController(constants.NullKeyspaceID).AdvanceTxnSafePoint(context.Background(), 11)
+	_, err = client.GetGCInternalController(keyspaceID).AdvanceTxnSafePoint(context.Background(), 11)
 	re.NoError(err)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadMinServiceGCSafePoint()
 	re.NoError(err)
 	re.Equal(uint64(11), minSsp.SafePoint)
+}
 
-	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
-	// will be newly created.
-	// Increase "a" so that "gc_worker" is the only minimum that will be returned by LoadMinServiceGCSafePoint.
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"a", 1000, 14)
-	re.NoError(err)
+func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
+	s.prepareKeyspacesForGCTest()
 
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("gc_worker", minSsp.ServiceID)
-	re.Equal(uint64(11), minSsp.SafePoint)
-	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		s.testUpdateServiceGCSafePointImpl(keyspaceID)
+	}
 }
 
 func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
@@ -2415,4 +2471,24 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 		// The existing GC barrier remains unchanged.
 		s.checkGCBarrier(re, keyspaceID, "b1", 22)
 	}
+}
+
+func TestDecodeHttpKeyRange(t *testing.T) {
+	re := require.New(t)
+	input := make(map[string]any)
+	startStrs := make([]string, 0)
+	endStrs := make([]string, 0)
+	for _, kr := range []*pdHttp.KeyRange{
+		pdHttp.NewKeyRange([]byte("100"), []byte("200")),
+		pdHttp.NewKeyRange([]byte("300"), []byte("400")),
+	} {
+		startStr, endStr := kr.EscapeAsUTF8Str()
+		startStrs = append(startStrs, startStr)
+		endStrs = append(endStrs, endStr)
+	}
+	input["start-key"] = strings.Join(startStrs, ",")
+	input["end-key"] = strings.Join(endStrs, ",")
+	ret, err := keyutil.DecodeHTTPKeyRanges(input)
+	re.NoError(err)
+	re.Equal([]string{"100", "200", "300", "400"}, ret)
 }

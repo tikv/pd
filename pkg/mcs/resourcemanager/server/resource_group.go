@@ -17,6 +17,7 @@ package server
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -29,6 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
+
+// overrideFillRateToleranceRate is the tolerance rate to override the fill rate, i.e., the fill rate will only
+// be overridden if the new fill rate exceeds the original fill rate by this specified tolerance rate.
+const overrideFillRateToleranceRate = 0.05
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
@@ -116,16 +121,81 @@ func (rg *ResourceGroup) getPriority() float64 {
 	return float64(rg.Priority)
 }
 
-func (rg *ResourceGroup) getFillRate() float64 {
+// getFillRate returns the fill rate of the resource group.
+// It will ignore the override fill rate and return the fill rate setting if the `ignoreOverride` is true.
+func (rg *ResourceGroup) getFillRate(ignoreOverride ...bool) float64 {
 	rg.RLock()
 	defer rg.RUnlock()
-	return rg.RUSettings.RU.getFillRateSetting()
+	if len(ignoreOverride) > 0 && ignoreOverride[0] {
+		return rg.RUSettings.RU.getFillRateSetting()
+	}
+	return rg.RUSettings.RU.getFillRate()
 }
 
-func (rg *ResourceGroup) getBurstLimit() float64 {
+func (rg *ResourceGroup) getOverrideFillRate() float64 {
 	rg.RLock()
 	defer rg.RUnlock()
-	return float64(rg.RUSettings.RU.getBurstLimitSetting())
+	return rg.RUSettings.RU.overrideFillRate
+}
+
+func (rg *ResourceGroup) overrideFillRate(new float64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideFillRateLocked(new)
+}
+
+func (rg *ResourceGroup) overrideFillRateLocked(new float64) {
+	original := rg.RUSettings.RU.overrideFillRate
+	// If the fill rate has not been set before or the new value is negative,
+	// set it to the new fill rate directly without checking the tolerance.
+	if original < 0 || new < 0 {
+		rg.RUSettings.RU.overrideFillRate = new
+		return
+	}
+	// If the new fill rate exceeds the original by more than the allowed tolerance,
+	// override it.
+	if math.Abs(new-original) > original*overrideFillRateToleranceRate {
+		rg.RUSettings.RU.overrideFillRate = new
+		return
+	}
+}
+
+// getBurstLimit returns the burst limit of the resource group.
+// It will ignore the override burst limit and return the burst limit setting if the `ignoreOverride` is true.
+func (rg *ResourceGroup) getBurstLimit(ignoreOverride ...bool) int64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return rg.getBurstLimitLocked(ignoreOverride...)
+}
+
+func (rg *ResourceGroup) getBurstLimitLocked(ignoreOverride ...bool) int64 {
+	if len(ignoreOverride) > 0 && ignoreOverride[0] {
+		return rg.RUSettings.RU.getBurstLimitSetting()
+	}
+	return rg.RUSettings.RU.getBurstLimit()
+}
+
+func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return rg.RUSettings.RU.overrideBurstLimit
+}
+
+func (rg *ResourceGroup) overrideBurstLimit(new int64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideBurstLimitLocked(new)
+}
+
+func (rg *ResourceGroup) overrideBurstLimitLocked(new int64) {
+	rg.RUSettings.RU.overrideBurstLimit = new
+}
+
+func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLimit int64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideFillRateLocked(fillRate)
+	rg.overrideBurstLimitLocked(burstLimit)
 }
 
 // PatchSettings patches the resource group settings.
@@ -205,7 +275,7 @@ func (rg *ResourceGroup) RequestRU(
 	if limitedTokens < grantedTokens {
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
-		if rg.RUSettings.RU.getBurstLimitSetting() > 0 {
+		if rg.getBurstLimitLocked() > 0 {
 			rg.RUSettings.RU.lastLimitedTokens += grantedTokens - limitedTokens
 		}
 	}
@@ -213,7 +283,7 @@ func (rg *ResourceGroup) RequestRU(
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
-func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
+func (rg *ResourceGroup) IntoProtoResourceGroup(keyspaceID uint32) *rmpb.ResourceGroup {
 	rg.RLock()
 	defer rg.RUnlock()
 
@@ -228,6 +298,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			},
 			RunawaySettings:    rg.Runaway,
 			BackgroundSettings: rg.Background,
+			KeyspaceId:         &rmpb.KeyspaceIDValue{Value: keyspaceID},
 		}
 
 		if rg.RUConsumption != nil {
@@ -244,7 +315,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
 func (rg *ResourceGroup) persistSettings(keyspaceID uint32, storage endpoint.ResourceGroupStorage) error {
-	metaGroup := rg.IntoProtoResourceGroup()
+	metaGroup := rg.IntoProtoResourceGroup(keyspaceID)
 	return storage.SaveResourceGroupSetting(keyspaceID, rg.Name, metaGroup)
 }
 
