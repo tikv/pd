@@ -85,7 +85,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
-	collectWaitTime       = time.Minute
+	collectWaitTime       = 5 * time.Minute
 
 	// heartbeat relative const
 	heartbeatTaskRunner = "heartbeat-task-runner"
@@ -518,7 +518,7 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	// force wait for 1 minute to make prepare checker won't be directly skipped
+	// force wait for 5 minute to make prepare checker won't be directly skipped
 	runCollectWaitTime := collectWaitTime
 	failpoint.Inject("changeRunCollectWaitTime", func() {
 		runCollectWaitTime = 1 * time.Second
