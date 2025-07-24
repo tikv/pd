@@ -443,6 +443,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
+	s.filterCounter.Flush()
 	_, job := s.conf.peek()
 	if job == nil {
 		balanceRangeNoJobCounter.Inc()
@@ -607,14 +608,14 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	}
 	switch job.Engine {
 	case core.EngineTiKV:
-		filters = append(filters, filter.NewEngineFilter(string(types.BalanceRangeScheduler), filter.NotSpecialEngines))
+		filters = append(filters, filter.NewEngineFilter(s.GetName(), filter.NotSpecialEngines))
 	case core.EngineTiFlash:
-		filters = append(filters, filter.NewEngineFilter(string(types.BalanceRangeScheduler), filter.SpecialEngines))
+		filters = append(filters, filter.NewEngineFilter(s.GetName(), filter.SpecialEngines))
 	default:
 		return nil, errs.ErrGetSourceStore.FastGenByArgs(job.Engine)
 	}
 
-	availableSource := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
+	availableSource := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	// filter some store that not match the rules in the key ranges
 	sources := make([]*core.StoreInfo, 0)
 	for _, store := range availableSource {
@@ -622,6 +623,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		for _, r := range job.Ranges {
 			count += GetCountThreshold(cluster, availableSource, store, r, job.Rule)
 		}
+		log.Debug("candidate store", zap.Uint64("store-id", store.GetID()), zap.Float64("count", count))
 		if count > 0 {
 			sources = append(sources, store)
 		}

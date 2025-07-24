@@ -15,6 +15,9 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,4 +55,73 @@ func TestRetryQuota(t *testing.T) {
 	// test resetLimit
 	q.resetLimit(store1)
 	re.Equal(10, q.getLimit(store1))
+}
+
+func TestGetCountThreshold(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, _ := prepareSchedulersTest()
+	defer cancel()
+	tc.PutStoreWithLabels(1, "region", "z1", "zone", "z1")
+	tc.PutStoreWithLabels(2, "region", "z1", "zone", "z1")
+	tc.PutStoreWithLabels(3, "region", "z1", "zone", "z1")
+	tc.PutStoreWithLabels(4, "region", "z2", "zone", "z1")
+	tc.PutStoreWithLabels(5, "region", "z2", "zone", "z1")
+
+	rule1 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_0",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    1,
+		Role:     placement.Leader,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z1"}},
+		},
+		LocationLabels: []string{"zone"},
+	}
+	rule2 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_1",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    1,
+		Role:     placement.Follower,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z1"}},
+		},
+		LocationLabels: []string{"zone"},
+	}
+
+	rule3 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_2",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    1,
+		Role:     placement.Learner,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z2"}},
+		},
+		LocationLabels: []string{"zone"},
+	}
+
+	re.NoError(tc.SetRules([]*placement.Rule{rule1, rule2, rule3}))
+	re.NoError(tc.GetRuleManager().DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID))
+
+	for i := range 100 {
+		starKey, endKey := 100+i-1, 100+i
+		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(starKey), strconv.Itoa(endKey), 1, 2, 4)
+	}
+
+	available := 0
+	for _, store := range tc.GetStores() {
+		count := GetCountThreshold(tc, tc.GetStores(), store, keyutil.NewKeyRange("", ""), core.LeaderScatter)
+		if count > 0 {
+			available++
+		}
+	}
+	re.Equal(3, available)
 }
