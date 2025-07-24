@@ -2381,7 +2381,8 @@ func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
 		Count:          3,
 		LocationLabels: []string{"zone", "host"},
 	}
-	suite.ruleManager.SetRule(rule)
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
 	region1 := suite.cluster.GetRegion(1)
 	op := suite.rc.Check(region1)
 	re.Empty(op)
@@ -2402,7 +2403,8 @@ func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
 		LocationLabels: []string{"zone", "host"},
 	}
 
-	suite.ruleManager.SetRule(ruleTiFlash)
+	err = suite.ruleManager.SetRule(ruleTiFlash)
+	re.NoError(err)
 	suite.cluster.AddRegionWithLearner(2, 1, []uint64{2, 3}, []uint64{5, 6, 7})
 	region2 := suite.cluster.GetRegion(2)
 	op = suite.rc.Check(region2)
