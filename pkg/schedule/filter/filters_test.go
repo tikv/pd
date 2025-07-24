@@ -484,34 +484,6 @@ func TestSpecialEngine(t *testing.T) {
 	re.False(NotSpecialEngines.MatchStore(tiflash))
 }
 
-func TestRuleFilter(t *testing.T) {
-	rules := make([]*placement.Rule, 0, 1)
-	rule := &placement.Rule{
-		GroupID: "test",
-		ID:      "r1",
-		Index:   100,
-		Role:    placement.Leader,
-		Count:   1,
-		LabelConstraints: []placement.LabelConstraint{
-			{Key: "region", Op: "in", Values: []string{"z1"}},
-		},
-	}
-	rules = append(rules, rule)
-	re := require.New(t)
-	f := NewStoreRuleFilter("test", rules)
-	re.Equal(statusOK, f.Target(nil, core.NewStoreInfoWithLabel(1, map[string]string{"region": "z1"})))
-	re.Equal(statusStoreNotMatchRule, f.Target(nil, core.NewStoreInfoWithLabel(2, map[string]string{"region": "z2"})))
-
-	rule2 := rule.Clone()
-	rule2.LabelConstraints = []placement.LabelConstraint{
-		{Key: "region", Op: "in", Values: []string{"z2"}},
-	}
-	rule2.Count = 1
-	rules = append(rules, rule2)
-	f = NewStoreRuleFilter("test", rules)
-	re.Equal(statusOK, f.Target(nil, core.NewStoreInfoWithLabel(2, map[string]string{"region": "z2"})))
-}
-
 func BenchmarkCloneRegionTest(b *testing.B) {
 	epoch := &metapb.RegionEpoch{
 		ConfVer: 1,

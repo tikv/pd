@@ -424,20 +424,6 @@ func (r *Rule) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// GetPeersByRule returns the peers with specified rule.
-func (r *RegionInfo) GetPeersByRule(rule Rule) []*metapb.Peer {
-	switch rule {
-	case LeaderScatter:
-		return []*metapb.Peer{r.GetLeader()}
-	case PeerScatter:
-		return r.GetPeers()
-	case LearnerScatter:
-		return r.GetLearners()
-	default:
-		return nil
-	}
-}
-
 // GetDownPeer returns the down peer with specified peer id.
 func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
@@ -1986,27 +1972,47 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
+// GetStoreRegionCountByRule returns the number of regions that overlap with the range [startKey, endKey) for
+// a specific rule and store.
+func (r *RegionsInfo) GetStoreRegionCountByRule(storeID uint64, startKey, endKey []byte, rule Rule) int {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	switch rule {
+	case LeaderScatter:
+		tree, ok := r.leaders[storeID]
+		if !ok {
+			return 0
+		}
+		return tree.GetCountByKeyRange(startKey, endKey)
+	case PeerScatter:
+		count := 0
+
+		if tree, ok := r.leaders[storeID]; ok {
+			count += tree.GetCountByKeyRange(startKey, endKey)
+		}
+		if tree, ok := r.followers[storeID]; ok {
+			count += tree.GetCountByKeyRange(startKey, endKey)
+		}
+		if tree, ok := r.learners[storeID]; ok {
+			count += tree.GetCountByKeyRange(startKey, endKey)
+		}
+		return count
+	case LearnerScatter:
+		tree, ok := r.learners[storeID]
+		if !ok {
+			return 0
+		}
+		return tree.GetCountByKeyRange(startKey, endKey)
+	default:
+		return 0
+	}
+}
+
 // GetRegionCount returns the number of regions that overlap with the range [startKey, endKey).
 func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
-	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
-	// it returns 0 if startKey is nil.
-	_, startIndex := r.tree.tree.GetWithIndex(start)
-	var endIndex int
-	var item *regionItem
-	// it should return the length of the tree if endKey is nil.
-	if len(endKey) == 0 {
-		endIndex = r.tree.tree.Len() - 1
-	} else {
-		item, endIndex = r.tree.tree.GetWithIndex(end)
-		// it should return the endIndex - 1 if the endKey is the startKey of a region.
-		if item != nil && bytes.Equal(item.GetStartKey(), endKey) {
-			endIndex--
-		}
-	}
-	return endIndex - startIndex + 1
+	return r.tree.GetCountByKeyRange(startKey, endKey)
 }
 
 // ScanRegions scans regions intersecting [start key, end key), returns at most
@@ -2123,41 +2129,6 @@ func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(regi
 	r.t.RLock()
 	defer r.t.RUnlock()
 	r.tree.scanRange(startKey, iterator)
-}
-
-// GetRegionCountByRange scans regions intersecting [start key, end key), returns the count of regions in this range.
-func (r *RegionsInfo) GetRegionCountByRange(startKey, endKey []byte) int {
-	if len(startKey) == 0 && len(endKey) == 0 {
-		r.t.RLock()
-		defer r.t.RUnlock()
-		return r.tree.length()
-	}
-	var total int
-	for {
-		r.t.RLock()
-		var cnt int
-		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-				return false
-			}
-			if cnt >= scanRegionLimit {
-				return false
-			}
-			cnt++
-			startKey = region.GetEndKey()
-			return true
-		})
-		r.t.RUnlock()
-		total += cnt
-		if cnt == 0 {
-			break
-		}
-		if len(startKey) == 0 {
-			break
-		}
-	}
-
-	return total
 }
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.

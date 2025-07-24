@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"net/url"
 	"strconv"
 	"time"
@@ -410,4 +411,93 @@ func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, direction c
 			log.Error("pause leader transfer failed", zap.Uint64("store-id", id), zap.String("direction", direction.String()), errs.ZapError(err))
 		}
 	}
+}
+
+func GetCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, kr keyutil.KeyRange, rule core.Rule) float64 {
+	start := time.Now()
+	cfg := c.GetSchedulerConfig()
+	if !cfg.IsPlacementRulesEnabled() {
+		var regionCount int
+		var weight float64
+		if rule == core.LeaderScatter {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey)
+			weight = 1
+		} else {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey) * cfg.GetMaxReplicas()
+			weight = core.GetStoreTopoWeight(store, stores, cfg.GetLocationLabels(), cfg.GetMaxReplicas())
+		}
+
+		return float64(regionCount) * weight * 0.9
+	}
+
+	keys := c.GetRuleManager().GetSplitKeys(kr.StartKey, kr.EndKey)
+	if len(keys) == 0 {
+		return calculateRangeCount(c, stores, store, kr.StartKey, kr.EndKey, rule) * 0.9
+	}
+
+	storeSize := 0.0
+	startKey := kr.StartKey
+	for _, key := range keys {
+		endKey := key
+		storeSize += calculateRangeCount(c, stores, store, startKey, endKey, rule)
+		startKey = endKey
+	}
+	// the range from the last split key to the last key
+	storeSize += calculateRangeCount(c, stores, store, startKey, kr.EndKey, rule)
+	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
+	return storeSize * 0.9
+}
+
+// IsSatisfyRole return true if the rule satisfies the region.
+func IsSatisfyRole(r core.Rule, role placement.PeerRoleType) bool {
+	switch r {
+	case core.LeaderScatter:
+		return role == placement.Leader || role == placement.Voter
+	case core.LearnerScatter:
+		return role == placement.Learner
+	default:
+		return true
+	}
+}
+
+func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte, r core.Rule) float64 {
+	var storeCount float64
+	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
+	for _, rule := range rules {
+		if !IsSatisfyRole(r, rule.Role) {
+			continue
+		}
+
+		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+			continue
+		}
+
+		var matchStores []*core.StoreInfo
+		for _, s := range stores {
+			if s.IsRemoving() || s.IsRemoved() {
+				continue
+			}
+			if placement.MatchLabelConstraints(s, rule.LabelConstraints) {
+				matchStores = append(matchStores, s)
+			}
+		}
+		regionCount := c.GetRegionCount(startKey, endKey) * rule.Count
+		var weight float64
+		if r == core.LeaderScatter {
+			weight = 1.0
+		} else {
+			weight = core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+		}
+		storeCount += float64(regionCount) * weight
+		log.Debug("calculate range result",
+			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
+			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
+			zap.Uint64("store-id", store.GetID()),
+			zap.String("rule", rule.String()),
+			zap.Int("region-count", regionCount),
+			zap.Float64("weight", weight),
+			zap.Float64("store-count", storeCount),
+		)
+	}
+	return storeCount
 }

@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -434,7 +433,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	}
 
 	s.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	s.filterCounter = filter.NewCounter(s.GetName())
@@ -457,6 +456,9 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
 		return nil, nil
 	}
+	conf := cluster.GetSchedulerConfig()
+	faultTargets := filter.SelectUnavailableTargetStores(plan.stores, s.filters, conf, nil, s.filterCounter)
+	sourceStores := filter.SelectSourceStores(plan.stores, s.filters, conf, nil, s.filterCounter)
 
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
@@ -464,7 +466,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	pendingFilter := filter.NewRegionPendingFilter()
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
 
-	for sourceIndex, sourceStore := range plan.stores {
+	for sourceIndex, sourceStore := range sourceStores {
 		plan.source = sourceStore
 		plan.sourceScore = plan.score(plan.source.GetID())
 		if plan.sourceScore < plan.averageScore {
@@ -502,7 +504,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 			continue
 		}
 		plan.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-		if op := s.transferPeer(plan, plan.stores[sourceIndex+1:]); op != nil {
+		if op := s.transferPeer(plan, sourceStores[sourceIndex+1:], faultTargets); op != nil {
 			op.Counters = append(op.Counters, balanceRangeNewOperatorCounter)
 			return []*operator.Operator{op}, nil
 		}
@@ -511,11 +513,14 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
+func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) *operator.Operator {
 	excludeTargets := plan.region.GetStoreIDs()
 	if plan.job.Rule == core.LeaderScatter {
 		excludeTargets = make(map[uint64]struct{})
 		excludeTargets[plan.region.GetLeader().GetStoreId()] = struct{}{}
+	}
+	for _, store := range faultStores {
+		excludeTargets[store.GetID()] = struct{}{}
 	}
 	conf := plan.GetSchedulerConfig()
 	filters := []filter.Filter{
@@ -594,69 +599,12 @@ type balanceRangeSchedulerPlan struct {
 	tolerate     int64
 }
 
-func fetchAllRegions(cluster sche.SchedulerCluster, ranges *keyutil.KeyRanges) []*core.RegionInfo {
-	scanLimit := 32
-	regions := make([]*core.RegionInfo, 0)
-	krs := ranges.Ranges()
-
-	for _, kr := range krs {
-		for {
-			region := cluster.ScanRegions(kr.StartKey, kr.EndKey, scanLimit)
-			if len(region) == 0 {
-				break
-			}
-			regions = append(regions, region...)
-			if len(region) < scanLimit {
-				break
-			}
-			kr.StartKey = region[len(region)-1].GetEndKey()
-			if bytes.Equal(kr.StartKey, kr.EndKey) {
-				break
-			}
-		}
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence,
+	job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
+	filters := []filter.Filter{
+		&filter.StoreStateFilter{ActionScope: s.GetName(), OperatorLevel: constant.Medium},
+		filter.NewSpecialUseFilter(s.GetName()),
 	}
-	return regions
-}
-
-func (s *balanceRangeScheduler) getStoreRuleFilter(cluster sche.SchedulerCluster, job *balanceRangeSchedulerJob) filter.Filter {
-	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() {
-		return nil
-	}
-	rules := make([]*placement.Rule, 0)
-	rm := cluster.GetRuleManager()
-	for _, r := range job.Ranges {
-		candidateRules := rm.GetRulesForApplyRange(r.StartKey, r.EndKey)
-		targetRules := make([]*placement.Rule, 0, len(candidateRules))
-		switch job.Rule {
-		case core.LeaderScatter:
-			for _, rule := range candidateRules {
-				if rule.Role == placement.Leader {
-					targetRules = []*placement.Rule{rule}
-					break
-				}
-				if rule.Role == placement.Voter {
-					targetRules = append(targetRules, rule)
-				}
-			}
-		case core.PeerScatter:
-			targetRules = candidateRules
-		case core.LearnerScatter:
-			for _, rule := range candidateRules {
-				if rule.Role == placement.Learner {
-					targetRules = append(targetRules, rule)
-				}
-			}
-		}
-		rules = append(rules, targetRules...)
-	}
-	if len(rules) == 0 {
-		return nil
-	}
-	return filter.NewStoreRuleFilter(s.GetName(), rules)
-}
-
-func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
-	filters := s.filters
 	switch job.Engine {
 	case core.EngineTiKV:
 		filters = append(filters, filter.NewEngineFilter(string(types.BalanceRangeScheduler), filter.NotSpecialEngines))
@@ -666,19 +614,20 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		return nil, errs.ErrGetSourceStore.FastGenByArgs(job.Engine)
 	}
 
-	storeRuleFilter := s.getStoreRuleFilter(cluster, job)
-	if storeRuleFilter != nil {
-		filters = append(filters, storeRuleFilter)
+	availableSource := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
+	// filter some store that not match the rules in the key ranges
+	sources := make([]*core.StoreInfo, 0)
+	for _, store := range availableSource {
+		count := float64(0)
+		for _, r := range job.Ranges {
+			count += GetCountThreshold(cluster, availableSource, store, r, job.Rule)
+		}
+		if count > 0 {
+			sources = append(sources, store)
+		}
 	}
-	sources := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
 	if len(sources) <= 1 {
 		return nil, errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
-	}
-
-	krs := keyutil.NewKeyRanges(job.Ranges)
-	scanRegions := fetchAllRegions(cluster, krs)
-	if len(scanRegions) == 0 {
-		return nil, errs.ErrRegionNotFound.FastGenByArgs("no region found")
 	}
 
 	// storeID <--> score mapping
@@ -687,11 +636,13 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		scoreMap[source.GetID()] = 0
 	}
 	totalScore := int64(0)
-	for _, region := range scanRegions {
-		for _, peer := range region.GetPeersByRule(job.Rule) {
-			scoreMap[peer.GetStoreId()] += 1
-			totalScore += 1
+	for _, store := range sources {
+		count := int64(0)
+		for _, kr := range job.Ranges {
+			count += int64(cluster.GetStoreRegionCountByRule(store.GetID(), kr.StartKey, kr.EndKey, job.Rule))
 		}
+		totalScore += count
+		scoreMap[store.GetID()] = count
 	}
 
 	sort.Slice(sources, func(i, j int) bool {
@@ -705,8 +656,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 
 	averageScore := int64(0)
 	averageScore = totalScore / int64(len(sources))
-
-	tolerantSizeRatio := int64(float64(len(scanRegions)) * adjustRatio)
+	tolerantSizeRatio := int64(float64(totalScore) * adjustRatio)
 	if tolerantSizeRatio < 1 {
 		tolerantSizeRatio = 1
 	}

@@ -832,60 +832,6 @@ func NewPlacementWitnessSafeguard(scope string, conf config.SharedConfigProvider
 	return nil
 }
 
-type storeRuleFilter struct {
-	scope string
-	rules []*placement.Rule
-}
-
-func NewStoreRuleFilter(scope string, rules []*placement.Rule) Filter {
-	return &storeRuleFilter{
-		scope: scope,
-		rules: rules,
-	}
-}
-
-// Scope returns the scheduler or the checker which the filter acts on.
-func (f *storeRuleFilter) Scope() string {
-	return f.scope
-}
-
-// Type returns the name of the filter.
-func (*storeRuleFilter) Type() filterType {
-	return engine
-}
-
-// Source filters stores when select them as schedule source.
-// returns statusOK if the store matches any of the rules.
-func (f *storeRuleFilter) Source(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	matched := slice.AnyOf(f.rules, func(i int) bool {
-		rule := f.rules[i]
-		if placement.MatchLabelConstraints(store, rule.LabelConstraints) {
-			return true
-		}
-		return false
-	})
-	if matched {
-		return statusOK
-	}
-	return statusStoreNotMatchRule
-}
-
-// Target filters stores when select them as schedule target.
-// returns statusOK if the store matches any of the rules.
-func (f *storeRuleFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	matched := slice.AnyOf(f.rules, func(i int) bool {
-		rule := f.rules[i]
-		if placement.MatchLabelConstraints(store, rule.LabelConstraints) {
-			return true
-		}
-		return false
-	})
-	if matched {
-		return statusOK
-	}
-	return statusStoreNotMatchRule
-}
-
 type engineFilter struct {
 	scope      string
 	constraint placement.LabelConstraint

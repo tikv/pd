@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -756,15 +755,11 @@ func TestGetRegionSizeByRange(t *testing.T) {
 	}
 	totalSize := regions.GetRegionSizeByRange([]byte(""), []byte(""))
 	require.Equal(t, int64(nums*10), totalSize)
-	totalCount := regions.GetRegionCountByRange([]byte(""), []byte(""))
-	require.Equal(t, nums, totalCount)
 	for i := 1; i < 10; i++ {
 		verifyNum := nums / i
 		endKey := fmt.Sprintf("%20d", verifyNum)
 		totalSize := regions.GetRegionSizeByRange([]byte(""), []byte(endKey))
 		require.Equal(t, int64(verifyNum*10), totalSize)
-		totalCount := regions.GetRegionCountByRange([]byte(""), []byte(endKey))
-		require.Equal(t, verifyNum, totalCount)
 	}
 }
 
@@ -1239,6 +1234,45 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 }
 
+func TestStoreRegionCount(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	i := uint64(1)
+	voterFn := func() *metapb.Peer {
+		i++
+		return &metapb.Peer{
+			StoreId: 2,
+			Id:      i,
+			Role:    metapb.PeerRole_Voter,
+		}
+	}
+	learnerFn := func() *metapb.Peer {
+		i++
+		return &metapb.Peer{
+			StoreId: 3,
+			Id:      i,
+			Role:    metapb.PeerRole_Learner,
+		}
+	}
+
+	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("c"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
+	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("e"), []byte("g"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
+	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("g"), []byte("i"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
+	for _, endKey := range [][]byte{[]byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f"), []byte("")} {
+		count := regions.GetRegionCount([]byte("a"), endKey)
+		scanCount := len(regions.ScanRegions([]byte("a"), endKey, 100))
+		re.Equal(count, scanCount, "endKey: %s", endKey)
+		storeCount := regions.GetStoreRegionCountByRule(uint64(1), []byte("a"), endKey, LeaderScatter)
+		re.Equal(count, storeCount, "endKey: %s", endKey)
+		learnerStoreCount := regions.GetStoreRegionCountByRule(uint64(3), []byte("a"), endKey, LearnerScatter)
+		re.Equal(count, learnerStoreCount, "endKey: %s", endKey)
+		for _, storeID := range []uint64{1, 2, 3} {
+			storePeerCount := regions.GetStoreRegionCountByRule(storeID, []byte("a"), endKey, PeerScatter)
+			re.Equal(count, storePeerCount, "endKey: %s", endKey)
+		}
+	}
+}
+
 func TestQueryRegions(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()
@@ -1325,45 +1359,6 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
 	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
-}
-
-func TestGetPeers(t *testing.T) {
-	re := require.New(t)
-	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
-	leader := &metapb.Peer{StoreId: 2, Id: 2}
-	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
-	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
-	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-		leader, follower1, follower2, learner,
-	}}, leader, WithLearners([]*metapb.Peer{learner}))
-	for _, v := range []struct {
-		rule  string
-		peers []*metapb.Peer
-	}{
-		{
-			rule:  "leader-scatter",
-			peers: []*metapb.Peer{leader},
-		},
-		{
-			rule:  "peer-scatter",
-			peers: []*metapb.Peer{learner, leader, follower1, follower2},
-		},
-		{
-			rule:  "learner-scatter",
-			peers: []*metapb.Peer{learner},
-		},
-		{
-			rule:  "witness-scatter",
-			peers: nil,
-		},
-	} {
-		role := NewRule(v.rule)
-		peers := region.GetPeersByRule(role)
-		sort.Slice(peers, func(i, j int) bool {
-			return peers[i].Id <= peers[j].Id
-		})
-		re.Equal(v.peers, peers, role)
-	}
 }
 
 func TestCodecRule(t *testing.T) {

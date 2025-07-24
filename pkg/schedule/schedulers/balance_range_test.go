@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -54,11 +55,12 @@ func TestPlacementRule(t *testing.T) {
 		StartKey: []byte("100"),
 		EndKey:   []byte("200"),
 		Count:    1,
-		Role:     placement.Voter,
+		Role:     placement.Follower,
 		LabelConstraints: []placement.LabelConstraint{
 			{Key: "region", Op: "in", Values: []string{"z2"}},
 		},
 	}
+
 	rule3 := &placement.Rule{
 		GroupID:  "TiDB_DDL_145",
 		ID:       "table_rule_145_2",
@@ -69,32 +71,44 @@ func TestPlacementRule(t *testing.T) {
 		Role:     placement.Learner,
 		LabelConstraints: []placement.LabelConstraint{
 			{Key: "region", Op: "in", Values: []string{"z3"}},
-			{Key: "engine", Op: "in", Values: []string{"tiflash"}},
 		},
 	}
+
 	re.NoError(tc.SetRules([]*placement.Rule{rule1, rule2, rule3}))
+	re.NoError(tc.GetRuleManager().DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID))
+
 	sc := newBalanceRangeScheduler(oc, &balanceRangeSchedulerConfig{}).(*balanceRangeScheduler)
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
-	filter := sc.getStoreRuleFilter(tc, job)
-	re.NotNil(filter)
-	storeZ1 := core.NewStoreInfoWithLabel(1, map[string]string{"region": "z1"})
-	storeZ2 := core.NewStoreInfoWithLabel(1, map[string]string{"region": "z2"})
-	re.True(filter.Target(tc.GetSchedulerConfig(), storeZ1).IsOK())
-	re.False(filter.Target(tc.GetSchedulerConfig(), storeZ2).IsOK())
+	for i, label := range []map[string]string{{"region": "z1"}, {"region": "z2"}, {"region": "z3"}} {
+		store := core.NewStoreInfoWithLabel(uint64(i+1), label)
+		tc.PutStore(store)
+	}
 
+	for i := 1; i <= 100; i++ {
+		starKey, endKey := 100+i-1, 100+i
+		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(starKey), strconv.Itoa(endKey), 1, 2, 3)
+	}
+
+	// only store-1 can match the leader rule
+	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.Error(err)
+	re.Nil(plan)
+
+	// all store can match the rules
 	job.Rule = core.PeerScatter
-	filter = sc.getStoreRuleFilter(tc, job)
-	re.True(filter.Target(tc.GetSchedulerConfig(), storeZ1).IsOK())
-	re.True(filter.Target(tc.GetSchedulerConfig(), storeZ2).IsOK())
+	plan, err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.NoError(err)
+	re.Len(plan.stores, 3)
 
+	// only store-1 can match the learner rule
 	job.Rule = core.LearnerScatter
-	filter = sc.getStoreRuleFilter(tc, job)
-	re.False(filter.Target(tc.GetSchedulerConfig(), storeZ1).IsOK())
-	re.False(filter.Target(tc.GetSchedulerConfig(), storeZ2).IsOK())
+	plan, err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.Error(err)
+	re.Nil(plan)
 }
 
 func TestBalanceRangePlan(t *testing.T) {
@@ -217,30 +231,6 @@ func TestTIFLASHEngine(t *testing.T) {
 	re.Equal("0", op.GetAdditionalInfo("targetScore"))
 	re.Equal("1", op.GetAdditionalInfo("tolerate"))
 	re.Contains(op.Brief(), "mv peer: store [4] to")
-}
-
-func TestFetchAllRegions(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, _ := prepareSchedulersTest()
-	defer cancel()
-	for i := 1; i <= 3; i++ {
-		tc.AddLeaderStore(uint64(i), 0)
-	}
-	for i := 1; i <= 100; i++ {
-		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
-	}
-
-	ranges := keyutil.NewKeyRangesWithSize(1)
-	ranges.Append([]byte(""), []byte(""))
-	regions := fetchAllRegions(tc, ranges)
-	re.Len(regions, 100)
-
-	ranges = keyutil.NewKeyRangesWithSize(1)
-	region := tc.GetRegion(50)
-	ranges.Append([]byte(""), region.GetStartKey())
-	ranges.Append(region.GetStartKey(), []byte(""))
-	regions = fetchAllRegions(tc, ranges)
-	re.Len(regions, 100)
 }
 
 func TestCodecConfig(t *testing.T) {
