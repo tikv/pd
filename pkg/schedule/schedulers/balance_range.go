@@ -458,7 +458,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	for sourceIndex, sourceStore := range sourceStores {
 		plan.source = sourceStore
 		plan.sourceScore = plan.score(plan.source.GetID())
-		if plan.sourceScore < plan.averageScore {
+		if plan.sourceScore <= plan.expectScoreMap[plan.source.GetID()] {
 			break
 		}
 		switch job.Rule {
@@ -522,7 +522,7 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 	for i := range candidates.Stores {
 		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
 		plan.targetScore = plan.score(plan.target.GetID())
-		if plan.targetScore > plan.averageScore {
+		if plan.targetScore >= plan.expectScoreMap[plan.target.GetID()] {
 			break
 		}
 		regionID := plan.region.GetID()
@@ -568,7 +568,8 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatInt(plan.sourceScore, 10))
 		op.SetAdditionalInfo("targetScore", strconv.FormatInt(plan.targetScore, 10))
-		op.SetAdditionalInfo("tolerate", strconv.FormatInt(plan.tolerate, 10))
+		op.SetAdditionalInfo("sourceExpectScore", strconv.FormatInt(plan.expectScoreMap[plan.sourceStoreID()], 10))
+		op.SetAdditionalInfo("targetExpectScore", strconv.FormatInt(plan.expectScoreMap[plan.targetStoreID()], 10))
 		return op
 	}
 	balanceRangeNoReplacementCounter.Inc()
@@ -581,17 +582,18 @@ type balanceRangeSchedulerPlan struct {
 	// stores is sorted by score desc
 	stores []*core.StoreInfo
 	// scoreMap records the storeID -> score
-	scoreMap     map[uint64]int64
-	source       *core.StoreInfo
-	sourceScore  int64
-	target       *core.StoreInfo
-	targetScore  int64
-	region       *core.RegionInfo
-	fit          *placement.RegionFit
-	averageScore int64
-	job          *balanceRangeSchedulerJob
-	opInfluence  operator.OpInfluence
-	tolerate     int64
+	scoreMap map[uint64]int64
+	// expectScoreMap records the storeID -> expect score
+	expectScoreMap map[uint64]int64
+
+	source      *core.StoreInfo
+	sourceScore int64
+	target      *core.StoreInfo
+	targetScore int64
+	region      *core.RegionInfo
+	fit         *placement.RegionFit
+	job         *balanceRangeSchedulerJob
+	opInfluence operator.OpInfluence
 }
 
 func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence,
@@ -612,14 +614,15 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	availableSource := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	// filter some store that not match the rules in the key ranges
 	sources := make([]*core.StoreInfo, 0)
+	expectScoreMap := make(map[uint64]int64)
 	for _, store := range availableSource {
 		count := float64(0)
 		for _, r := range job.Ranges {
 			count += GetCountThreshold(cluster, availableSource, store, r, job.Rule)
 		}
-		log.Debug("candidate store", zap.Uint64("store-id", store.GetID()), zap.Float64("count", count))
 		if count > 0 {
 			sources = append(sources, store)
+			expectScoreMap[store.GetID()] = int64(count)
 		}
 	}
 	if len(sources) <= 1 {
@@ -650,12 +653,6 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		return iScore+iop > jScore+jop
 	})
 
-	averageScore := int64(0)
-	averageScore = totalScore / int64(len(sources))
-	tolerantSizeRatio := int64(float64(totalScore) * adjustRatio)
-	if tolerantSizeRatio < 1 {
-		tolerantSizeRatio = 1
-	}
 	return &balanceRangeSchedulerPlan{
 		SchedulerCluster: cluster,
 		stores:           sources,
@@ -663,10 +660,9 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		source:           nil,
 		target:           nil,
 		region:           nil,
-		averageScore:     averageScore,
 		job:              job,
 		opInfluence:      opInfluence,
-		tolerate:         tolerantSizeRatio,
+		expectScoreMap:   expectScoreMap,
 	}, nil
 }
 
@@ -691,7 +687,7 @@ func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	}
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
-	sourceScore := p.sourceScore - sourceInf - p.tolerate
+	sourceScore := p.sourceScore - sourceInf
 
 	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
 	targetInf := targetInfluence.GetStoreInfluenceByRole(p.job.Rule)
@@ -699,7 +695,7 @@ func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	if targetInf < 0 {
 		targetInf = -targetInf
 	}
-	targetScore := p.targetScore + targetInf + p.tolerate
+	targetScore := p.targetScore + targetInf
 
 	// the source score must be greater than the target score
 	shouldBalance := sourceScore >= targetScore
@@ -713,8 +709,6 @@ func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 			zap.Int64("origin-target-score", p.targetScore),
 			zap.Int64("influence-source-score", sourceScore),
 			zap.Int64("influence-target-score", targetScore),
-			zap.Int64("average-region-score", p.averageScore),
-			zap.Int64("tolerate", p.tolerate),
 		)
 	}
 	return shouldBalance

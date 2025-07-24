@@ -427,12 +427,12 @@ func GetCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store 
 			weight = core.GetStoreTopoWeight(store, stores, cfg.GetLocationLabels(), cfg.GetMaxReplicas())
 		}
 
-		return float64(regionCount) * weight * 0.9
+		return float64(regionCount) * weight
 	}
 
 	keys := c.GetRuleManager().GetSplitKeys(kr.StartKey, kr.EndKey)
 	if len(keys) == 0 {
-		return calculateRangeCount(c, stores, store, kr.StartKey, kr.EndKey, rule) * 0.9
+		return calculateRangeCount(c, stores, store, kr.StartKey, kr.EndKey, rule)
 	}
 
 	storeSize := 0.0
@@ -445,7 +445,7 @@ func GetCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store 
 	// the range from the last split key to the last key
 	storeSize += calculateRangeCount(c, stores, store, startKey, kr.EndKey, rule)
 	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
-	return storeSize * 0.9
+	return storeSize
 }
 
 // IsSatisfyRole return true if the rule satisfies the region.
@@ -481,12 +481,16 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 				matchStores = append(matchStores, s)
 			}
 		}
-		regionCount := c.GetRegionCount(startKey, endKey) * rule.Count
+		if len(matchStores) == 0 {
+			return 0.0
+		}
+		regionCount := c.GetRegionCount(startKey, endKey)
 		var weight float64
 		if r == core.LeaderScatter {
-			weight = 1.0
+			weight = 1.0 / float64(len(matchStores))
 		} else {
 			weight = core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+			regionCount *= rule.Count
 		}
 		storeCount += float64(regionCount) * weight
 		log.Debug("calculate range result",

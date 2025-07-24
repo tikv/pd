@@ -131,7 +131,6 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.Len(plan.stores, 3)
 	re.Len(plan.scoreMap, 3)
 	re.Equal(int64(1), plan.scoreMap[1])
-	re.Equal(int64(1), plan.tolerate)
 }
 
 func TestTIKVEngine(t *testing.T) {
@@ -188,8 +187,8 @@ func TestTIFLASHEngine(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tikvCount := 3
 	// 3 tikv and 3 tiflash
+	tikvCount := 3
 	for i := 1; i <= tikvCount; i++ {
 		tc.AddLeaderStore(uint64(i), 0)
 	}
@@ -231,7 +230,8 @@ func TestTIFLASHEngine(t *testing.T) {
 	op := ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("0", op.GetAdditionalInfo("targetScore"))
-	re.Equal("1", op.GetAdditionalInfo("tolerate"))
+	re.Equal("1", op.GetAdditionalInfo("sourceExpectScore"))
+	re.Equal("1", op.GetAdditionalInfo("targetExpectScore"))
 	re.Contains(op.Brief(), "mv peer: store [4] to")
 }
 
