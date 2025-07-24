@@ -16,6 +16,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -52,8 +53,8 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Equal(uint32(middlePriority), defaultGroup.Priority)
 
 	// Verify the default resource group has unlimited rate and burst limit.
-	re.Equal(float64(unlimitedRate), defaultGroup.RUSettings.RU.getFillRateSetting())
-	re.Equal(int64(unlimitedBurstLimit), defaultGroup.RUSettings.RU.getBurstLimitSetting())
+	re.Equal(float64(unlimitedRate), defaultGroup.getFillRate())
+	re.Equal(int64(unlimitedBurstLimit), defaultGroup.getBurstLimit())
 }
 
 func TestAddResourceGroup(t *testing.T) {
@@ -101,7 +102,7 @@ func TestAddResourceGroup(t *testing.T) {
 	re.Equal(group.GetPriority(), addedGroup.Priority)
 	re.Equal(
 		float64(group.GetRUSettings().GetRU().GetSettings().GetFillRate()),
-		addedGroup.RUSettings.RU.getFillRateSetting(),
+		addedGroup.getFillRate(),
 	)
 	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), addedGroup.RUSettings.RU.getBurstLimitSetting())
 }
@@ -152,7 +153,7 @@ func TestModifyResourceGroup(t *testing.T) {
 	re.Equal(modifiedGroup.GetPriority(), updatedGroup.Priority)
 	re.Equal(
 		float64(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetFillRate()),
-		updatedGroup.RUSettings.RU.getFillRateSetting(),
+		updatedGroup.getFillRate(),
 	)
 	re.Equal(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), updatedGroup.RUSettings.RU.getBurstLimitSetting())
 
@@ -417,21 +418,22 @@ func TestRUTracker(t *testing.T) {
 
 	rt := newRUTracker(time.Second)
 	now := time.Now()
-	rt.sample(now, 100, time.Duration(0))
+	rt.sample(now, 100)
 	re.Zero(rt.getRUPerSec())
-	rt.sample(now, 100, time.Second)
+	now = now.Add(time.Second)
+	rt.sample(now, 100)
 	re.Equal(100.0, rt.getRUPerSec())
 	now = now.Add(time.Second)
-	rt.sample(now, 100, time.Second)
+	rt.sample(now, 100)
 	re.InDelta(100.0, rt.getRUPerSec(), floatDelta)
 	now = now.Add(time.Second)
-	rt.sample(now, 200, time.Second)
+	rt.sample(now, 200)
 	re.InDelta(150.0, rt.getRUPerSec(), floatDelta)
 	// EMA should eventually converge to 10000 RU/s.
 	const targetRUPerSec = 10000.0
 	testutil.Eventually(re, func() bool {
 		now = now.Add(time.Second)
-		rt.sample(now, targetRUPerSec, time.Second)
+		rt.sample(now, targetRUPerSec)
 		return math.Abs(rt.getRUPerSec()-targetRUPerSec) < floatDelta
 	})
 }
@@ -520,4 +522,394 @@ func TestPersistAndReloadIntegrity(t *testing.T) {
 	re.Equal(float64(100), reloadedGroup.RUConsumption.RRU)
 	re.Equal(float64(200), reloadedGroup.RUConsumption.WRU)
 	re.Equal(uint32(10), reloadedGroup.Priority)
+}
+
+func TestGetPriorityQueues(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+
+	// Add some resource groups with different priorities.
+	groups := map[uint32]*rmpb.ResourceGroup{
+		1: {
+			Name:     "group_with_priority_1",
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: 1,
+		},
+		2: {
+			Name:     "group_with_priority_2",
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: 2,
+		},
+		3: {
+			Name:     "group_with_priority_3",
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: 3,
+		},
+	}
+	for _, group := range groups {
+		err := krgm.addResourceGroup(group)
+		re.NoError(err)
+	}
+	// Verify the priority queues.
+	priorityQueues := krgm.getPriorityQueues()
+	re.Len(priorityQueues, 3)
+	// Check if the priority queues are sorted in descending order.
+	for i := range len(priorityQueues) - 1 {
+		re.Greater(priorityQueues[i][0].Priority, priorityQueues[i+1][0].Priority)
+	}
+	// Check if the priority queues are correct.
+	for _, queue := range priorityQueues {
+		group := queue[0]
+		re.Equal(groups[group.Priority].Name, group.Name)
+	}
+}
+
+func TestOverrideFillRate(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		originalFillRate float64
+		overrideFillRate float64
+		expectedFillRate float64
+	}{
+		{
+			originalFillRate: -1,
+			overrideFillRate: -1,
+			expectedFillRate: -1,
+		},
+		{
+			originalFillRate: -1,
+			overrideFillRate: 0,
+			expectedFillRate: 0,
+		},
+		{
+			originalFillRate: -1,
+			overrideFillRate: 100,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 0,
+			overrideFillRate: -1,
+			expectedFillRate: -1,
+		},
+		{
+			originalFillRate: 0,
+			overrideFillRate: 0,
+			expectedFillRate: 0,
+		},
+		{
+			originalFillRate: 0,
+			overrideFillRate: 100,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: -1,
+			expectedFillRate: -1,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 0,
+			expectedFillRate: 0,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 96,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 95,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 94,
+			expectedFillRate: 94,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 104,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 105,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 106,
+			expectedFillRate: 106,
+		},
+	}
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	groupName := "test_group"
+	group := &rmpb.ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+	}
+	err := krgm.addResourceGroup(group)
+	re.NoError(err)
+	for idx, tc := range testCases {
+		group := krgm.getMutableResourceGroup(groupName)
+		group.RUSettings.RU.overrideFillRate = tc.originalFillRate
+		group.overrideFillRate(tc.overrideFillRate)
+		re.Equal(tc.expectedFillRate, group.RUSettings.RU.overrideFillRate, "case %d", idx)
+	}
+}
+
+func TestConciliateFillRate(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		name                           string
+		serviceLimit                   float64
+		priorityList                   []uint32
+		fillRateSettingList            []uint64
+		burstLimitSettingList          []int64 // If not provided, the burst limit is set to the same as the fill rate.
+		ruDemandList                   []float64
+		expectedOverrideFillRateList   []float64
+		expectedOverrideBurstLimitList []int64
+	}{
+		{
+			name:                "One priority with sufficient service limit",
+			serviceLimit:        100,
+			priorityList:        []uint32{1, 1, 1},
+			fillRateSettingList: []uint64{10, 20, 30},
+			ruDemandList:        []float64{10, 20, 30},
+			// Total demand: 60 < service limit 100, so all groups get their original settings
+			expectedOverrideFillRateList:   []float64{-1, -1, -1}, // -1 means use original fill rate settings
+			expectedOverrideBurstLimitList: []int64{-1, -1, -1},   // -1 means use original burst limit settings
+		},
+		{
+			name:                "One priority with insufficient service limit",
+			serviceLimit:        50,
+			priorityList:        []uint32{1, 1, 1},
+			fillRateSettingList: []uint64{20, 30, 50},
+			ruDemandList:        []float64{20, 30, 50},
+			// Total demand: 100 > service limit 50, normalized demand: 20/20=1, 30/30=1, 50/50=1
+			// Proportional allocation: 50*20/100=10, 50*30/100=15, 50*50/100=25
+			expectedOverrideFillRateList:   []float64{10, 15, 25},
+			expectedOverrideBurstLimitList: []int64{10, 15, 25}, // All groups are non-burstable, so burst limit is set to the same as fill rate
+		},
+		{
+			name:                "Multiple priorities with sufficient service limit",
+			serviceLimit:        200,
+			priorityList:        []uint32{3, 3, 2, 2, 1},
+			fillRateSettingList: []uint64{20, 30, 25, 35, 40},
+			ruDemandList:        []float64{10, 15, 20, 30, 40},
+			// Total demand: 115 < service limit 200, so all groups get their original settings
+			expectedOverrideFillRateList:   []float64{-1, -1, -1, -1, -1},
+			expectedOverrideBurstLimitList: []int64{-1, -1, -1, -1, -1},
+		},
+		{
+			name:                "Multiple priorities with insufficient service limit - higher groups get partial",
+			serviceLimit:        80,
+			priorityList:        []uint32{3, 3, 2, 1, 1},
+			fillRateSettingList: []uint64{30, 20, 30, 20, 10},
+			ruDemandList:        []float64{30, 20, 30, 20, 10},
+			// Priority 3: demand 50, gets full allocation (remaining: 30)
+			// Priority 2: demand 30, gets full allocation (remaining: 0)
+			// Priority 1: demand 30, gets 0 (no remaining service limit)
+			expectedOverrideFillRateList:   []float64{-1, -1, 30, 0, 0},
+			expectedOverrideBurstLimitList: []int64{-1, -1, 30, 0, 0},
+		},
+		{
+			name:                "Multiple priorities with insufficient service limit - higher groups get all",
+			serviceLimit:        100,
+			priorityList:        []uint32{5, 5, 3, 2, 1},
+			fillRateSettingList: []uint64{60, 60, 30, 20, 10},
+			ruDemandList:        []float64{60, 60, 30, 20, 10},
+			// Priority 5: demand 120 > service limit 100, proportional allocation: 100*(60/120)=50, 100*(60/120)=50
+			// Lower priorities get 0 (no remaining service limit)
+			expectedOverrideFillRateList:   []float64{50, 50, 0, 0, 0},
+			expectedOverrideBurstLimitList: []int64{50, 50, 0, 0, 0},
+		},
+		{
+			name:                "Zero service limit",
+			serviceLimit:        0,
+			priorityList:        []uint32{3, 2, 1},
+			fillRateSettingList: []uint64{10, 20, 30},
+			ruDemandList:        []float64{10, 20, 30},
+			// Service limit is 0, so no conciliation is performed, all groups keep original settings
+			expectedOverrideFillRateList:   []float64{-1, -1, -1},
+			expectedOverrideBurstLimitList: []int64{-1, -1, -1},
+		},
+		{
+			name:                "Zero demand from all groups",
+			serviceLimit:        100,
+			priorityList:        []uint32{3, 2, 1},
+			fillRateSettingList: []uint64{10, 20, 30},
+			ruDemandList:        []float64{0, 0, 0},
+			// No demand from any group, so all groups keep their original settings
+			expectedOverrideFillRateList:   []float64{-1, -1, -1},
+			expectedOverrideBurstLimitList: []int64{-1, -1, -1},
+		},
+		{
+			name:                "Partial throttling across priorities - priority 3 gets full, priority 2 gets partial, priority 1 gets none",
+			serviceLimit:        120,
+			priorityList:        []uint32{3, 3, 2, 2, 1},
+			fillRateSettingList: []uint64{40, 30, 30, 30, 20},
+			ruDemandList:        []float64{40, 30, 30, 30, 20},
+			// Priority 3: demand 70, gets full allocation (remaining: 50)
+			// Priority 2: demand 60 > remaining 50, proportional allocation: 50*(30/60)=25, 50*(30/60)=25
+			// Priority 1: demand 20, gets 0 (no remaining service limit)
+			expectedOverrideFillRateList:   []float64{-1, -1, 25, 25, 0}, // Priority 3 gets full, priority 2 gets partial, priority 1 gets none
+			expectedOverrideBurstLimitList: []int64{-1, -1, 25, 25, 0},
+		},
+		{
+			name:                  "Burst demand with insufficient service limit for all",
+			serviceLimit:          70,
+			priorityList:          []uint32{2, 2, 1},
+			fillRateSettingList:   []uint64{20, 30, 40},
+			burstLimitSettingList: []int64{20, 35, 70},
+			ruDemandList:          []float64{25, 50, 65},
+			// Priority 2: basic 20+30=50, busrt 0+20=20, total 70
+			// 	 - All groups get their basic demand satisfied (remaining: 70-20-30=20)
+			//   - group 0 is non-burstable, so it gets no extra burst supply. (remaining: 20)
+			//   - group 1 is burstable, but 35 < 30+20, so it still gets the 35 burst supply. (remaining: 20-(35-30)=15)
+			// Priority 1: demand 65 > remaining 15, gets 15 basic and 0 burst
+			expectedOverrideFillRateList:   []float64{-1, -1, 15},
+			expectedOverrideBurstLimitList: []int64{20, 35, 15},
+		},
+		{
+			name:                  "Mixed burst scenarios - some with burst, some without",
+			serviceLimit:          100,
+			priorityList:          []uint32{2, 2, 1, 1},
+			fillRateSettingList:   []uint64{30, 40, 20, 30},
+			burstLimitSettingList: []int64{30, -1, 20, 30},
+			ruDemandList:          []float64{35, 45, 22, 20},
+			// Priority 2: basic 30+40=70, burst 0+5=5, total 75 < service limit 100, so gets full allocation (remaining: 25)
+			// Priority 1: basic 20+30=50, burst 2+0=2, total 52 > service limit 25, so gets basic demand proportionally
+			expectedOverrideFillRateList:   []float64{-1, -1, 10, 15},
+			expectedOverrideBurstLimitList: []int64{-1, -1, 10, 15},
+		},
+		{
+			name:                  "Unlimited burst limit with service limit constraint",
+			serviceLimit:          100,
+			priorityList:          []uint32{2, 1, 1},
+			fillRateSettingList:   []uint64{20, 30, 40},
+			burstLimitSettingList: []int64{-1, -1, -1},
+			ruDemandList:          []float64{30, 50, 60}, // Basic: 20,30,40=90; Burst: 10,20,20=50; Total: 140
+			// Priority 2: demand 30, gets full allocation (remaining: 70)
+			// Priority 1: demand 110 > remaining 70, basic demand 70 = remaining 70, proportional allocation: 70*(30/70)=30, 70*(40/70)=40
+			expectedOverrideFillRateList:   []float64{-1, 30, 40},
+			expectedOverrideBurstLimitList: []int64{-1, 30, 40},
+		},
+		{
+			name:                  "Partial burst demand satisfied with unlimited burst limit",
+			serviceLimit:          60,
+			priorityList:          []uint32{2, 2, 1},
+			fillRateSettingList:   []uint64{20, 30, 40},
+			burstLimitSettingList: []int64{-1, -1, -1},
+			ruDemandList:          []float64{35, 40, 55}, // Basic: 20,30,40=90; Burst: 15,10,15=40; Total: 130
+			// Priority 2: demand 75 > service limit 60, basic demand 50 < service limit 60, basic satisfied, burst gets: 60-50=10
+			// Burst allocation: 10*(15/25)=6, 10*(10/25)=4, so burst limits: 20+6=26, 30+4=34
+			// Priority 1: gets 0 (no remaining service limit)
+			expectedOverrideFillRateList:   []float64{-1, -1, 0},
+			expectedOverrideBurstLimitList: []int64{26, 34, 0}, // 20+10*15/(15+10), 30+10*10/(15+10), 0
+		},
+		{
+			name:                  "Default group with unlimited burst limit",
+			serviceLimit:          100,
+			priorityList:          []uint32{1},
+			fillRateSettingList:   []uint64{unlimitedRate},
+			burstLimitSettingList: []int64{unlimitedBurstLimit},
+			ruDemandList:          []float64{1000},
+			// Default group with unlimited settings, basic demand = min(1000, unlimitedRate) = 1000
+			// Basic demand 1000 > service limit 100, so gets proportional allocation: 100*(1000/1000)=100
+			expectedOverrideFillRateList:   []float64{100},
+			expectedOverrideBurstLimitList: []int64{100},
+		},
+		{
+			name:                           "Proportional allocation with normalization check - case 1",
+			serviceLimit:                   100,
+			priorityList:                   []uint32{1, 1, 1},
+			fillRateSettingList:            []uint64{100, 100, 100},
+			ruDemandList:                   []float64{40, 80, 10},
+			expectedOverrideFillRateList:   []float64{40, 50, 10},
+			expectedOverrideBurstLimitList: []int64{40, 50, 10},
+		},
+		{
+			name:                           "Proportional allocation with normalization check - case 2",
+			serviceLimit:                   90,
+			priorityList:                   []uint32{1, 1, 1},
+			fillRateSettingList:            []uint64{100, 100, 100},
+			ruDemandList:                   []float64{50, 60, 70},
+			expectedOverrideFillRateList:   []float64{30, 30, 30},
+			expectedOverrideBurstLimitList: []int64{30, 30, 30},
+		},
+	}
+	genGroupName := func(caseIdx, i int) string {
+		return fmt.Sprintf("case_%d_group_%d", caseIdx, i)
+	}
+	for idx, tc := range testCases {
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		// Set the service limit.
+		krgm.setServiceLimit(tc.serviceLimit)
+		// Add the resource groups.
+		for i, priority := range tc.priorityList {
+			fillRate := tc.fillRateSettingList[i]
+			burstLimit := int64(fillRate)
+			if len(tc.burstLimitSettingList) > 0 {
+				burstLimit = tc.burstLimitSettingList[i]
+			}
+			group := &rmpb.ResourceGroup{
+				Name:     genGroupName(idx, i),
+				Mode:     rmpb.GroupMode_RUMode,
+				Priority: priority,
+				RUSettings: &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate:   fillRate,
+							BurstLimit: burstLimit,
+						},
+					},
+				},
+			}
+			err := krgm.addResourceGroup(group)
+			re.NoError(err, "case %s, group %d", tc.name, i)
+		}
+		// Mock the RU demand of each resource group.
+		now := time.Now()
+		for i, ruDemand := range tc.ruDemandList {
+			ruTracker := krgm.getOrCreateRUTracker(genGroupName(idx, i))
+			// Warm up the RU tracker.
+			ruTracker.sample(now, 0)
+			// Sample the RU demand.
+			now = now.Add(time.Second)
+			ruTracker.sample(now, ruDemand)
+		}
+		// Conciliate the fill rate.
+		krgm.conciliateFillRates()
+		// Verify the override fill rate and burst limit of each resource group.
+		for i, expectedOverrideFillRate := range tc.expectedOverrideFillRateList {
+			group := krgm.getMutableResourceGroup(genGroupName(idx, i))
+			re.Equal(
+				expectedOverrideFillRate,
+				group.getOverrideFillRate(),
+				"check fill rate of case %s, group %d", tc.name, i,
+			)
+			var expectedOverrideBurstLimit int64
+			if len(tc.expectedOverrideBurstLimitList) == 0 {
+				expectedOverrideBurstLimit = -1
+			} else {
+				expectedOverrideBurstLimit = tc.expectedOverrideBurstLimitList[i]
+			}
+			re.Equal(
+				expectedOverrideBurstLimit,
+				group.getOverrideBurstLimit(),
+				"check burst limit of case %s, group %d", tc.name, i,
+			)
+		}
+		// Test the cleanup overrides.
+		krgm.setServiceLimit(0)
+		for i := range tc.priorityList {
+			group := krgm.getMutableResourceGroup(genGroupName(idx, i))
+			re.Equal(float64(-1), group.getOverrideFillRate(), "check fill rate of case %s, group %d", tc.name, i)
+			re.Equal(int64(-1), group.getOverrideBurstLimit(), "check burst limit of case %s, group %d", tc.name, i)
+		}
+	}
 }

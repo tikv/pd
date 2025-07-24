@@ -79,6 +79,13 @@ type GroupTokenBucket struct {
 	GroupTokenBucketState `json:"state,omitempty"`
 }
 
+func (gtb *GroupTokenBucket) getFillRate() float64 {
+	if gtb.overrideFillRate >= 0 {
+		return gtb.overrideFillRate
+	}
+	return float64(gtb.Settings.GetFillRate())
+}
+
 func (gtb *GroupTokenBucket) getFillRateSetting() float64 {
 	return float64(gtb.Settings.GetFillRate())
 }
@@ -89,6 +96,22 @@ func (gtb *GroupTokenBucket) setFillRateSetting(fillRate uint64) {
 
 func (gtb *GroupTokenBucket) getBurstLimitSetting() int64 {
 	return gtb.Settings.GetBurstLimit()
+}
+
+func (gtb *GroupTokenBucket) getBurstLimit() int64 {
+	if gtb.overrideBurstLimit >= 0 {
+		return gtb.overrideBurstLimit
+	}
+	return gtb.Settings.GetBurstLimit()
+}
+
+func (gtb *GroupTokenBucket) getBurstableMode() burstableMode {
+	// When override fill rate is set, it means the service limit is throttled,
+	// so the burst should work in the limited mode to prevent consuming extra tokens.
+	if gtb.overrideBurstLimit >= 0 {
+		return limited
+	}
+	return getBurstableMode(gtb.Settings)
 }
 
 func (gtb *GroupTokenBucket) clone() *GroupTokenBucket {
@@ -139,6 +162,16 @@ type GroupTokenBucketState struct {
 	// ensuring that these tokens are not lost but are reintroduced into
 	// token calculation during the next update.
 	lastLimitedTokens float64
+	// overrideFillRate is used to override the fill rate of the token bucket.
+	// It's used to control the fill rate of the token bucket within the service
+	// limit to ensure the priority of the resource group. Only non-negative value
+	// means the fill rate is overridden.
+	overrideFillRate float64
+	// overrideBurstLimit is used to override the burst limit of the token bucket.
+	// It's used to control the burst limit of the token bucket within the service
+	// limit to ensure the priority of the resource group. Only non-negative value
+	// means the burst limit is overridden.
+	overrideBurstLimit int64
 
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
@@ -166,6 +199,8 @@ func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 		LastUpdate:                 lastUpdate,
 		Initialized:                gts.Initialized,
 		tokenSlots:                 tokenSlots,
+		overrideFillRate:           gts.overrideFillRate,
+		overrideBurstLimit:         gts.overrideBurstLimit,
 		clientConsumptionTokensSum: gts.clientConsumptionTokensSum,
 		lastCheckExpireSlot:        gts.lastCheckExpireSlot,
 	}
@@ -231,10 +266,10 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		return
 	}
 	evenRatio := 1 / float64(len(gtb.tokenSlots))
-	if mode := getBurstableMode(gtb.Settings); mode == rateControlled || mode == unlimited {
+	if mode := gtb.getBurstableMode(); mode == rateControlled || mode == unlimited {
 		for _, slot := range gtb.tokenSlots {
-			slot.fillRate = uint64(gtb.getFillRateSetting() * evenRatio)
-			slot.burstLimit = gtb.getBurstLimitSetting()
+			slot.fillRate = uint64(gtb.getFillRate() * evenRatio)
+			slot.burstLimit = gtb.getBurstLimit()
 		}
 		return
 	}
@@ -284,13 +319,13 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 }
 
 func (gtb *GroupTokenBucket) calcRateAndBurstLimit(ratio float64) (fillRate uint64, burstLimit int64) {
-	if getBurstableMode(gtb.Settings) == moderated {
-		fillRate = uint64(math.Min(gtb.getFillRateSetting()+defaultModeratedBurstRate, unlimitedRate) * ratio)
+	if gtb.getBurstableMode() == moderated {
+		fillRate = uint64(math.Min(gtb.getFillRate()+defaultModeratedBurstRate, unlimitedRate) * ratio)
 		burstLimit = int64(fillRate)
 		return
 	}
-	fillRate = uint64(gtb.getFillRateSetting() * ratio)
-	burstLimit = int64(float64(gtb.getBurstLimitSetting()) * ratio)
+	fillRate = uint64(gtb.getFillRate() * ratio)
+	burstLimit = int64(float64(gtb.getBurstLimit()) * ratio)
 	return
 }
 
@@ -302,8 +337,10 @@ func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
 	return &GroupTokenBucket{
 		Settings: tokenBucket.GetSettings(),
 		GroupTokenBucketState: GroupTokenBucketState{
-			Tokens:     tokenBucket.GetTokens(),
-			tokenSlots: make(map[uint64]*tokenSlot),
+			Tokens:             tokenBucket.GetTokens(),
+			tokenSlots:         make(map[uint64]*tokenSlot),
+			overrideFillRate:   -1,
+			overrideBurstLimit: -1,
 		},
 	}
 }
@@ -335,17 +372,17 @@ func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 
 // init initializes the group token bucket.
 func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
-	if gtb.getFillRateSetting() == 0 {
+	if gtb.getFillRate() == 0 {
 		gtb.setFillRateSetting(defaultRefillRate)
 	}
-	if gtb.Tokens < defaultInitialTokens && gtb.getBurstLimitSetting() > 0 {
+	if gtb.Tokens < defaultInitialTokens && gtb.getBurstLimit() > 0 {
 		gtb.Tokens = defaultInitialTokens
 	}
 	// init slot
 	gtb.tokenSlots[clientID] = &tokenSlot{
 		// Copy settings to avoid modifying the original settings.
-		fillRate:          uint64(gtb.getFillRateSetting()),
-		burstLimit:        gtb.getBurstLimitSetting(),
+		fillRate:          uint64(gtb.getFillRate()),
+		burstLimit:        gtb.getBurstLimit(),
 		tokenCapacity:     gtb.Tokens,
 		lastTokenCapacity: gtb.Tokens,
 	}
@@ -361,7 +398,7 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 		gtb.init(now, clientUniqueID)
 	} else if burst := float64(burstLimit); burst > 0 {
 		if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
-			elapseTokens = gtb.getFillRateSetting()*delta.Seconds() + gtb.lastBurstTokens + gtb.lastLimitedTokens
+			elapseTokens = gtb.getFillRate()*delta.Seconds() + gtb.lastBurstTokens + gtb.lastLimitedTokens
 			gtb.lastBurstTokens = 0
 			gtb.lastLimitedTokens = 0
 			gtb.Tokens += elapseTokens
@@ -386,7 +423,7 @@ func (gtb *GroupTokenBucket) request(now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) (*rmpb.TokenBucket, int64) {
-	burstLimit := gtb.getBurstLimitSetting()
+	burstLimit := gtb.getBurstLimit()
 	gtb.updateTokens(now, burstLimit, clientUniqueID, requiredToken)
 	slot, ok := gtb.tokenSlots[clientUniqueID]
 	if !ok {
