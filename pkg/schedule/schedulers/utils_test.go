@@ -118,7 +118,7 @@ func TestGetCountThreshold(t *testing.T) {
 
 	available := 0
 	for _, store := range tc.GetStores() {
-		count := GetCountThreshold(tc, tc.GetStores(), store, keyutil.NewKeyRange("", ""), core.LeaderScatter)
+		count := GetCountThreshold(tc, tc.GetStores(), store, keyutil.NewKeyRange("100", "200"), core.LeaderScatter)
 		if count > 0 {
 			available++
 		}

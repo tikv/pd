@@ -603,7 +603,7 @@ type balanceRangeSchedulerPlan struct {
 func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence,
 	job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), OperatorLevel: constant.Medium},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	switch job.Engine {
