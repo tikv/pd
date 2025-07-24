@@ -459,7 +459,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		plan.source = sourceStore
 		plan.sourceScore = plan.score(plan.source.GetID())
 		if plan.sourceScore <= plan.expectScoreMap[plan.source.GetID()] {
-			break
+			continue
 		}
 		switch job.Rule {
 		case core.LeaderScatter:
@@ -523,7 +523,7 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
 		plan.targetScore = plan.score(plan.target.GetID())
 		if plan.targetScore >= plan.expectScoreMap[plan.target.GetID()] {
-			break
+			continue
 		}
 		regionID := plan.region.GetID()
 		sourceID := plan.source.GetID()

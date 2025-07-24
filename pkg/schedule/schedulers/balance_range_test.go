@@ -183,6 +183,70 @@ func TestTIKVEngine(t *testing.T) {
 	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
 
+func TestLocationLabel(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	rule1 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_0",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    1,
+		Role:     placement.Leader,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z1"}},
+		},
+		LocationLabels: []string{"zone"},
+	}
+	rule2 := &placement.Rule{
+		GroupID:  "TiDB_DDL_145",
+		ID:       "table_rule_145_1",
+		Index:    40,
+		StartKey: []byte("100"),
+		EndKey:   []byte("200"),
+		Count:    2,
+		Role:     placement.Follower,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "region", Op: "in", Values: []string{"z2", "z3"}},
+		},
+		LocationLabels: []string{"zone"},
+	}
+
+	re.NoError(tc.SetRules([]*placement.Rule{rule1, rule2}))
+	re.NoError(tc.GetRuleManager().DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID))
+
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"peer-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
+	tc.AddLabelsStore(1, 0, map[string]string{"region": "z1", "zone": "z1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"region": "z2", "zone": "z2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"region": "z2", "zone": "z2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"region": "z3", "zone": "z3"})
+	tc.AddLabelsStore(5, 0, map[string]string{"region": "z3", "zone": "z3"})
+	for i := range 100 {
+		follower1 := 2 + i%4
+		follower2 := 2 + (i+1)%4
+		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(100+i), strconv.Itoa(100+i+1),
+			1, uint64(follower1), uint64(follower2))
+	}
+	// case1: store 1 has 100 peers, the others has 50 peer, it suiter for the location label setting.
+	op, _ := scheduler.Schedule(tc, true)
+	re.Empty(op)
+
+	// case2: store1 has 110 peers, but store2 and store4 has 60 peer, it should move some peers from store2 or store 4
+	//	to store5 and store3.
+	for i := range 10 {
+		tc.AddLeaderRegionWithRange(uint64(100+i), strconv.Itoa(200+i), strconv.Itoa(200+i+1),
+			1, 2, 4)
+	}
+	op, _ = scheduler.Schedule(tc, true)
+	re.NotEmpty(op)
+	re.Contains(op[0].Brief(), "move peer")
+}
+
 func TestTIFLASHEngine(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
