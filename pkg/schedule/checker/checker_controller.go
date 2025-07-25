@@ -55,13 +55,6 @@ const (
 	patrolRegionChanLen      = MaxPatrolScanRegionLimit
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
-	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
-	denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("checkers", "deny")
-)
-
 // Controller is used to manage all checkers.
 type Controller struct {
 	ctx                     context.Context
@@ -237,7 +230,6 @@ func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.
 
 func (c *Controller) checkPendingProcessedRegions() {
 	ids := c.GetPendingProcessedRegions()
-	pendingProcessedRegionsGauge.Set(float64(len(ids)))
 	for _, id := range ids {
 		region := c.cluster.GetRegion(id)
 		c.tryAddOperators(region)
@@ -248,7 +240,6 @@ func (c *Controller) checkPendingProcessedRegions() {
 func (c *Controller) checkPriorityRegions() {
 	items := c.GetPriorityRegions()
 	removes := make([]uint64, 0)
-	priorityListGauge.Set(float64(len(items)))
 	for _, id := range items {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
@@ -323,7 +314,6 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 		l := cl.GetRegionLabeler()
 		if l.ScheduleDisabled(region) {
-			denyCheckersByLabelerCounter.Inc()
 			return nil
 		}
 	}
