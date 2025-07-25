@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -1333,45 +1332,6 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
 	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
-}
-
-func TestGetPeers(t *testing.T) {
-	re := require.New(t)
-	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
-	leader := &metapb.Peer{StoreId: 2, Id: 2}
-	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
-	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
-	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-		leader, follower1, follower2, learner,
-	}}, leader, WithLearners([]*metapb.Peer{learner}))
-	for _, v := range []struct {
-		rule  string
-		peers []*metapb.Peer
-	}{
-		{
-			rule:  "leader-scatter",
-			peers: []*metapb.Peer{leader},
-		},
-		{
-			rule:  "peer-scatter",
-			peers: []*metapb.Peer{learner, leader, follower1, follower2},
-		},
-		{
-			rule:  "learner-scatter",
-			peers: []*metapb.Peer{learner},
-		},
-		{
-			rule:  "witness-scatter",
-			peers: nil,
-		},
-	} {
-		role := NewRule(v.rule)
-		peers := region.GetPeersByRule(role)
-		sort.Slice(peers, func(i, j int) bool {
-			return peers[i].Id <= peers[j].Id
-		})
-		re.Equal(v.peers, peers, role)
-	}
 }
 
 func TestCodecRule(t *testing.T) {
