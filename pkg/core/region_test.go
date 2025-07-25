@@ -1397,9 +1397,21 @@ func TestRegionCount(t *testing.T) {
 	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("c")))
 	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("e"), []byte("g")))
 	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("g"), []byte("i")))
-	for _, endKey := range [][]byte{[]byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f"), []byte("")} {
-		count := regions.GetRegionCount([]byte("a"), endKey)
-		scanCount := len(regions.ScanRegions([]byte("a"), endKey, 100))
-		re.Equal(count, scanCount, "endKey: %s", endKey)
+	for _, key := range [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f"), []byte("g"), []byte("h"), []byte("")} {
+		count := regions.GetRegionCount([]byte("a"), key)
+		scanCount := len(regions.ScanRegions([]byte("a"), key, 100))
+		re.Equal(count, scanCount, "endKey: %s", key)
+
+		count = regions.GetRegionCount([]byte(""), key)
+		scanCount = len(regions.ScanRegions([]byte(""), key, 100))
+		re.Equal(count, scanCount, "endKey: %s", key)
+
+		count = regions.GetRegionCount(key, []byte("i"))
+		scanCount = len(regions.ScanRegions(key, []byte("i"), 100))
+		re.Equal(count, scanCount, "startKey: %s", key)
+
+		count = regions.GetRegionCount(key, []byte(""))
+		scanCount = len(regions.ScanRegions(key, []byte(""), 100))
+		re.Equal(count, scanCount, "startKey: %s", key)
 	}
 }
