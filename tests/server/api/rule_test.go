@@ -63,7 +63,7 @@ func (suite *ruleTestSuite) TearDownSuite() {
 
 func (suite *ruleTestSuite) TearDownTest() {
 	re := suite.Require()
-	suite.env.RunFunc(cleanRules(re))
+	suite.env.Reset(re)
 }
 
 func (suite *ruleTestSuite) TestSet() {
