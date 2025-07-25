@@ -103,6 +103,8 @@ type RegionSetInformer interface {
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
 	BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error)
+	GetRegionCount(startKey, endKey []byte) int
+	GetStoreRegionCountByRule(storeID uint64, startKey, endKey []byte, rule Rule) int
 }
 
 type batchScanRegionsOptions struct {
