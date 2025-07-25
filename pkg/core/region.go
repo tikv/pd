@@ -1995,18 +1995,13 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	// it returns 0 if startKey is nil.
 	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int
-	var item *regionItem
 	// it should return the length of the tree if endKey is nil.
 	if len(endKey) == 0 {
-		endIndex = r.tree.tree.Len() - 1
+		endIndex = r.tree.tree.Len()
 	} else {
-		item, endIndex = r.tree.tree.GetWithIndex(end)
-		// it should return the endIndex - 1 if the endKey is the startKey of a region.
-		if item != nil && bytes.Equal(item.GetStartKey(), endKey) {
-			endIndex--
-		}
+		_, endIndex = r.tree.tree.GetWithIndex(end)
 	}
-	return endIndex - startIndex + 1
+	return endIndex - startIndex
 }
 
 // ScanRegions scans regions intersecting [start key, end key), returns at most
