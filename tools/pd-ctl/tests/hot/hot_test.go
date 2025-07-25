@@ -42,6 +42,11 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
+func init() {
+	// disable denoising for hot statistic tests
+	statistics.Denoising = false
+}
+
 type hotTestSuite struct {
 	suite.Suite
 	env *pdTests.SchedulingTestEnvironment
@@ -75,7 +80,6 @@ func (suite *hotTestSuite) TestHot() {
 
 func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -245,7 +249,6 @@ func (suite *hotTestSuite) TestHotWithStoreID() {
 
 func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 	leaderServer := cluster.GetLeaderServer()
@@ -312,7 +315,6 @@ func (suite *hotTestSuite) TestHotWithoutHotPeer() {
 
 func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
@@ -394,7 +396,6 @@ func TestHistoryHotRegions(t *testing.T) {
 	// TODO: support history hotspot in scheduling server with stateless in the future.
 	// Ref: https://github.com/tikv/pd/pull/7183
 	re := require.New(t)
-	statistics.Denoising = false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1,
@@ -517,7 +518,6 @@ func TestHistoryHotRegions(t *testing.T) {
 func TestBuckets(t *testing.T) {
 	// TODO: support forward bucket request in scheduling server in the future.
 	re := require.New(t)
-	statistics.Denoising = false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })

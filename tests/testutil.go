@@ -413,17 +413,16 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 			return len(respBundle) == 1 && respBundle[0].ID == placement.DefaultGroupID && len(respBundle[0].Rules) == 1 &&
 				respBundle[0].Rules[0].ID == placement.DefaultRuleID && respBundle[0].Rules[0].Count == 3 && respBundle[0].Rules[0].Role == placement.Voter
 		})
-		// clean region cache
+		// clean region storage and cache
 		for _, server := range cluster.GetServers() {
 			pdAddr := cluster.GetConfig().GetClientURL()
 			for _, region := range server.GetRegions() {
-				url := fmt.Sprintf("%s/pd/api/v1/admin/cache/region/%d", pdAddr, region.GetID())
-				err := testutil.CheckDelete(TestDialClient, url, testutil.StatusOK(re))
+				url := fmt.Sprintf("%s/pd/api/v1/admin/storage/region/%d", pdAddr, region.GetID())
+				err = testutil.CheckDelete(TestDialClient, url, testutil.StatusOK(re))
 				re.NoError(err)
 			}
 			re.Empty(server.GetRegions())
 		}
-
 		// clean stores
 		leader := cluster.GetLeaderServer()
 		for _, store := range leader.GetStores() {

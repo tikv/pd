@@ -212,7 +212,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	clusterVersion = semver.Version{}
 	re.NoError(json.Unmarshal(output, &clusterVersion))
 	re.Equal(svr.GetClusterVersion(), clusterVersion)
-	args2 = []string{"-u", pdAddr, "config", "set", "cluster-version", "2.0.0"}
+	args2 = []string{"-u", pdAddr, "config", "set", "cluster-version", "2.0.0"} // reset to default
 	_, err = tests.ExecuteCommand(cmd, args2...)
 	re.NoError(err)
 
