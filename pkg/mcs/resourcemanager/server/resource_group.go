@@ -165,6 +165,10 @@ func (rg *ResourceGroup) overrideFillRateLocked(new float64) {
 func (rg *ResourceGroup) getBurstLimit(ignoreOverride ...bool) int64 {
 	rg.RLock()
 	defer rg.RUnlock()
+	return rg.getBurstLimitLocked(ignoreOverride...)
+}
+
+func (rg *ResourceGroup) getBurstLimitLocked(ignoreOverride ...bool) int64 {
 	if len(ignoreOverride) > 0 && ignoreOverride[0] {
 		return rg.RUSettings.RU.getBurstLimitSetting()
 	}
@@ -175,6 +179,12 @@ func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
 	rg.RLock()
 	defer rg.RUnlock()
 	return rg.RUSettings.RU.overrideBurstLimit
+}
+
+func (rg *ResourceGroup) overrideBurstLimit(new int64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideBurstLimitLocked(new)
 }
 
 func (rg *ResourceGroup) overrideBurstLimitLocked(new int64) {
@@ -265,7 +275,7 @@ func (rg *ResourceGroup) RequestRU(
 	if limitedTokens < grantedTokens {
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
-		if rg.getBurstLimit() > 0 {
+		if rg.getBurstLimitLocked() > 0 {
 			rg.RUSettings.RU.lastLimitedTokens += grantedTokens - limitedTokens
 		}
 	}

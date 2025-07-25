@@ -1163,6 +1163,13 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", errs.ErrKeyspaceGroupPrimaryNotFound
 	}
 	// The format of leader name is address-groupID.
-	contents := strings.Split(leader.GetName(), "-")
-	return contents[0], err
+	return parsePrimaryName(leader.Name), err
+}
+
+func parsePrimaryName(name string) string {
+	idx := strings.LastIndex(name, "-")
+	if idx != -1 {
+		return name[:idx]
+	}
+	return name
 }

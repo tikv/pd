@@ -2357,3 +2357,56 @@ func (suite *ruleCheckerTestSuite) TestIssue7808() {
 	re.Equal("fast-replace-rule-down-peer", op.Desc())
 	re.Contains(op.Brief(), "mv peer: store [1] to [2]")
 }
+
+func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
+	re := suite.Require()
+
+	// Setup stores with different engine types
+	suite.cluster.AddLabelsStore(1, 10, map[string]string{"zone": "z1", "host": "host1"})
+	suite.cluster.AddLabelsStore(2, 10, map[string]string{"zone": "z2", "host": "host2"})
+	suite.cluster.AddLabelsStore(3, 10, map[string]string{"zone": "z2", "host": "host3"})
+	suite.cluster.AddLabelsStore(4, 10, map[string]string{"zone": "z2", "host": "host4"})
+	suite.cluster.AddLabelsStore(5, 10, map[string]string{"zone": "z3", "host": "host5", "engine": "tiflash"})
+	suite.cluster.AddLabelsStore(6, 10, map[string]string{"zone": "z3", "host": "host6", "engine": "tiflash"})
+	suite.cluster.AddLabelsStore(7, 10, map[string]string{"zone": "z3", "host": "host7", "engine": "tiflash"})
+
+	// Create a TiKV region on stores 1, 2, 3
+	suite.cluster.AddLeaderRegionWithRange(1, "a", "b", 1, 2, 3)
+
+	rule := &placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Index:          0,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+	}
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
+	region1 := suite.cluster.GetRegion(1)
+	op := suite.rc.Check(region1)
+	re.Empty(op)
+
+	ruleTiFlash := &placement.Rule{
+		GroupID: "tiflash",
+		ID:      "tiflash",
+		Index:   40,
+		Role:    placement.Learner,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "engine",
+				Op:     placement.In,
+				Values: []string{"tiflash"},
+			},
+		},
+		LocationLabels: []string{"zone", "host"},
+	}
+
+	err = suite.ruleManager.SetRule(ruleTiFlash)
+	re.NoError(err)
+	suite.cluster.AddRegionWithLearner(2, 1, []uint64{2, 3}, []uint64{5, 6, 7})
+	region2 := suite.cluster.GetRegion(2)
+	op = suite.rc.Check(region2)
+	re.Empty(op)
+}

@@ -253,6 +253,7 @@ func newUpdateGCSafePoint() func() GRPCCase {
 
 func (*updateGCSafePoint) unary(ctx context.Context, cli pd.Client) error {
 	s := time.Now().Unix()
+	//nolint:staticcheck
 	_, err := cli.UpdateGCSafePoint(ctx, uint64(s))
 	if err != nil {
 		return err
@@ -278,6 +279,7 @@ func newUpdateServiceGCSafePoint() func() GRPCCase {
 func (*updateServiceGCSafePoint) unary(ctx context.Context, cli pd.Client) error {
 	s := time.Now().Unix()
 	id := rand.Int63n(100) + 1
+	//nolint:staticcheck
 	_, err := cli.UpdateServiceGCSafePoint(ctx, strconv.FormatInt(id, 10), id, uint64(s))
 	if err != nil {
 		return err

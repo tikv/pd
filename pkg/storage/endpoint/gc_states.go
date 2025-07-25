@@ -306,6 +306,7 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 }
 
 // LoadAllGCBarriers loads all GC barriers of the given keyspace.
+// Note that reserved barrier IDs (e.g., "gc_worker") are not filtered out here.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix(keyspaceID)
 	// TODO: Limit the count for each call.
@@ -422,8 +423,8 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 }
 
 // CompatibleLoadAllServiceGCSafePoints returns all services GC safe points with their etcd key.
-func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*ServiceSafePoint, error) {
-	prefix := keypath.GCBarrierPrefix(constant.NullKeyspaceID)
+func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints(keyspaceID uint32) ([]string, []*ServiceSafePoint, error) {
+	prefix := keypath.GCBarrierPrefix(keyspaceID)
 	keys, ssps, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
 		return nil, nil, err
