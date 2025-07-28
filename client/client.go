@@ -150,23 +150,25 @@ var _ Client = (*client)(nil)
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
 	sync.RWMutex
-	serviceMode     pdpb.ServiceMode
-	tsoClient       *tso.Cli
-	tsoSvcDiscovery sd.ServiceDiscovery
-	routerClient    *router.Cli
+	serviceMode              pdpb.ServiceMode
+	tsoClient                *tso.Cli
+	tsoSvcDiscovery          sd.ServiceDiscovery
+	routerClient             *router.Cli
+	resourceManagerDiscovery *sd.ResourceManagerDiscovery
 }
 
 func (k *serviceModeKeeper) close() {
 	k.Lock()
 	defer k.Unlock()
-	switch k.serviceMode {
-	case pdpb.ServiceMode_API_SVC_MODE:
+	if k.tsoSvcDiscovery != nil {
 		k.tsoSvcDiscovery.Close()
-		fallthrough
-	case pdpb.ServiceMode_PD_SVC_MODE:
-		k.tsoClient.Close()
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		k.tsoSvcDiscovery = nil
 	}
+	if k.resourceManagerDiscovery != nil {
+		k.resourceManagerDiscovery.Close()
+		k.resourceManagerDiscovery = nil
+	}
+	k.tsoClient.Close()
 }
 
 type client struct {
@@ -451,7 +453,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
 		}
-		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE && enable {
+		if c.inner.getTSOProvider() != tsoProviderPD && enable {
 			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		c.inner.option.SetEnableTSOFollowerProxy(enable)
@@ -598,18 +600,12 @@ func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logi
 // GetMinTS implements the TSOClient interface.
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
 	// Handle compatibility issue in case of PD doesn't support GetMinTS API.
-	serviceMode := c.inner.getServiceMode()
-	switch serviceMode {
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
-		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
-	case pdpb.ServiceMode_PD_SVC_MODE:
+	if c.inner.getTSOProvider() == tsoProviderPD {
 		// If the service mode is switched to API during GetTS() call, which happens during migration,
 		// returning the default timeline should be fine.
 		return c.GetTS(ctx)
-	case pdpb.ServiceMode_API_SVC_MODE:
-	default:
-		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
 	}
+
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	// Call GetMinTS API to get the minimal TS from the API leader.

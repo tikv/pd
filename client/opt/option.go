@@ -61,14 +61,15 @@ const (
 // It provides the ability to change some PD client's options online from the outside.
 type Option struct {
 	// Static options.
-	GRPCDialOptions   []grpc.DialOption
-	Timeout           time.Duration
-	MaxRetryTimes     int
-	EnableForwarding  bool
-	UseTSOServerProxy bool
-	MetricsLabels     prometheus.Labels
-	InitMetrics       bool
-	Backoffer         *retry.Backoffer
+	GRPCDialOptions         []grpc.DialOption
+	Timeout                 time.Duration
+	MaxRetryTimes           int
+	EnableForwarding        bool
+	UseTSOServerProxy       bool
+	UseResourceManagerProxy bool
+	MetricsLabels           prometheus.Labels
+	InitMetrics             bool
+	Backoffer               *retry.Backoffer
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
@@ -87,6 +88,7 @@ func NewOption() *Option {
 		EnableFollowerHandleCh:   make(chan struct{}, 1),
 		EnableRouterClientCh:     make(chan struct{}, 1),
 		InitMetrics:              true,
+		UseResourceManagerProxy:  true,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
@@ -197,6 +199,16 @@ func WithForwardingOption(enableForwarding bool) ClientOption {
 func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
 	return func(op *Option) {
 		op.UseTSOServerProxy = useTSOServerProxy
+	}
+}
+
+// WithResourceManagerProxyOption configures the client to use resource manager proxy,
+// i.e., the client will send resource manager requests to the API leader (the resource manager
+// proxy) which will forward the requests to the resource manager servers.
+// Default is true, which means the client will use resource manager proxy.
+func WithResourceManagerProxyOption(useResourceManagerProxy bool) ClientOption {
+	return func(op *Option) {
+		op.UseResourceManagerProxy = useResourceManagerProxy
 	}
 }
 
