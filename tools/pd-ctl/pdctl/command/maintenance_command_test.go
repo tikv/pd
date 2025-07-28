@@ -290,7 +290,7 @@ func TestMaintenanceShowCommand_NetworkError(t *testing.T) {
 // errorReader implements io.Reader and always returns an error
 type errorReader struct{}
 
-func (_ *errorReader) Read(p []byte) (n int, err error) {
+func (*errorReader) Read(_ []byte) (n int, err error) {
 	return 0, errors.New("read error")
 }
 
