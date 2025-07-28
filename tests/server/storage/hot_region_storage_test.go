@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 
 func TestHotRegionStorage(t *testing.T) {
 	re := require.New(t)
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1,
@@ -149,7 +149,7 @@ func TestHotRegionStorage(t *testing.T) {
 
 func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	re := require.New(t)
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	ctx, cancel := context.WithCancel(context.Background())
 	interval := 100 * time.Millisecond
 	defer cancel()
@@ -244,7 +244,7 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 
 func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	re := require.New(t)
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	ctx, cancel := context.WithCancel(context.Background())
 	interval := 100 * time.Millisecond
 	defer cancel()

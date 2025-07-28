@@ -42,11 +42,6 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
-func init() {
-	// disable denoising for hot statistic tests
-	statistics.Denoising = false
-}
-
 type hotTestSuite struct {
 	suite.Suite
 	env *pdTests.SchedulingTestEnvironment
@@ -57,6 +52,7 @@ func TestHotTestSuite(t *testing.T) {
 }
 
 func (suite *hotTestSuite) SetupSuite() {
+	statistics.DisableDenoising()
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, _ string) {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
@@ -396,6 +392,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	// TODO: support history hotspot in scheduling server with stateless in the future.
 	// Ref: https://github.com/tikv/pd/pull/7183
 	re := require.New(t)
+	statistics.DisableDenoising()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1,
@@ -518,6 +515,7 @@ func TestHistoryHotRegions(t *testing.T) {
 func TestBuckets(t *testing.T) {
 	// TODO: support forward bucket request in scheduling server in the future.
 	re := require.New(t)
+	statistics.DisableDenoising()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
