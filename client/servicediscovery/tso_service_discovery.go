@@ -564,12 +564,12 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 		urls []string
 		err  error
 	)
-	t := c.tsoServerDiscovery
 	urls, err = sd.(*serviceDiscovery).discoverMicroservice(tsoService)
 	if err != nil {
 		return "", err
 	}
 
+	t := c.tsoServerDiscovery
 	failpoint.Inject("serverReturnsNoTSOAddrs", func() {
 		if len(t.urls) == 0 {
 			log.Info("[failpoint] injected error: server returns no tso URLs")
