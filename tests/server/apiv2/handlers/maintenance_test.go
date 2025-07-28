@@ -88,8 +88,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 		re.NoError(err)
 
 		type conflictErrorResp struct {
-			Error        string      `json:"error"`
-			ExistingTask interface{} `json:"existing_task"`
+			Error        string `json:"error"`
+			ExistingTask any    `json:"existing_task"`
 		}
 		var errorResp conflictErrorResp
 		err = json.Unmarshal(body, &errorResp)
@@ -122,7 +122,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 				StartTimestamp int64  `json:"start_timestamp"`
 				Description    string `json:"description"`
 			}
-			json.NewDecoder(res.Body).Decode(&tasks)
+			err = json.NewDecoder(res.Body).Decode(&tasks)
+			re.NoError(err)
 			re.Len(tasks, 1) // Should only have one task
 			task := tasks[0]
 			re.Equal(taskType, task.Type)
@@ -145,7 +146,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 			StartTimestamp int64  `json:"start_timestamp"`
 			Description    string `json:"description"`
 		}
-		json.NewDecoder(res.Body).Decode(&taskByType)
+		err = json.NewDecoder(res.Body).Decode(&taskByType)
+		re.NoError(err)
 		re.Equal(taskType, taskByType.Type)
 		re.Equal(taskID, taskByType.ID)
 		re.Equal(desc, taskByType.Description)
@@ -290,7 +292,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
 			StartTimestamp int64  `json:"start_timestamp"`
 			Description    string `json:"description"`
 		}
-		json.NewDecoder(res.Body).Decode(&tasks)
+		err = json.NewDecoder(res.Body).Decode(&tasks)
+		re.NoError(err)
 		re.Len(tasks, 1, "Should only have one task")
 		successfulTaskID := tasks[0].ID
 
@@ -434,7 +437,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
 			StartTimestamp int64  `json:"start_timestamp"`
 			Description    string `json:"description"`
 		}
-		json.NewDecoder(res.Body).Decode(&tasks)
+		err = json.NewDecoder(res.Body).Decode(&tasks)
+		re.NoError(err)
 
 		// Verify that GetMaintenanceTasks returns both tasks in an array
 		re.Len(tasks, 2, "GetMaintenanceTasks should return both tasks in an array")
@@ -443,11 +447,12 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
 		task1Found := false
 		task2Found := false
 		for _, task := range tasks {
-			if task.Type == taskType1 {
+			switch task.Type {
+			case taskType1:
 				re.Equal(taskID1, task.ID)
 				re.Equal(desc1, task.Description)
 				task1Found = true
-			} else if task.Type == taskType2 {
+			case taskType2:
 				re.Equal(taskID2, task.ID)
 				re.Equal(desc2, task.Description)
 				task2Found = true
@@ -469,7 +474,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
 			StartTimestamp int64  `json:"start_timestamp"`
 			Description    string `json:"description"`
 		}
-		json.NewDecoder(res.Body).Decode(&taskByType1)
+		err = json.NewDecoder(res.Body).Decode(&taskByType1)
+		re.NoError(err)
 		re.Equal(taskType1, taskByType1.Type)
 		re.Equal(taskID1, taskByType1.ID)
 		re.Equal(desc1, taskByType1.Description)
@@ -486,7 +492,8 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
 			StartTimestamp int64  `json:"start_timestamp"`
 			Description    string `json:"description"`
 		}
-		json.NewDecoder(res.Body).Decode(&taskByType2)
+		err = json.NewDecoder(res.Body).Decode(&taskByType2)
+		re.NoError(err)
 		re.Equal(taskType2, taskByType2.Type)
 		re.Equal(taskID2, taskByType2.ID)
 		re.Equal(desc2, taskByType2.Description)

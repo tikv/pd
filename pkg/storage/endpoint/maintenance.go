@@ -26,10 +26,12 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"go.uber.org/zap"
 )
 
 // MaintenanceLockName is the name used for the maintenance lock key.
