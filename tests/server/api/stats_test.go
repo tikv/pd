@@ -185,8 +185,8 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 			endKey:   "",
 			expect:   statsAll,
 		}, {
-			startKey: url.QueryEscape(""),
-			endKey:   url.QueryEscape("y"),
+			startKey: url.QueryEscape("\x01\x02"),
+			endKey:   url.QueryEscape("xyz\x00\x00"),
 			expect:   statsAll,
 		},
 		{
