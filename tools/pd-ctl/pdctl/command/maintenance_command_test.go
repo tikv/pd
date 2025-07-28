@@ -33,7 +33,7 @@ type mockRoundTripper struct {
 	err  error
 }
 
-func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (m *mockRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
 	return m.resp, m.err
 }
 
@@ -290,7 +290,7 @@ func TestMaintenanceShowCommand_NetworkError(t *testing.T) {
 // errorReader implements io.Reader and always returns an error
 type errorReader struct{}
 
-func (e *errorReader) Read(p []byte) (n int, err error) {
+func (_ *errorReader) Read(p []byte) (n int, err error) {
 	return 0, errors.New("read error")
 }
 
