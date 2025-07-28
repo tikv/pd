@@ -120,7 +120,9 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
 	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().NetworkSlowScore = 100
+		store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			1: 100,
+		}
 	})
 	suite.tc.PutStore(newStoreInfo)
 
@@ -140,7 +142,9 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 	re.True(ok)
 
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().NetworkSlowScore = 1
+		store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			1: 1,
+		}
 	})
 	suite.tc.PutStore(newStoreInfo)
 	suite.es.Schedule(suite.tc, false)
