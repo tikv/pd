@@ -570,12 +570,13 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 		return "", err
 	}
 
-	if len(t.urls) == 0 {
-		failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+	failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+		if len(t.urls) == 0 {
 			log.Info("[failpoint] injected error: server returns no tso URLs")
 			urls = nil
-		})
-	}
+		}
+	})
+
 	if len(urls) == 0 {
 		// There is no error but no tso server url found, which means
 		// the server side hasn't been upgraded to the version that
