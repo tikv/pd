@@ -1297,7 +1297,7 @@ mergeLoop:
 		// Check if the keyspace group primaries in the merge map are all gone.
 		if len(mergeMap) != 0 {
 			for id := range mergeMap {
-				leaderPath := keypath.LeaderPath(&keypath.MsParam{
+				leaderPath := keypath.ElectionPath(&keypath.MsParam{
 					ServiceName: mcs.TSOServiceName,
 					GroupID:     id,
 				})

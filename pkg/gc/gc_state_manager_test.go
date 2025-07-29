@@ -89,7 +89,7 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	kvBase := kv.NewEtcdKVBase(client)
 
 	// Simulate a member which id.Allocator may need to check.
-	err := kvBase.Save(keypath.LeaderPath(nil), "member1")
+	err := kvBase.Save(keypath.ElectionPath(nil), "member1")
 	re.NoError(err)
 
 	s := endpoint.NewStorageEndpoint(kvBase, nil)

@@ -701,6 +701,11 @@ error = '''
 marshal member failed
 '''
 
+["PD:member:ErrMarshalParticipant"]
+error = '''
+marshal participant failed
+'''
+
 ["PD:netstat:ErrNetstatTCPSocks"]
 error = '''
 TCP socks error
