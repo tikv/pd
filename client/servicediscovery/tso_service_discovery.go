@@ -557,9 +557,6 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 }
 
 func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
-	c.Lock()
-	defer c.Unlock()
-
 	var (
 		urls []string
 		err  error
@@ -569,6 +566,8 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 		return "", err
 	}
 
+	c.Lock()
+	defer c.Unlock()
 	t := c.tsoServerDiscovery
 	failpoint.Inject("serverReturnsNoTSOAddrs", func() {
 		if len(t.urls) == 0 {
