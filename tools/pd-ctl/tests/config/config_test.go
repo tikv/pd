@@ -17,7 +17,6 @@ package config_test
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"os"
 	"reflect"
 	"strconv"
@@ -43,13 +42,6 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
-// testDialClient used to dial http request. only used for test.
-var testDialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
-
 type testCase struct {
 	name  string
 	value any
@@ -73,8 +65,7 @@ func TestConfigTestSuite(t *testing.T) {
 	suite.Run(t, new(configTestSuite))
 }
 
-func (suite *configTestSuite) SetupTest() {
-	// use a new environment to avoid affecting other tests
+func (suite *configTestSuite) SetupSuite() {
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 }
 
@@ -84,22 +75,7 @@ func (suite *configTestSuite) TearDownSuite() {
 
 func (suite *configTestSuite) TearDownTest() {
 	re := suite.Require()
-	cleanFunc := func(cluster *pdTests.TestCluster) {
-		def := placement.GroupBundle{
-			ID: "pd",
-			Rules: []*placement.Rule{
-				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
-			},
-		}
-		data, err := json.Marshal([]placement.GroupBundle{def})
-		re.NoError(err)
-		leader := cluster.GetLeaderServer()
-		re.NotNil(leader)
-		urlPrefix := leader.GetAddr()
-		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
-		re.NoError(err)
-	}
-	suite.env.RunFunc(cleanFunc)
+	suite.env.Reset(re)
 }
 
 func (suite *configTestSuite) TestConfig() {
@@ -236,6 +212,9 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	clusterVersion = semver.Version{}
 	re.NoError(json.Unmarshal(output, &clusterVersion))
 	re.Equal(svr.GetClusterVersion(), clusterVersion)
+	args2 = []string{"-u", pdAddr, "config", "set", "cluster-version", "2.0.0"} // reset to default
+	_, err = tests.ExecuteCommand(cmd, args2...)
+	re.NoError(err)
 
 	// config show label-property
 	args1 = []string{"-u", pdAddr, "config", "show", "label-property"}
@@ -367,7 +346,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 func (suite *configTestSuite) TestConfigForwardControl() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	suite.env.RunTest(suite.checkConfigForwardControl)
+	suite.env.RunTestInMicroserviceEnv(suite.checkConfigForwardControl) // It only tests scheduling server.
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -522,6 +501,10 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		sche.GetPersistConfig().SetReplicationConfig(repCfg)
 		re.Equal(uint64(233), sche.GetPersistConfig().GetLeaderScheduleLimit())
 		re.Equal(7, sche.GetPersistConfig().GetMaxReplicas())
+		defer func() {
+			sche.GetPersistConfig().SetScheduleConfig(leaderServer.GetConfig().Schedule.Clone())
+			sche.GetPersistConfig().SetReplicationConfig(leaderServer.GetConfig().Replication.Clone())
+		}()
 	}
 	// show config from PD rather than scheduling server
 	testConfig()
@@ -558,6 +541,10 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 			},
 		}}, true)
 		re.Len(ruleManager.GetAllRules(), 2)
+		defer func() {
+			bundles := leaderServer.GetRaftCluster().GetRuleManager().GetAllGroupBundles()
+			ruleManager.SetAllGroupBundles(bundles, true)
+		}()
 	}
 
 	// show placement rules
@@ -746,6 +733,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	re.NoError(json.Unmarshal(output, &bundle))
 	expect := placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}
 	expect.Rules[0].CreateTimestamp = bundle.Rules[0].CreateTimestamp // skip create timestamp in mcs
+	expect.Rules[0].Version = bundle.Rules[0].Version                 // skip version
 	re.Equal(expect, bundle)
 
 	f, err := os.CreateTemp("", "pd_tests")
