@@ -435,17 +435,17 @@ func GetCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store 
 		return calculateRangeCount(c, stores, store, kr.StartKey, kr.EndKey, rule)
 	}
 
-	storeSize := 0.0
+	storeRegionCount := 0.0
 	startKey := kr.StartKey
 	for _, key := range keys {
 		endKey := key
-		storeSize += calculateRangeCount(c, stores, store, startKey, endKey, rule)
+		storeRegionCount += calculateRangeCount(c, stores, store, startKey, endKey, rule)
 		startKey = endKey
 	}
 	// the range from the last split key to the last key
-	storeSize += calculateRangeCount(c, stores, store, startKey, kr.EndKey, rule)
+	storeRegionCount += calculateRangeCount(c, stores, store, startKey, kr.EndKey, rule)
 	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
-	return storeSize
+	return storeRegionCount
 }
 
 // IsSatisfyRole return true if the rule satisfies the region.

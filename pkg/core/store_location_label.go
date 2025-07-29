@@ -2,7 +2,6 @@ package core
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	
 	"github.com/tikv/pd/pkg/slice"
 )
 
