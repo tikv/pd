@@ -148,6 +148,17 @@ type tokenSlot struct {
 	lastReqTime       time.Time
 }
 
+func (ts *tokenSlot) logFields() []zap.Field {
+	return []zap.Field{
+		zap.Uint64("slot-fill-rate", ts.fillRate),
+		zap.Int64("slot-burst-limit", ts.burstLimit),
+		zap.Float64("slot-require-tokens-sum", ts.requireTokensSum),
+		zap.Float64("slot-token-capacity", ts.tokenCapacity),
+		zap.Float64("slot-last-token-capacity", ts.lastTokenCapacity),
+		zap.Time("slot-last-req-time", ts.lastReqTime),
+	}
+}
+
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
 	Tokens      float64    `json:"tokens,omitempty"`
@@ -213,16 +224,11 @@ func (gts *GroupTokenBucketState) resetLoan() {
 	gts.settingChanged = false
 	gts.Tokens = 0
 	gts.clientConsumptionTokensSum = 0
-	evenRatio := 1.0
-	if l := len(gts.tokenSlots); l > 0 {
-		evenRatio = 1 / float64(l)
-	}
-
-	evenTokens := gts.Tokens * evenRatio
+	// Reset all slots.
 	for _, slot := range gts.tokenSlots {
 		slot.requireTokensSum = 0
-		slot.tokenCapacity = evenTokens
-		slot.lastTokenCapacity = evenTokens
+		slot.tokenCapacity = 0
+		slot.lastTokenCapacity = 0
 	}
 }
 
@@ -422,6 +428,39 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	gtb.balanceSlotTokens(clientUniqueID, requiredToken, elapseTokens)
 }
 
+func (gtb *GroupTokenBucket) inspectAnomalies(
+	tb *rmpb.TokenBucket,
+	slot *tokenSlot,
+	logFields []zap.Field,
+) {
+	// Add some common fields to the log fields to help debug.
+	logFields = append(logFields,
+		append(
+			slot.logFields(),
+			zap.String("resource-group-name", gtb.resourceGroupName),
+			zap.String("settings", gtb.Settings.String()),
+			zap.Float64("tokens", gtb.Tokens),
+			zap.Int("slot-len", len(gtb.tokenSlots)),
+		)...,
+	)
+	// Once any of the following conditions is met, the group token bucket will be reset.
+	needToReset := false
+	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
+	if tb.Tokens <= 0 || math.IsInf(tb.Tokens, 0) || math.IsNaN(tb.Tokens) {
+		log.Error("assigned token is invalid", logFields...)
+		needToReset = true
+	}
+	// Verify whether the state of the slot is abnormal.
+	if math.IsInf(slot.tokenCapacity, 0) || math.IsNaN(slot.tokenCapacity) {
+		log.Error("slot token capacity is invalid", logFields...)
+		needToReset = true
+	}
+	// Reset if needed to avoid the group token bucket is in a bad state.
+	if needToReset {
+		gtb.resetLoan()
+	}
+}
+
 // request requests tokens from the corresponding slot.
 func (gtb *GroupTokenBucket) request(
 	now time.Time,
@@ -438,53 +477,39 @@ func (gtb *GroupTokenBucket) request(
 		}, 0
 	}
 	res, trickleDuration := slot.assignSlotTokens(requiredToken, targetPeriodMs)
+	// Inspect the group token bucket and the assigned token result to catch any anomalies.
+	gtb.inspectAnomalies(res, slot, []zap.Field{
+		zap.Time("now", now),
+		zap.Uint64("client-unique-id", clientUniqueID),
+		zap.Uint64("target-period-ms", targetPeriodMs),
+		zap.Float64("required-token", requiredToken),
+		zap.Float64("assigned-tokens", res.Tokens),
+	})
 	// Update bucket to record all tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.tokenCapacity
 	slot.lastTokenCapacity = slot.tokenCapacity
-	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
-	if res.Tokens <= 0 || math.IsInf(res.Tokens, 0) || math.IsNaN(res.Tokens) {
-		// Output detailed information to help locate the problem.
-		log.Warn("assigned token is invalid",
-			zap.Time("now", now),
-			zap.String("resource-group-name", gtb.resourceGroupName),
-			zap.Uint64("client-unique-id", clientUniqueID),
-			zap.Uint64("target-period-ms", targetPeriodMs),
-			zap.Float64("required-token", requiredToken),
-			zap.Float64("assigned-tokens", res.Tokens),
-			zap.Int("slot-len", len(gtb.tokenSlots)),
-			zap.Float64("fill-rate", float64(slot.fillRate)),
-			zap.Int64("burst-limit", slot.burstLimit),
-			zap.Float64("require-tokens-sum", slot.requireTokensSum),
-			zap.Float64("token-capacity", slot.tokenCapacity),
-			zap.Float64("last-token-capacity", slot.lastTokenCapacity),
-			zap.Time("last-req-time", slot.lastReqTime),
-		)
-		// Reset to avoid the token bucket is in a bad state.
-		gtb.resetLoan()
-		// Return no result to let the controller try again later.
-		return nil, 0
-	}
 	return res, trickleDuration
 }
 
 func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint64) (*rmpb.TokenBucket, int64) {
-	var res rmpb.TokenBucket
-	burstLimit := ts.burstLimit
-	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: burstLimit}
+	res := &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{BurstLimit: ts.burstLimit},
+		Tokens:   0.0,
+	}
 	if getBurstableMode(res.Settings) == unlimited {
 		res.Tokens = requiredToken
-		return &res, 0
+		return res, 0
 	}
 	// FillRate is used for the token server unavailable in abnormal situation.
 	if requiredToken <= 0 {
-		return &res, 0
+		return res, 0
 	}
 	// If the current tokens can directly meet the requirement, returns the need token.
 	if ts.tokenCapacity >= requiredToken {
 		ts.tokenCapacity -= requiredToken
 		// granted the total request tokens
 		res.Tokens = requiredToken
-		return &res, 0
+		return res, 0
 	}
 
 	// Firstly allocate the remaining tokens
@@ -502,6 +527,7 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 		targetPeriodTimeSec = targetPeriodTime.Seconds()
 		trickleTime         = 0.
 		fillRate            = ts.fillRate
+		burstLimit          = ts.burstLimit
 	)
 
 	loanCoefficient := defaultLoanCoefficient
@@ -577,5 +603,5 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	} else {
 		trickleDuration = targetPeriodTime
 	}
-	return &res, trickleDuration.Milliseconds()
+	return res, trickleDuration.Milliseconds()
 }
