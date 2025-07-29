@@ -92,6 +92,22 @@ func newRegionTreeWithCountRef() *regionTree {
 	}
 }
 
+// GetCountByKeyRange returns the number of regions that overlap with the given key range.
+func (t *regionTree) GetCountByKeyRange(startKey, endKey []byte) int {
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	_, startIndex := t.tree.GetWithIndex(start)
+	var endIndex int
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = t.tree.Len()
+	} else {
+		_, endIndex = t.tree.GetWithIndex(end)
+	}
+	return endIndex - startIndex
+}
+
 func (t *regionTree) length() int {
 	if t == nil {
 		return 0

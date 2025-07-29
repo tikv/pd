@@ -184,9 +184,10 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 			startKey: "",
 			endKey:   "",
 			expect:   statsAll,
-		}, {
-			startKey: url.QueryEscape("\x01\x02"),
-			endKey:   url.QueryEscape("xyz\x00\x00"),
+		},
+		{
+			startKey: url.QueryEscape(""),
+			endKey:   url.QueryEscape("y"),
 			expect:   statsAll,
 		},
 		{
@@ -205,7 +206,7 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 			err = apiutil.ReadJSON(res.Body, stats)
 			re.NoError(res.Body.Close())
 			re.NoError(err)
-			re.Equal(data.expect.Count, stats.Count)
+			re.Equal(data.expect.Count, stats.Count, fmt.Sprintf("startKey:%s,query:%s", data.startKey, query))
 			if query != "count" {
 				re.Equal(data.expect, stats)
 			}

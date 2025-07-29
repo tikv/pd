@@ -1028,7 +1028,7 @@ func (t *BTreeG[T]) Get(key T) (_ T, _ bool) {
 }
 
 // GetWithIndex gets the key and its index.
-// If the key is not in the tree, the the index is the number of items < key.
+// If the key is not in the tree, the index is the number of items < key.
 func (t *BTreeG[T]) GetWithIndex(key T) (_ T, _ int) {
 	if t.root == nil {
 		var zero T
