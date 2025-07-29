@@ -150,7 +150,11 @@ type tokenSlot struct {
 
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
-	Tokens float64 `json:"tokens,omitempty"`
+	Tokens      float64    `json:"tokens,omitempty"`
+	LastUpdate  *time.Time `json:"last_update,omitempty"`
+	Initialized bool       `json:"initialized"`
+
+	resourceGroupName string
 	// ClientUniqueID -> TokenSlot
 	tokenSlots                 map[uint64]*tokenSlot
 	clientConsumptionTokensSum float64
@@ -173,8 +177,6 @@ type GroupTokenBucketState struct {
 	// means the burst limit is overridden.
 	overrideBurstLimit int64
 
-	LastUpdate  *time.Time `json:"last_update,omitempty"`
-	Initialized bool       `json:"initialized"`
 	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
 	settingChanged      bool
 	lastCheckExpireSlot time.Time
@@ -198,6 +200,7 @@ func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 		Tokens:                     gts.Tokens,
 		LastUpdate:                 lastUpdate,
 		Initialized:                gts.Initialized,
+		resourceGroupName:          gts.resourceGroupName,
 		tokenSlots:                 tokenSlots,
 		overrideFillRate:           gts.overrideFillRate,
 		overrideBurstLimit:         gts.overrideBurstLimit,
@@ -330,7 +333,7 @@ func (gtb *GroupTokenBucket) calcRateAndBurstLimit(ratio float64) (fillRate uint
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
-func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
+func NewGroupTokenBucket(resourceGroupName string, tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
 	if tokenBucket == nil || tokenBucket.Settings == nil {
 		return &GroupTokenBucket{}
 	}
@@ -338,6 +341,7 @@ func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
 		Settings: tokenBucket.GetSettings(),
 		GroupTokenBucketState: GroupTokenBucketState{
 			Tokens:             tokenBucket.GetTokens(),
+			resourceGroupName:  resourceGroupName,
 			tokenSlots:         make(map[uint64]*tokenSlot),
 			overrideFillRate:   -1,
 			overrideBurstLimit: -1,
@@ -419,7 +423,8 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 }
 
 // request requests tokens from the corresponding slot.
-func (gtb *GroupTokenBucket) request(now time.Time,
+func (gtb *GroupTokenBucket) request(
+	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) (*rmpb.TokenBucket, int64) {
@@ -427,13 +432,38 @@ func (gtb *GroupTokenBucket) request(now time.Time,
 	gtb.updateTokens(now, burstLimit, clientUniqueID, requiredToken)
 	slot, ok := gtb.tokenSlots[clientUniqueID]
 	if !ok {
-		return &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{BurstLimit: burstLimit}}, 0
+		return &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{BurstLimit: burstLimit},
+			Tokens:   0.0,
+		}, 0
 	}
 	res, trickleDuration := slot.assignSlotTokens(requiredToken, targetPeriodMs)
 	// Update bucket to record all tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.tokenCapacity
 	slot.lastTokenCapacity = slot.tokenCapacity
-
+	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
+	if res.Tokens <= 0 || math.IsInf(res.Tokens, 0) || math.IsNaN(res.Tokens) {
+		// Output detailed information to help locate the problem.
+		log.Warn("assigned token is invalid",
+			zap.Time("now", now),
+			zap.String("resource-group-name", gtb.resourceGroupName),
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Uint64("target-period-ms", targetPeriodMs),
+			zap.Float64("required-token", requiredToken),
+			zap.Float64("assigned-tokens", res.Tokens),
+			zap.Int("slot-len", len(gtb.tokenSlots)),
+			zap.Float64("fill-rate", float64(slot.fillRate)),
+			zap.Int64("burst-limit", slot.burstLimit),
+			zap.Float64("require-tokens-sum", slot.requireTokensSum),
+			zap.Float64("token-capacity", slot.tokenCapacity),
+			zap.Float64("last-token-capacity", slot.lastTokenCapacity),
+			zap.Time("last-req-time", slot.lastReqTime),
+		)
+		// Reset to avoid the token bucket is in a bad state.
+		gtb.resetLoan()
+		// Return no result to let the controller try again later.
+		return nil, 0
+	}
 	return res, trickleDuration
 }
 
