@@ -68,14 +68,18 @@ type RPCClient interface {
 	// UpdateGCSafePoint TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
+	//
+	// Deprecated: This API is deprecated and replaced by AdvanceGCSafePoint, which expected only for use of the
+	// GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
+	// read the current GC safe point, consider using GetGCStates instead.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
+	//
+	// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
-	// Deprecated: Avoid using this API.
-	WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
@@ -424,6 +428,11 @@ func (c *client) GetLeaderURL() string {
 // GetServiceDiscovery returns the client-side service discovery object
 func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
 	return c.inner.serviceDiscovery
+}
+
+// GetTSOServiceDiscovery returns the TSO service discovery object. Only used for testing.
+func (c *client) GetTSOServiceDiscovery() sd.ServiceDiscovery {
+	return c.inner.tsoSvcDiscovery
 }
 
 // UpdateOption updates the client option.
@@ -1033,6 +1042,10 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 }
 
 // UpdateGCSafePoint implements the RPCClient interface.
+//
+// Deprecated: This API is deprecated and replaced by AdvanceGCSafePoint, which expected only for use of the
+// GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
+// read the current GC safe point, consider using GetGCStates instead.
 func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
 	if c.inner.keyspaceID != constants.NullKeyspaceID {
 		return c.updateGCSafePointV2(ctx, c.inner.keyspaceID, safePoint)
@@ -1067,6 +1080,8 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // returns the minimum safepoint across all services, this value is used to
 // determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
+//
+// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if c.inner.keyspaceID != constants.NullKeyspaceID {
 		return c.updateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)

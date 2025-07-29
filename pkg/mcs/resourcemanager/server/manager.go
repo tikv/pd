@@ -239,15 +239,12 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	}); err != nil {
 		return err
 	}
-	// Load service limits from the storage.
-	if err := m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimit(serviceLimit)
-	}); err != nil {
-		return err
-	}
 	// Initialize the reserved keyspace resource group manager and default resource groups.
 	m.initReserved()
-	return nil
+	// Load service limits from the storage after all resource groups are loaded.
+	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimit(serviceLimit)
+	})
 }
 
 func (m *Manager) initReserved() {

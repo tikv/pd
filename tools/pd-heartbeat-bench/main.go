@@ -275,7 +275,7 @@ func (s *Stores) update(rs *utils.Regions) {
 
 func main() {
 	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 	defer logutil.LogPanic()

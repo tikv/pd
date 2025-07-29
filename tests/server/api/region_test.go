@@ -62,8 +62,7 @@ func (suite *regionTestSuite) TearDownSuite() {
 
 func (suite *regionTestSuite) TearDownTest() {
 	re := suite.Require()
-	suite.env.RunFunc(cleanRules(re))
-	suite.env.RunFunc(cleanStoresAndRegions(re))
+	suite.env.Reset(re)
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
