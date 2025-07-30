@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -48,9 +49,18 @@ const (
 // the refresh interval should be less than store heartbeat interval to keep the next calculate must use the latest threshold.
 var ThresholdsUpdateInterval = 8 * time.Second
 
-// Denoising is an option to calculate flow base on the real heartbeats. Should
-// only turn off by the simulator and the test.
-var Denoising = true
+// denoising is an option to calculate flow base on the real heartbeats.
+var denoising uint32 = 1
+
+func isDenoisingEnabled() bool {
+	return atomic.LoadUint32(&denoising) == 1
+}
+
+// DisableDenoising disables the denoising feature.
+// It is used for the simulator and test.
+func DisableDenoising() {
+	atomic.CompareAndSwapUint32(&denoising, 1, 0)
+}
 
 type thresholds struct {
 	updatedTime time.Time
@@ -157,7 +167,7 @@ func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 // Notice: CheckPeerFlow couldn't be used concurrently.
 // CheckPeerFlow will update oldItem's rollingLoads into newItem, thus we should use write lock here.
 func (f *HotPeerCache) CheckPeerFlow(region *core.RegionInfo, peers []*metapb.Peer, deltaLoads []float64, interval uint64) []*HotPeerStat {
-	if Denoising && interval < HotRegionReportMinInterval { // for test or simulator purpose
+	if isDenoisingEnabled() && interval < HotRegionReportMinInterval { // for test or simulator purpose
 		return nil
 	}
 
@@ -215,7 +225,7 @@ func (f *HotPeerCache) CheckPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 // CheckColdPeer checks the collect the un-heartbeat peer and maintain it.
 func (f *HotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]*core.RegionInfo, interval uint64) (ret []*HotPeerStat) {
 	// for test or simulator purpose
-	if Denoising && interval < HotRegionReportMinInterval {
+	if isDenoisingEnabled() && interval < HotRegionReportMinInterval {
 		return
 	}
 	previousHotStat, ok := f.regionsOfStore[storeID]

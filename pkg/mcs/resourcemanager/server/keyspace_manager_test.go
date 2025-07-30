@@ -53,8 +53,8 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Equal(uint32(middlePriority), defaultGroup.Priority)
 
 	// Verify the default resource group has unlimited rate and burst limit.
-	re.Equal(float64(unlimitedRate), defaultGroup.getFillRate())
-	re.Equal(int64(unlimitedBurstLimit), defaultGroup.getBurstLimit())
+	re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
+	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
 }
 
 func TestAddResourceGroup(t *testing.T) {
@@ -815,8 +815,8 @@ func TestConciliateFillRate(t *testing.T) {
 			name:                  "Default group with unlimited burst limit",
 			serviceLimit:          100,
 			priorityList:          []uint32{1},
-			fillRateSettingList:   []uint64{unlimitedRate},
-			burstLimitSettingList: []int64{unlimitedBurstLimit},
+			fillRateSettingList:   []uint64{UnlimitedRate},
+			burstLimitSettingList: []int64{UnlimitedBurstLimit},
 			ruDemandList:          []float64{1000},
 			// Default group with unlimited settings, basic demand = min(1000, unlimitedRate) = 1000
 			// Basic demand 1000 > service limit 100, so gets proportional allocation: 100*(1000/1000)=100

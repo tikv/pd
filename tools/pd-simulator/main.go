@@ -60,7 +60,7 @@ func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel, *simLogFile)
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	schedulers.Register() // register schedulers, which is needed by simConfig.Adjust
 	simConfig := sc.NewSimConfig(*serverLogLevel)
 	if simConfig.EnableTransferRegionCounter {
