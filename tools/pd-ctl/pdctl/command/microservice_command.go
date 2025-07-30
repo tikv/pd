@@ -26,8 +26,8 @@ var (
 	msMembersPrefix = "/pd/api/v2/ms/members/%s"
 )
 
-// NewMsCommand return a microservice subcommand of rootCmd
-func NewMsCommand() *cobra.Command {
+// NewMicroServicesCommand return a microservice subcommand of rootCmd
+func NewMicroServicesCommand() *cobra.Command {
 	m := &cobra.Command{
 		Use:   "ms <command>",
 		Short: "microservice commands",

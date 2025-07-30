@@ -853,8 +853,8 @@ func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
 	return c.schedulingCluster.GetPrimaryServer()
 }
 
-// GetTsoDefaultSpacePrimaryServer returns the primary TSO server for the default keyspace and keyspace group.
-func (c *TestCluster) GetTsoDefaultSpacePrimaryServer() *tso.Server {
+// GetDefaultTSOPrimaryServer returns the primary TSO server for the default keyspace.
+func (c *TestCluster) GetDefaultTSOPrimaryServer() *tso.Server {
 	if c.tsoCluster == nil {
 		return nil
 	}
@@ -866,8 +866,8 @@ func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
 	c.schedulingCluster = cluster
 }
 
-// SetTsoCluster sets the TSO cluster.
-func (c *TestCluster) SetTsoCluster(cluster *TestTSOCluster) {
+// SetTSOCluster sets the TSO cluster.
+func (c *TestCluster) SetTSOCluster(cluster *TestTSOCluster) {
 	c.tsoCluster = cluster
 }
 

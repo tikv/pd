@@ -65,7 +65,7 @@ func (suite *microServiceSuite) TestMicroService() {
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "ms", "scheduling", "members"}, &v)
 		re.Len(v, 2)
 	}
-	if primaryServer := cluster.GetTsoDefaultSpacePrimaryServer(); primaryServer != nil {
+	if primaryServer := cluster.GetDefaultTSOPrimaryServer(); primaryServer != nil {
 		address := primaryServer.GetAddr()
 		res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "ms", "tso", "primary"}, nil)
 		primaryAddress := strings.Trim(res, "\"\n")
@@ -105,6 +105,6 @@ func (suite *microServiceSuite) startCluster() {
 	ts, err := pdTests.NewTestTSOCluster(ctx, 2, leaderServer.GetAddr())
 	ts.WaitForDefaultPrimaryServing(re)
 	re.NoError(err)
-	cluster.SetTsoCluster(ts)
+	cluster.SetTSOCluster(ts)
 	suite.cluster = cluster
 }
