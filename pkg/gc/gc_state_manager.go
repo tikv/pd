@@ -722,7 +722,8 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 //     the minimal service safe point. Returns a simulated service safe point whose serviceID starts with
 //     "tidb_min_start_ts_" to simulate the minimal service safe point. It may actually be either a GC barrier or
 //     a *TiDB min start ts*.
-//  2. If the given serviceID is "native_br", it internally calls SetGlobalGCBarrier, and keyspaceID parameter is ignored.
+//  2. If the given serviceID is "native_br" and keyspaceID is NullKeyspaceID, it is mapping to global GC barriers.
+//     Otherwise if serviceID is "native_br" on other keyspaces, it internally calls SetGCBarrier or DeleteGCBarrier.
 //  3. If the given serviceID is anything else, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
 //     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
 //     simulate the case that the service safe point of "gc_worker" is the minimal one, and return a service safe point
@@ -733,8 +734,8 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	switch serviceID {
-	case keypath.GCWorkerServiceSafePointID:
+	switch {
+	case serviceID == keypath.GCWorkerServiceSafePointID:
 		if ttl != math.MaxInt64 {
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
 		}
@@ -757,7 +758,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 			}
 		}
 		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
-	case keypath.NativeBRServiceSafePointID:
+	case serviceID == keypath.NativeBRServiceSafePointID && keyspaceID == constant.NullKeyspaceID:
 		if ttl > 0 {
 			_, err = m.setGlobalGCBarrierImpl(context.Background(), serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
 		} else {

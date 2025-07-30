@@ -1527,37 +1527,24 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR
 	re := s.Require()
 	now := time.Now()
 
-	// CompatibleUpdateServiceGCSafePoint on native_br cannot succeed if any of the
-	// keyspace has larger txn safe point than the given service safe point value
-	res, err := s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 25, time.Now())
+	// CompatibleUpdateServiceGCSafePoint on native_br nullkeyspace cannot succeed if
+	// any of the keyspace has larger txn safe point than the given service safe point value
+	res, err := s.manager.AdvanceTxnSafePoint(2, 25, time.Now())
 	re.NoError(err)
 	re.Equal(uint64(25), res.NewTxnSafePoint)
-	res, err = s.manager.AdvanceTxnSafePoint(2, 22, time.Now())
+
+	minSsp, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", 16, math.MaxInt64, now)
 	re.NoError(err)
-	re.Equal(uint64(22), res.NewTxnSafePoint)
+	re.False(updated) // the call failed, but this is not an error
+	re.Equal(uint64(25), minSsp.SafePoint)
 
-	for _, keyspaceID := range s.keyspacePresets.manageable {
-		// 16 < both 22 and 25
-		minSsp, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "native_br", 16, math.MaxInt64, now)
-		re.NoError(err)
-		re.False(updated) // the call failed, but this is not an error
-		re.Equal(uint64(25), minSsp.SafePoint)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", 32, math.MaxInt64, now)
+	re.NoError(err)
+	re.True(updated)
+	re.Equal("gc_worker", minSsp.ServiceID)
+	re.Equal(uint64(25), minSsp.SafePoint)
 
-		// 24 < 25 but > 22
-		minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "native_br", 24, math.MaxInt64, now)
-		re.NoError(err)
-		re.False(updated)
-		re.Equal(uint64(25), minSsp.SafePoint)
-
-		// 32 > both 22 and 25
-		minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "native_br", 32, math.MaxInt64, now)
-		re.NoError(err)
-		re.True(updated)
-		re.Equal("gc_worker", minSsp.ServiceID)
-		re.Equal(uint64(25), minSsp.SafePoint)
-	}
-
-	// native_br should block all keyspaces
+	// native_br on NullKeyspace should block all keyspaces
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 33, now)
 		re.NoError(err)
@@ -1575,12 +1562,61 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR
 		re.Empty(allSsp)
 	}
 
-	// "native_br" is transformed into global GC barrier
+	// "native_br" on NullKeyspace is transformed into global GC barrier
 	gbr := s.getGlobalGCBarrier("native_br")
 	re.Equal("native_br", gbr.BarrierID)
 	re.Equal(uint64(32), gbr.BarrierTS)
-	// "gc_worker" is not transformed into global GC barrier
-	re.Nil(s.getGlobalGCBarrier("gc_worker"))
+
+	// delete it and check
+	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", 32, -1, now)
+	re.NoError(err)
+	gbrs := s.getAllGlobalGCBarriers()
+	re.Empty(gbrs)
+	_, allSsp, err := s.provider.CompatibleLoadAllServiceGCSafePoints(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Empty(allSsp)
+
+	// "native_br" on other keyspaces is transformed into GC barriers
+	// Unlike on NullKeyspace, it has different behavior
+	// txn safe point has been bump to 32, and the barrier ts cannot below it.
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(2, "native_br", 16, math.MaxInt64, now)
+	re.NoError(err)
+	re.False(updated)
+	re.Equal(uint64(32), minSsp.SafePoint)
+
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(2, "native_br", 64, math.MaxInt64, now)
+	re.NoError(err)
+	re.True(updated)
+	re.Equal("gc_worker", minSsp.ServiceID)
+	re.Equal(uint64(32), minSsp.SafePoint)
+
+	// CompatibleLoadAllServiceGCSafePoints will found the native_br service safe point.
+	barrier := s.getGCBarrier(2, "native_br")
+	re.Equal("native_br", barrier.BarrierID)
+	re.Equal(uint64(64), barrier.BarrierTS)
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints(2)
+	re.NoError(err)
+	re.Len(allSsp, 1)
+	re.Equal("native_br", allSsp[0].ServiceID)
+	re.Equal(uint64(64), allSsp[0].SafePoint)
+
+	// It blocks the specified keyspace, but not all keyspaces.
+	for _, tc := range []struct {
+		keyspaceID uint32
+		block      bool
+	}{
+		{2, true},
+		{constant.NullKeyspaceID, false},
+	} {
+		res, err = s.manager.AdvanceTxnSafePoint(tc.keyspaceID, 100, now)
+		re.NoError(err)
+		if tc.block {
+			re.Equal(uint64(64), res.NewTxnSafePoint)
+			re.Contains(res.BlockerDescription, `BarrierID: "native_br"`)
+		} else {
+			re.Equal(uint64(100), res.NewTxnSafePoint)
+		}
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
