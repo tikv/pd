@@ -40,7 +40,7 @@ func NewMsCommand() *cobra.Command {
 func newMSTsoCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "tso <primary|members>",
-		Short: "ms commands",
+		Short: "microservice commands",
 	}
 	d.AddCommand(&cobra.Command{
 		Use:   "primary",
@@ -58,7 +58,7 @@ func newMSTsoCommand() *cobra.Command {
 func newMSSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scheduling <primary|members>",
-		Short: "micro-service commands",
+		Short: "microservice commands",
 	}
 	c.AddCommand(&cobra.Command{
 		Use:   "primary",
@@ -67,7 +67,7 @@ func newMSSchedulerCommand() *cobra.Command {
 	})
 	c.AddCommand(&cobra.Command{
 		Use:   "members",
-		Short: "show the primary member status",
+		Short: "show all members status",
 		Run:   getMembersCommandFunc,
 	})
 	return c
@@ -78,7 +78,7 @@ func getMembersCommandFunc(cmd *cobra.Command, _ []string) {
 	uri := fmt.Sprintf(msMembersPrefix, parent)
 	r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the microservice members: %s\n", err)
+		cmd.Printf("Failed to get the %s microservice members: %s\n", parent, err)
 		return
 	}
 	cmd.Println(r)
@@ -89,7 +89,7 @@ func getPrimaryCommandFunc(cmd *cobra.Command, _ []string) {
 	uri := fmt.Sprintf(msPrimaryPrefix, parent)
 	r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the microservice primary: %s\n", err)
+		cmd.Printf("Failed to get the %s microservice primary: %s\n", parent, err)
 		return
 	}
 	cmd.Println(r)
