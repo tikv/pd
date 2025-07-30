@@ -320,7 +320,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 
 func (gtb *GroupTokenBucket) calcRateAndBurstLimit(ratio float64) (fillRate uint64, burstLimit int64) {
 	if gtb.getBurstableMode() == moderated {
-		fillRate = uint64(math.Min(gtb.getFillRate()+defaultModeratedBurstRate, unlimitedRate) * ratio)
+		fillRate = uint64(math.Min(gtb.getFillRate()+defaultModeratedBurstRate, UnlimitedRate) * ratio)
 		burstLimit = int64(fillRate)
 		return
 	}
