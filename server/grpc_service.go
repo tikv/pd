@@ -1595,7 +1595,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			rc          *cluster.RaftCluster
 			needBuckets bool
 		)
-		if s.member.IsLeader() {
+		if s.member.IsServing() {
 			rc = s.GetRaftCluster()
 			if rc == nil {
 				resp := &pdpb.QueryRegionResponse{
@@ -2254,7 +2254,7 @@ func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.Req
 	if s.IsClosed() {
 		return errs.ErrNotStarted
 	}
-	if !s.member.IsLeader() {
+	if !s.member.IsServing() {
 		if allowFollower == nil {
 			return errs.ErrNotLeader
 		}

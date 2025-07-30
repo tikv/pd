@@ -156,14 +156,14 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResetPDLeader() {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 }
 
 // ResignLeader resigns the leader of the server.
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
@@ -282,7 +282,7 @@ func (s *TestServer) GetServerID() uint64 {
 func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
-	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
+	return !s.server.IsClosed() && s.server.GetMember().IsServing()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -419,7 +419,7 @@ func (s *TestServer) BootstrapCluster() error {
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
 	for range WaitLeaderRetryTimes {
-		if s.server.GetMember().IsLeader() {
+		if s.server.GetMember().IsServing() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
@@ -663,7 +663,7 @@ func (c *TestCluster) GetLeader() string {
 // GetFollower returns an follower of all servers
 func (c *TestCluster) GetFollower() string {
 	for name, s := range c.servers {
-		if !s.server.IsClosed() && !s.server.GetMember().IsLeader() {
+		if !s.server.IsClosed() && !s.server.GetMember().IsServing() {
 			return name
 		}
 	}

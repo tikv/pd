@@ -22,8 +22,8 @@ import (
 	"github.com/tikv/pd/pkg/election"
 )
 
-// ElectionMember defines the interface for the election related logic.
-type ElectionMember interface {
+// Election defines the interface for the election related logic.
+type Election interface {
 	// ID returns the unique ID in the election group. For example, it can be unique
 	// server id of a cluster or the unique keyspace group replica id of the election
 	// group composed of the replicas of a keyspace group.
@@ -32,38 +32,28 @@ type ElectionMember interface {
 	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string
-	// GetMember returns the current member
-	GetMember() any
 	// Client returns the etcd client.
 	Client() *clientv3.Client
-	// IsLeader returns whether the participant is the leader or not by checking its
-	// leadership's lease and leader info.
-	IsLeader() bool
-	// EnableLeader declares the member itself to be the leader.
-	EnableLeader()
+	// IsServing returns whether the member is serving or not.
+	// For PD, whether the member is the leader.
+	// For microservices, whether the participant is the primary.
+	IsServing() bool
+	// PromoteSelf declares the member itself to be the leader or primary.
+	PromoteSelf()
 	// Campaign is used to campaign the leadership and make it become a leader or primary in an election group.
 	Campaign(ctx context.Context, leaseTimeout int64) error
-	// ResetLeader is used to reset the member's current leadership.
-	// Basically it will reset the leader lease and unset leader info.
-	ResetLeader()
-	// GetLeaderListenUrls returns current leader's listen urls
-	// The first element is the leader/primary url
-	GetLeaderListenUrls() []string
-	// GetElectionPath returns the path of the election. for PD it's the leader path, for microservices it's the primary path.
+	// Resign is used to reset the member's current leadership.
+	// For PD, it will reset the leader.
+	// For microservices, it will reset the primary.
+	Resign()
+	// GetServingUrls returns current serving listen urls:
+	// For PD, it returns the listen urls of the leader,
+	// For microservices, it returns the listen urls of the primary.
+	GetServingUrls() []string
+	// GetElectionPath returns the path of the election:
+	// For PD it's the leader path.
+	// For microservices it's the primary path.
 	GetElectionPath() string
-	// GetLeadership returns the leadership of the election member.
+	// GetLeadership returns the leadership of the member.
 	GetLeadership() *election.Leadership
-}
-
-// ElectionLeader defines the common interface of the leader, which is the pdpb.Member
-// for in PD or the tsopb.Participant in the microservices.
-type ElectionLeader interface {
-	// GetListenUrls returns the listen urls
-	GetListenUrls() []string
-	// GetRevision the revision of the leader in etcd
-	GetRevision() int64
-	// String declares fmt.Stringer
-	String() string
-	// Watch on itself, the leader in the election group
-	Watch(context.Context)
 }

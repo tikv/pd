@@ -120,9 +120,9 @@ func (p *Participant) Client() *clientv3.Client {
 	return p.client
 }
 
-// IsLeader returns whether the participant is the primary or not by checking its leadership's
+// IsServing returns whether the participant is the primary or not by checking its leadership's
 // lease and primary info.
-func (p *Participant) IsLeader() bool {
+func (p *Participant) IsServing() bool {
 	return p.leadership.Check() && p.getPrimary().GetId() == p.participant.GetId() && p.campaignCheck()
 }
 
@@ -131,8 +131,8 @@ func (p *Participant) IsPrimaryElected() bool {
 	return p.getPrimary().GetId() != 0
 }
 
-// GetLeaderListenUrls returns current primary's listen urls
-func (p *Participant) GetLeaderListenUrls() []string {
+// GetServingUrls returns current primary's listen urls
+func (p *Participant) GetServingUrls() []string {
 	return p.getPrimary().GetListenUrls()
 }
 
@@ -161,8 +161,8 @@ func (p *Participant) unsetPrimary() {
 	p.primary.Store(primary)
 }
 
-// EnableLeader declares the participant itself to be the primary.
-func (p *Participant) EnableLeader() {
+// PromoteSelf declares the participant itself to be the primary.
+func (p *Participant) PromoteSelf() {
 	p.setPrimary(p.participant)
 }
 
@@ -240,9 +240,9 @@ func (p *Participant) WatchLeader(ctx context.Context, primary participant, revi
 	p.unsetPrimary()
 }
 
-// ResetLeader is used to reset the participant's current leadership.
+// Resign is used to reset the participant's current leadership.
 // Basically it will reset the primary lease and unset primary info.
-func (p *Participant) ResetLeader() {
+func (p *Participant) Resign() {
 	p.leadership.Reset()
 	p.unsetPrimary()
 }
