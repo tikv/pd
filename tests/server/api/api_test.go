@@ -122,7 +122,6 @@ func TestMiddlewareTestSuite(t *testing.T) {
 
 func (suite *middlewareTestSuite) SetupSuite() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3)
@@ -140,8 +139,6 @@ func (suite *middlewareTestSuite) SetupTest() {
 }
 
 func (suite *middlewareTestSuite) TearDownSuite() {
-	re := suite.Require()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"))
 	suite.cleanup()
 	suite.cluster.Destroy()
 }

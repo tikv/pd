@@ -50,7 +50,7 @@ var (
 
 func init() {
 	// disable denoising in test.
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	statisticsInterval = 0
 	RegisterScheduler(writeType, func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()

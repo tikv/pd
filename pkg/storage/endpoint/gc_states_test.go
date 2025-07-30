@@ -514,7 +514,7 @@ func TestGCBarrier(t *testing.T) {
 
 		if keyspaceID == constant.NullKeyspaceID {
 			// Check by the legacy service safe point API for null keyspace.
-			keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
+			keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
 			re.NoError(err)
 			re.Len(keys, 3)
 			re.Len(ssps, 3)
@@ -867,7 +867,7 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		re.Equal("instance2", key)
 		re.Equal(uint64(456139133457530888), minStartTS)
 
-		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
+		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints(constant.NullKeyspaceID)
 		re.NoError(err)
 		re.Equal([]string{
 			"/pd/0/gc/safe_point/service/gc_worker",

@@ -565,3 +565,24 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePrimaryName(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		name     string
+		expected string
+	}{
+		{"127.0.0.1:2379-00000", "127.0.0.1:2379"},
+		{"http://127.0.0.1:2379-10000", "http://127.0.0.1:2379"},
+		{"https://127.0.0.1:2379-00001", "https://127.0.0.1:2379"},
+		{"http://[::1]:2379-00002", "http://[::1]:2379"},
+		{"https://[::1]:2379-00003", "https://[::1]:2379"},
+		{"https://a-b-c-d-e-f-g:2379-00004", "https://a-b-c-d-e-f-g:2379"},
+		{"https://pd-tso-server-0.tso-service.tidb-serverless.svc:2379-00002", "https://pd-tso-server-0.tso-service.tidb-serverless.svc:2379"},
+		{"http://pd-tso-server-0.tso-service.tidb-serverless.svc:2379-00002", "http://pd-tso-server-0.tso-service.tidb-serverless.svc:2379"},
+		{"pd-tso-server-0.tso-service.tidb-serverless.svc:2379-00000", "pd-tso-server-0.tso-service.tidb-serverless.svc:2379"},
+	}
+	for _, tc := range testCases {
+		re.Equal(tc.expected, parsePrimaryName(tc.name))
+	}
+}

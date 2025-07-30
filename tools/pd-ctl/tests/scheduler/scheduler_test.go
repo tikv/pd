@@ -15,6 +15,7 @@
 package scheduler_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -41,8 +43,7 @@ import (
 
 type schedulerTestSuite struct {
 	suite.Suite
-	env               *pdTests.SchedulingTestEnvironment
-	defaultSchedulers []string
+	env *pdTests.SchedulingTestEnvironment
 }
 
 func TestSchedulerTestSuite(t *testing.T) {
@@ -52,17 +53,41 @@ func TestSchedulerTestSuite(t *testing.T) {
 func (suite *schedulerTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
-	suite.defaultSchedulers = []string{
-		"balance-leader-scheduler",
-		"balance-region-scheduler",
-		"balance-hot-region-scheduler",
-		"evict-slow-store-scheduler",
-	}
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *schedulerTestSuite) SetupTest() {
-	// use a new environment to avoid affecting other tests
-	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
+	re := suite.Require()
+	suite.env.RunFunc(func(cluster *pdTests.TestCluster) {
+		stores := []*metapb.Store{
+			{
+				Id:            1,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
+			},
+			{
+				Id:            2,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
+			},
+			{
+				Id:            3,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
+			},
+			{
+				Id:            4,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
+			},
+		}
+		for _, store := range stores {
+			pdTests.MustPutStore(re, cluster, store)
+		}
+
+		// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
+		pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
+	})
 }
 
 func (suite *schedulerTestSuite) TearDownSuite() {
@@ -72,38 +97,15 @@ func (suite *schedulerTestSuite) TearDownSuite() {
 }
 
 func (suite *schedulerTestSuite) TearDownTest() {
-	cleanFunc := func(cluster *pdTests.TestCluster) {
-		re := suite.Require()
-		pdAddr := cluster.GetConfig().GetClientURL()
-		cmd := ctl.GetRootCmd()
-
-		var currentSchedulers []string
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &currentSchedulers)
-		for _, scheduler := range suite.defaultSchedulers {
-			if slice.NoneOf(currentSchedulers, func(i int) bool {
-				return currentSchedulers[i] == scheduler
-			}) {
-				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler}, nil)
-				re.Contains(echo, "Success!", scheduler)
-			}
-		}
-		for _, scheduler := range currentSchedulers {
-			if slice.NoneOf(suite.defaultSchedulers, func(i int) bool {
-				return suite.defaultSchedulers[i] == scheduler
-			}) {
-				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", scheduler}, nil)
-				re.Contains(echo, "Success!")
-			}
-		}
-	}
-	suite.env.RunTest(cleanFunc)
-	suite.env.Cleanup()
+	re := suite.Require()
+	suite.env.Reset(re)
 }
 
-func (suite *schedulerTestSuite) checkDefaultSchedulers(re *require.Assertions, cmd *cobra.Command, pdAddr string) {
+func (suite *schedulerTestSuite) checkDefaultSchedulers(cmd *cobra.Command, pdAddr string) {
+	re := suite.Require()
 	expected := make(map[string]bool)
-	for _, scheduler := range suite.defaultSchedulers {
-		expected[scheduler] = true
+	for _, scheduler := range types.DefaultSchedulers {
+		expected[scheduler.String()] = true
 	}
 	checkSchedulerCommand(re, cmd, pdAddr, nil, expected)
 }
@@ -116,29 +118,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
-
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
+	leaderServer := cluster.GetLeaderServer()
 
 	mustUsage := func(args []string) {
 		output, err := tests.ExecuteCommand(cmd, args...)
@@ -154,16 +134,6 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		})
 	}
 
-	leaderServer := cluster.GetLeaderServer()
-	for _, store := range stores {
-		pdTests.MustPutStore(re, cluster, store)
-	}
-
-	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
-	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-
-	suite.checkDefaultSchedulers(re, cmd, pdAddr)
-
 	// scheduler delete command
 	args := []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
 	expected := map[string]bool{
@@ -177,6 +147,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	schedulers := []string{"evict-leader-scheduler", "grant-leader-scheduler", "evict-leader-scheduler", "grant-leader-scheduler"}
 
 	checkStorePause := func(changedStores []uint64, schedulerName string) {
+		stores := leaderServer.GetStores()
 		for _, store := range stores {
 			storeInfo := cluster.GetLeaderServer().GetRaftCluster().GetStore(store.GetId())
 			status, isStorePaused := func() (string, bool) {
@@ -416,36 +387,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-	for _, store := range stores {
-		pdTests.MustPutStore(re, cluster, store)
-	}
-
-	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
-	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-
-	suite.checkDefaultSchedulers(re, cmd, pdAddr)
+	suite.checkDefaultSchedulers(cmd, pdAddr)
 
 	// test evict-slow-store && evict-slow-trend schedulers config
 	evictSlownessSchedulers := []string{"evict-slow-store-scheduler", "evict-slow-trend-scheduler"}
@@ -623,37 +565,6 @@ func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.T
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-	for _, store := range stores {
-		pdTests.MustPutStore(re, cluster, store)
-	}
-
-	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
-	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-
-	suite.checkDefaultSchedulers(re, cmd, pdAddr)
-
 	// case 1: add grant-hot-region-scheduler when balance-hot-region-scheduler is running
 	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
 	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
@@ -661,9 +572,11 @@ func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.T
 	// case 2: add grant-hot-region-scheduler when balance-hot-region-scheduler is paused
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-hot-region-scheduler", "60"}, nil)
 	re.Contains(echo, "Success!")
-	suite.checkDefaultSchedulers(re, cmd, pdAddr)
+	suite.checkDefaultSchedulers(cmd, pdAddr)
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
 	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-hot-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
 
 	// case 3: add grant-hot-region-scheduler when balance-hot-region-scheduler is disabled
 	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, map[string]bool{
@@ -727,7 +640,7 @@ func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.T
 
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
 	re.Contains(echo, "Success!")
-	suite.checkDefaultSchedulers(re, cmd, pdAddr)
+	suite.checkDefaultSchedulers(cmd, pdAddr)
 }
 
 func (suite *schedulerTestSuite) TestHotRegionSchedulerConfig() {
@@ -739,37 +652,6 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-	for _, store := range stores {
-		pdTests.MustPutStore(re, cluster, store)
-	}
-	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
-	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-
-	suite.checkDefaultSchedulers(re, cmd, pdAddr)
-
-	leaderServer := cluster.GetLeaderServer()
 	// test hot region config
 	expected1 := map[string]any{
 		"min-hot-byte-rate":       float64(100),
@@ -875,23 +757,6 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-interval", "0s"}, nil)
 	re.Contains(echo, "Success!")
 	checkHotSchedulerConfig(expected1)
-
-	// test compatibility
-	re.Equal("2.0.0", leaderServer.GetClusterVersion().String())
-	for _, store := range stores {
-		version := versioninfo.HotScheduleWithQuery
-		store.Version = versioninfo.MinSupportedVersion(version).String()
-		store.LastHeartbeat = time.Now().UnixNano()
-		pdTests.MustPutStore(re, cluster, store)
-	}
-	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
-	// After upgrading, we can use query.
-	expected1["write-leader-priorities"] = []any{"query", "byte"}
-	checkHotSchedulerConfig(expected1)
-	// cannot set qps as write-peer-priorities
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
-	re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
-	checkHotSchedulerConfig(expected1)
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
@@ -911,48 +776,28 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
 
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-	for _, store := range stores {
-		pdTests.MustPutStore(re, cluster, store)
-	}
-
-	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
-	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-
-	suite.checkDefaultSchedulers(re, cmd, pdAddr)
-
 	echo := mustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
 	re.Contains(echo, "Success!")
-	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "1 store(s) RegionNotMatchRule; ")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "region-schedule-limit", "0"}, nil)
+	re.Contains(echo, "Success!")
+	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "balance-region-scheduler reach limit")
 
 	// scheduler delete command
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
-	checkSchedulerDescribeCommand("balance-region-scheduler", "disabled", "")
+	checkSchedulerDescribeCommand("balance-leader-scheduler", "disabled", "")
 
+	// scheduler add command
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
+
+	// scheduler pause command
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
 	re.Contains(echo, "Success!")
+	checkSchedulerDescribeCommand("balance-leader-scheduler", "paused", "")
+
+	// scheduler resume command
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
@@ -967,33 +812,6 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-	for _, store := range stores {
-		pdTests.MustPutStore(re, cluster, store)
-	}
-
-	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
 	output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
@@ -1078,4 +896,80 @@ func compareGrantHotRegionSchedulerConfig(expect, actual map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// TestHotSchedulerUpgrade tests the config change after pd upgrade to 5.2.0
+// It only tests the config change of hot scheduler with non ms.
+// Because it change the cluster version, so need to test in another test.
+func TestHotSchedulerUpgrade(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store)
+	}
+	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
+	// wait scheduelrs run
+	testutil.Eventually(re, func() bool {
+		schedulers := []string{}
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
+		return len(schedulers) == len(sc.DefaultSchedulers)
+	})
+	// check config in version 2.0
+	var conf map[string]any
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
+	re.NotContains(conf["write-leader-priorities"], "query")
+	// test compatibility
+	re.Equal("2.0.0", leaderServer.GetClusterVersion().String())
+	for _, store := range stores {
+		version := versioninfo.HotScheduleWithQuery
+		store.Version = versioninfo.MinSupportedVersion(version).String()
+		store.LastHeartbeat = time.Now().UnixNano()
+		pdTests.MustPutStore(re, cluster, store)
+	}
+	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
+	// after upgrading, we can use query automatically.
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
+		return slice.Contains(conf["write-leader-priorities"].([]any), "query")
+	})
+	// cannot set qps as write-peer-priorities
+	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
+	re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
 }
