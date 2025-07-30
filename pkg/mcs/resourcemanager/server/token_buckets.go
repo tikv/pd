@@ -432,7 +432,7 @@ func (gtb *GroupTokenBucket) inspectAnomalies(
 	tb *rmpb.TokenBucket,
 	slot *tokenSlot,
 	logFields []zap.Field,
-) {
+) bool {
 	var errMsg string
 	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
 	if tb.Tokens <= 0 || math.IsInf(tb.Tokens, 0) || math.IsNaN(tb.Tokens) {
@@ -443,7 +443,8 @@ func (gtb *GroupTokenBucket) inspectAnomalies(
 		errMsg = "slot token capacity is invalid"
 	}
 	// If there is any error, reset the group token bucket to avoid the group token bucket is in a bad state.
-	if len(errMsg) > 0 {
+	isAnomaly := len(errMsg) > 0
+	if isAnomaly {
 		logFields = append(logFields,
 			append(
 				slot.logFields(),
@@ -458,6 +459,7 @@ func (gtb *GroupTokenBucket) inspectAnomalies(
 		// Reset after logging to keep the original context.
 		gtb.resetLoan()
 	}
+	return isAnomaly
 }
 
 // request requests tokens from the corresponding slot.
@@ -477,13 +479,17 @@ func (gtb *GroupTokenBucket) request(
 	}
 	res, trickleDuration := slot.assignSlotTokens(requiredToken, targetPeriodMs)
 	// Inspect the group token bucket and the assigned token result to catch any anomalies.
-	gtb.inspectAnomalies(res, slot, []zap.Field{
+	if isAnomaly := gtb.inspectAnomalies(res, slot, []zap.Field{
 		zap.Time("now", now),
 		zap.Uint64("client-unique-id", clientUniqueID),
 		zap.Uint64("target-period-ms", targetPeriodMs),
 		zap.Float64("required-token", requiredToken),
 		zap.Float64("assigned-tokens", res.Tokens),
-	})
+	}); isAnomaly {
+		// Return nil here to prevent sending any unexpected result to the client.
+		// The client has to retry later to access the resource group whose state has been reset.
+		return nil, 0
+	}
 	// Update bucket to record all tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.tokenCapacity
 	slot.lastTokenCapacity = slot.tokenCapacity
