@@ -433,30 +433,29 @@ func (gtb *GroupTokenBucket) inspectAnomalies(
 	slot *tokenSlot,
 	logFields []zap.Field,
 ) {
-	// Add some common fields to the log fields to help debug.
-	logFields = append(logFields,
-		append(
-			slot.logFields(),
-			zap.String("resource-group-name", gtb.resourceGroupName),
-			zap.String("settings", gtb.Settings.String()),
-			zap.Float64("tokens", gtb.Tokens),
-			zap.Int("slot-len", len(gtb.tokenSlots)),
-		)...,
-	)
-	// Once any of the following conditions is met, the group token bucket will be reset.
-	needToReset := false
+	var errMsg string
 	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
 	if tb.Tokens <= 0 || math.IsInf(tb.Tokens, 0) || math.IsNaN(tb.Tokens) {
-		log.Error("assigned token is invalid", logFields...)
-		needToReset = true
+		errMsg = "assigned token is invalid"
 	}
 	// Verify whether the state of the slot is abnormal.
 	if math.IsInf(slot.tokenCapacity, 0) || math.IsNaN(slot.tokenCapacity) {
-		log.Error("slot token capacity is invalid", logFields...)
-		needToReset = true
+		errMsg = "slot token capacity is invalid"
 	}
-	// Reset if needed to avoid the group token bucket is in a bad state.
-	if needToReset {
+	// If there is any error, reset the group token bucket to avoid the group token bucket is in a bad state.
+	if len(errMsg) > 0 {
+		logFields = append(logFields,
+			append(
+				slot.logFields(),
+				zap.String("resource-group-name", gtb.resourceGroupName),
+				zap.String("settings", gtb.Settings.String()),
+				zap.Float64("tokens", gtb.Tokens),
+				zap.Float64("client-consumption-tokens-sum", gtb.clientConsumptionTokensSum),
+				zap.Int("slot-len", len(gtb.tokenSlots)),
+			)...,
+		)
+		log.Error(errMsg, logFields...)
+		// Reset after logging to keep the original context.
 		gtb.resetLoan()
 	}
 }
