@@ -647,9 +647,9 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 	return meta, nil
 }
 
-// UpdateKeyspaceState updates target keyspace to the given state if it's not already in that state.
+// UpdateKeyspaceStateByName updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
-func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) UpdateKeyspaceStateByName(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
 	if name == constant.DefaultKeyspaceName {
 		log.Warn("[keyspace] failed to update keyspace config",
@@ -678,7 +678,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = updateKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.updateKeyspaceState(txn, meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -697,6 +697,23 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		zap.String("new-state", newState.String()),
 	)
 	return meta, nil
+}
+
+func (manager *Manager) removeKeyspaceFromMSGroup(
+	txn kv.Txn,
+	keyspaceMeta *keyspacepb.KeyspaceMeta,
+	oldMetaServiceGroup string,
+	removeMetaServiceGroup string,
+) error {
+	// Remove keyspace config meta-service-group-id.
+	delete(keyspaceMeta.Config, MetaServiceGroupIDKey)
+	// Remove keyspace from meta-service group.
+	if manager.mgm != nil && oldMetaServiceGroup != removeMetaServiceGroup {
+		if err := manager.mgm.UpdateAssignmentWithTxn(txn, oldMetaServiceGroup, removeMetaServiceGroup); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
@@ -723,7 +740,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			return ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = updateKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.updateKeyspaceState(txn, meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -745,7 +762,17 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 }
 
 // updateKeyspaceState updates keyspace meta and record the update time.
-func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+func (manager *Manager) updateKeyspaceState(txn kv.Txn, meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+	if newState == keyspacepb.KeyspaceState_TOMBSTONE {
+		oldMetaServiceGroup := meta.GetConfig()[MetaServiceGroupIDKey]
+		removeMetaServiceGroup := ""
+		// remove keyspace from meta-service group before set tombstone.
+		err := manager.removeKeyspaceFromMSGroup(txn, meta, oldMetaServiceGroup, removeMetaServiceGroup)
+		if err != nil {
+			return err
+		}
+	}
+
 	// If already in the target state, do nothing and return.
 	if meta.GetState() == newState {
 		return nil

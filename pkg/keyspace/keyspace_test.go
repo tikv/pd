@@ -233,9 +233,9 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		re.NoError(err)
 		checkMutations(re, createRequest.Config, updated.Config, mutations)
 		// Changing config of a ARCHIVED keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		_, err = manager.UpdateKeyspaceStateByName(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
 		re.NoError(err)
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+		_, err = manager.UpdateKeyspaceStateByName(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
 		re.NoError(err)
 		_, err = manager.UpdateKeyspaceConfig(createRequest.Name, mutations)
 		re.Error(err)
@@ -258,30 +258,30 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		re.NoError(err)
 		oldTime := time.Now().Unix()
 		// Archiving an ENABLED keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, oldTime)
+		_, err = manager.UpdateKeyspaceStateByName(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, oldTime)
 		re.Error(err)
 		// Disabling an ENABLED keyspace is allowed. Should update StateChangedAt.
-		updated, err := manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, oldTime)
+		updated, err := manager.UpdateKeyspaceStateByName(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, oldTime)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
 		re.Equal(oldTime, updated.StateChangedAt)
 
 		newTime := time.Now().Unix()
 		// Disabling an DISABLED keyspace is allowed. Should NOT update StateChangedAt.
-		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, newTime)
+		updated, err = manager.UpdateKeyspaceStateByName(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
 		re.Equal(oldTime, updated.StateChangedAt)
 		// Archiving a DISABLED keyspace is allowed. Should update StateChangeAt.
-		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, newTime)
+		updated, err = manager.UpdateKeyspaceStateByName(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, newTime)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, updated.State)
 		re.Equal(newTime, updated.StateChangedAt)
 		// Changing state of an ARCHIVED keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
+		_, err = manager.UpdateKeyspaceStateByName(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
 		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(constant.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+		_, err = manager.UpdateKeyspaceStateByName(constant.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.Error(err)
 	}
 }
@@ -600,4 +600,49 @@ func checkSafePointVersion(re *require.Assertions, meta *keyspacepb.KeyspaceMeta
 	val, ok := meta.Config[SafePointVersion]
 	re.True(ok)
 	re.Equal(KeyspaceGlobalSafePointVersionV2, val)
+}
+
+func (suite *keyspaceTestSuite) TestTombstoneKeyspaceWillUnassignMSGroup() {
+	re := suite.Require()
+	manager := suite.manager
+
+	newMap := map[string]string{
+		"etcd-group-0": "etcd-group-0.tidb-serverless.cluster.svc.local",
+	}
+	manager.mgm.updateConfig(true, newMap, 0)
+	// Create a keyspace with a meta service group.
+	request := &CreateKeyspaceRequest{
+		Name: "test_keyspace",
+		Config: map[string]string{
+			MetaServiceGroupIDKey: "etcd-group-0",
+		},
+		CreateTime: time.Now().Unix(),
+	}
+	created, err := manager.CreateKeyspace(request)
+	re.NoError(err)
+	re.Equal("etcd-group-0", created.Config[MetaServiceGroupIDKey])
+
+	// Check if the meta service group is removed. AssignmentCount should be 0.
+	metaServiceGroups, err := manager.mgm.GetStatus()
+	re.NoError(err)
+	// get "etcd-group-0" status
+	group0, exist := metaServiceGroups["etcd-group-0"]
+	re.True(exist)
+	re.Equal(1, group0.AssignmentCount, "the meta service group should have 1 assignment count after creating the keyspace")
+
+	// Tombstone the keyspace.
+	_, err = manager.UpdateKeyspaceStateByName(created.Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceStateByName(created.Name, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceStateByName(created.Name, keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+
+	// Check if the meta service group is removed. AssignmentCount should be 0.
+	metaServiceGroups, err = manager.mgm.GetStatus()
+	re.NoError(err)
+	// get "etcd-group-0" status
+	group0, exist = metaServiceGroups["etcd-group-0"]
+	re.True(exist)
+	re.Equal(0, group0.AssignmentCount, "the meta service group should have 0 assignment count after tombstone the keyspace")
 }

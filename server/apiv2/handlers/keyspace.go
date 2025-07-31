@@ -368,7 +368,7 @@ func UpdateKeyspaceState(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errors.Errorf("unknown target state: %s", param.State))
 		return
 	}
-	meta, err := manager.UpdateKeyspaceState(name, keyspacepb.KeyspaceState(targetState), time.Now().Unix())
+	meta, err := manager.UpdateKeyspaceStateByName(name, keyspacepb.KeyspaceState(targetState), time.Now().Unix())
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

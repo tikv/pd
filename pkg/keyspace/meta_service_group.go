@@ -153,24 +153,30 @@ func (m *MetaServiceGroupManager) UpdateAssignment(oldGroupID, newGroupID string
 		return errUnknownMetaServiceGroup
 	}
 	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
-		if err != nil {
+		return m.UpdateAssignmentWithTxn(txn, oldGroupID, newGroupID)
+	})
+}
+
+// UpdateAssignmentWithTxn updates the assignment of a keyspace from one meta-service group to another within a transaction.
+func (m *MetaServiceGroupManager) UpdateAssignmentWithTxn(txn kv.Txn, oldGroupID string, newGroupID string) error {
+	statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
+	if err != nil {
+		return err
+	}
+	if status, exists := statusMap[oldGroupID]; exists {
+		log.Info("[keyspace] update meta-service group assignment", zap.Any("status", status))
+		status.AssignmentCount--
+		if err := m.store.SaveMetaServiceGroupStatus(txn, oldGroupID, status); err != nil {
 			return err
 		}
-		if status, exists := statusMap[oldGroupID]; exists {
-			status.AssignmentCount--
-			if err := m.store.SaveMetaServiceGroupStatus(txn, oldGroupID, status); err != nil {
-				return err
-			}
+	}
+	if status, exists := statusMap[newGroupID]; exists {
+		status.AssignmentCount++
+		if err := m.store.SaveMetaServiceGroupStatus(txn, newGroupID, status); err != nil {
+			return err
 		}
-		if status, exists := statusMap[newGroupID]; exists {
-			status.AssignmentCount++
-			if err := m.store.SaveMetaServiceGroupStatus(txn, newGroupID, status); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // AttachEndpoints append potential meta-service group endpoint to the given keyspace config map.
