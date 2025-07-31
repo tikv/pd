@@ -57,22 +57,22 @@ func (suite *microServiceSuite) TestMicroService() {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	if primaryServer := cluster.GetSchedulingPrimaryServer(); primaryServer != nil {
 		address := primaryServer.GetAddr()
-		res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "ms", "scheduling", "primary"}, nil)
+		res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "service", "scheduling", "primary"}, nil)
 		primaryAddress := strings.Trim(res, "\"\n")
 		suite.Equal(address, primaryAddress)
 
 		v := make([]any, 0)
-		tests.MustExec(re, cmd, []string{"-u", pdAddr, "ms", "scheduling", "members"}, &v)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "service", "scheduling", "members"}, &v)
 		re.Len(v, 2)
 	}
 	if primaryServer := cluster.GetDefaultTSOPrimaryServer(); primaryServer != nil {
 		address := primaryServer.GetAddr()
-		res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "ms", "tso", "primary"}, nil)
+		res := tests.MustExec(re, cmd, []string{"-u", pdAddr, "service", "tso", "primary"}, nil)
 		primaryAddress := strings.Trim(res, "\"\n")
 		suite.Equal(address, primaryAddress)
 
 		v := make([]any, 0)
-		tests.MustExec(re, cmd, []string{"-u", pdAddr, "ms", "tso", "members"}, &v)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "service", "tso", "members"}, &v)
 		re.Len(v, 2)
 	}
 }
