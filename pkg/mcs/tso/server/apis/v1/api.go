@@ -262,7 +262,7 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 		members[id] = &KeyspaceGroupMember{
 			Group:     group,
 			Member:    m.GetMember().(*tsopb.Participant),
-			IsPrimary: m.IsLeader(),
+			IsPrimary: m.IsServing(),
 			PrimaryID: m.GetPrimaryID(),
 		}
 	}

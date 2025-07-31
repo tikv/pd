@@ -292,7 +292,7 @@ func (s *Server) campaignPrimary() {
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
-		s.participant.ResetLeader()
+		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
 	})
 
@@ -323,7 +323,7 @@ func (s *Server) campaignPrimary() {
 		return
 	}
 	s.participant.SetExpectedPrimaryLease(lease)
-	s.participant.EnableLeader()
+	s.participant.PromoteSelf()
 
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
@@ -334,7 +334,7 @@ func (s *Server) campaignPrimary() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.participant.IsLeader() {
+			if !s.participant.IsServing() {
 				log.Info("no longer a primary because lease has expired, the scheduling primary will step down")
 				return
 			}
@@ -381,7 +381,7 @@ func (s *Server) Close() {
 
 // IsServing returns whether the server is the primary.
 func (s *Server) IsServing() bool {
-	return !s.IsClosed() && s.participant.IsLeader()
+	return !s.IsClosed() && s.participant.IsServing()
 }
 
 // IsClosed checks if the server loop is closed
@@ -443,9 +443,9 @@ func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
 	s.service.RegisterGRPCService(grpcServer)
 }
 
-// GetLeaderListenUrls gets service endpoints from the primary in election group.
-func (s *Server) GetLeaderListenUrls() []string {
-	return s.participant.GetLeaderListenUrls()
+// GetServingUrls gets service endpoints.
+func (s *Server) GetServingUrls() []string {
+	return s.participant.GetServingUrls()
 }
 
 func (s *Server) startServer() (err error) {

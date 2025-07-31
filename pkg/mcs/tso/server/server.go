@@ -58,7 +58,7 @@ import (
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ member.ElectionMember = (*member.Participant)(nil)
+var _ member.Election = (*member.Participant)(nil)
 
 const serviceName = "TSO Service"
 
@@ -219,32 +219,32 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 }
 
 func (s *Server) checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID uint32) bool {
-	member, err := s.keyspaceGroupManager.GetElectionMember(
+	member, err := s.keyspaceGroupManager.GetMember(
 		keyspaceID, keyspaceGroupID)
 	if err != nil {
-		log.Error("failed to get election member", errs.ZapError(err))
+		log.Error("failed to get member", errs.ZapError(err))
 		return false
 	}
-	return member.IsLeader()
+	return member.IsServing()
 }
 
-// GetLeaderListenUrls gets service endpoints from the leader in election group.
+// GetServingUrls gets service endpoints.
 // The entry at the index 0 is the primary's service endpoint.
-func (s *Server) GetLeaderListenUrls() []string {
+func (s *Server) GetServingUrls() []string {
 	keyspaceID := keyspace.GetBootstrapKeyspaceID()
-	member, err := s.keyspaceGroupManager.GetElectionMember(
+	member, err := s.keyspaceGroupManager.GetMember(
 		keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
-		log.Error("failed to get election member", errs.ZapError(err))
+		log.Error("failed to get member", errs.ZapError(err))
 		return nil
 	}
 
-	return member.GetLeaderListenUrls()
+	return member.GetServingUrls()
 }
 
-// GetMember returns the election member of the given keyspace and keyspace group.
-func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.ElectionMember, error) {
-	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+// GetMember returns the member of the given keyspace and keyspace group.
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.Election, error) {
+	member, err := s.keyspaceGroupManager.GetMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -253,11 +253,11 @@ func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.ElectionM
 
 // ResignPrimary resigns the primary of the given keyspace.
 func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
-	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+	member, err := s.keyspaceGroupManager.GetMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return err
 	}
-	member.ResetLeader()
+	member.Resign()
 	return nil
 }
 

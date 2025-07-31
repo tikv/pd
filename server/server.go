@@ -832,9 +832,9 @@ func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
 }
 
-// GetLeaderListenUrls gets service endpoints from the leader in election group.
-func (s *Server) GetLeaderListenUrls() []string {
-	return s.member.GetLeaderListenUrls()
+// GetServingUrls gets service endpoints.
+func (s *Server) GetServingUrls() []string {
+	return s.member.GetServingUrls()
 }
 
 // GetMember returns the member of server.
@@ -1577,7 +1577,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 
 // IsServing returns whether the server is the leader if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.member.IsLeader()
+	return s.member.IsServing()
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader if there is embedded etcd, or the primary otherwise.
@@ -1681,7 +1681,7 @@ func (s *Server) campaignLeader() {
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
-		s.member.ResetLeader()
+		s.member.Resign()
 	})
 
 	// maintain the PD leadership, after this, TSO can be service.
@@ -1724,14 +1724,14 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
-	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
-	s.member.EnableLeader()
+	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
+	s.member.PromoteSelf()
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
-		s.member.ResetLeader()
+		s.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	})
 
@@ -1744,7 +1744,7 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.IsLeader() {
+			if !s.member.IsServing() {
 				log.Info("no longer a leader because lease has expired, PD leader will step down")
 				return
 			}

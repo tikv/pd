@@ -118,8 +118,8 @@ func (m *Member) Client() *clientv3.Client {
 	return m.client
 }
 
-// IsLeader returns whether the server is PD leader or not by checking its leadership's lease and leader info.
-func (m *Member) IsLeader() bool {
+// IsServing returns whether the server is PD leader or not by checking its leadership's lease and leader info.
+func (m *Member) IsServing() bool {
 	return m.leadership.Check() && m.GetLeader().GetMemberId() == m.member.GetMemberId()
 }
 
@@ -128,8 +128,8 @@ func (m *Member) IsLeaderElected() bool {
 	return m.GetLeader() != nil
 }
 
-// GetLeaderListenUrls returns current leader's listen urls
-func (m *Member) GetLeaderListenUrls() []string {
+// GetServingUrls returns current leader's listen urls
+func (m *Member) GetServingUrls() []string {
 	return m.GetLeader().GetClientUrls()
 }
 
@@ -158,8 +158,8 @@ func (m *Member) unsetLeader() {
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
-// EnableLeader sets the member itself to a PD leader.
-func (m *Member) EnableLeader() {
+// PromoteSelf sets the member itself to a PD leader.
+func (m *Member) PromoteSelf() {
 	m.setLeader(m.member)
 }
 
@@ -202,8 +202,8 @@ func (m *Member) Campaign(ctx context.Context, leaseTimeout int64) error {
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
-// PreCheckLeader does some pre-check before checking whether it's the leader.
-func (m *Member) PreCheckLeader() error {
+// preCheckLeader does some pre-check before checking whether it's the leader.
+func (m *Member) preCheckLeader() error {
 	if m.GetEtcdLeader() == 0 {
 		return errs.ErrEtcdLeaderNotFound
 	}
@@ -226,8 +226,8 @@ func (m *Member) getPersistentLeader() (*pdpb.Member, int64, error) {
 
 // CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
 // otherwise returns a bool which indicates if it is needed to check later.
-func (m *Member) CheckLeader() (ElectionLeader, bool) {
-	if err := m.PreCheckLeader(); err != nil {
+func (m *Member) CheckLeader() (*Leader, bool) {
+	if err := m.preCheckLeader(); err != nil {
 		log.Warn("failed to pass pre-check, check pd leader later", errs.ZapError(err))
 		time.Sleep(checkFailBackoffDuration)
 		return nil, true
@@ -272,9 +272,9 @@ func (m *Member) WatchLeader(ctx context.Context, leader *pdpb.Member, revision 
 	m.unsetLeader()
 }
 
-// ResetLeader is used to reset the PD member's current leadership.
+// Resign is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
-func (m *Member) ResetLeader() {
+func (m *Member) Resign() {
 	m.leadership.Reset()
 	m.unsetLeader()
 }

@@ -281,7 +281,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 
 func (s *state) getNextPrimaryToReset(
 	groupID int, localAddress string,
-) (member member.ElectionMember, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
+) (member member.Election, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -291,7 +291,7 @@ func (s *state) getNextPrimaryToReset(
 	for j := 0; j < groupSize; groupID, j = (groupID+1)%groupSize, j+1 {
 		allocator := s.allocators[groupID]
 		kg := s.kgs[groupID]
-		if allocator != nil && kg != nil && allocator.GetMember().IsLeader() {
+		if allocator != nil && kg != nil && allocator.GetMember().IsServing() {
 			maxPriority := math.MinInt32
 			localPriority := math.MaxInt32
 			for _, member := range kg.Members {
@@ -686,7 +686,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		kgm.metrics.mergeTargetGauge.Dec()
 	}
 
-	// If this host is already assigned a replica of this keyspace group, i.e., the election member
+	// If this host is already assigned a replica of this keyspace group, i.e., the member
 	// is already initialized, just update the meta.
 	if oldAM != nil {
 		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
@@ -727,7 +727,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return
 		}
 		participant.SetCampaignChecker(func(*election.Leadership) bool {
-			return splitSourceAM.GetMember().IsLeader()
+			return splitSourceAM.GetMember().IsServing()
 		})
 	}
 	// Initialize all kinds of maps.
@@ -991,10 +991,10 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, nil
 }
 
-// GetElectionMember returns the election member of the keyspace group serving the given keyspace.
-func (kgm *KeyspaceGroupManager) GetElectionMember(
+// GetMember returns the member of the keyspace group serving the given keyspace.
+func (kgm *KeyspaceGroupManager) GetMember(
 	keyspaceID, keyspaceGroupID uint32,
-) (member.ElectionMember, error) {
+) (member.Election, error) {
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}

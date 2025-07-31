@@ -64,7 +64,7 @@ type Allocator struct {
 	// keyspaceGroupID is the keyspace group ID of the allocator.
 	keyspaceGroupID uint32
 	// for election use
-	member member.ElectionMember
+	member member.Election
 	// expectedPrimaryLease is used to store the expected primary lease.
 	expectedPrimaryLease atomic.Value // store as *election.LeaderLease
 	timestampOracle      *timestampOracle
@@ -78,7 +78,7 @@ type Allocator struct {
 func NewAllocator(
 	ctx context.Context,
 	keyspaceGroupID uint32,
-	member member.ElectionMember,
+	member member.Election,
 	storage endpoint.TSOStorage,
 	cfg Config,
 ) *Allocator {
@@ -203,7 +203,7 @@ func (a *Allocator) Reset(resetLeadership bool) {
 	a.timestampOracle.resetTimestamp()
 	// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
 	if resetLeadership && a.isPrimary() {
-		a.member.ResetLeader()
+		a.member.Resign()
 	}
 }
 
@@ -228,8 +228,8 @@ func (a *Allocator) primaryElectionLoop() {
 			return
 		default:
 		}
-
-		primary, checkAgain := a.member.(*member.Participant).CheckPrimary()
+		m := a.member.(*member.Participant)
+		primary, checkAgain := m.CheckPrimary()
 		if checkAgain {
 			continue
 		}
@@ -252,16 +252,16 @@ func (a *Allocator) primaryElectionLoop() {
 		if len(expectedPrimary) > 0 && !strings.Contains(a.member.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of tso primary and check later", append(a.logFields,
 				zap.String("expected-primary-id", expectedPrimary),
-				zap.String("cur-member-value", a.member.(*member.Participant).ParticipantString()))...)
+				zap.String("cur-member-value", m.ParticipantString()))...)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		a.campaignLeader()
+		a.campaignPrimary()
 	}
 }
 
-func (a *Allocator) campaignLeader() {
+func (a *Allocator) campaignPrimary() {
 	log.Info("start to campaign the primary", a.logFields...)
 	leaderLease := a.cfg.GetLeaderLease()
 	if err := a.member.Campaign(a.ctx, leaderLease); err != nil {
@@ -285,7 +285,7 @@ func (a *Allocator) campaignLeader() {
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
-		a.member.ResetLeader()
+		a.member.Resign()
 	})
 
 	// maintain the leadership, after this, TSO can be service.
@@ -308,19 +308,19 @@ func (a *Allocator) campaignLeader() {
 		leaderLease, &keypath.MsParam{
 			ServiceName: constant.TSOServiceName,
 			GroupID:     a.keyspaceGroupID,
-		}, a.member)
+		}, a.member.(*member.Participant))
 	if err != nil {
 		log.Error("prepare tso primary watch error", append(a.logFields, errs.ZapError(err))...)
 		return
 	}
 	a.expectedPrimaryLease.Store(lease)
-	a.member.EnableLeader()
+	a.member.PromoteSelf()
 
 	tsoLabel := fmt.Sprintf("TSO Service Group %d", a.keyspaceGroupID)
 	member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(1)
 	defer resetLeaderOnce.Do(func() {
 		cancel()
-		a.member.ResetLeader()
+		a.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	})
 
@@ -352,15 +352,15 @@ func (a *Allocator) GetPrimaryAddr() string {
 	if a == nil || a.member == nil {
 		return ""
 	}
-	leaderAddrs := a.member.GetLeaderListenUrls()
-	if len(leaderAddrs) < 1 {
+	primaryAddrs := a.member.GetServingUrls()
+	if len(primaryAddrs) < 1 {
 		return ""
 	}
-	return leaderAddrs[0]
+	return primaryAddrs[0]
 }
 
 // GetMember returns the member of the allocator.
-func (a *Allocator) GetMember() member.ElectionMember {
+func (a *Allocator) GetMember() member.Election {
 	return a.member
 }
 
@@ -368,7 +368,7 @@ func (a *Allocator) isPrimary() bool {
 	if a == nil || a.member == nil {
 		return false
 	}
-	return a.member.IsLeader()
+	return a.member.IsServing()
 }
 
 func (a *Allocator) isPrimaryElected() bool {
