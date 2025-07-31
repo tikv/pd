@@ -225,11 +225,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
 						// for primary election.
-						primaryPath := keypath.LeaderPath(&keypath.MsParam{
+						primaryPath := keypath.ElectionPath(&keypath.MsParam{
 							ServiceName: mcs.TSOServiceName,
 							GroupID:     keyspaceGroupID,
 						})
-						re.Equal(primaryPath, allocator.GetMember().GetLeaderPath())
+						re.Equal(primaryPath, allocator.GetMember().GetElectionPath())
 
 						served = true
 					}
@@ -348,33 +348,33 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 	re.Equal([]uint32{555, 666}, kg2.Keyspaces)
 	re.True(kg2.IsSplitTarget())
 	// Check the leadership.
-	member1, err := suite.tsoCluster.WaitForPrimaryServing(re, 444, oldID).GetMember(444, oldID)
+	primary1, err := suite.tsoCluster.WaitForPrimaryServing(re, 444, oldID).GetMember(444, oldID)
 	re.NoError(err)
-	re.NotNil(member1)
-	member2, err := suite.tsoCluster.WaitForPrimaryServing(re, 555, newID).GetMember(555, newID)
+	re.NotNil(primary1)
+	primary2, err := suite.tsoCluster.WaitForPrimaryServing(re, 555, newID).GetMember(555, newID)
 	re.NoError(err)
-	re.NotNil(member2)
-	// Wait for the leader of the keyspace group `oldID` and `newID` to be elected.
+	re.NotNil(primary2)
+	// Wait for the primary of the keyspace group `oldID` and `newID` to be elected.
 	testutil.Eventually(re, func() bool {
-		return len(member1.GetLeaderListenUrls()) > 0 && len(member2.GetLeaderListenUrls()) > 0
+		return len(primary1.GetServingUrls()) > 0 && len(primary2.GetServingUrls()) > 0
 	})
-	// Check if the leader of the keyspace group `oldID` and `newID` are the same.
-	re.Equal(member1.GetLeaderListenUrls(), member2.GetLeaderListenUrls())
-	// Resign and block the leader of the keyspace group `oldID` from being elected.
-	member1.(*member.Participant).SetCampaignChecker(func(*election.Leadership) bool {
+	// Check if the primary of the keyspace group `oldID` and `newID` are the same.
+	re.Equal(primary1.GetServingUrls(), primary2.GetServingUrls())
+	// Resign and block the primary of the keyspace group `oldID` from being elected.
+	primary1.(*member.Participant).SetCampaignChecker(func(*election.Leadership) bool {
 		return false
 	})
-	member1.ResetLeader()
-	// The leader of the keyspace group `newID` should be resigned also.
+	primary1.Resign()
+	// The primary of the keyspace group `newID` should be resigned also.
 	testutil.Eventually(re, func() bool {
-		return member2.IsLeader() == false
+		return primary2.IsServing() == false
 	})
-	// Check if the leader of the keyspace group `oldID` and `newID` are the same again.
-	member1.(*member.Participant).SetCampaignChecker(nil)
+	// Check if the primary of the keyspace group `oldID` and `newID` are the same again.
+	primary1.(*member.Participant).SetCampaignChecker(nil)
 	testutil.Eventually(re, func() bool {
-		return len(member1.GetLeaderListenUrls()) > 0 && len(member2.GetLeaderListenUrls()) > 0
+		return len(primary1.GetServingUrls()) > 0 && len(primary2.GetServingUrls()) > 0
 	})
-	re.Equal(member1.GetLeaderListenUrls(), member2.GetLeaderListenUrls())
+	re.Equal(primary1.GetServingUrls(), primary2.GetServingUrls())
 	// Wait for the keyspace groups to finish the split.
 	waitFinishSplit(re, suite.pdLeaderServer, oldID, newID, []uint32{444}, []uint32{555, 666})
 }
@@ -443,12 +443,12 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re *require.Assertions, keyspaceID, keyspaceGroupID uint32,
 ) context.CancelFunc {
-	// Make sure the leader of the keyspace group is elected.
-	member, err := suite.tsoCluster.
+	// Make sure the primary of the keyspace group is elected.
+	primary, err := suite.tsoCluster.
 		WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID).
 		GetMember(keyspaceID, keyspaceGroupID)
 	re.NoError(err)
-	re.NotNil(member)
+	re.NotNil(primary)
 	// Prepare the client for keyspace.
 	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx,
 		caller.TestComponent,

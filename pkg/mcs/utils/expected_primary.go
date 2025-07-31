@@ -82,17 +82,17 @@ func KeepExpectedPrimaryAlive(
 	exitPrimary chan<- struct{},
 	leaseTimeout int64,
 	msParam *keypath.MsParam,
-	member member.ElectionMember) (*election.Lease, error) {
+	m *member.Participant) (*election.Lease, error) {
 	log.Info("primary start to watch the expected primary",
-		zap.String("service", msParam.ServiceName), zap.String("primary-value", member.MemberString()))
+		zap.String("service", msParam.ServiceName), zap.String("primary-value", m.ParticipantString()))
 	service := fmt.Sprintf("%s expected primary", msParam.ServiceName)
 	lease := election.NewLease(cli, service)
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
 	}
 	leader := &leaderData{
-		raw:    member.MemberValue(),
-		output: member.MemberString(),
+		raw:    m.MemberValue(),
+		output: m.ParticipantString(),
 	}
 	revision, err := markExpectedPrimaryFlag(cli, msParam, leader, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {

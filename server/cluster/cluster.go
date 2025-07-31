@@ -153,7 +153,7 @@ type RaftCluster struct {
 	cancel    context.CancelFunc
 
 	*core.BasicCluster // cached cluster info
-	member             *member.EmbeddedEtcdMember
+	member             *member.Member
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -208,7 +208,7 @@ type Status struct {
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(
 	ctx context.Context,
-	member *member.EmbeddedEtcdMember,
+	member *member.Member,
 	basicCluster *core.BasicCluster,
 	storage storage.Storage,
 	regionSyncer *syncer.RegionSyncer,
