@@ -39,6 +39,7 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -57,7 +58,7 @@ import (
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ member.ElectionMember = (*member.Participant)(nil)
+var _ member.Election = (*member.Participant)(nil)
 
 const serviceName = "TSO Service"
 
@@ -198,7 +199,8 @@ func (s *Server) Close() {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.IsKeyspaceServing(constant.DefaultKeyspaceID)
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	return s.IsKeyspaceServingByGroup(keyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
 // IsKeyspaceServingByGroup returns whether the server is the primary of the given keyspace.
@@ -216,42 +218,33 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 	return s.checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID)
 }
 
-// IsKeyspaceServing returns whether the keyspace is serving.
-func (s *Server) IsKeyspaceServing(keyspaceID uint32) bool {
-	if atomic.LoadInt64(&s.isRunning) == 0 {
-		return false
-	}
-	// We only need to pass the keyspace ID and the default keyspace group ID.
-	// Because GetElectionMember will call getKeyspaceGroupMetaWithCheck,
-	// getKeyspaceGroupMetaWithCheck will correct the keyspace group ID automatically if keyspace serves.
-	return s.checkKeyspaceGroupLeadership(keyspaceID, constant.DefaultKeyspaceGroupID)
-}
 func (s *Server) checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID uint32) bool {
-	member, err := s.keyspaceGroupManager.GetElectionMember(
+	member, err := s.keyspaceGroupManager.GetMember(
 		keyspaceID, keyspaceGroupID)
 	if err != nil {
-		log.Error("failed to get election member", errs.ZapError(err))
+		log.Error("failed to get member", errs.ZapError(err))
 		return false
 	}
-	return member.IsLeader()
+	return member.IsServing()
 }
 
-// GetLeaderListenUrls gets service endpoints from the leader in election group.
+// GetServingUrls gets service endpoints.
 // The entry at the index 0 is the primary's service endpoint.
-func (s *Server) GetLeaderListenUrls() []string {
-	member, err := s.keyspaceGroupManager.GetElectionMember(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+func (s *Server) GetServingUrls() []string {
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	member, err := s.keyspaceGroupManager.GetMember(
+		keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
-		log.Error("failed to get election member", errs.ZapError(err))
+		log.Error("failed to get member", errs.ZapError(err))
 		return nil
 	}
 
-	return member.GetLeaderListenUrls()
+	return member.GetServingUrls()
 }
 
-// GetMember returns the election member of the given keyspace and keyspace group.
-func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.ElectionMember, error) {
-	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+// GetMember returns the member of the given keyspace and keyspace group.
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.Election, error) {
+	member, err := s.keyspaceGroupManager.GetMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -260,11 +253,11 @@ func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.ElectionM
 
 // ResignPrimary resigns the primary of the given keyspace.
 func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
-	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+	member, err := s.keyspaceGroupManager.GetMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return err
 	}
-	member.ResetLeader()
+	member.Resign()
 	return nil
 }
 

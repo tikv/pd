@@ -775,6 +775,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 			defer wg.Done()
 			err := leaderServer.BootstrapCluster()
 			if err != nil {
+				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 				re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
 			}
 		}()
@@ -865,7 +866,7 @@ func TestStoreVersionChange(t *testing.T) {
 	re.NoError(err)
 	store := newMetaStore(storeID, "mock://tikv-1:1", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 	var wg sync.WaitGroup
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/versionChangeConcurrency", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/versionChangeConcurrency", `return(true)`))
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -880,7 +881,7 @@ func TestStoreVersionChange(t *testing.T) {
 	v, err := semver.NewVersion("1.0.0")
 	re.NoError(err)
 	re.Equal(*v, svr.GetClusterVersion())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/versionChangeConcurrency"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/versionChangeConcurrency"))
 }
 
 func TestConcurrentHandleRegion(t *testing.T) {
@@ -1597,10 +1598,11 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	id := leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
 
+	schedulersNum := len(sc.DefaultSchedulers)
 	testutil.Eventually(re, func() bool {
-		return leaderServer.GetRaftCluster().IsPrepared()
+		return len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames()) == schedulersNum
 	})
-	schedulersNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Add evict leader scheduler
 	tests.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,

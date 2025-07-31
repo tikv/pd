@@ -42,7 +42,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -85,8 +84,10 @@ var (
 	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
 	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
-	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
+	versionStaleCounter           = bucketEventCounter.WithLabelValues("version_stale")
+	versionNotChangeCounter       = bucketEventCounter.WithLabelValues("version_no_change")
 	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
+	updateSuccessCounter          = bucketEventCounter.WithLabelValues("update_success")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -133,7 +134,6 @@ type Server interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
 	IsKeyspaceGroupEnabled() bool
-	GetSafePointV2Manager() *gc.SafePointV2Manager
 }
 
 // RaftCluster is used for cluster config management.
@@ -153,7 +153,7 @@ type RaftCluster struct {
 	cancel    context.CancelFunc
 
 	*core.BasicCluster // cached cluster info
-	member             *member.EmbeddedEtcdMember
+	member             *member.Member
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -208,7 +208,7 @@ type Status struct {
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(
 	ctx context.Context,
-	member *member.EmbeddedEtcdMember,
+	member *member.Member,
 	basicCluster *core.BasicCluster,
 	storage storage.Storage,
 	regionSyncer *syncer.RegionSyncer,
@@ -1168,14 +1168,21 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	for range 3 {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
-		if old != nil && buckets.GetVersion() <= old.GetVersion() {
-			versionNotMatchCounter.Inc()
-			return nil
+		if old != nil {
+			reportVersion := buckets.GetVersion()
+			if reportVersion < old.GetVersion() {
+				versionStaleCounter.Inc()
+				return nil
+			} else if reportVersion == old.GetVersion() {
+				versionNotChangeCounter.Inc()
+				return nil
+			}
 		}
 		failpoint.Inject("concurrentBucketHeartbeat", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
 		if ok := region.UpdateBuckets(buckets, old); ok {
+			updateSuccessCounter.Inc()
 			return nil
 		}
 	}

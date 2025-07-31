@@ -48,12 +48,16 @@ func TestStoreTestSuite(t *testing.T) {
 	suite.Run(t, new(storeTestSuite))
 }
 
-func (suite *storeTestSuite) SetupTest() {
+func (suite *storeTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
-func (suite *storeTestSuite) TearDownTest() {
+func (suite *storeTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+}
+func (suite *storeTestSuite) TearDownTest() {
+	re := suite.Require()
+	suite.env.Reset(re)
 }
 
 func (suite *storeTestSuite) TestStoresList() {

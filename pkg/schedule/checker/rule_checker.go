@@ -391,14 +391,24 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 	strategy := c.strategy(c.r, region, rf.Rule, isWitness)
 	ruleStores := c.getRuleFitStores(rf)
-	oldStore := strategy.SelectStoreToRemove(ruleStores)
-	if oldStore == 0 {
+	oldStoreID := strategy.SelectStoreToRemove(ruleStores)
+	if oldStoreID == 0 {
+		return nil, nil
+	}
+	oldStore := c.cluster.GetStore(oldStoreID)
+	if oldStore == nil {
 		return nil, nil
 	}
 	var coLocationStores []*core.StoreInfo
 	regionStores := c.cluster.GetRegionStores(region)
 	for _, s := range regionStores {
+		if s.GetLabelValue(core.EngineKey) != oldStore.GetLabelValue(core.EngineKey) {
+			continue
+		}
 		for _, r := range fit.GetRules() {
+			if r.Role != rf.Rule.Role {
+				continue
+			}
 			if placement.MatchLabelConstraints(s, r.LabelConstraints) {
 				coLocationStores = append(coLocationStores, s)
 				break
@@ -406,7 +416,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 		}
 	}
 
-	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
+	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStoreID)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
@@ -414,7 +424,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 	}
 	ruleCheckerMoveToBetterLocationCounter.Inc()
 	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
-	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
+	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStoreID, newPeer)
 }
 
 func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {

@@ -92,7 +92,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(leader)
-	waitLeader(re, suite.client, leader.GetAddr())
+	waitLeaderServingClient(re, suite.client, leader.GetAddr())
 
 	suite.initGroups = []*rmpb.ResourceGroup{
 		{
@@ -149,7 +149,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	}
 }
 
-func waitLeader(re *require.Assertions, cli pd.Client, leaderAddr string) {
+func waitLeaderServingClient(re *require.Assertions, cli pd.Client, leaderAddr string) {
 	innerCli, ok := cli.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 	re.True(ok)
 	re.NotNil(innerCli)
@@ -191,7 +191,7 @@ func (suite *resourceManagerClientTestSuite) resignAndWaitLeader(re *require.Ass
 	re.NoError(suite.cluster.ResignLeader())
 	newLeader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(newLeader)
-	waitLeader(re, suite.client, newLeader.GetAddr())
+	waitLeaderServingClient(re, suite.client, newLeader.GetAddr())
 }
 
 func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {

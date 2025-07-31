@@ -52,6 +52,7 @@ func TestHotTestSuite(t *testing.T) {
 }
 
 func (suite *hotTestSuite) SetupSuite() {
+	statistics.DisableDenoising()
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, _ string) {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
@@ -65,15 +66,8 @@ func (suite *hotTestSuite) TearDownSuite() {
 }
 
 func (suite *hotTestSuite) TearDownTest() {
-	cleanFunc := func(cluster *pdTests.TestCluster) {
-		leader := cluster.GetLeaderServer()
-		hotStat := leader.GetRaftCluster().GetHotStat()
-		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			hotStat = sche.GetCluster().GetHotStat()
-		}
-		hotStat.CleanCache()
-	}
-	suite.env.RunTest(cleanFunc)
+	re := suite.Require()
+	suite.env.Reset(re)
 }
 
 func (suite *hotTestSuite) TestHot() {
@@ -82,7 +76,6 @@ func (suite *hotTestSuite) TestHot() {
 
 func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -252,7 +245,6 @@ func (suite *hotTestSuite) TestHotWithStoreID() {
 
 func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 	leaderServer := cluster.GetLeaderServer()
@@ -319,7 +311,6 @@ func (suite *hotTestSuite) TestHotWithoutHotPeer() {
 
 func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
@@ -401,7 +392,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	// TODO: support history hotspot in scheduling server with stateless in the future.
 	// Ref: https://github.com/tikv/pd/pull/7183
 	re := require.New(t)
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1,
@@ -524,7 +515,7 @@ func TestHistoryHotRegions(t *testing.T) {
 func TestBuckets(t *testing.T) {
 	// TODO: support forward bucket request in scheduling server in the future.
 	re := require.New(t)
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })

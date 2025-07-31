@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -54,7 +55,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -281,7 +281,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 
 func (s *state) getNextPrimaryToReset(
 	groupID int, localAddress string,
-) (member member.ElectionMember, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
+) (member member.Election, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -291,7 +291,7 @@ func (s *state) getNextPrimaryToReset(
 	for j := 0; j < groupSize; groupID, j = (groupID+1)%groupSize, j+1 {
 		allocator := s.allocators[groupID]
 		kg := s.kgs[groupID]
-		if allocator != nil && kg != nil && allocator.GetMember().IsLeader() {
+		if allocator != nil && kg != nil && allocator.GetMember().IsServing() {
 			maxPriority := math.MinInt32
 			localPriority := math.MaxInt32
 			for _, member := range kg.Members {
@@ -686,7 +686,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		kgm.metrics.mergeTargetGauge.Dec()
 	}
 
-	// If this host is already assigned a replica of this keyspace group, i.e., the election member
+	// If this host is already assigned a replica of this keyspace group, i.e., the member
 	// is already initialized, just update the meta.
 	if oldAM != nil {
 		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
@@ -727,7 +727,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return
 		}
 		participant.SetCampaignChecker(func(*election.Leadership) bool {
-			return splitSourceAM.GetMember().IsLeader()
+			return splitSourceAM.GetMember().IsServing()
 		})
 	}
 	// Initialize all kinds of maps.
@@ -854,10 +854,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				j++
 			}
 		}
-		kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.DefaultKeyspaceID)
-		if kerneltype.IsNextGen() {
-			kgm.checkReserveKeyspace(newGroup, newKeyspaces, constant.SystemKeyspaceID)
-		}
+		keyspaceID := keyspace.GetBootstrapKeyspaceID()
+		kgm.checkReserveKeyspace(newGroup, newKeyspaces, keyspaceID)
 	}
 	// Check the split state.
 	if oldGroup != nil {
@@ -941,10 +939,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 }
 
 func (kgm *KeyspaceGroupManager) genDefaultKeyspaceGroupMeta() *endpoint.KeyspaceGroup {
-	keyspaces := []uint32{constant.DefaultKeyspaceID}
-	if kerneltype.IsNextGen() {
-		keyspaces = append(keyspaces, constant.SystemKeyspaceID)
-	}
+	keyspaces := []uint32{keyspace.GetBootstrapKeyspaceID()}
 	return &endpoint.KeyspaceGroup{
 		ID: constant.DefaultKeyspaceGroupID,
 		Members: []endpoint.KeyspaceGroupMember{{
@@ -996,10 +991,10 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, nil
 }
 
-// GetElectionMember returns the election member of the keyspace group serving the given keyspace.
-func (kgm *KeyspaceGroupManager) GetElectionMember(
+// GetMember returns the member of the keyspace group serving the given keyspace.
+func (kgm *KeyspaceGroupManager) GetMember(
 	keyspaceID, keyspaceGroupID uint32,
-) (member.ElectionMember, error) {
+) (member.Election, error) {
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
@@ -1302,7 +1297,7 @@ mergeLoop:
 		// Check if the keyspace group primaries in the merge map are all gone.
 		if len(mergeMap) != 0 {
 			for id := range mergeMap {
-				leaderPath := keypath.LeaderPath(&keypath.MsParam{
+				leaderPath := keypath.ElectionPath(&keypath.MsParam{
 					ServiceName: mcs.TSOServiceName,
 					GroupID:     id,
 				})

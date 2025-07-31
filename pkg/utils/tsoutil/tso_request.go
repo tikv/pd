@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
@@ -136,8 +137,9 @@ func (r *PDProtoRequest) getCount() uint32 {
 // process sends request and receive response via stream.
 // count defines the count of timestamps to retrieve.
 func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		keyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
 // postProcess sends the response back to the sender of the request

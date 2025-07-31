@@ -60,7 +60,7 @@ type tsoObject struct {
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
 	keyspaceGroupID uint32
-	member          member.ElectionMember
+	member          member.Election
 	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
@@ -210,7 +210,7 @@ func (t *timestampOracle) isInitialized() bool {
 func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if !t.member.IsLeader() {
+	if !t.member.IsServing() {
 		t.metrics.errLeaseResetTSEvent.Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs(errs.NotLeaderErr)
 	}
@@ -359,7 +359,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if t.member.IsLeader() {
+			if t.member.IsServing() {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -381,7 +381,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 			continue
 		}
 		// In case lease expired after the first check.
-		if !t.member.IsLeader() {
+		if !t.member.IsServing() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		return resp, nil

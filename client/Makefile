@@ -29,7 +29,7 @@ basic-test: failpoint-enable
 
 ci-test-job:
 	if [ -f covprofile ]; then rm covprofile; fi
-	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
+	CGO_ENABLED=1 go test ./... -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
 
 failpoint-enable:
 	cd $(ROOT_PATH) && $(MAKE) failpoint-enable
@@ -45,6 +45,8 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c ../.golangci.yml --verbose ./... --allow-parallel-runners
+	@ echo "leakcheck ..."
+	@ leakcheck ./...
 
 tidy:
 	@ go mod tidy

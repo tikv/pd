@@ -45,7 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -121,10 +120,7 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
 	// to every tso node/pod by default.
-	keyspaces := []uint32{constant.DefaultKeyspaceID}
-	if kerneltype.IsNextGen() {
-		keyspaces = append(keyspaces, constant.SystemKeyspaceID)
-	}
+	keyspaces := []uint32{GetBootstrapKeyspaceID()}
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
 		ID:        constant.DefaultKeyspaceGroupID,
 		UserKind:  endpoint.Basic.String(),
@@ -635,11 +631,8 @@ func buildSplitKeyspaces(
 			oldKeyspaceMap[keyspace] = struct{}{}
 		}
 		for _, keyspace := range new {
-			if keyspace == constant.DefaultKeyspaceID {
-				return nil, nil, errs.ErrModifyDefaultKeyspace
-			}
-			if checkReservedID(keyspace) {
-				return nil, nil, errs.ErrModifySystemKeyspace
+			if isProtectedKeyspaceID(keyspace) {
+				return nil, nil, newModifyProtectedKeyspaceError()
 			}
 			if _, ok := oldKeyspaceMap[keyspace]; !ok {
 				return nil, nil, errs.ErrKeyspaceNotInKeyspaceGroup
@@ -672,16 +665,12 @@ func buildSplitKeyspaces(
 	newSplit = make([]uint32, 0, oldNum)
 	newKeyspaceMap := make(map[uint32]struct{}, newNum)
 	for _, keyspace := range old {
-		if keyspace == constant.DefaultKeyspaceID {
-			// The source keyspace group must be the default keyspace group and we always keep the default
-			// keyspace in the default keyspace group.
-			continue
-		}
-		if checkReservedID(keyspace) {
+		if isProtectedKeyspaceID(keyspace) {
 			// The source keyspace group must be the default keyspace group and we always keep
-			// the system keyspace in the default keyspace group.
+			// the bootstrap keyspace (default or system) in the default keyspace group.
 			continue
 		}
+
 		if startKeyspaceID <= keyspace && keyspace <= endKeyspaceID {
 			newSplit = append(newSplit, keyspace)
 			newKeyspaceMap[keyspace] = struct{}{}
@@ -1161,7 +1150,7 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", errs.ErrKeyspaceGroupNotExists.FastGenByArgs(id)
 	}
 
-	primaryPath := keypath.LeaderPath(&keypath.MsParam{
+	primaryPath := keypath.ElectionPath(&keypath.MsParam{
 		ServiceName: mcs.TSOServiceName,
 		GroupID:     id,
 	})
@@ -1174,6 +1163,13 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", errs.ErrKeyspaceGroupPrimaryNotFound
 	}
 	// The format of leader name is address-groupID.
-	contents := strings.Split(leader.GetName(), "-")
-	return contents[0], err
+	return parsePrimaryName(leader.Name), err
+}
+
+func parsePrimaryName(name string) string {
+	idx := strings.LastIndex(name, "-")
+	if idx != -1 {
+		return name[:idx]
+	}
+	return name
 }

@@ -227,6 +227,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 			re.Contains(string(b), "Reset ts successfully.")
 			return true
 		case http.StatusServiceUnavailable:
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
 			return false
 		default:

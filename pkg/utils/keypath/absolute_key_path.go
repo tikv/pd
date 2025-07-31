@@ -58,6 +58,9 @@ const (
 	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
+	// Maintenance task path format
+	maintenanceTaskPathFormat = "/pd/%d/maintenance/%s" // "/pd/{cluster_id}/maintenance/{task_type}"
+
 	// "%08d" adds extra padding to make encoded ID ordered.
 	// Encoded ID can be decoded directly with strconv.ParseUint. Width of the
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
@@ -94,17 +97,17 @@ const (
 	servicePathFormat  = "/ms/%d/%s/registry/"   // "/ms/{cluster_id}/{service_name}/registry/"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
 
-	msLeaderPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
-	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msPrimaryPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
+	msTsoDefaultPrimaryPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKespacePrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
-	// `expected_primary` is the flag to indicate the expected primary/leader.
-	// 1. When the leader was campaigned successfully, it will set the `expected_primary` flag.
+	// `expected_primary` is the flag to indicate the expected primary.
+	// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
 	// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
 	// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-	msExpectedLeaderPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
-	msTsoDefaultExpectedLeaderPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceExpectedLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msExpectedPrimaryPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
+	msTsoDefaultExpectedPrimaryPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKespaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
 	// resource group path
 	keyspaceResourceGroupSettingsPathPrefixFormat = "resource_group/keyspace/settings/"      // "resource_group/keyspace/settings/"

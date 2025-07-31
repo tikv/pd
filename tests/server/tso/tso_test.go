@@ -117,7 +117,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
 
 	// Make the old leader resign and wait for the new leader to get a lease
-	err = leaderServer.ResignLeader()
+	err = leaderServer.ResignLeaderWithRetry()
 	re.NoError(err)
 	re.True(nextLeaderServer.WaitLeader())
 

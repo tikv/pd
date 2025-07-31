@@ -196,9 +196,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			logFields[0] = zap.Uint32("keyspace-id", keyspaceID)
 			logFields[1] = zap.String("resource-group", resourceGroupName)
 			// Get keyspace resource group manager to apply service limit later.
-			krgm := s.manager.getKeyspaceResourceGroupManager(keyspaceID)
+			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {
-				log.Warn("keyspace resource group manager not found", logFields...)
+				log.Warn("keyspace resource group manager not found", append(logFields, zap.Error(err))...)
 				continue
 			}
 			// Get the resource group from manager to acquire token buckets.
@@ -220,13 +220,17 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				ResourceGroupName: rg.Name,
 				KeyspaceId:        &rmpb.KeyspaceIDValue{Value: keyspaceID},
 			}
+			requiredToken := 0.0
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
+						requiredToken = re.GetValue()
+						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
 					}
+					// Sample the latest RU demand.
+					krgm.getOrCreateRUTracker(rg.Name).sample(now, requiredToken)
 					if tokens == nil {
 						continue
 					}

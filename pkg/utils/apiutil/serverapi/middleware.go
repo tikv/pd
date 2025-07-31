@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -182,7 +182,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	if (allowFollowerHandle || h.s.GetMember().IsLeader()) && !redirectToMicroservice {
+	if (allowFollowerHandle || h.s.GetMember().IsServing()) && !redirectToMicroservice {
 		next(w, r)
 		return
 	}
@@ -215,7 +215,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		// If the leader is the current server now, we can handle the request directly.
-		if h.s.GetMember().IsLeader() || leader.GetName() == h.s.Name() {
+		if h.s.GetMember().IsServing() || leader.GetName() == h.s.Name() {
 			next(w, r)
 			return
 		}

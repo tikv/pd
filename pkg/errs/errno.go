@@ -119,6 +119,7 @@ var (
 var (
 	ErrEtcdLeaderNotFound = errors.Normalize("etcd leader not found", errors.RFCCodeText("PD:member:ErrEtcdLeaderNotFound"))
 	ErrMarshalMember      = errors.Normalize("marshal member failed", errors.RFCCodeText("PD:member:ErrMarshalMember"))
+	ErrMarshalParticipant = errors.Normalize("marshal participant failed", errors.RFCCodeText("PD:member:ErrMarshalParticipant"))
 	ErrCheckCampaign      = errors.Normalize("check campaign failed", errors.RFCCodeText("PD:member:ErrCheckCampaign"))
 )
 
@@ -242,8 +243,8 @@ var (
 	ErrExceedMaxEtcdTxnOps = errors.Normalize("exceed max etcd txn operations", errors.RFCCodeText("PD:keyspace:ErrExceedMaxEtcdTxnOps"))
 	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
 	ErrModifyDefaultKeyspace = errors.Normalize("cannot modify default keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifyDefaultKeyspace"))
-	// ErrModifySystemKeyspace is used to indicate that system keyspace cannot be modified.
-	ErrModifySystemKeyspace = errors.Normalize("cannot modify system keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifySystemKeyspace"))
+	// ErrModifyReservedKeyspace is used to indicate that reserved keyspace cannot be modified.
+	ErrModifyReservedKeyspace = errors.Normalize("cannot modify reserved keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifyReservedKeyspace"))
 	// ErrIllegalOperation is used to indicate this is an illegal operation.
 	ErrIllegalOperation = errors.Normalize("unknown operation", errors.RFCCodeText("PD:keyspace:ErrIllegalOperation"))
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
