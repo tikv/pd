@@ -16,7 +16,6 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -87,8 +86,7 @@ var zapLogOnce sync.Once
 func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	// use temp dir to ensure test isolation.
 	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
-		dirPattern := fmt.Sprintf("pd-server-test-%s-", cfg.Name)
-		tempDir, err := os.MkdirTemp("", dirPattern)
+		tempDir, err := os.MkdirTemp("", "pd_tests")
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create safeguard temp data dir for test server")
 		}
