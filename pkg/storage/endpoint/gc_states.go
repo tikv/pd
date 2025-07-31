@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 // This file contains the definition of GCStateProvider. It provides methods for reading and writing GC states,
@@ -120,46 +121,14 @@ var (
 	_ json.Unmarshaler = (*ServiceSafePoint)(nil)
 )
 
-// TimeOptional is time.Time or nil
-type TimeOptional struct {
-	*time.Time
-}
-
-func (t *TimeOptional) unixSeconds() int64 {
-	if t.Time != nil {
-		return t.Unix()
-	}
-	return 0
-}
-
-// MarshalJSON implements json.Marshaler for TimeOptional
-func (t *TimeOptional) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.unixSeconds())
-}
-
-// UnmarshalJSON implements json.Marshaler for TimeOptional
-func (t *TimeOptional) UnmarshalJSON(b []byte) error {
-	var unixSeconds int64
-	if err := json.Unmarshal(b, &unixSeconds); err != nil {
-		return err
-	}
-	if unixSeconds < math.MaxInt64 && unixSeconds > 0 {
-		val := time.Unix(unixSeconds, 0)
-		t.Time = &val
-	} else {
-		t.Time = nil
-	}
-	return nil
-}
-
 // GlobalGCBarrier represents a global GC barrier.
 // It looks like a GCBarrier now but the struct might change with the code evolve.
 // A more important reason is to distinguish from GC barrier by the type system,
 // avoiding potential misuse between them in code.
 type GlobalGCBarrier struct {
-	BarrierID      string       `json:"barrier_id"`
-	BarrierTS      uint64       `json:"barrier_ts"`
-	ExpirationTime TimeOptional `json:"expiration_time"`
+	BarrierID      string                `json:"barrier_id"`
+	BarrierTS      uint64                `json:"barrier_ts"`
+	ExpirationTime typeutil.TimeOptional `json:"expiration_time"`
 }
 
 // NewGlobalGCBarrier creates a new GlobalGCBarrier. The given expirationTime will be rounded up to the next second if it's
@@ -174,7 +143,7 @@ func NewGlobalGCBarrier(barrierID string, barrierTS uint64, expirationTime *time
 	return &GlobalGCBarrier{
 		BarrierID:      barrierID,
 		BarrierTS:      barrierTS,
-		ExpirationTime: TimeOptional{expirationTime},
+		ExpirationTime: typeutil.TimeOptional{Time: expirationTime},
 	}
 }
 
@@ -187,7 +156,7 @@ func (b *GlobalGCBarrier) IsExpired(now time.Time) bool {
 func (b *GlobalGCBarrier) String() string {
 	expirationTime := "<nil>"
 	if b.ExpirationTime.Time != nil {
-		expirationTime = b.ExpirationTime.String()
+		expirationTime = b.ExpirationTime.Time.String()
 	}
 	return fmt.Sprintf("GlobalGCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
 		b.BarrierID, b.BarrierTS, expirationTime)

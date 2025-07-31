@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func newEtcdStorageEndpoint(t *testing.T) (se *StorageEndpoint, clean func()) {
@@ -561,9 +562,9 @@ func TestGlobalGCBarrier(t *testing.T) {
 	expirationTime := time.Unix(1740127928, 0)
 
 	gcBarriers := []*GlobalGCBarrier{
-		{BarrierID: "1", BarrierTS: 1, ExpirationTime: TimeOptional{&expirationTime}},
-		{BarrierID: "2", BarrierTS: 2, ExpirationTime: TimeOptional{nil}},
-		{BarrierID: "3", BarrierTS: 3, ExpirationTime: TimeOptional{&expirationTime}},
+		{BarrierID: "1", BarrierTS: 1, ExpirationTime: typeutil.TimeOptional{Time: &expirationTime}},
+		{BarrierID: "2", BarrierTS: 2, ExpirationTime: typeutil.TimeOptional{Time: nil}},
+		{BarrierID: "3", BarrierTS: 3, ExpirationTime: typeutil.TimeOptional{Time: &expirationTime}},
 	}
 
 	// Empty.

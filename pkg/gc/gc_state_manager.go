@@ -722,7 +722,7 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 //     the minimal service safe point. Returns a simulated service safe point whose serviceID starts with
 //     "tidb_min_start_ts_" to simulate the minimal service safe point. It may actually be either a GC barrier or
 //     a *TiDB min start ts*.
-//  2. If the given serviceID is "native_br" and keyspaceID is NullKeyspaceID, it is mapping to global GC barriers.
+//  2. If the given serviceID is "native_br" and keyspaceID is NullKeyspaceID, it is mapped to global GC barriers.
 //     Otherwise if serviceID is "native_br" on other keyspaces, it internally calls SetGCBarrier or DeleteGCBarrier.
 //  3. If the given serviceID is anything else, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
 //     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
