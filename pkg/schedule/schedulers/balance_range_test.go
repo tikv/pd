@@ -50,8 +50,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.NotNil(plan)
 	re.Len(plan.stores, 3)
 	re.Len(plan.scoreMap, 3)
-	re.Equal(int64(1), plan.scoreMap[1])
-	re.Equal(int64(1), plan.tolerate)
+	re.Equal(float64(1), plan.score(1))
 }
 
 func TestTIKVEngine(t *testing.T) {
@@ -89,8 +88,8 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("1", op.GetAdditionalInfo("targetScore"))
+	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("1.00", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
 	// case2: move leader from store 1 to store 4
@@ -98,8 +97,8 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
-	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0", op.GetAdditionalInfo("targetScore"))
+	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
 	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
@@ -149,8 +148,8 @@ func TestTIFLASHEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0", op.GetAdditionalInfo("targetScore"))
+	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
 	re.Equal("1", op.GetAdditionalInfo("tolerate"))
 	re.Contains(op.Brief(), "mv peer: store [4] to")
 }

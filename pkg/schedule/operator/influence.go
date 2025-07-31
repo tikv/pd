@@ -97,7 +97,13 @@ func (s *StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 			return 0
 		}
 	case constant.RegionKind:
-		return s.RegionSize
+		switch kind.Policy {
+		case constant.ByCount:
+			return s.RegionCount
+		default:
+			return s.RegionSize
+		}
+
 	case constant.WitnessKind:
 		return s.WitnessCount
 	default:
