@@ -29,7 +29,7 @@ var (
 // NewMicroServicesCommand return a microservice subcommand of rootCmd
 func NewMicroServicesCommand() *cobra.Command {
 	m := &cobra.Command{
-		Use:   "service <tso|scheduling>",
+		Use:   "microservice <tso|scheduling>",
 		Short: "microservice commands",
 	}
 	m.AddCommand(newMSTsoCommand())
@@ -40,16 +40,16 @@ func NewMicroServicesCommand() *cobra.Command {
 func newMSTsoCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "tso <primary|members>",
-		Short: "microservice commands",
+		Short: "tso microservice commands",
 	}
 	d.AddCommand(&cobra.Command{
 		Use:   "primary",
-		Short: "show the primary status",
+		Short: "show the tso primary status",
 		Run:   getPrimaryCommandFunc,
 	})
 	d.AddCommand(&cobra.Command{
 		Use:   "members",
-		Short: "show the members status",
+		Short: "show the tso members status",
 		Run:   getMembersCommandFunc,
 	})
 	return d
@@ -58,16 +58,16 @@ func newMSTsoCommand() *cobra.Command {
 func newMSSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scheduling <primary|members>",
-		Short: "microservice commands",
+		Short: "scheduling microservice commands",
 	}
 	c.AddCommand(&cobra.Command{
 		Use:   "primary",
-		Short: "show the primary member status",
+		Short: "show the scheduling primary member status",
 		Run:   getPrimaryCommandFunc,
 	})
 	c.AddCommand(&cobra.Command{
 		Use:   "members",
-		Short: "show all members status",
+		Short: "show the scheduling members status",
 		Run:   getMembersCommandFunc,
 	})
 	return c
