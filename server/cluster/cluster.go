@@ -1031,6 +1031,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		return errors.Errorf("store %v not found", storeID)
 	}
 
+	recordNetworkSlowScore(storeID, stats.GetNetworkSlowScore())
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
 	opts := make([]core.StoreCreateOption, 0)

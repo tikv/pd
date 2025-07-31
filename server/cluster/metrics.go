@@ -14,7 +14,11 @@
 
 package cluster
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 var (
 	healthStatusGauge = prometheus.NewGaugeVec(
@@ -71,6 +75,14 @@ var (
 			Name:      "store_sync",
 			Help:      "The state of store sync config",
 		}, []string{"address", "state"})
+
+	storeNetworkScoreGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "store_network_score",
+			Help:      "Gauge of the store network score",
+		}, []string{"source", "target"})
 )
 
 func init() {
@@ -81,4 +93,13 @@ func init() {
 	prometheus.MustRegister(bucketEventCounter)
 	prometheus.MustRegister(storeSyncConfigEvent)
 	prometheus.MustRegister(updateStoreStatsGauge)
+	prometheus.MustRegister(storeNetworkScoreGauge)
+}
+
+func recordNetworkSlowScore(storeID uint64, networkSlowScores map[uint64]uint64) {
+	source := fmt.Sprintf("%d", storeID)
+	for targetID, score := range networkSlowScores {
+		target := fmt.Sprintf("%d", targetID)
+		storeNetworkScoreGauge.WithLabelValues(source, target).Set(float64(score))
+	}
 }

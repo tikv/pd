@@ -15,7 +15,9 @@
 package schedulers
 
 import (
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -375,7 +377,24 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 	}
 	stores := cluster.GetStores()
 	for _, store := range stores {
-		if calculateAvgScore(store.GetNetworkSlowScore()) < 0.95*slowStoreEvictThreshold {
+		networkSlowScores := store.GetNetworkSlowScore()
+		for storeID := range networkSlowStores {
+			delete(networkSlowScores, storeID)
+		}
+		slowScores := slices.Collect(maps.Values(networkSlowScores))
+		if slices.Max(slowScores) < slowStoreEvictThreshold {
+			continue
+		}
+		totalScore := 0
+		for _, score := range slowScores {
+			totalScore += int(score)
+		}
+		// If the average value after removing the maximum value is
+		// still greater than 30, it is considered a slow store.
+		if (totalScore-slowStoreEvictThreshold)/len(slowScores) < 30 {
+			log.Info("network slow store is not slow enough, skip",
+				zap.Uint64("store-id", store.GetID()),
+				zap.Any("network-slow-score", store.GetNetworkSlowScore()))
 			continue
 		}
 		if _, exist := networkSlowStores[store.GetID()]; exist {
