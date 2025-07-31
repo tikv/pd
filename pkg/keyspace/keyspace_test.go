@@ -1113,3 +1113,42 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
 	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
 }
+
+func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup() {
+	re := suite.Require()
+	manager := suite.manager
+	groupID := "etcd-group-0"
+	metaServiceGroupStore, ok := manager.store.(endpoint.MetaServiceGroupStorage)
+	re.True(ok)
+	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{
+		groupID: "etcd-group-0.tidb-serverless.cluster.svc.local",
+	})
+	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "test_ks_msg",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.Equal(groupID, created.GetConfig()[MetaServiceGroupIDKey])
+
+	counts, err := manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, counts[groupID])
+
+	_, err = manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	re.NoError(err)
+	updated, err := manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.NotContains(updated.GetConfig(), MetaServiceGroupIDKey)
+
+	loaded, err := manager.LoadKeyspace(created.GetName())
+	re.NoError(err)
+	re.NotContains(loaded.GetConfig(), MetaServiceGroupIDKey)
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
+}

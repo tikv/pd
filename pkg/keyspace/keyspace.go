@@ -1005,7 +1005,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(txn, meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -1056,14 +1056,7 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	// persisted counter stays in sync with the keyspaces actually referencing the
 	// group. Without this, removed keyspaces leak count and could permanently
 	// block deleting an otherwise-empty group.
-	if manager.mgm != nil {
-		if groupID := meta.GetConfig()[MetaServiceGroupIDKey]; groupID != "" {
-			if err := manager.mgm.updateAssignmentTxn(txn, groupID, ""); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
@@ -1088,7 +1081,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(txn, meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -1112,8 +1105,22 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	return meta, nil
 }
 
+func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
+	groupID := meta.GetConfig()[MetaServiceGroupIDKey]
+	if groupID == "" {
+		return nil
+	}
+	delete(meta.Config, MetaServiceGroupIDKey)
+	if manager.mgm == nil {
+		return nil
+	}
+	manager.mgm.RLock()
+	defer manager.mgm.RUnlock()
+	return manager.mgm.updateAssignmentTxn(txn, groupID, "")
+}
+
 // transformKeyspaceState transforms the keyspace state to the target state and record the update time.
-func (manager *Manager) transformKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
 	// If already in the target state, do nothing and return.
 	if meta.GetState() == newState {
 		return nil
@@ -1121,6 +1128,11 @@ func (manager *Manager) transformKeyspaceState(meta *keyspacepb.KeyspaceMeta, ne
 	// Consult state transition table to check if the operation is legal.
 	if !slice.Contains(stateTransitionTable[meta.GetState()], newState) {
 		return errors.Errorf("cannot change keyspace state from %s to %s", meta.GetState().String(), newState.String())
+	}
+	if newState == keyspacepb.KeyspaceState_TOMBSTONE {
+		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, meta); err != nil {
+			return err
+		}
 	}
 	// If the operation is legal, update keyspace state and change time.
 	meta.State = newState
