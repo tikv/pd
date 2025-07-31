@@ -65,18 +65,10 @@ func (suite *resourceManagerAPITestSuite) TearDownTest() {
 	suite.cluster.Destroy()
 }
 
-func (suite *resourceManagerAPITestSuite) getEndpoint(re *require.Assertions, elems ...string) string {
-	endpoint, err := url.JoinPath(
-		suite.cluster.GetLeaderServer().GetAddr(),
-		append([]string{apis.APIPathPrefix}, elems...)...,
-	)
-	re.NoError(err)
-	return endpoint
-}
-
 // sendRequest is a helper function to send HTTP requests and handle common response processing
-func (suite *resourceManagerAPITestSuite) sendRequest(
+func sendRequest(
 	re *require.Assertions,
+	leaderAddr string,
 	method, path string,
 	queryParams url.Values,
 	body any,
@@ -87,7 +79,8 @@ func (suite *resourceManagerAPITestSuite) sendRequest(
 		re.NoError(err)
 		bodyReader = bytes.NewBuffer(data)
 	}
-	path = suite.getEndpoint(re, path)
+	path, err := url.JoinPath(leaderAddr, apis.APIPathPrefix, path)
+	re.NoError(err)
 	if len(queryParams) > 0 {
 		path += "?" + queryParams.Encode()
 	}
@@ -108,7 +101,7 @@ func (suite *resourceManagerAPITestSuite) mustSendRequest(
 	method, path string,
 	body any,
 ) []byte {
-	bodyBytes, statusCode := suite.sendRequest(re, method, path, nil, body)
+	bodyBytes, statusCode := sendRequest(re, suite.cluster.GetLeaderServer().GetAddr(), method, path, nil, body)
 	re.Equal(http.StatusOK, statusCode, string(bodyBytes))
 	return bodyBytes
 }
@@ -270,7 +263,7 @@ func (suite *resourceManagerAPITestSuite) mustUpdateResourceGroup(re *require.As
 func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Assertions, name string, keyspaceName string) *server.ResourceGroup {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/group/"+name, queryParams, nil)
+	bodyBytes, statusCode := sendRequest(re, suite.server.GetAddr(), http.MethodGet, "/config/group/"+name, queryParams, nil)
 	if statusCode != http.StatusOK {
 		re.Equal(http.StatusNotFound, statusCode)
 		return nil
@@ -283,7 +276,7 @@ func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Asser
 func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.Assertions, keyspaceName string) []*server.ResourceGroup {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/groups", queryParams, nil)
+	bodyBytes, statusCode := sendRequest(re, suite.server.GetAddr(), http.MethodGet, "/config/groups", queryParams, nil)
 	if statusCode != http.StatusOK {
 		re.Equal(http.StatusNotFound, statusCode)
 		return nil
@@ -296,7 +289,7 @@ func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.A
 func (suite *resourceManagerAPITestSuite) mustDeleteResourceGroup(re *require.Assertions, name string, keyspaceName string) {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodDelete, "/config/group/"+name, queryParams, nil)
+	bodyBytes, statusCode := sendRequest(re, suite.server.GetAddr(), http.MethodDelete, "/config/group/"+name, queryParams, nil)
 	if statusCode != http.StatusOK {
 		re.Equal(http.StatusNotFound, statusCode)
 		return
@@ -344,9 +337,10 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 		},
 	)
 	re.NoError(err)
+	leaderAddr := suite.cluster.GetLeaderServer().GetAddr()
 	for _, keyspaceName := range []string{"", "test_keyspace"} {
 		// Get the keyspace service limit.
-		limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)
+		limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, keyspaceName)
 		if len(keyspaceName) == 0 {
 			// The null keyspace is always available.
 			re.Equal(http.StatusOK, statusCode)
@@ -357,29 +351,29 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 			re.Equal(0.0, limit)
 		}
 		// Try to set the keyspace service limit to a negative value.
-		resp, statusCode := suite.tryToSetKeyspaceServiceLimit(re, keyspaceName, -1.0)
+		resp, statusCode := tryToSetKeyspaceServiceLimit(re, leaderAddr, keyspaceName, -1.0)
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Equal("service_limit must be non-negative", resp)
 		// Set the keyspace service limit to a positive value.
-		resp, statusCode = suite.tryToSetKeyspaceServiceLimit(re, keyspaceName, 1.0)
+		resp, statusCode = tryToSetKeyspaceServiceLimit(re, leaderAddr, keyspaceName, 1.0)
 		re.Equal(http.StatusOK, statusCode)
 		re.Equal("Success!", resp)
-		limit, statusCode = suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)
+		limit, statusCode = tryToGetKeyspaceServiceLimit(re, leaderAddr, keyspaceName)
 		re.Equal(http.StatusOK, statusCode)
 		re.Equal(1.0, limit)
 	}
 	// Try to set a non-existing keyspace's service limit.
-	resp, statusCode := suite.tryToSetKeyspaceServiceLimit(re, "non_existing_keyspace", 1.0)
+	resp, statusCode := tryToSetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace", 1.0)
 	re.Equal(http.StatusBadRequest, statusCode)
 	re.Equal("keyspace not found with name: non_existing_keyspace", resp)
 	// Try to get a non-existing keyspace's service limit.
-	limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, "non_existing_keyspace")
+	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
 	re.Equal(http.StatusBadRequest, statusCode)
 	re.Equal(0.0, limit)
 }
 
-func (suite *resourceManagerAPITestSuite) tryToGetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string) (float64, int) {
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil, nil)
+func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
+	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil, nil)
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
@@ -390,9 +384,10 @@ func (suite *resourceManagerAPITestSuite) tryToGetKeyspaceServiceLimit(re *requi
 	return limiter.ServiceLimit, statusCode
 }
 
-func (suite *resourceManagerAPITestSuite) tryToSetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string, limit float64) (string, int) {
-	bodyBytes, statusCode := suite.sendRequest(
+func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string, limit float64) (string, int) {
+	bodyBytes, statusCode := sendRequest(
 		re,
+		leaderAddr,
 		http.MethodPost,
 		"/config/keyspace/service-limit/"+keyspaceName,
 		nil,

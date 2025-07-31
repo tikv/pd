@@ -1993,20 +1993,26 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
 	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
 	// it returns 0 if startKey is nil.
-	_, startIndex := r.tree.tree.GetWithIndex(start)
-	var endIndex int
-	var item *regionItem
-	// it should return the length of the tree if endKey is nil.
-	if len(endKey) == 0 {
-		endIndex = r.tree.tree.Len() - 1
-	} else {
-		item, endIndex = r.tree.tree.GetWithIndex(end)
-		// it should return the endIndex - 1 if the endKey is the startKey of a region.
-		if item != nil && bytes.Equal(item.GetStartKey(), endKey) {
-			endIndex--
+	item, startIndex := r.tree.tree.GetWithIndex(start)
+	// if item is nil, it means that the startKey is not found in the tree, we need to check the previous item, avoid
+	// to the startKey in the previous iterm.
+	// regions: [a c] [c f] [f h], startKey: b
+	// the first item is index 2 [c,f]
+	if item == nil {
+		item = r.tree.tree.GetAt(startIndex - 1)
+		// if the item is not nil and the start key in the previous item range, the previous should be included.
+		if item != nil && bytes.Compare(item.GetEndKey(), startKey) > 0 {
+			startIndex--
 		}
 	}
-	return endIndex - startIndex + 1
+	var endIndex int
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = r.tree.tree.Len()
+	} else {
+		_, endIndex = r.tree.tree.GetWithIndex(end)
+	}
+	return endIndex - startIndex
 }
 
 // ScanRegions scans regions intersecting [start key, end key), returns at most
