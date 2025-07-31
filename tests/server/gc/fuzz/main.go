@@ -28,7 +28,8 @@ func getGCState(ctx context.Context, cli gc.GCStatesClient) (gc.GCState, error) 
 		if err != nil {
 			errStr := err.Error()
 			// This error is too common, sleep and retry on it
-			if strings.Contains(errStr, "ErrEtcdTxnConflict") || strings.Contains(errStr, "not leader") {
+			// if strings.Contains(errStr, "ErrEtcdTxnConflict") ||
+			if strings.Contains(errStr, "not leader") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
@@ -43,8 +44,8 @@ func advanceTxnSafePoint(ctx context.Context, cli gc.InternalController, target 
 		if err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "not leader") ||
-				strings.Contains(errStr, "DeadlineExceeded") ||
-				strings.Contains(errStr, "ErrEtcdTxnConflict") {
+				// strings.Contains(errStr, "ErrEtcdTxnConflict") ||
+				strings.Contains(errStr, "DeadlineExceeded") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
@@ -59,8 +60,8 @@ func advanceGCSafePoint(ctx context.Context, cli gc.InternalController, target u
 		if err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "not leader") ||
-				strings.Contains(errStr, "DeadlineExceeded") ||
-				strings.Contains(errStr, "ErrEtcdTxnConflict") {
+				// strings.Contains(errStr, "ErrEtcdTxnConflict") ||
+				strings.Contains(errStr, "DeadlineExceeded") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
@@ -75,8 +76,8 @@ func setGCBarrier(ctx context.Context, cli gc.GCStatesClient, barrierID string, 
 		if err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "not leader") ||
-				strings.Contains(errStr, "DeadlineExceeded") ||
-				strings.Contains(errStr, "ErrEtcdTxnConflict") {
+				// strings.Contains(errStr, "ErrEtcdTxnConflict") ||
+				strings.Contains(errStr, "DeadlineExceeded") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
@@ -128,8 +129,8 @@ func deleteGCBarrier(ctx context.Context, cli gc.GCStatesClient, barrierID strin
 		if err != nil {
 			errStr := err.Error()
 			if strings.Contains(errStr, "not leader") ||
-				strings.Contains(errStr, "DeadlineExceeded") ||
-				strings.Contains(errStr, "ErrEtcdTxnConflict") {
+				// strings.Contains(errStr, "ErrEtcdTxnConflict") ||
+				strings.Contains(errStr, "DeadlineExceeded") {
 				time.Sleep(time.Duration(rand.Intn(10)+60) * time.Millisecond)
 				continue
 			}
