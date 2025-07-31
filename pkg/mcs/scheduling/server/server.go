@@ -98,7 +98,7 @@ type Server struct {
 	service           *Service
 	checkMembershipCh chan struct{}
 
-	// primaryCallbacks will be called after the server becomes leader.
+	// primaryCallbacks will be called after the server becomes primary.
 	primaryCallbacks     []func(context.Context) error
 	primaryExitCallbacks []func()
 
@@ -222,7 +222,7 @@ func (s *Server) updatePDMemberLoop() {
 				}
 				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
-						log.Info("switch leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
 					}
 					curLeader = ep.ID
 					break
@@ -244,13 +244,13 @@ func (s *Server) primaryElectionLoop() {
 		default:
 		}
 
-		primary, checkAgain := s.participant.CheckLeader()
+		primary, checkAgain := s.participant.CheckPrimary()
 		if checkAgain {
 			continue
 		}
 		if primary != nil {
 			log.Info("start to watch the primary", zap.Stringer("scheduling-primary", primary))
-			// Watch will keep looping and never return unless the primary/leader has changed.
+			// Watch will keep looping and never return unless the primary has changed.
 			primary.Watch(s.serverLoopCtx)
 			log.Info("the scheduling primary has changed, try to re-campaign a primary")
 		}
@@ -263,19 +263,19 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
-				zap.Uint64("member-id", s.participant.ID()),
-				zap.String("cur-member-value", s.participant.MemberString()))
+				zap.Uint64("participant-id", s.participant.ID()),
+				zap.String("cur-participant-value", s.participant.ParticipantString()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		s.campaignLeader()
+		s.campaignPrimary()
 	}
 }
 
-func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
+func (s *Server) campaignPrimary() {
+	log.Info("start to campaign the primary", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
+	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-scheduling-primary-name", s.participant.Name()))
@@ -297,7 +297,7 @@ func (s *Server) campaignLeader() {
 	})
 
 	// maintain the leadership, after this, Scheduling could be ready to provide service.
-	s.participant.KeepLeader(ctx)
+	s.participant.GetLeadership().Keep(ctx)
 	log.Info("campaign scheduling primary ok", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
 
 	log.Info("triggering the primary callback functions")
@@ -335,7 +335,7 @@ func (s *Server) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if !s.participant.IsLeader() {
-				log.Info("no longer a primary/leader because lease has expired, the scheduling primary/leader will step down")
+				log.Info("no longer a primary because lease has expired, the scheduling primary will step down")
 				return
 			}
 		case <-ctx.Done():
@@ -379,7 +379,7 @@ func (s *Server) Close() {
 	log.Info("scheduling server is closed")
 }
 
-// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+// IsServing returns whether the server is the primary.
 func (s *Server) IsServing() bool {
 	return !s.IsClosed() && s.participant.IsLeader()
 }
@@ -389,12 +389,12 @@ func (s *Server) IsClosed() bool {
 	return s != nil && atomic.LoadInt64(&s.isRunning) == 0
 }
 
-// AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds callbacks when the server becomes the primary.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
-// AddServiceExitCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceExitCallback adds callbacks when the server becomes the primary.
 func (s *Server) AddServiceExitCallback(callbacks ...func()) {
 	s.primaryExitCallbacks = append(s.primaryExitCallbacks, callbacks...)
 }
@@ -443,7 +443,7 @@ func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
 	s.service.RegisterGRPCService(grpcServer)
 }
 
-// GetLeaderListenUrls gets service endpoints from the leader in election group.
+// GetLeaderListenUrls gets service endpoints from the primary in election group.
 func (s *Server) GetLeaderListenUrls() []string {
 	return s.participant.GetLeaderListenUrls()
 }

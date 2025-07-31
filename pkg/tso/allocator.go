@@ -229,7 +229,7 @@ func (a *Allocator) primaryElectionLoop() {
 		default:
 		}
 
-		primary, checkAgain := a.member.CheckLeader()
+		primary, checkAgain := a.member.(*member.Participant).CheckPrimary()
 		if checkAgain {
 			continue
 		}
@@ -252,7 +252,7 @@ func (a *Allocator) primaryElectionLoop() {
 		if len(expectedPrimary) > 0 && !strings.Contains(a.member.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of tso primary and check later", append(a.logFields,
 				zap.String("expected-primary-id", expectedPrimary),
-				zap.String("cur-member-value", a.member.MemberString()))...)
+				zap.String("cur-member-value", a.member.(*member.Participant).ParticipantString()))...)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -264,7 +264,7 @@ func (a *Allocator) primaryElectionLoop() {
 func (a *Allocator) campaignLeader() {
 	log.Info("start to campaign the primary", a.logFields...)
 	leaderLease := a.cfg.GetLeaderLease()
-	if err := a.member.CampaignLeader(a.ctx, leaderLease); err != nil {
+	if err := a.member.Campaign(a.ctx, leaderLease); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
 				a.logFields...)
@@ -289,7 +289,7 @@ func (a *Allocator) campaignLeader() {
 	})
 
 	// maintain the leadership, after this, TSO can be service.
-	a.member.KeepLeader(ctx)
+	a.member.GetLeadership().Keep(ctx)
 	log.Info("campaign tso primary ok", a.logFields...)
 
 	log.Info("initializing the tso allocator")
@@ -375,7 +375,7 @@ func (a *Allocator) isPrimaryElected() bool {
 	if a == nil || a.member == nil {
 		return false
 	}
-	return a.member.IsLeaderElected()
+	return a.member.(*member.Participant).IsPrimaryElected()
 }
 
 // GetExpectedPrimaryLease returns the expected primary lease.

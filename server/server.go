@@ -149,7 +149,7 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 
 	// for PD leader election.
-	member *member.EmbeddedEtcdMember
+	member *member.Member
 	// etcd client
 	client *clientv3.Client
 	// electionClient is used for leader election.
@@ -256,7 +256,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		persistOptions:                  config.NewPersistOptions(cfg),
 		serviceMiddlewareCfg:            serviceMiddlewareCfg,
 		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(serviceMiddlewareCfg),
-		member:                          &member.EmbeddedEtcdMember{},
+		member:                          &member.Member{},
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
@@ -838,7 +838,7 @@ func (s *Server) GetLeaderListenUrls() []string {
 }
 
 // GetMember returns the member of server.
-func (s *Server) GetMember() *member.EmbeddedEtcdMember {
+func (s *Server) GetMember() *member.Member {
 	return s.member
 }
 
@@ -1661,7 +1661,7 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign PD leader", zap.String("campaign-leader-name", s.Name()))
-	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
+	if err := s.member.Campaign(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign PD leader meets error due to txn conflict, another PD may campaign successfully",
 				zap.String("campaign-leader-name", s.Name()))
@@ -1685,7 +1685,7 @@ func (s *Server) campaignLeader() {
 	})
 
 	// maintain the PD leadership, after this, TSO can be service.
-	s.member.KeepLeader(ctx)
+	s.member.GetLeadership().Keep(ctx)
 	log.Info("campaign PD leader ok", zap.String("campaign-leader-name", s.Name()))
 
 	if err := s.reloadConfigFromKV(); err != nil {
@@ -1982,7 +1982,7 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := mcs.TSOServiceName
-	tsoServicePrimaryKey := keypath.LeaderPath(&keypath.MsParam{
+	tsoServicePrimaryKey := keypath.ElectionPath(&keypath.MsParam{
 		ServiceName: mcs.TSOServiceName,
 		GroupID:     constant.DefaultKeyspaceGroupID,
 	})
@@ -1992,7 +1992,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := mcs.SchedulingServiceName
-	primaryKey := keypath.LeaderPath(&keypath.MsParam{
+	primaryKey := keypath.ElectionPath(&keypath.MsParam{
 		ServiceName: mcs.SchedulingServiceName,
 	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)

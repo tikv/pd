@@ -20,29 +20,29 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
-// LeaderPath returns the leader path.
-func LeaderPath(p *MsParam) string {
+// ElectionPath returns the election path.
+func ElectionPath(p *MsParam) string {
 	if p == nil || p.ServiceName == "" {
 		return fmt.Sprintf(leaderPathFormat, ClusterID())
 	}
 	if p.ServiceName == constant.TSOServiceName {
 		if p.GroupID == 0 {
-			return fmt.Sprintf(msTsoDefaultLeaderPathFormat, ClusterID())
+			return fmt.Sprintf(msTsoDefaultPrimaryPathFormat, ClusterID())
 		}
-		return fmt.Sprintf(msTsoKespaceLeaderPathFormat, ClusterID(), p.GroupID)
+		return fmt.Sprintf(msTsoKespacePrimaryPathFormat, ClusterID(), p.GroupID)
 	}
-	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), p.ServiceName)
+	return fmt.Sprintf(msPrimaryPathFormat, ClusterID(), p.ServiceName)
 }
 
 // ExpectedPrimaryPath returns the expected_primary path.
 func ExpectedPrimaryPath(p *MsParam) string {
 	if p.ServiceName == constant.TSOServiceName {
 		if p.GroupID == 0 {
-			return fmt.Sprintf(msTsoDefaultExpectedLeaderPathFormat, ClusterID())
+			return fmt.Sprintf(msTsoDefaultExpectedPrimaryPathFormat, ClusterID())
 		}
-		return fmt.Sprintf(msTsoKespaceExpectedLeaderPathFormat, ClusterID(), p.GroupID)
+		return fmt.Sprintf(msTsoKespaceExpectedPrimaryPathFormat, ClusterID(), p.GroupID)
 	}
-	return fmt.Sprintf(msExpectedLeaderPathFormat, ClusterID(), p.ServiceName)
+	return fmt.Sprintf(msExpectedPrimaryPathFormat, ClusterID(), p.ServiceName)
 }
 
 // MemberLeaderPriorityPath returns the member leader priority path.

@@ -16,7 +16,6 @@ package member
 
 import (
 	"context"
-	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -33,8 +32,6 @@ type ElectionMember interface {
 	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string
-	// MemberString returns the member value as a string.
-	MemberString() string
 	// GetMember returns the current member
 	GetMember() any
 	// Client returns the etcd client.
@@ -42,31 +39,31 @@ type ElectionMember interface {
 	// IsLeader returns whether the participant is the leader or not by checking its
 	// leadership's lease and leader info.
 	IsLeader() bool
-	// IsLeaderElected returns true if the leader exists; otherwise false.
-	IsLeaderElected() bool
-	// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
-	// otherwise returns a bool which indicates if it is needed to check later.
-	CheckLeader() (leader ElectionLeader, checkAgain bool)
 	// EnableLeader declares the member itself to be the leader.
 	EnableLeader()
-	// KeepLeader is used to keep the leader's leadership.
-	KeepLeader(ctx context.Context)
-	// CampaignLeader is used to campaign the leadership and make it become a leader in an election group.
-	CampaignLeader(ctx context.Context, leaseTimeout int64) error
+	// Campaign is used to campaign the leadership and make it become a leader or primary in an election group.
+	Campaign(ctx context.Context, leaseTimeout int64) error
 	// ResetLeader is used to reset the member's current leadership.
 	// Basically it will reset the leader lease and unset leader info.
 	ResetLeader()
 	// GetLeaderListenUrls returns current leader's listen urls
 	// The first element is the leader/primary url
 	GetLeaderListenUrls() []string
-	// GetLeaderID returns current leader's member ID.
-	GetLeaderID() uint64
-	// GetLeaderPath returns the path of the leader.
-	GetLeaderPath() string
+	// GetElectionPath returns the path of the election. for PD it's the leader path, for microservices it's the primary path.
+	GetElectionPath() string
 	// GetLeadership returns the leadership of the election member.
 	GetLeadership() *election.Leadership
-	// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
-	GetLastLeaderUpdatedTime() time.Time
-	// PreCheckLeader does some pre-check before checking whether it's the leader.
-	PreCheckLeader() error
+}
+
+// ElectionLeader defines the common interface of the leader, which is the pdpb.Member
+// for in PD or the tsopb.Participant in the microservices.
+type ElectionLeader interface {
+	// GetListenUrls returns the listen urls
+	GetListenUrls() []string
+	// GetRevision the revision of the leader in etcd
+	GetRevision() int64
+	// String declares fmt.Stringer
+	String() string
+	// Watch on itself, the leader in the election group
+	Watch(context.Context)
 }

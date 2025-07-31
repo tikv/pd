@@ -295,7 +295,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 	for range 3 {
 		svr := <-ch
 		suite.svrs[svr.GetAddr()] = svr
-		suite.leaderPath = svr.GetMember().GetLeaderPath()
+		suite.leaderPath = svr.GetMember().GetElectionPath()
 	}
 }
 
