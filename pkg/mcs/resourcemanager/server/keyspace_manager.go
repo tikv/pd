@@ -117,21 +117,38 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	if ok {
 		return
 	}
+
+	var (
+		fillRate     uint64 = UnlimitedRate
+		burstLimit   int64  = UnlimitedBurstLimit
+		serviceLimit        = krgm.getServiceLimiter().getServiceLimit()
+	)
+	// If there is a service limit set, ensure the default resource group has a reasonable fill rate initially.
+	if serviceLimit > 0 {
+		fillRate = uint64(serviceLimit)
+		// Busrt limit will be handled by the `invalidateBurstability` method during the actual initialization.
+	}
 	defaultGroup := &ResourceGroup{
 		Name: DefaultResourceGroupName,
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &RequestUnitSettings{
 			RU: &GroupTokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   UnlimitedRate,
-					BurstLimit: UnlimitedBurstLimit,
+					FillRate:   fillRate,
+					BurstLimit: burstLimit,
 				},
 			},
 		},
 		Priority: middlePriority,
 	}
 	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
-		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
+		log.Warn("init default group failed",
+			zap.Uint32("keyspace-id", krgm.keyspaceID),
+			zap.Uint64("fill-rate", fillRate),
+			zap.Int64("burst-limit", burstLimit),
+			zap.Float64("service-limit", serviceLimit),
+			zap.Error(err),
+		)
 	}
 }
 
@@ -268,6 +285,48 @@ func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) 
 		krgm.cleanupOverrides()
 	} else {
 		krgm.invalidateBurstability(serviceLimit)
+	}
+	// Update default resource group constraints when service limit is set.
+	krgm.updateDefaultResourceGroupWithServiceLimit(serviceLimit)
+}
+
+func (krgm *keyspaceResourceGroupManager) updateDefaultResourceGroupWithServiceLimit(serviceLimit float64) {
+	// If the service limit is not set, revert the fill rate setting of the default resource group.
+	if serviceLimit <= 0 {
+		// TODO: should consider whether the default group has been manually modified. If it has been
+		// modified by the user, then it should not be restored. However, given that there are currently
+		// no scenarios where the service limit is turned off, this is temporarily implemented as NOOP.
+		return
+	}
+
+	krgm.RLock()
+	defaultGroup, ok := krgm.groups[DefaultResourceGroupName]
+	krgm.RUnlock()
+	if !ok {
+		return
+	}
+	// If the unlimited settings are changed, skip the update.
+	if defaultGroup.getFillRate(true) != UnlimitedRate || defaultGroup.getBurstLimit(true) != UnlimitedBurstLimit {
+		return
+	}
+	// Update the fill rate setting of the default resource group to the service limit.
+	defaultGroup.RUSettings.RU.setFillRateSetting(uint64(serviceLimit))
+	// Modify and persist the default resource group.
+	if err := krgm.modifyResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
+		log.Warn("failed to update default resource group with service limit",
+			zap.Uint32("keyspace-id", krgm.keyspaceID),
+			zap.Float64("service-limit", serviceLimit),
+			zap.Float64("fill-rate", defaultGroup.getFillRate(true)),
+			zap.Int64("burst-limit", defaultGroup.getBurstLimit(true)),
+			zap.Error(err),
+		)
+	} else {
+		log.Info("update default resource group with service limit",
+			zap.Uint32("keyspace-id", krgm.keyspaceID),
+			zap.Float64("service-limit", serviceLimit),
+			zap.Float64("fill-rate", defaultGroup.getFillRate(true)),
+			zap.Int64("burst-limit", defaultGroup.getBurstLimit(true)),
+		)
 	}
 }
 
