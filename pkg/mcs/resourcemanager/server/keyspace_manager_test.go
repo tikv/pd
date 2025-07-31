@@ -57,6 +57,58 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
 }
 
+func TestInitDefaultResourceGroupWithServiceLimit(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	re.NotNil(krgm)
+	re.Equal(uint32(1), krgm.keyspaceID)
+	re.Empty(krgm.groups)
+
+	// Set the service limit to 1000.
+	krgm.setServiceLimit(1000)
+	serviceLimit := krgm.getServiceLimiter().getServiceLimit()
+	re.Equal(1000.0, serviceLimit)
+
+	// Initialize the default resource group.
+	krgm.initDefaultResourceGroup()
+
+	// Verify the settings of the default resource group.
+	defaultGroup, exists := krgm.groups[DefaultResourceGroupName]
+	re.True(exists)
+	re.Equal(1000.0, defaultGroup.getFillRate())
+	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
+}
+
+func TestServiceLimitUpdateDefaultResourceGroup(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	re.NotNil(krgm)
+	re.Equal(uint32(1), krgm.keyspaceID)
+	re.Empty(krgm.groups)
+
+	// Initialize the default resource group.
+	krgm.initDefaultResourceGroup()
+
+	// Verify the settings of the default resource group before setting the service limit.
+	defaultGroup, exists := krgm.groups[DefaultResourceGroupName]
+	re.True(exists)
+	re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
+	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
+
+	// Set the service limit to 1000.
+	krgm.setServiceLimit(1000)
+	serviceLimit := krgm.getServiceLimiter().getServiceLimit()
+	re.Equal(1000.0, serviceLimit)
+
+	// Verify the settings of the default resource group after setting the service limit.
+	defaultGroup, exists = krgm.groups[DefaultResourceGroupName]
+	re.True(exists)
+	re.Equal(1000.0, defaultGroup.getFillRate())
+	re.Equal(int64(1000), defaultGroup.getBurstLimit())
+}
+
 func TestAddResourceGroup(t *testing.T) {
 	re := require.New(t)
 
