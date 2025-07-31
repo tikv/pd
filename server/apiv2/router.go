@@ -56,8 +56,13 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	root.Use(middlewares.Redirector())
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
+<<<<<<< HEAD
 	handlers.RegisterMicroService(root)
 	root.Use(middlewares.AffinityMicroserviceRedirector())
 	handlers.RegisterAffinity(root)
+=======
+	handlers.RegisterMicroservice(root)
+	handlers.RegisterMaintenance(root)
+>>>>>>> 01d96415c6 (maintenance: implement PD maintenance endpoints to serialize TiKV maintenance operations (#9478))
 	return router, group, nil
 }
