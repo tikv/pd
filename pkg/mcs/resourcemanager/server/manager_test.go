@@ -408,6 +408,16 @@ func TestResourceGroupPersistence(t *testing.T) {
 	re.Equal(group.Name, rg.Name)
 	re.Equal(group.Mode, rg.Mode)
 	re.Equal(group.Priority, rg.Priority)
+	// Check the default resource group is loaded from the storage.
+	rg, err = m.GetResourceGroup(keyspaceID, DefaultResourceGroupName, true)
+	re.NoError(err)
+	re.NotNil(rg)
+	re.Equal(DefaultResourceGroupName, rg.Name)
+	re.Equal(rmpb.GroupMode_RUMode, rg.Mode)
+	re.Equal(uint32(middlePriority), rg.Priority)
+	// Should be limited by the service limit.
+	re.Equal(100.0, rg.getFillRate())
+	re.Equal(int64(100), rg.getBurstLimit())
 	// Check the service limit is loaded from the storage.
 	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
 	re.NotNil(limiter)
