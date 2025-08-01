@@ -234,7 +234,7 @@ func GetHealth(c *gin.Context) {
 		return
 	}
 
-	c.String(http.StatusInternalServerError, "no leader elected")
+	c.String(http.StatusInternalServerError, "no primary elected")
 }
 
 // KeyspaceGroupMember contains the keyspace group and its member information.

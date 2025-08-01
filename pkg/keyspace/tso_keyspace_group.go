@@ -892,6 +892,10 @@ func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, prior
 		return err
 	}
 	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	log.Info("set priority for keyspace group",
+		zap.Uint32("keyspace-group-id", id),
+		zap.String("node", node),
+		zap.Int("priority", priority))
 	return nil
 }
 

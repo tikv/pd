@@ -85,9 +85,9 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		BackendEndpoints:          suite.backendEndpoints,
 		ListenAddr:                addr,
 		AdvertiseListenAddr:       addr,
-		LeaderLease:               mcs.DefaultLeaderLease,
+		LeaderLease:               mcs.DefaultLease,
 		TSOUpdatePhysicalInterval: 50 * time.Millisecond,
-		TSOSaveInterval:           time.Duration(mcs.DefaultLeaderLease) * time.Second,
+		TSOSaveInterval:           time.Duration(mcs.DefaultLease) * time.Second,
 		MaxResetTSGap:             time.Hour * 24,
 		TLSConfig:                 nil,
 	}
@@ -166,9 +166,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	allocator, err := kgm.GetAllocator(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, allocator.keyspaceGroupID)
-	re.Equal(mcs.DefaultLeaderLease, allocator.cfg.GetLeaderLease())
+	re.Equal(mcs.DefaultLease, allocator.cfg.GetLease())
 	re.Equal(time.Hour*24, allocator.cfg.GetMaxResetTSGap())
-	re.Equal(time.Duration(mcs.DefaultLeaderLease)*time.Second, allocator.cfg.GetTSOSaveInterval())
+	re.Equal(time.Duration(mcs.DefaultLease)*time.Second, allocator.cfg.GetTSOSaveInterval())
 	re.Equal(time.Duration(50)*time.Millisecond, allocator.cfg.GetTSOUpdatePhysicalInterval())
 }
 

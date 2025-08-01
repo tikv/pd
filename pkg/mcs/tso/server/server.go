@@ -196,8 +196,7 @@ func (s *Server) Close() {
 	log.Info("tso server is closed")
 }
 
-// IsServing implements basicserver. It returns whether the server is the leader
-// if there is embedded etcd, or the primary otherwise.
+// IsServing implements basicserver.
 func (s *Server) IsServing() bool {
 	keyspaceID := keyspace.GetBootstrapKeyspaceID()
 	return s.IsKeyspaceServingByGroup(keyspaceID, constant.DefaultKeyspaceGroupID)

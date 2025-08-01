@@ -48,20 +48,20 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) s
 	return string(primary)
 }
 
-// leaderData is used to store the leader data.
+// primaryData is used to store the primary data.
 // The raw value is used to write to etcd, while the output string is used for logging and debugging purposes.
-type leaderData struct {
+type primaryData struct {
 	raw    string
 	output string
 }
 
 // markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, leader *leaderData, leaseID clientv3.LeaseID) (int64, error) {
+func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, primary *primaryData, leaseID clientv3.LeaseID) (int64, error) {
 	path := keypath.ExpectedPrimaryPath(msParam)
-	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("leader", leader.output))
+	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("primary", primary.output))
 	// write a flag to indicate the expected primary.
 	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(path, leader.raw, clientv3.WithLease(leaseID))).
+		Then(clientv3.OpPut(path, primary.raw, clientv3.WithLease(leaseID))).
 		Commit()
 	if err != nil || !resp.Succeeded {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
@@ -74,7 +74,7 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 // We use lease to keep `expected primary` healthy.
 // ONLY reset by the following conditions:
 // - changed by `{service}/primary/transfer` API.
-// - leader lease expired.
+// - primary lease expired.
 // ONLY primary called this function.
 func KeepExpectedPrimaryAlive(
 	ctx context.Context,
@@ -90,11 +90,11 @@ func KeepExpectedPrimaryAlive(
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
 	}
-	leader := &leaderData{
+	primary := &primaryData{
 		raw:    m.MemberValue(),
 		output: m.ParticipantString(),
 	}
-	revision, err := markExpectedPrimaryFlag(cli, msParam, leader, lease.ID.Load().(clientv3.LeaseID))
+	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
 		return nil, err
@@ -115,7 +115,7 @@ func watchExpectedPrimary(ctx context.Context,
 	expectedPrimary.SetPrimaryWatch(true)
 	// ONLY exited watch by the following conditions:
 	// - changed by `{service}/primary/transfer` API.
-	// - leader lease expired.
+	// - primary lease expired.
 	expectedPrimary.Watch(ctx, revision)
 	expectedPrimary.Reset()
 	defer log.Info("primary exit the primary watch loop")
@@ -163,7 +163,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 	nextPrimaryID := r.Intn(len(primaryIDs))
 
 	// update expected primary flag
-	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLeaderLease)
+	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLease)
 	if err != nil {
 		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
 	}
@@ -177,11 +177,11 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		ServiceName: serviceName,
 		GroupID:     keyspaceGroupID,
 	}
-	leader := &leaderData{
+	primary := &primaryData{
 		raw:    primaryIDs[nextPrimaryID],
 		output: primaryIDs[nextPrimaryID],
 	}
-	_, err = markExpectedPrimaryFlag(client, msParam, leader, grantResp.ID)
+	_, err = markExpectedPrimaryFlag(client, msParam, primary, grantResp.ID)
 	if err != nil {
 		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}

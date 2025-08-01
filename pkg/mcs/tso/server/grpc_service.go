@@ -93,7 +93,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		}
 
 		start := time.Now()
-		// TSO uses leader lease to determine validity. No need to check leader here.
+		// TSO uses lease to determine validity. No need to check primary here.
 		if s.IsClosed() {
 			return errs.ErrNotStarted
 		}

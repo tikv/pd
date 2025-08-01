@@ -55,8 +55,8 @@ func (c *TestServiceConfig) GetAdvertiseListenAddr() string {
 	return c.AdvertiseListenAddr
 }
 
-// GetLeaderLease returns the LeaderLease field of TestServiceConfig.
-func (c *TestServiceConfig) GetLeaderLease() int64 {
+// GetLease returns the LeaderLease field of TestServiceConfig.
+func (c *TestServiceConfig) GetLease() int64 {
 	return c.LeaderLease
 }
 

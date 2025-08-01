@@ -2084,9 +2084,9 @@ func (s *Server) GetTSOProxyRecvFromClientTimeout() time.Duration {
 	return s.cfg.GetTSOProxyRecvFromClientTimeout()
 }
 
-// GetLeaderLease returns the leader lease.
-func (s *Server) GetLeaderLease() int64 {
-	return s.cfg.GetLeaderLease()
+// GetLease returns the leader lease.
+func (s *Server) GetLease() int64 {
+	return s.cfg.GetLease()
 }
 
 // GetTSOSaveInterval returns TSO save interval.

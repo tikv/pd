@@ -36,8 +36,10 @@ const (
 	DefaultLogLevel = "info"
 	// DefaultDisableErrorVerbose is the default value of DisableErrorVerbose
 	DefaultDisableErrorVerbose = true
-	// DefaultLeaderLease is the default value of LeaderLease
-	DefaultLeaderLease = int64(5)
+	// DefaultLease is the default value of lease
+	DefaultLease = int64(5)
+	// PrimaryTickInterval is the interval to check primary
+	PrimaryTickInterval = 50 * time.Millisecond
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
 

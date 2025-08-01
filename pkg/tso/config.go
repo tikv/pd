@@ -36,8 +36,8 @@ type ServiceConfig interface {
 
 // Config is used to provide TSO configuration.
 type Config interface {
-	// GetLeaderLease returns the leader lease.
-	GetLeaderLease() int64
+	// GetLease returns the lease.
+	GetLease() int64
 	// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 	GetTSOUpdatePhysicalInterval() time.Duration
 	// GetTSOSaveInterval returns TSO save interval.
