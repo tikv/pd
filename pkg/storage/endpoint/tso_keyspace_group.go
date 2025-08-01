@@ -74,7 +74,7 @@ func IsUserKindValid(kind string) bool {
 	}
 }
 
-// KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
+// KeyspaceGroupMember defines an member which campaigns for the primary of the keyspace group.
 // Its `Priority` is used in keyspace group primary weighted-election to balance primaries' distribution.
 // Among multiple replicas of a keyspace group, the higher the priority, the more likely
 // the replica is to be elected as primary.

@@ -389,7 +389,7 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 
 // IsLeader return true if this server is leader
 func (h *Handler) IsLeader() bool {
-	return h.s.member.IsLeader()
+	return h.s.member.IsServing()
 }
 
 // GetHistoryHotRegions get hot region info in HistoryHotRegion form.

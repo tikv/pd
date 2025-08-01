@@ -147,7 +147,7 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 	suite.requestTSOConcurrently()
 	// Test TSO after the leader change
-	suite.pdLeaderServer.GetServer().GetMember().ResetLeader()
+	suite.pdLeaderServer.GetServer().GetMember().Resign()
 	suite.cluster.WaitLeader()
 	suite.requestTSOConcurrently()
 }

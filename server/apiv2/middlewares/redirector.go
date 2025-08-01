@@ -38,7 +38,7 @@ func Redirector() gin.HandlerFunc {
 			return
 		}
 		allowFollowerHandle := len(c.Request.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
-		if allowFollowerHandle || svr.GetMember().IsLeader() {
+		if allowFollowerHandle || svr.GetMember().IsServing() {
 			c.Next()
 			return
 		}
