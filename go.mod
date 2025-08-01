@@ -1,6 +1,8 @@
 module github.com/tikv/pd
 
-go 1.21
+go 1.23.0
+
+toolchain go1.23.11
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
@@ -42,7 +44,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20250526075340-5030ed622c15
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20250714160803-c7c768954455
+	github.com/pingcap/tidb-dashboard v0.0.0-20250801082640-fe57e65e2348
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.55.0
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -62,12 +64,14 @@ require (
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.24.0
 	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a
-	golang.org/x/text v0.21.0
+	golang.org/x/text v0.23.0
 	golang.org/x/time v0.1.0
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d
 	google.golang.org/grpc v1.59.0
 	gotest.tools/gotestsum v1.7.0
 )
+
+require github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
@@ -191,14 +195,14 @@ require (
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
-	golang.org/x/crypto v0.24.0 // indirect
-	golang.org/x/image v0.5.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/oauth2 v0.21.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.22.0 // indirect
-	golang.org/x/term v0.21.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
 	google.golang.org/genproto v0.0.0-20230822172742-b8732ec3820d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230822172742-b8732ec3820d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect

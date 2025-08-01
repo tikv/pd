@@ -1,6 +1,8 @@
 module github.com/tikv/pd/tests/integrations/tso
 
-go 1.21
+go 1.23.0
+
+toolchain go1.23.11
 
 replace (
 	github.com/tikv/pd => ../../../
@@ -81,6 +83,7 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
@@ -122,7 +125,7 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20250714160803-c7c768954455 // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20250801082640-fe57e65e2348 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -167,14 +170,14 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
-	golang.org/x/crypto v0.24.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
-	golang.org/x/image v0.5.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/oauth2 v0.21.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.22.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/image v0.18.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/time v0.1.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/genproto v0.0.0-20230822172742-b8732ec3820d // indirect
