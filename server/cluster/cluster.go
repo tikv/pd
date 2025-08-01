@@ -320,12 +320,6 @@ func (c *RaftCluster) InitCluster(
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
 	c.keyRangeManager = keyrange.NewManager()
-	if c.opt.IsPlacementRulesEnabled() {
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
-		if err != nil {
-			return err
-		}
-	}
 	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
 }
@@ -370,6 +364,12 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	if cluster == nil {
 		log.Warn("cluster is not bootstrapped")
 		return nil
+	}
+	if c.opt.IsPlacementRulesEnabled() {
+		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
+		if err != nil {
+			return err
+		}
 	}
 
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
