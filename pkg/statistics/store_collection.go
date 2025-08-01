@@ -32,16 +32,44 @@ const (
 	labelType = "label"
 )
 
+var (
+	// tikv status counters.
+	tikvUpCounter          = clusterStatusGauge.WithLabelValues("store_up_count", "tikv")
+	tikvDiconnectedCounter = clusterStatusGauge.WithLabelValues("store_disconnected_count", "tikv")
+	tikvDownCounter        = clusterStatusGauge.WithLabelValues("store_down_count", "tikv")
+	TikvUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tikv")
+	tikvOfflinepCounter    = clusterStatusGauge.WithLabelValues("store_offline_count", "tikv")
+	tikvTombstoneCounter   = clusterStatusGauge.WithLabelValues("store_tombstone_count", "tikv")
+	tikvLowSpaceCounter    = clusterStatusGauge.WithLabelValues("store_low_space_count", "tikv")
+	tikvPreparingCounter   = clusterStatusGauge.WithLabelValues("store_preparing_count", "tikv")
+	tikvServingCounter     = clusterStatusGauge.WithLabelValues("store_serving_count", "tikv")
+	tikvRemovingCounter    = clusterStatusGauge.WithLabelValues("store_removing_count", "tikv")
+	tikvRemovedCounter     = clusterStatusGauge.WithLabelValues("store_removed_count", "tikv")
+
+	// tiflash status counters.
+	tiflashUpCounter          = clusterStatusGauge.WithLabelValues("store_up_count", "tiflash")
+	tiflashDiconnectedCounter = clusterStatusGauge.WithLabelValues("store_disconnected_count", "tiflash")
+	tiflashDownCounter        = clusterStatusGauge.WithLabelValues("store_down_count", "tiflash")
+	TiflashUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tiflash")
+	tiflashOfflinepCounter    = clusterStatusGauge.WithLabelValues("store_offline_count", "tiflash")
+	tiflashTombstoneCounter   = clusterStatusGauge.WithLabelValues("store_tombstone_count", "tiflash")
+	tiflashLowSpaceCounter    = clusterStatusGauge.WithLabelValues("store_low_space_count", "tiflash")
+	tiflashPreparingCounter   = clusterStatusGauge.WithLabelValues("store_preparing_count", "tiflash")
+	tiflashServingCounter     = clusterStatusGauge.WithLabelValues("store_serving_count", "tiflash")
+	tiflashRemovingCounter    = clusterStatusGauge.WithLabelValues("store_removing_count", "tiflash")
+	tiflashRemovedCounter     = clusterStatusGauge.WithLabelValues("store_removed_count", "tiflash")
+
+	// Store status metrics.
+	storeRegionCountGauge     = storeStatusGauge.WithLabelValues("region_count")
+	storeLeaderCountGauge     = storeStatusGauge.WithLabelValues("leader_count")
+	storeWitnessCountGauge    = storeStatusGauge.WithLabelValues("witness_count")
+	storeLearnerCountGauge    = storeStatusGauge.WithLabelValues("learner_count")
+	storeStorageSizeGauge     = storeStatusGauge.WithLabelValues("storage_size")
+	storeStorageCapacityGauge = storeStatusGauge.WithLabelValues("storage_capacity")
+)
+
 type storeStatistics struct {
 	opt             config.ConfProvider
-	Up              int
-	Disconnect      int
-	Unhealthy       int
-	Down            int
-	Offline         int
-	Tombstone       int
-	LowSpace        int
-	Slow            int
 	StorageSize     uint64
 	StorageCapacity uint64
 	RegionCount     int
@@ -49,33 +77,28 @@ type storeStatistics struct {
 	LearnerCount    int
 	WitnessCount    int
 	LabelCounter    map[string][]uint64
-	Preparing       int
-	Serving         int
-	Removing        int
-	Removed         int
+
+	tiflash *storeStatusStatistics
+	tikv    *storeStatusStatistics
 }
 
-func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
-	return &storeStatistics{
-		opt:          opt,
-		LabelCounter: make(map[string][]uint64),
-	}
+type storeStatusStatistics struct {
+	opt        config.ConfProvider
+	Up         int
+	Disconnect int
+	Unhealthy  int
+	Down       int
+	Offline    int
+	Tombstone  int
+	LowSpace   int
+	Slow       int
+	Preparing  int
+	Serving    int
+	Removing   int
+	Removed    int
 }
 
-func (s *storeStatistics) observe(store *core.StoreInfo) {
-	for _, k := range s.opt.GetLocationLabels() {
-		v := store.GetLabelValue(k)
-		if v == "" {
-			v = unknown
-		}
-		key := fmt.Sprintf("%s:%s", k, v)
-		// exclude tombstone
-		if !store.IsRemoved() {
-			s.LabelCounter[key] = append(s.LabelCounter[key], store.GetID())
-		}
-	}
-	storeAddress := store.GetAddress()
-	id := strconv.FormatUint(store.GetID(), 10)
+func (s *storeStatusStatistics) observe(store *core.StoreInfo) {
 	// Store state.
 	isDown := false
 	switch store.GetNodeState() {
@@ -105,10 +128,40 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 		s.Removed++
 		return
 	}
-
 	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
 		s.LowSpace++
 	}
+}
+
+func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
+	return &storeStatistics{
+		opt:          opt,
+		LabelCounter: make(map[string][]uint64),
+	}
+}
+
+func (s *storeStatistics) observe(store *core.StoreInfo) {
+	for _, k := range s.opt.GetLocationLabels() {
+		v := store.GetLabelValue(k)
+		if v == "" {
+			v = unknown
+		}
+		key := fmt.Sprintf("%s:%s", k, v)
+		// exclude tombstone
+		if !store.IsRemoved() {
+			s.LabelCounter[key] = append(s.LabelCounter[key], store.GetID())
+		}
+	}
+	storeAddress := store.GetAddress()
+	id := strconv.FormatUint(store.GetID(), 10)
+	// Store state.
+	var statistics *storeStatusStatistics
+	if store.IsTiFlash() {
+		statistics = s.tiflash
+	} else {
+		statistics = s.tiflash
+	}
+	statistics.observe(store)
 
 	// Store stats.
 	s.StorageSize += store.StorageSize()
@@ -183,29 +236,39 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 func (s *storeStatistics) collect() {
 	placementStatusGauge.Reset()
 
-	metrics := make(map[string]float64)
-	metrics["store_up_count"] = float64(s.Up)
-	metrics["store_disconnected_count"] = float64(s.Disconnect)
-	metrics["store_down_count"] = float64(s.Down)
-	metrics["store_unhealth_count"] = float64(s.Unhealthy)
-	metrics["store_offline_count"] = float64(s.Offline)
-	metrics["store_tombstone_count"] = float64(s.Tombstone)
-	metrics["store_low_space_count"] = float64(s.LowSpace)
-	metrics["store_slow_count"] = float64(s.Slow)
-	metrics["store_preparing_count"] = float64(s.Preparing)
-	metrics["store_serving_count"] = float64(s.Serving)
-	metrics["store_removing_count"] = float64(s.Removing)
-	metrics["store_removed_count"] = float64(s.Removed)
-	metrics["region_count"] = float64(s.RegionCount)
-	metrics["leader_count"] = float64(s.LeaderCount)
-	metrics["witness_count"] = float64(s.WitnessCount)
-	metrics["learner_count"] = float64(s.LearnerCount)
-	metrics["storage_size"] = float64(s.StorageSize)
-	metrics["storage_capacity"] = float64(s.StorageCapacity)
+	// tikv store status metrics.
+	tikvUpCounter.Set(float64(s.tikv.Up))
+	tikvDiconnectedCounter.Set(float64(s.tikv.Disconnect))
+	tikvDownCounter.Set(float64(s.tikv.Down))
+	TikvUnhealthCounter.Set(float64(s.tikv.Unhealthy))
+	tikvOfflinepCounter.Set(float64(s.tikv.Offline))
+	tikvTombstoneCounter.Set(float64(s.tikv.Tombstone))
+	tikvLowSpaceCounter.Set(float64(s.tikv.LowSpace))
+	tikvPreparingCounter.Set(float64(s.tikv.Preparing))
+	tikvServingCounter.Set(float64(s.tikv.Serving))
+	tikvRemovingCounter.Set(float64(s.tikv.Removing))
+	tikvRemovedCounter.Set(float64(s.tikv.Removed))
 
-	for typ, value := range metrics {
-		clusterStatusGauge.WithLabelValues(typ).Set(value)
-	}
+	// tiflash store status metrics.
+	tiflashUpCounter.Set(float64(s.tiflash.Up))
+	tiflashDiconnectedCounter.Set(float64(s.tiflash.Disconnect))
+	tiflashDownCounter.Set(float64(s.tiflash.Down))
+	TiflashUnhealthCounter.Set(float64(s.tiflash.Unhealthy))
+	tiflashOfflinepCounter.Set(float64(s.tiflash.Offline))
+	tiflashTombstoneCounter.Set(float64(s.tiflash.Tombstone))
+	tiflashLowSpaceCounter.Set(float64(s.tiflash.LowSpace))
+	tiflashPreparingCounter.Set(float64(s.tiflash.Preparing))
+	tiflashServingCounter.Set(float64(s.tiflash.Serving))
+	tiflashRemovingCounter.Set(float64(s.tiflash.Removing))
+	tiflashRemovedCounter.Set(float64(s.tiflash.Removed))
+
+	// Store status metrics.
+	storeRegionCountGauge.Set(float64(s.RegionCount))
+	storeLeaderCountGauge.Set(float64(s.LeaderCount))
+	storeWitnessCountGauge.Set(float64(s.WitnessCount))
+	storeLearnerCountGauge.Set(float64(s.LearnerCount))
+	storeStorageSizeGauge.Set(float64(s.StorageSize))
+	storeStorageCapacityGauge.Set(float64(s.StorageCapacity))
 
 	// Current scheduling configurations of the cluster
 	configs := make(map[string]float64)
