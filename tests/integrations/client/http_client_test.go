@@ -396,7 +396,7 @@ func (suite *httpClientTestSuite) TestRule() {
 	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
 	re.Error(err)
 	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
-	_ = suite.setStoreLabels(ctx, re, map[string]string{
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
 		"$mode": "readonly",
 	})
 	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
@@ -405,6 +405,10 @@ func (suite *httpClientTestSuite) TestRule() {
 
 	suite.transferLeader(ctx, re)
 	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "$mode"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
