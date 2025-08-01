@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -39,10 +38,6 @@ import (
 )
 
 const maxScheduleRetries = 10
-
-var (
-	denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
-)
 
 // Controller is used to manage all schedulers.
 type Controller struct {
@@ -512,7 +507,6 @@ retry:
 			// If the evict-leader-scheduler is disabled, it will obstruct the restart operation of tikv by the operator.
 			// Refer: https://docs.pingcap.com/tidb-in-kubernetes/stable/restart-a-tidb-cluster#perform-a-graceful-restart-to-a-single-tikv-pod
 			if labelMgr.ScheduleDisabled(region) && !isEvictLeaderScheduler {
-				denySchedulersByLabelerCounter.Inc()
 				ops = append(ops[:i], ops[i+1:]...)
 				i--
 			}

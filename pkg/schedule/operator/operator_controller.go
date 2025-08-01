@@ -558,13 +558,12 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			continue
 		}
 		limit := store.GetStoreLimit()
-		for n, v := range storelimit.TypeNameValue {
+		for _, v := range storelimit.TypeNameValue {
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
 			limit.Take(stepCost, v, op.GetPriorityLevel())
-			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
 
