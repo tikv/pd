@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -46,14 +45,49 @@ func TestOperatorTestSuite(t *testing.T) {
 }
 
 func (suite *operatorTestSuite) SetupSuite() {
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, _ string) {
-			conf.Replication.MaxReplicas = 1
-		})
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *operatorTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+}
+
+func (suite *operatorTestSuite) SetupTest() {
+	re := suite.Require()
+	suite.env.RunFunc(func(cluster *tests.TestCluster) {
+		pauseAllCheckers(re, cluster)
+		stores := []*metapb.Store{
+			{
+				Id:            1,
+				State:         metapb.StoreState_Up,
+				NodeState:     metapb.NodeState_Serving,
+				LastHeartbeat: time.Now().UnixNano(),
+				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "1"}},
+			},
+			{
+				Id:            2,
+				State:         metapb.StoreState_Up,
+				NodeState:     metapb.NodeState_Serving,
+				LastHeartbeat: time.Now().UnixNano(),
+				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "2"}},
+			},
+			{
+				Id:            3,
+				State:         metapb.StoreState_Up,
+				NodeState:     metapb.NodeState_Serving,
+				LastHeartbeat: time.Now().UnixNano(),
+				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "3"}},
+			},
+		}
+		for _, store := range stores {
+			tests.MustPutStore(re, cluster, store)
+		}
+	})
+}
+
+func (suite *operatorTestSuite) TearDownTest() {
+	re := suite.Require()
+	suite.env.Reset(re)
 }
 
 func (suite *operatorTestSuite) TestAddRemovePeer() {
@@ -62,31 +96,6 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
-	pauseAllCheckers(re, cluster)
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
 	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
 	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
 	region := &metapb.Region{
@@ -172,37 +181,17 @@ func (suite *operatorTestSuite) TestMergeRegionOperator() {
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
-
-	pauseAllCheckers(re, cluster)
-	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"),
+		core.SetPeers([]*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3}}),
+		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
-	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"),
+		core.SetPeers([]*metapb.Peer{{Id: 21, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 23, StoreId: 3}}),
+		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
 	tests.MustPutRegionInfo(re, cluster, r2)
-	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""),
+		core.SetPeers([]*metapb.Peer{{Id: 31, StoreId: 1}, {Id: 32, StoreId: 2}, {Id: 33, StoreId: 3}}),
+		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	tests.MustPutRegionInfo(re, cluster, r3)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
@@ -224,46 +213,11 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 }
 
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, _ string) {
-			conf.Replication.MaxReplicas = 3
-		})
-	env.RunTest(suite.checkTransferRegionWithPlacementRule)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkTransferRegionWithPlacementRule)
 }
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
-	pauseAllCheckers(re, cluster)
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "1"}},
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "2"}},
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "3"}},
-		},
-	}
-
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
-
 	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
 	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
 
@@ -280,8 +234,8 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 	tests.MustPutRegionInfo(re, cluster, core.NewRegionInfo(region, peer1))
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
-	err := testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+	operatorURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
+	err := testutil.CheckGetJSON(tests.TestDialClient, operatorURL, nil,
 		testutil.StatusNotOK(re), testutil.StringContain(re, "operator not found"))
 	re.NoError(err)
 	convertStepsToStr := func(steps []string) string {
@@ -444,8 +398,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			}),
 		},
 	}
-	svr := cluster.GetLeaderServer()
-	url := fmt.Sprintf("%s/pd/api/v1/config", svr.GetAddr())
+	configURL := fmt.Sprintf("%s/config", urlPrefix)
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		data := make(map[string]any)
@@ -456,7 +409,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		}
 		reqData, e := json.Marshal(data)
 		re.NoError(e)
-		err := testutil.CheckPostJSON(tests.TestDialClient, url, reqData, testutil.StatusOK(re))
+		err := testutil.CheckPostJSON(tests.TestDialClient, configURL, reqData, testutil.StatusOK(re))
 		re.NoError(err)
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			// wait for the scheduling server to update the config
@@ -464,24 +417,17 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
 			})
 		}
-		manager := svr.GetRaftCluster().GetRuleManager()
-		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			manager = sche.GetCluster().GetRuleManager()
-		}
 
-		if testCase.placementRuleEnable {
-			err := manager.Initialize(
-				svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
-				svr.GetRaftCluster().GetOpts().GetLocationLabels(),
-				svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
-				false)
+		if testCase.placementRuleEnable && len(testCase.rules) > 0 {
+			// add customized rule
+			bundles := placement.GroupBundle{
+				ID:    testCase.rules[0].GroupID, // suppose the group id is the same in all rules
+				Rules: testCase.rules,
+			}
+			data, err := json.Marshal([]placement.GroupBundle{bundles})
 			re.NoError(err)
-		}
-		if len(testCase.rules) > 0 {
-			// add customized rule first and then remove default rule
-			err := manager.SetRules(testCase.rules)
-			re.NoError(err)
-			err = manager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+			ruleURL := fmt.Sprintf("%s/config/placement-rule", urlPrefix)
+			err = testutil.CheckPostJSON(tests.TestDialClient, ruleURL, data, testutil.StatusOK(re))
 			re.NoError(err)
 		}
 		if testCase.expectedError == nil {
@@ -492,54 +438,35 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		}
 		re.NoError(err)
 		if len(testCase.expectSteps) > 0 {
-			err = testutil.CheckGetJSON(tests.TestDialClient, regionURL, nil,
+			err = testutil.CheckGetJSON(tests.TestDialClient, operatorURL, nil,
 				testutil.StatusOK(re), testutil.StringContain(re, testCase.expectSteps))
 			re.NoError(err)
-			err = testutil.CheckDelete(tests.TestDialClient, regionURL, testutil.StatusOK(re))
+			err = testutil.CheckDelete(tests.TestDialClient, operatorURL, testutil.StatusOK(re))
 		} else {
-			err = testutil.CheckDelete(tests.TestDialClient, regionURL, testutil.StatusNotOK(re))
+			err = testutil.CheckDelete(tests.TestDialClient, operatorURL, testutil.StatusNotOK(re))
 		}
 		re.NoError(err)
 	}
 }
 
 func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
-	// use a new environment to avoid being affected by other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, _ string) {
-			conf.Replication.MaxReplicas = 1
-		})
-	env.RunTest(suite.checkGetOperatorsAsObject)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkGetOperatorsAsObject)
 }
 
 func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestCluster) {
 	re := suite.Require()
-	pauseAllCheckers(re, cluster)
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
+	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"),
+		core.SetPeers([]*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3}}),
+		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	tests.MustPutRegionInfo(re, cluster, r1)
+	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"),
+		core.SetPeers([]*metapb.Peer{{Id: 21, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 23, StoreId: 3}}),
+		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	tests.MustPutRegionInfo(re, cluster, r2)
+	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""),
+		core.SetPeers([]*metapb.Peer{{Id: 31, StoreId: 1}, {Id: 32, StoreId: 2}, {Id: 33, StoreId: 3}}),
+		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	tests.MustPutRegionInfo(re, cluster, r3)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	objURL := fmt.Sprintf("%s/operators?object=1", urlPrefix)
@@ -551,13 +478,6 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 	re.Empty(resp)
 
 	// Merge operator.
-	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
-	tests.MustPutRegionInfo(re, cluster, r1)
-	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
-	tests.MustPutRegionInfo(re, cluster, r2)
-	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
-	tests.MustPutRegionInfo(re, cluster, r3)
-
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), testutil.StatusOK(re))
 	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, objURL, &resp)
@@ -611,49 +531,30 @@ func (suite *operatorTestSuite) TestRemoveOperators() {
 
 func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster) {
 	re := suite.Require()
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
 
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
-
-	pauseAllCheckers(re, cluster)
-	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"),
+		core.SetPeers([]*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3}}),
+		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
-	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"),
+		core.SetPeers([]*metapb.Peer{{Id: 21, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 23, StoreId: 3}}),
+		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
 	tests.MustPutRegionInfo(re, cluster, r2)
-	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""),
+		core.SetPeers([]*metapb.Peer{{Id: 31, StoreId: 1}, {Id: 32, StoreId: 2}, {Id: 33, StoreId: 3}}),
+		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	tests.MustPutRegionInfo(re, cluster, r3)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), testutil.StatusOK(re))
 	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 30, "store_id": 4}`), testutil.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"remove-peer", "region_id": 30, "store_id": 3}`), testutil.StatusOK(re))
 	re.NoError(err)
 	url := fmt.Sprintf("%s/operators", urlPrefix)
-	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil, testutil.StatusOK(re), testutil.StringContain(re, "merge: region 10 to 20"), testutil.StringContain(re, "add peer: store [4]"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil, testutil.StatusOK(re), testutil.StringContain(re, "merge: region 10 to 20"), testutil.StringContain(re, "rm peer: store [3]"))
 	re.NoError(err)
 	err = testutil.CheckDelete(tests.TestDialClient, url, testutil.StatusOK(re))
 	re.NoError(err)
-	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil, testutil.StatusOK(re), testutil.StringNotContain(re, "merge: region 10 to 20"), testutil.StringNotContain(re, "add peer: store [4]"))
+	err = testutil.CheckGetJSON(tests.TestDialClient, url, nil, testutil.StatusOK(re), testutil.StringNotContain(re, "merge: region 10 to 20"), testutil.StringNotContain(re, "rm peer: store [3]"))
 	re.NoError(err)
 }

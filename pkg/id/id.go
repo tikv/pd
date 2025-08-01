@@ -41,7 +41,8 @@ const (
 	// KeyspaceLabel is the label for keyspace id allocator.
 	KeyspaceLabel label = "keyspace-idAlloc"
 
-	defaultAllocStep = uint64(1000)
+	// DefaultAllocStep is the default step size for id allocation.
+	DefaultAllocStep = uint64(1000)
 )
 
 // Allocator is the allocator to generate unique ID.
@@ -93,7 +94,7 @@ func NewAllocator(params *AllocatorParams) Allocator {
 		metrics: &metrics{idGauge: idGauge.WithLabelValues(string(params.Label))},
 	}
 	if allocator.step == 0 {
-		allocator.step = defaultAllocStep
+		allocator.step = DefaultAllocStep
 	}
 	var effectiveEnd uint64
 	effectiveEnd = math.MaxUint64
