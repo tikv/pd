@@ -606,6 +606,8 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	if err != nil {
 		return GCState{}, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	var result GCState
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {

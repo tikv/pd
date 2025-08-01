@@ -66,6 +66,12 @@ require (
 )
 
 require (
+	github.com/nxadm/tail v1.4.11 // indirect
+	github.com/onsi/ginkgo v1.16.5 // indirect
+	github.com/onsi/gomega v1.20.1 // indirect
+)
+
+require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
@@ -99,7 +105,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.10.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
-	github.com/fsnotify/fsnotify v1.4.9 // indirect
+	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
@@ -151,7 +157,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oleiade/reflections v1.0.1 // indirect
-	github.com/onsi/gomega v1.20.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/petermattis/goid v0.0.0-20240813172612-4fcff4a6cae7 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
@@ -193,7 +198,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.20.0 // indirect
 	go.opentelemetry.io/otel/trace v1.20.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
-	go.uber.org/atomic v1.9.0 // indirect
+	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0
