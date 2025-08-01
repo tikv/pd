@@ -1,8 +1,6 @@
 module github.com/tikv/pd
 
-go 1.23.0
-
-toolchain go1.23.11
+go 1.21
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
