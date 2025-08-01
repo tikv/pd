@@ -78,7 +78,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "balance_direction",
 			Help:      "Counter of direction of balance related schedulers.",
-		}, []string{"type", "source", "target"})
+		}, []string{"type", "store", "direction"})
 
 	// TODO: pre-allocate gauge metrics
 	hotDirectionCounter = prometheus.NewCounterVec(

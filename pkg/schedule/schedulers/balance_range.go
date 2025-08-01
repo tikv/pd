@@ -557,7 +557,8 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), targetLabel, "in"),
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatInt(plan.sourceScore, 10))
 		op.SetAdditionalInfo("targetScore", strconv.FormatInt(plan.targetScore, 10))
