@@ -628,6 +628,8 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Do not guarantee atomicity among different keyspaces here.
 	results := make(map[uint32]GCState)
