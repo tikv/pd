@@ -60,12 +60,12 @@ var (
 	tiflashRemovedCounter     = clusterStatusGauge.WithLabelValues("store_removed_count", "tiflash")
 
 	// Store status metrics.
-	storeRegionCountGauge     = storeStatusGauge.WithLabelValues("region_count")
-	storeLeaderCountGauge     = storeStatusGauge.WithLabelValues("leader_count")
-	storeWitnessCountGauge    = storeStatusGauge.WithLabelValues("witness_count")
-	storeLearnerCountGauge    = storeStatusGauge.WithLabelValues("learner_count")
-	storeStorageSizeGauge     = storeStatusGauge.WithLabelValues("storage_size")
-	storeStorageCapacityGauge = storeStatusGauge.WithLabelValues("storage_capacity")
+	storeRegionCountGauge     = clusterStatusGauge.WithLabelValues("region_count", "all")
+	storeLeaderCountGauge     = clusterStatusGauge.WithLabelValues("leader_count", "all")
+	storeWitnessCountGauge    = clusterStatusGauge.WithLabelValues("witness_count", "all")
+	storeLearnerCountGauge    = clusterStatusGauge.WithLabelValues("learner_count", "all")
+	storeStorageSizeGauge     = clusterStatusGauge.WithLabelValues("storage_size", "all")
+	storeStorageCapacityGauge = clusterStatusGauge.WithLabelValues("storage_capacity", "all")
 )
 
 type storeStatistics struct {
