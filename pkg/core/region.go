@@ -1972,36 +1972,41 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
-// GetStoreRegionCountByRule returns the number of regions in given store that overlap with the range [startKey, endKey) for a specific rule.
-func (r *RegionsInfo) GetStoreRegionCountByRule(storeID uint64, startKey, endKey []byte, rule Rule) int {
+// GetStoreLeaderCountByRange returns the number of leader regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetStoreLeaderCountByRange(storeID uint64, startKey, endKey []byte) int {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	switch rule {
-	case LeaderScatter:
-		if leaders, ok := r.leaders[storeID]; ok {
-			return leaders.GetCountByRange(startKey, endKey)
-		}
-		return 0
-	case PeerScatter:
-		sum := 0
-		if leaders, ok := r.leaders[storeID]; ok {
-			sum += leaders.GetCountByRange(startKey, endKey)
-		}
-		if followers, ok := r.followers[storeID]; ok {
-			sum += followers.GetCountByRange(startKey, endKey)
-		}
-		if learners, ok := r.learners[storeID]; ok {
-			sum += learners.GetCountByRange(startKey, endKey)
-		}
-		return sum
-	case LearnerScatter:
-		if learners, ok := r.learners[storeID]; ok {
-			return learners.GetCountByRange(startKey, endKey)
-		}
-		return 0
-	default:
-		return 0
+	if leaders, ok := r.leaders[storeID]; ok {
+		return leaders.GetCountByRange(startKey, endKey)
 	}
+	return 0
+}
+
+// GetStorePeerCountByRange returns the number of regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetStorePeerCountByRange(storeID uint64, startKey, endKey []byte) int {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	sum := 0
+	if leaders, ok := r.leaders[storeID]; ok {
+		sum += leaders.GetCountByRange(startKey, endKey)
+	}
+	if followers, ok := r.followers[storeID]; ok {
+		sum += followers.GetCountByRange(startKey, endKey)
+	}
+	if learners, ok := r.learners[storeID]; ok {
+		sum += learners.GetCountByRange(startKey, endKey)
+	}
+	return sum
+}
+
+// GetStoreLearnerCountByRange returns the number of learner regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetStoreLearnerCountByRange(storeID uint64, startKey, endKey []byte) int {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	if learners, ok := r.learners[storeID]; ok {
+		return learners.GetCountByRange(startKey, endKey)
+	}
+	return 0
 }
 
 // GetRegionCount returns the number of regions that overlap with the range [startKey, endKey).

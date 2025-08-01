@@ -608,7 +608,14 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	for _, source := range sources {
 		count := 0
 		for _, kr := range job.Ranges {
-			count += cluster.GetStoreRegionCountByRule(source.GetID(), kr.StartKey, kr.EndKey, job.Rule)
+			switch job.Rule {
+			case core.LeaderScatter:
+				count += cluster.GetStoreLeaderCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			case core.PeerScatter:
+				count += cluster.GetStorePeerCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			case core.LearnerScatter:
+				count += cluster.GetStoreLearnerCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			}
 		}
 		scoreMap[source.GetID()] = int64(count)
 		totalScore += int64(count)

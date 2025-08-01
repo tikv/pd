@@ -396,12 +396,12 @@ func TestStoreRegionCount(t *testing.T) {
 		count := regions.GetRegionCount([]byte("a"), key)
 		scanCount := len(regions.ScanRegions([]byte("a"), key, 100))
 		re.Equal(count, scanCount, "endKey: %s", key)
-		storeCount := regions.GetStoreRegionCountByRule(uint64(1), []byte("a"), key, LeaderScatter)
+		storeCount := regions.GetStoreLeaderCountByRange(uint64(1), []byte("a"), key)
 		re.Equal(count, storeCount, "endKey: %s", key)
-		learnerStoreCount := regions.GetStoreRegionCountByRule(uint64(3), []byte("a"), key, LearnerScatter)
+		learnerStoreCount := regions.GetStoreLearnerCountByRange(uint64(3), []byte("a"), key)
 		re.Equal(count, learnerStoreCount, "endKey: %s", key)
 		for _, storeID := range []uint64{1, 2, 3} {
-			storePeerCount := regions.GetStoreRegionCountByRule(storeID, []byte("a"), key, PeerScatter)
+			storePeerCount := regions.GetStorePeerCountByRange(storeID, []byte("a"), key)
 			re.Equal(count, storePeerCount, "endKey: %s", key)
 		}
 	}
