@@ -347,7 +347,54 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 	}
 	err = client.SetPlacementRule(env.ctx, testRule)
 	re.NoError(err)
+<<<<<<< HEAD
 	suite.checkRuleResult(re, env, client, testRule, 1, true)
+=======
+	suite.checkRuleResult(ctx, re, testRule, 1, true)
+
+	// ***** Test placement rule failed passing check after transfer leader
+	// Transfer the leader to another store to ensure the PD follower
+	// exists stale store labels.
+	suite.transferLeader(ctx, re)
+	tranferLeaderRule := []*pd.GroupBundle{
+		{
+			ID: "test-transfer-leader",
+			Rules: []*pd.Rule{
+				{
+					GroupID:  "test-transfer-leader",
+					ID:       "readonly",
+					Role:     pd.Voter,
+					Count:    3,
+					StartKey: []byte{},
+					EndKey:   []byte{},
+					LabelConstraints: []pd.LabelConstraint{
+						{
+							Key:    "$mode",
+							Op:     pd.In,
+							Values: []string{"readonly"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.Error(err)
+	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"$mode": "readonly",
+	})
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.NoError(err)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+
+	suite.transferLeader(ctx, re)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "$mode"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
+>>>>>>> 4d498809b (placement-rule: move placement rule initialization after LoadStores (#9616))
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -569,6 +616,7 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	suite.RunTestInTwoModes(suite.checkSchedulers)
 }
 
+<<<<<<< HEAD
 func (suite *httpClientTestSuite) checkSchedulers(mode mode, client pd.Client) {
 	re := suite.Require()
 	env := suite.env[mode]
@@ -604,6 +652,17 @@ func (suite *httpClientTestSuite) checkSetStoreLabels(mode mode, client pd.Clien
 		"zone": "zone1",
 	}
 	err = client.SetStoreLabels(env.ctx, 1, storeLabels)
+=======
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, re *require.Assertions, storeLabels map[string]string) int64 {
+	client := suite.client
+	resp, err := client.GetStores(ctx)
+	re.NoError(err)
+	re.NotEmpty(resp.Stores)
+	firstStore := resp.Stores[0]
+	re.Empty(firstStore.Store.Labels, nil)
+
+	err = client.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels)
+>>>>>>> 4d498809b (placement-rule: move placement rule initialization after LoadStores (#9616))
 	re.NoError(err)
 
 	resp, err = client.GetStores(env.ctx)
@@ -615,6 +674,7 @@ func (suite *httpClientTestSuite) checkSetStoreLabels(mode mode, client pd.Clien
 			}
 		}
 	}
+<<<<<<< HEAD
 }
 
 func (suite *httpClientTestSuite) TestTransferLeader() {
@@ -626,6 +686,35 @@ func (suite *httpClientTestSuite) checkTransferLeader(mode mode, client pd.Clien
 	env := suite.env[mode]
 
 	members, err := client.GetMembers(env.ctx)
+=======
+
+	for key, value := range storeLabels {
+		re.Equal(value, labelsMap[key])
+	}
+
+	return firstStore.Store.ID
+}
+
+func (suite *httpClientTestSuite) TestStoreLabels() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"zone": "zone1",
+	})
+
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "zone"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
+}
+
+func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
+	client := suite.client
+	members, err := client.GetMembers(ctx)
+>>>>>>> 4d498809b (placement-rule: move placement rule initialization after LoadStores (#9616))
 	re.NoError(err)
 	re.Len(members.Members, 2)
 
@@ -655,6 +744,13 @@ func (suite *httpClientTestSuite) checkTransferLeader(mode mode, client pd.Clien
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
+}
+func (suite *httpClientTestSuite) TestTransferLeader() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	suite.transferLeader(ctx, re)
 }
 
 func (suite *httpClientTestSuite) TestVersion() {
