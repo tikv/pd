@@ -157,11 +157,11 @@ func (s *TSODispatcher) dispatch(
 				}
 				// Cancel the tsoQueue to prevent new requests from being accepted
 				tsoQueue.cancel(err)
-				
+
 				// Clear all pending requests in the queue to prevent goroutine leakage
 				// This is important to avoid goroutines blocking on waiting for TSO responses
 				s.clearPendingRequests(tsoQueue, forwardedHost, err)
-				
+
 				return
 			}
 		case <-noProxyRequestsTimer.C:
@@ -215,10 +215,10 @@ func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical i
 // clearPendingRequests clears all pending requests in the queue to prevent goroutine leakage.
 // This method should be called when an error occurs to ensure that all waiting goroutines
 // are notified and can exit gracefully.
-func (s *TSODispatcher) clearPendingRequests(tsoQueue *tsoRequestProxyQueue, forwardedHost string, err error) {
+func (s *TSODispatcher) clearPendingRequests(tsoQueue *tsoRequestProxyQueue, forwardedHost string, _ error) {
 	// Delete the queue from the dispatcher to prevent new requests from being accepted
 	s.dispatchChs.Delete(forwardedHost)
-	
+
 	// Clear all pending requests in the queue
 	// We don't close the channel here to avoid panic in other goroutines that might try to send to it
 	// Instead, we drain the channel
