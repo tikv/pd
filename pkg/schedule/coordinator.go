@@ -326,7 +326,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		s, err := schedulers.CreateScheduler(tp, c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
 		if err != nil {
-			log.Error("can not create scheduler", zap.Stringer("type", tp), zap.String("scheduler-type", schedulerCfg.Type),
+			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type),
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
 		}
