@@ -368,6 +368,45 @@ func TestRandomRegionDiscontinuous(t *testing.T) {
 	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []keyutil.KeyRange{keyutil.NewKeyRange("", "")})
 }
 
+func TestStoreRegionCount(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	i := uint64(1)
+	voterFn := func() *metapb.Peer {
+		i++
+		return &metapb.Peer{
+			StoreId: 2,
+			Id:      i,
+			Role:    metapb.PeerRole_Voter,
+		}
+	}
+	learnerFn := func() *metapb.Peer {
+		i++
+		return &metapb.Peer{
+			StoreId: 3,
+			Id:      i,
+			Role:    metapb.PeerRole_Learner,
+		}
+	}
+
+	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("c"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
+	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("e"), []byte("g"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
+	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("g"), []byte("i"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
+	for _, key := range [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f"), []byte("g"), []byte("h"), []byte("")} {
+		count := regions.GetRegionCount([]byte("a"), key)
+		scanCount := len(regions.ScanRegions([]byte("a"), key, 100))
+		re.Equal(count, scanCount, "endKey: %s", key)
+		storeCount := regions.GetStoreLeaderCountByRange(uint64(1), []byte("a"), key)
+		re.Equal(count, storeCount, "endKey: %s", key)
+		learnerStoreCount := regions.GetStoreLearnerCountByRange(uint64(3), []byte("a"), key)
+		re.Equal(count, learnerStoreCount, "endKey: %s", key)
+		for _, storeID := range []uint64{1, 2, 3} {
+			storePeerCount := regions.GetStorePeerCountByRange(storeID, []byte("a"), key)
+			re.Equal(count, storePeerCount, "endKey: %s", key)
+		}
+	}
+}
+
 func updateNewItem(tree *regionTree, region *RegionInfo) {
 	item := &regionItem{RegionInfo: region}
 	tree.update(item, false)
