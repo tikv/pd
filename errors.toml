@@ -913,7 +913,7 @@ wrong scheduler config %s
 
 ["PD:scheduler:ErrSchedulerCreateFuncNotRegistered"]
 error = '''
-create func of %v is not registered
+create func is not registered
 '''
 
 ["PD:scheduler:ErrSchedulerDuplicated"]
