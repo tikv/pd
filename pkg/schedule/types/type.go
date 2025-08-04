@@ -64,8 +64,6 @@ const (
 	ShuffleLeaderScheduler CheckerSchedulerType = "shuffle-leader-scheduler"
 	// ShuffleRegionScheduler is shuffle region scheduler name.
 	ShuffleRegionScheduler CheckerSchedulerType = "shuffle-region-scheduler"
-	// SplitBucketScheduler is the split bucket name.
-	SplitBucketScheduler CheckerSchedulerType = "split-bucket-scheduler"
 	// TransferWitnessLeaderScheduler is transfer witness leader scheduler name.
 	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
 	// LabelScheduler is label scheduler name.
@@ -96,7 +94,6 @@ var (
 		ShuffleHotRegionScheduler:      "shuffle-hot-region",
 		ShuffleLeaderScheduler:         "shuffle-leader",
 		ShuffleRegionScheduler:         "shuffle-region",
-		SplitBucketScheduler:           "split-bucket",
 		TransferWitnessLeaderScheduler: "transfer-witness-leader",
 		LabelScheduler:                 "label",
 		BalanceRangeScheduler:          "balance-range",
@@ -120,7 +117,6 @@ var (
 		"shuffle-hot-region":      ShuffleHotRegionScheduler,
 		"shuffle-leader":          ShuffleLeaderScheduler,
 		"shuffle-region":          ShuffleRegionScheduler,
-		"split-bucket":            SplitBucketScheduler,
 		"transfer-witness-leader": TransferWitnessLeaderScheduler,
 		"label":                   LabelScheduler,
 		"balance-range":           BalanceRangeScheduler,
@@ -144,7 +140,6 @@ var (
 		"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
 		"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
 		"shuffle-region-scheduler":          ShuffleRegionScheduler,
-		"split-bucket-scheduler":            SplitBucketScheduler,
 		"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
 		"label-scheduler":                   LabelScheduler,
 		"balance-range-scheduler":           BalanceRangeScheduler,
