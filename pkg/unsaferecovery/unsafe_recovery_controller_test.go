@@ -1941,20 +1941,20 @@ func TestTiFlashOrphanedPeerDemote(t *testing.T) {
 			plan := resp.GetRecoveryPlan()
 			if plan != nil {
 				stage := recoveryController.GetStage()
-				
+
 				if stage == TombstoneTiFlashLearner && len(plan.GetTombstones()) > 0 {
 					tombstoneFound = true
 					re.Contains(plan.GetTombstones(), uint64(1001))
 					re.Equal(uint64(3), storeID)
 				}
-				
+
 				if stage == ForceLeader && plan.GetForceLeader() != nil && len(plan.GetForceLeader().GetEnterForceLeaders()) > 0 {
 					forcedLeaderFound = true
 					re.Contains(plan.GetForceLeader().GetEnterForceLeaders(), uint64(1001))
 					// Only store 1 should get force leader (the only live voter)
 					re.Equal(uint64(1), storeID)
 				}
-				
+
 				if stage == DemoteFailedVoter && len(plan.GetDemotes()) > 0 {
 					demoteStageFound = true
 					found := false
@@ -1968,14 +1968,14 @@ func TestTiFlashOrphanedPeerDemote(t *testing.T) {
 								failedStoreIds[peer.GetStoreId()] = true
 							}
 							re.True(failedStoreIds[2], "Failed voter store 2 should be demoted")
-							re.True(failedStoreIds[4], "Failed voter store 4 should be demoted") 
+							re.True(failedStoreIds[4], "Failed voter store 4 should be demoted")
 							re.True(failedStoreIds[3], "Orphaned TiFlash peer store 3 should be demoted")
 						}
 					}
 					re.True(found)
 				}
 			}
-			
+
 			applyRecoveryPlan(re, storeID, reports, resp)
 		}
 		if recoveryController.GetStage() == Finished {
