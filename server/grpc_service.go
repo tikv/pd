@@ -32,8 +32,6 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -2828,14 +2826,4 @@ func (s *GrpcServer) rateLimitCheck() (done ratelimit.DoneFunc, err error) {
 		return
 	}
 	return
-}
-
-// SetGlobalGCBarrier implements gRPC PDServer.
-func (*GrpcServer) SetGlobalGCBarrier(context.Context, *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "SetGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
-}
-
-// DeleteGlobalGCBarrier implements gRPC PDServer.
-func (*GrpcServer) DeleteGlobalGCBarrier(context.Context, *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "DeleteGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
 }
