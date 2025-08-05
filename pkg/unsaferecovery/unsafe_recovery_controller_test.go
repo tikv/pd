@@ -830,7 +830,6 @@ func TestTiflashLearnerPeer(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 8, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1},
-							{Id: 12, StoreId: 3, Role: metapb.PeerRole_Learner},
 							{Id: 13, StoreId: 5, Role: metapb.PeerRole_Learner},
 						}}}},
 		}},
