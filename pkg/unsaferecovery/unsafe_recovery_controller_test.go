@@ -1963,13 +1963,13 @@ func TestTiFlashOrphanedPeerDemote(t *testing.T) {
 							found = true
 							re.NotEmpty(demote.GetFailedVoters())
 							// Should include failed voters (stores 2, 4) and orphaned TiFlash peer (store 3)
-							failedStoreIds := make(map[uint64]bool)
+							failedStoreIDs := make(map[uint64]bool)
 							for _, peer := range demote.GetFailedVoters() {
-								failedStoreIds[peer.GetStoreId()] = true
+								failedStoreIDs[peer.GetStoreId()] = true
 							}
-							re.True(failedStoreIds[2], "Failed voter store 2 should be demoted")
-							re.True(failedStoreIds[4], "Failed voter store 4 should be demoted")
-							re.True(failedStoreIds[3], "Orphaned TiFlash peer store 3 should be demoted")
+							re.True(failedStoreIDs[2], "Failed voter store 2 should be demoted")
+							re.True(failedStoreIDs[4], "Failed voter store 4 should be demoted")
+							re.True(failedStoreIDs[3], "Orphaned TiFlash peer store 3 should be demoted")
 						}
 					}
 					re.True(found)

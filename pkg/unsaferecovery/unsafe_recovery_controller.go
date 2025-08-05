@@ -135,7 +135,7 @@ type Controller struct {
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
 
 	// Orphaned peers are the peers that exist in the forced leader but not in the target stores' reports
-	// they are expected to exist when some of the peers were destoryed by TombstoneTiFlashLearner phase.
+	// they are expected to exist when some of the peers were destroyed by TombstoneTiFlashLearner phase.
 	// we need to explicitly remove them in DemoteFailedVoter phase, in case there is only one candidate store
 	// for this peer, and PD is not able to remove it through the down peer removal mechanism.
 	orphanedPeers map[uint64][]*metapb.Peer
@@ -965,7 +965,7 @@ func (u *Controller) buildUpFromReports() (*regionTree, map[uint64][]*regionItem
 		newestPeerReports = append(newestPeerReports, latest)
 
 		// find the orphaned peers, i.e. the peers exist in the forced leader but not in the target stores' reports
-		// this is expected when some of the peers were destoryed by TombstoneTiFlashLearner phase.
+		// this is expected when some of the peers were destroyed by TombstoneTiFlashLearner phase.
 		exists := func(peers []*regionItem, peer *metapb.Peer) bool {
 			for _, p := range peers {
 				if p.storeID == peer.StoreId {
