@@ -90,7 +90,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		cancel:                cancel,
 		schedulersInitialized: false,
 		cluster:               cluster,
-		prepareChecker:        newPrepareChecker(),
+		prepareChecker:        newPrepareChecker(cluster.GetPrepareRegionCount()),
 		checkers:              checkers,
 		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddPendingProcessedRegions),
 		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddPendingProcessedRegions),
@@ -206,8 +206,8 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 }
 
 // RunUntilStop runs the coordinator until receiving the stop signal.
-func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
-	c.Run(collectWaitTime...)
+func (c *Coordinator) RunUntilStop() {
+	c.Run()
 	<-c.ctx.Done()
 	log.Info("coordinator is stopping")
 	c.GetSchedulersController().Wait()
@@ -216,7 +216,7 @@ func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
 }
 
 // Run starts coordinator.
-func (c *Coordinator) Run(collectWaitTime ...time.Duration) {
+func (c *Coordinator) Run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	failpoint.Inject("changeCoordinatorTicker", func() {
 		ticker.Reset(100 * time.Millisecond)
@@ -224,7 +224,7 @@ func (c *Coordinator) Run(collectWaitTime ...time.Duration) {
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {
-		if c.ShouldRun(collectWaitTime...) {
+		if c.ShouldRun() {
 			log.Info("coordinator has finished cluster information preparation")
 			break
 		}
@@ -549,8 +549,8 @@ func ResetHotSpotMetrics() {
 }
 
 // ShouldRun returns true if the coordinator should run.
-func (c *Coordinator) ShouldRun(collectWaitTime ...time.Duration) bool {
-	return c.prepareChecker.check(c.cluster.GetBasicCluster(), collectWaitTime...)
+func (c *Coordinator) ShouldRun() bool {
+	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 
 // GetSchedulersController returns the schedulers controller.
