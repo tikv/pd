@@ -27,18 +27,20 @@ import (
 
 type prepareChecker struct {
 	syncutil.RWMutex
-	start    time.Time
-	prepared bool
+	start            time.Time
+	totalRegionCount int
+	prepared         bool
 }
 
-func newPrepareChecker() *prepareChecker {
+func newPrepareChecker(totalRegionCount int) *prepareChecker {
 	return &prepareChecker{
-		start: time.Now(),
+		start:            time.Now(),
+		totalRegionCount: totalRegionCount,
 	}
 }
 
 // Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
-func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...time.Duration) bool {
+func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	checker.Lock()
 	defer checker.Unlock()
 	if checker.prepared {
@@ -48,13 +50,9 @@ func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...ti
 		checker.prepared = true
 		return true
 	}
-	if len(collectWaitTime) > 0 && time.Since(checker.start) < collectWaitTime[0] {
-		return false
-	}
-	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
-	totalRegionsCnt := c.GetTotalRegionCount()
+	notLoadedFromRegionsCnt := c.GetNotFromStorageRegionsCnt()
 	// The number of active regions should be more than total region of all stores * core.CollectFactor
-	if float64(totalRegionsCnt)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
+	if float64(checker.totalRegionCount)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
 		return false
 	}
 	for _, store := range c.GetStores() {
@@ -63,14 +61,14 @@ func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...ti
 		}
 		storeID := store.GetID()
 		// It is used to avoid sudden scheduling when scheduling service is just started.
-		if len(collectWaitTime) > 0 && (float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID))) {
+		if float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
 			return false
 		}
 		if !c.IsStorePrepared(storeID) {
 			return false
 		}
 	}
-	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionsCnt))
+	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", checker.totalRegionCount))
 	checker.prepared = true
 	return true
 }
