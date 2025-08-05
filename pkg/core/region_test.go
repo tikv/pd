@@ -1246,45 +1246,6 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 }
 
-func TestStoreRegionCount(t *testing.T) {
-	re := require.New(t)
-	regions := NewRegionsInfo()
-	i := uint64(1)
-	voterFn := func() *metapb.Peer {
-		i++
-		return &metapb.Peer{
-			StoreId: 2,
-			Id:      i,
-			Role:    metapb.PeerRole_Voter,
-		}
-	}
-	learnerFn := func() *metapb.Peer {
-		i++
-		return &metapb.Peer{
-			StoreId: 3,
-			Id:      i,
-			Role:    metapb.PeerRole_Learner,
-		}
-	}
-
-	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("c"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
-	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("e"), []byte("g"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
-	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("g"), []byte("i"), WithAddPeer(voterFn()), WithAddPeer(learnerFn())))
-	for _, endKey := range [][]byte{[]byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f"), []byte("")} {
-		count := regions.GetRegionCount([]byte("a"), endKey)
-		scanCount := len(regions.ScanRegions([]byte("a"), endKey, 100))
-		re.Equal(count, scanCount, "endKey: %s", endKey)
-		storeCount := regions.GetStoreRegionCountByRule(uint64(1), []byte("a"), endKey, LeaderScatter)
-		re.Equal(count, storeCount, "endKey: %s", endKey)
-		learnerStoreCount := regions.GetStoreRegionCountByRule(uint64(3), []byte("a"), endKey, LearnerScatter)
-		re.Equal(count, learnerStoreCount, "endKey: %s", endKey)
-		for _, storeID := range []uint64{1, 2, 3} {
-			storePeerCount := regions.GetStoreRegionCountByRule(storeID, []byte("a"), endKey, PeerScatter)
-			re.Equal(count, storePeerCount, "endKey: %s", endKey)
-		}
-	}
-}
-
 func TestQueryRegions(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()

@@ -85,6 +85,7 @@ func TestPlacementRule(t *testing.T) {
 	}
 	for i, label := range []map[string]string{{"region": "z1"}, {"region": "z2"}, {"region": "z3"}} {
 		store := core.NewStoreInfoWithLabel(uint64(i+1), label)
+		store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
 		tc.PutStore(store)
 	}
 
@@ -131,6 +132,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.Len(plan.stores, 3)
 	re.Len(plan.scoreMap, 3)
 	re.Equal(int64(1), plan.scoreMap[1])
+	re.Equal(int64(0), plan.expectScoreMap[1])
 }
 
 func TestTIKVEngine(t *testing.T) {
@@ -244,7 +246,7 @@ func TestLocationLabel(t *testing.T) {
 	}
 	op, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(op)
-	re.Contains(op[0].Brief(), "move peer")
+	re.Contains(op[0].Brief(), "mv peer")
 }
 
 func TestTIFLASHEngine(t *testing.T) {

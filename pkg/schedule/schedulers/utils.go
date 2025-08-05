@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"net/url"
 	"strconv"
 	"time"
@@ -33,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -413,7 +413,8 @@ func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, direction c
 	}
 }
 
-func GetCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, kr keyutil.KeyRange, rule core.Rule) float64 {
+// getCountThreshold calculates the count threshold for a given key range and rule.
+func getCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, kr keyutil.KeyRange, rule core.Rule) float64 {
 	start := time.Now()
 	cfg := c.GetSchedulerConfig()
 	if !cfg.IsPlacementRulesEnabled() {
@@ -448,8 +449,7 @@ func GetCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store 
 	return storeRegionCount
 }
 
-// IsSatisfyRole return true if the rule satisfies the region.
-func IsSatisfyRole(r core.Rule, role placement.PeerRoleType) bool {
+func isSatisfyRole(r core.Rule, role placement.PeerRoleType) bool {
 	switch r {
 	case core.LeaderScatter:
 		return role == placement.Leader || role == placement.Voter
@@ -464,7 +464,7 @@ func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, stor
 	var storeCount float64
 	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
 	for _, rule := range rules {
-		if !IsSatisfyRole(r, rule.Role) {
+		if !isSatisfyRole(r, rule.Role) {
 			continue
 		}
 

@@ -15,8 +15,6 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"strconv"
 	"testing"
 
@@ -25,6 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestRetryQuota(t *testing.T) {
@@ -118,7 +118,7 @@ func TestGetCountThreshold(t *testing.T) {
 
 	available := 0
 	for _, store := range tc.GetStores() {
-		count := GetCountThreshold(tc, tc.GetStores(), store, keyutil.NewKeyRange("100", "200"), core.LeaderScatter)
+		count := getCountThreshold(tc, tc.GetStores(), store, keyutil.NewKeyRange("100", "200"), core.LeaderScatter)
 		if count > 0 {
 			available++
 		}
