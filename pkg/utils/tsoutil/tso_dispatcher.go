@@ -101,9 +101,9 @@ func (s *TSODispatcher) dispatch(
 	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
 	defer logutil.LogPanic()
 	dispatcherCtx := tsoQueue.ctx
-	// Note: We don't use defer s.dispatchChs.Delete(forwardedHost) here anymore
-	// because we need to delete the queue immediately when an error occurs to prevent
-	// new requests from being added to a queue that will never be processed.
+	// Note: We use clearPendingRequests in a defer statement to ensure proper cleanup when an error occurs.
+	// This function not only deletes the queue from the dispatcher but also clears all pending requests
+	// to prevent goroutine leakage and ensure that all waiting goroutines are notified and can exit gracefully.
 	var err error
 	defer func() {
 		s.clearPendingRequests(tsoQueue, forwardedHost, err)
