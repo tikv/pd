@@ -106,9 +106,8 @@ func (s *TSODispatcher) dispatch(
 	// new requests from being added to a queue that will never be processed.
 	var err error
 	defer func() {
-		s.dispatchChs.Delete(forwardedHost)
 		s.clearPendingRequests(tsoQueue, forwardedHost, err)
-	}
+	}()
 
 	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(tsoQueue.ctx, clientConn)
 	failpoint.Inject("canNotCreateForwardStream", func() {
@@ -160,22 +159,15 @@ func (s *TSODispatcher) dispatch(
 				if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
 					tsoPrimaryWatchers[0].ForceLoad()
 				}
-				// Cancel the tsoQueue to prevent new requests from being accepted
 				tsoQueue.cancel(err)
-
-				// Clear all pending requests in the queue to prevent goroutine leakage
-				// This is important to avoid goroutines blocking on waiting for TSO responses
-				// s.clearPendingRequests(tsoQueue, forwardedHost, err)
 
 				return
 			}
 		case <-noProxyRequestsTimer.C:
 			log.Info("close tso proxy as it is idle for a while")
 			tsoQueue.cancel(errors.New("TSOProxyStreamIdleTimeout"))
-			// s.dispatchChs.Delete(forwardedHost)
 			return
 		case <-dispatcherCtx.Done():
-			// s.dispatchChs.Delete(forwardedHost)
 			return
 		}
 	}
