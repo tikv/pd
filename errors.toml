@@ -446,6 +446,11 @@ error = '''
 trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v
 '''
 
+["PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"]
+error = '''
+trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace %s
+'''
+
 ["PD:gc:ErrReservedGCBarrierID"]
 error = '''
 trying to set a GC barrier with a barrier ID that is reserved: %v
@@ -699,6 +704,11 @@ etcd leader not found
 ["PD:member:ErrMarshalMember"]
 error = '''
 marshal member failed
+'''
+
+["PD:member:ErrMarshalParticipant"]
+error = '''
+marshal participant failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]

@@ -69,9 +69,9 @@ func (rus *RequestUnitSettings) Clone() *RequestUnitSettings {
 }
 
 // NewRequestUnitSettings creates a new RequestUnitSettings with the given token bucket.
-func NewRequestUnitSettings(tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
+func NewRequestUnitSettings(resourceGroupName string, tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
 	return &RequestUnitSettings{
-		RU: NewGroupTokenBucket(tokenBucket),
+		RU: NewGroupTokenBucket(resourceGroupName, tokenBucket),
 	}
 }
 
@@ -241,9 +241,9 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
 		if group.GetRUSettings() == nil {
-			rg.RUSettings = NewRequestUnitSettings(nil)
+			rg.RUSettings = NewRequestUnitSettings(rg.Name, nil)
 		} else {
-			rg.RUSettings = NewRequestUnitSettings(group.GetRUSettings().GetRU())
+			rg.RUSettings = NewRequestUnitSettings(rg.Name, group.GetRUSettings().GetRU())
 		}
 		if group.RUStats != nil {
 			rg.RUConsumption = group.RUStats
@@ -263,12 +263,14 @@ func (rg *ResourceGroup) RequestRU(
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
-
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
 	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
+	if tb == nil {
+		return nil
+	}
 	// Then, try to apply the service limit.
 	grantedTokens := tb.GetTokens()
 	limitedTokens := sl.applyServiceLimit(now, grantedTokens)
@@ -276,7 +278,7 @@ func (rg *ResourceGroup) RequestRU(
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
 		if rg.getBurstLimitLocked() > 0 {
-			rg.RUSettings.RU.lastLimitedTokens += grantedTokens - limitedTokens
+			rg.RUSettings.RU.reservedServiceTokens += grantedTokens - limitedTokens
 		}
 	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}

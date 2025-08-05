@@ -1150,7 +1150,7 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", errs.ErrKeyspaceGroupNotExists.FastGenByArgs(id)
 	}
 
-	primaryPath := keypath.LeaderPath(&keypath.MsParam{
+	primaryPath := keypath.ElectionPath(&keypath.MsParam{
 		ServiceName: mcs.TSOServiceName,
 		GroupID:     id,
 	})

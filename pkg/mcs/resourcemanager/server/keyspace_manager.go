@@ -36,8 +36,10 @@ const (
 	maxGroupNameLength         = 32
 	middlePriority             = 8
 	maxPriority                = 16
-	unlimitedRate              = math.MaxInt32
-	unlimitedBurstLimit        = -1
+	// UnlimitedRate is the unlimited fill rate used for the default resource group.
+	UnlimitedRate = math.MaxInt32
+	// UnlimitedBurstLimit is the unlimited burst limit used for the default resource group.
+	UnlimitedBurstLimit = -1
 	// DefaultResourceGroupName is the reserved default resource group name within each keyspace.
 	DefaultResourceGroupName = "default"
 	// defaultRUTrackerTimeConstant is the default time-aware EMA time constant for the RU tracker.
@@ -121,8 +123,8 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 		RUSettings: &RequestUnitSettings{
 			RU: &GroupTokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   unlimitedRate,
-					BurstLimit: unlimitedBurstLimit,
+					FillRate:   UnlimitedRate,
+					BurstLimit: UnlimitedBurstLimit,
 				},
 			},
 		},
@@ -638,7 +640,7 @@ func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
 // This ensures the burstability of the resource groups can be properly invalidated.
 func (krgm *keyspaceResourceGroupManager) invalidateBurstability(serviceLimit float64) {
 	for _, group := range krgm.getMutableResourceGroupList() {
-		if group.getBurstLimit() >= 0 {
+		if group.getBurstLimit(true) >= 0 {
 			continue
 		}
 		group.overrideBurstLimit(int64(serviceLimit))

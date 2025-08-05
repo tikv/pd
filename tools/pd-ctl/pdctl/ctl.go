@@ -74,6 +74,8 @@ func GetRootCmd() *cobra.Command {
 		command.NewKeyspaceGroupCommand(),
 		command.NewKeyspaceCommand(),
 		command.NewResourceManagerCommand(),
+		command.NewMaintenanceCommand(),
+		command.NewMicroServicesCommand(),
 	)
 
 	return rootCmd

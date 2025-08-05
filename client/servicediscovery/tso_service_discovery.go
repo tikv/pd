@@ -101,21 +101,6 @@ type tsoServerDiscovery struct {
 	urls []string
 	// used for round-robin load balancing
 	selectIdx int
-	// failureCount counts the consecutive failures for communicating with the tso servers
-	failureCount int
-}
-
-func (t *tsoServerDiscovery) countFailure() bool {
-	t.Lock()
-	defer t.Unlock()
-	t.failureCount++
-	return t.failureCount >= len(t.urls)
-}
-
-func (t *tsoServerDiscovery) resetFailure() {
-	t.Lock()
-	defer t.Unlock()
-	t.failureCount = 0
 }
 
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
@@ -431,15 +416,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	if len(tsoServerURL) > 0 {
 		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout)
 		if err != nil {
-			if c.countFailure() {
-				log.Error("[tso] failed to find the keyspace group",
-					zap.Uint32("keyspace-id-in-request", keyspaceID),
-					zap.String("tso-server-url", tsoServerURL),
-					errs.ZapError(err))
-			}
+			log.Error("[tso] failed to find the keyspace group",
+				zap.Uint32("keyspace-id-in-request", keyspaceID),
+				zap.String("tso-server-url", tsoServerURL),
+				errs.ZapError(err))
 			return err
 		}
-		c.resetFailure()
 	} else {
 		// There is no error but no tso server URL found, which means
 		// the server side hasn't been upgraded to the version that
@@ -575,36 +557,37 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 }
 
 func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
-	c.Lock()
-	defer c.Unlock()
-
 	var (
 		urls []string
 		err  error
 	)
+	urls, err = sd.(*serviceDiscovery).discoverMicroservice(tsoService)
+	if err != nil {
+		return "", err
+	}
+
+	c.Lock()
+	defer c.Unlock()
 	t := c.tsoServerDiscovery
-	if len(t.urls) == 0 || t.failureCount == len(t.urls) {
-		urls, err = sd.(*serviceDiscovery).discoverMicroservice(tsoService)
-		if err != nil {
-			return "", err
-		}
-		failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+	failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+		if len(t.urls) == 0 {
 			log.Info("[failpoint] injected error: server returns no tso URLs")
 			urls = nil
-		})
-		if len(urls) == 0 {
-			// There is no error but no tso server url found, which means
-			// the server side hasn't been upgraded to the version that
-			// processes and returns GetClusterInfoResponse.TsoUrls. Return here
-			// and handle the fallback logic outside of this function.
-			return "", nil
 		}
+	})
 
+	if len(urls) == 0 {
+		// There is no error but no tso server url found, which means
+		// the server side hasn't been upgraded to the version that
+		// processes and returns GetClusterInfoResponse.TsoUrls. Return here
+		// and handle the fallback logic outside of this function.
+		return "", nil
+	}
+
+	if len(t.urls) == 0 || !EqualWithoutOrder(t.urls, urls) {
 		log.Info("update tso server URLs", zap.Strings("urls", urls))
-
 		t.urls = urls
 		t.selectIdx = 0
-		t.failureCount = 0
 	}
 
 	// Pick a TSO server in a round-robin way.
@@ -642,4 +625,32 @@ func (c *tsoServiceDiscovery) discoverWithLegacyPath() ([]string, error) {
 		return nil, errs.ErrClientGetServingEndpoint
 	}
 	return listenUrls, nil
+}
+
+// GetURLs returns the URLs of the TSO servers. Only used for testing.
+func (c *tsoServiceDiscovery) GetURLs() []string {
+	return c.urls
+}
+
+// EqualWithoutOrder checks if two slices are equal without considering the order.
+func EqualWithoutOrder[T comparable](a, b []T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, item := range a {
+		if !Contains(b, item) {
+			return false
+		}
+	}
+	return true
+}
+
+// Contains returns true if the given slice contains the value.
+func Contains[T comparable](slice []T, value T) bool {
+	for _, v := range slice {
+		if v == value {
+			return true
+		}
+	}
+	return false
 }

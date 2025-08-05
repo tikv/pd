@@ -1972,47 +1972,11 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
-// GetStoreRegionCountByRule returns the number of regions that overlap with the range [startKey, endKey) for
-// a specific rule and store.
-func (r *RegionsInfo) GetStoreRegionCountByRule(storeID uint64, startKey, endKey []byte, rule Rule) int {
-	r.t.RLock()
-	defer r.t.RUnlock()
-	switch rule {
-	case LeaderScatter:
-		tree, ok := r.leaders[storeID]
-		if !ok {
-			return 0
-		}
-		return tree.GetCountByKeyRange(startKey, endKey)
-	case PeerScatter:
-		count := 0
-
-		if tree, ok := r.leaders[storeID]; ok {
-			count += tree.GetCountByKeyRange(startKey, endKey)
-		}
-		if tree, ok := r.followers[storeID]; ok {
-			count += tree.GetCountByKeyRange(startKey, endKey)
-		}
-		if tree, ok := r.learners[storeID]; ok {
-			count += tree.GetCountByKeyRange(startKey, endKey)
-		}
-		return count
-	case LearnerScatter:
-		tree, ok := r.learners[storeID]
-		if !ok {
-			return 0
-		}
-		return tree.GetCountByKeyRange(startKey, endKey)
-	default:
-		return 0
-	}
-}
-
 // GetRegionCount returns the number of regions that overlap with the range [startKey, endKey).
 func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	return r.tree.GetCountByKeyRange(startKey, endKey)
+	return r.tree.GetCountByRange(startKey, endKey)
 }
 
 // ScanRegions scans regions intersecting [start key, end key), returns at most
@@ -2133,6 +2097,11 @@ func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(regi
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
+	if len(startKey) == 0 && len(endKey) == 0 {
+		r.t.RLock()
+		defer r.t.RUnlock()
+		return r.tree.totalSize
+	}
 	var size int64
 	for {
 		r.t.RLock()
