@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 // ControllerConfigPath returns the path to save the controller config.
@@ -71,6 +71,16 @@ func KeyspaceResourceGroupSettingPrefix() string {
 // KeyspaceResourceGroupStatePrefix returns the prefix of the keyspace resource group states.
 func KeyspaceResourceGroupStatePrefix() string {
 	return keyspaceResourceGroupStatesPathPrefixFormat
+}
+
+// KeyspaceServiceLimitPath returns the path to save the keyspace service limit.
+func KeyspaceServiceLimitPath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceServiceLimitsPathFormat, keyspaceID)
+}
+
+// KeyspaceServiceLimitPrefix returns the prefix of the keyspace service limits.
+func KeyspaceServiceLimitPrefix() string {
+	return keyspaceServiceLimitsPathPrefixFormat
 }
 
 // ParseKeyspaceResourceGroupPath parses the keyspace ID and resource group name from the keyspace resource group path.

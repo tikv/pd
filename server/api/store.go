@@ -565,33 +565,33 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		action, progress, leftSeconds, currentSpeed, err := h.GetProgressByID(v)
+		p, err := h.GetProgressByID(storeID)
 		if err != nil {
 			h.rd.JSON(w, http.StatusNotFound, err.Error())
 			return
 		}
 		sp := &Progress{
 			StoreID:      storeID,
-			Action:       action,
-			Progress:     progress,
-			CurrentSpeed: currentSpeed,
-			LeftSeconds:  leftSeconds,
+			Action:       string(p.Action),
+			Progress:     p.ProgressPercent,
+			CurrentSpeed: p.CurrentSpeed,
+			LeftSeconds:  p.LeftSecond,
 		}
 
 		h.rd.JSON(w, http.StatusOK, sp)
 		return
 	}
 	if v := r.URL.Query().Get("action"); v != "" {
-		progress, leftSeconds, currentSpeed, err := h.GetProgressByAction(v)
+		p, err := h.GetProgressByAction(v)
 		if err != nil {
 			h.rd.JSON(w, http.StatusNotFound, err.Error())
 			return
 		}
 		sp := &Progress{
 			Action:       v,
-			Progress:     progress,
-			CurrentSpeed: currentSpeed,
-			LeftSeconds:  leftSeconds,
+			Progress:     p.ProgressPercent,
+			CurrentSpeed: p.CurrentSpeed,
+			LeftSeconds:  p.LeftSecond,
 		}
 
 		h.rd.JSON(w, http.StatusOK, sp)

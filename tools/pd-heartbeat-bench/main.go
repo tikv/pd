@@ -65,7 +65,7 @@ var (
 )
 
 func newClient(ctx context.Context, cfg *config.Config) (pdpb.PDClient, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
+	tlsConfig, err := cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +275,7 @@ func (s *Stores) update(rs *utils.Regions) {
 
 func main() {
 	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 	defer logutil.LogPanic()

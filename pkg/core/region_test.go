@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -467,9 +466,11 @@ func TestSetRegionConcurrence(t *testing.T) {
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	go func() {
-		regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
 	}()
-	regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
@@ -835,7 +836,7 @@ const (
 	keyLength = 100
 )
 
-func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
+func newRegionInfoIDRandom(re *require.Assertions, idAllocator id.Allocator) *RegionInfo {
 	var (
 		peers  []*metapb.Peer
 		leader *metapb.Peer
@@ -843,7 +844,8 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 	// Randomly select a peer as the leader.
 	leaderIdx := mrand.Intn(peerNum)
 	for i := range peerNum {
-		id, _, _ := idAllocator.Alloc(1)
+		id, _, err := idAllocator.Alloc(1)
+		re.NoError(err)
 		// Randomly distribute the peers to different stores.
 		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
 		if i == leaderIdx {
@@ -851,7 +853,8 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 		}
 		peers = append(peers, p)
 	}
-	regionID, _, _ := idAllocator.Alloc(1)
+	regionID, _, err := idAllocator.Alloc(1)
+	re.NoError(err)
 	return NewRegionInfo(
 		&metapb.Region{
 			Id:       regionID,
@@ -875,9 +878,10 @@ func randomBytes(n int) []byte {
 }
 
 func BenchmarkAddRegion(b *testing.B) {
+	re := require.New(b)
 	regions := NewRegionsInfo()
 	idAllocator := mockid.NewIDAllocator()
-	items := generateRegionItems(idAllocator, 10000000)
+	items := generateRegionItems(re, idAllocator, 10000000)
 	b.ResetTimer()
 	for i := range b.N {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
@@ -886,10 +890,11 @@ func BenchmarkAddRegion(b *testing.B) {
 }
 
 func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
+	re := require.New(b)
 	idAllocator := mockid.NewIDAllocator()
 	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
 		regions := NewRegionsInfo()
-		items := generateRegionItems(idAllocator, size)
+		items := generateRegionItems(re, idAllocator, size)
 		// Update the subtrees from an empty `*RegionsInfo`.
 		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -914,7 +919,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// Update the subtrees from a non-empty `*RegionsInfo` with different regions,
 		// which means the regions are most likely overlapped.
 		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
-			items = generateRegionItems(idAllocator, size)
+			items = generateRegionItems(re, idAllocator, size)
 			b.ResetTimer()
 			for range b.N {
 				for idx := range items {
@@ -925,10 +930,10 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 	}
 }
 
-func generateRegionItems(idAllocator *mockid.IDAllocator, size int) []*RegionInfo {
+func generateRegionItems(re *require.Assertions, idAllocator *mockid.IDAllocator, size int) []*RegionInfo {
 	items := make([]*RegionInfo, size)
 	for i := range size {
-		items[i] = newRegionInfoIDRandom(idAllocator)
+		items[i] = newRegionInfoIDRandom(re, idAllocator)
 	}
 	return items
 }
@@ -975,11 +980,13 @@ func TestUpdateRegionEquivalence(t *testing.T) {
 	updateRegion := func(item *RegionInfo) {
 		// old way
 		ctx := ContextTODO()
-		regionsOld.AtomicCheckAndPutRegion(ctx, item)
+		_, err := regionsOld.AtomicCheckAndPutRegion(ctx, item)
+		re.NoError(err)
 		// new way
 		newItem := item.Clone()
 		ctx = ContextTODO()
-		regionsNew.CheckAndPutRootTree(ctx, newItem)
+		_, err = regionsNew.CheckAndPutRootTree(ctx, newItem)
+		re.NoError(err)
 		regionsNew.CheckAndPutSubTree(newItem)
 	}
 	checksEquivalence := func() {
@@ -1080,7 +1087,8 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 	// Old way
 	{
 		ctx := ContextTODO()
-		regionsOld.AtomicCheckAndPutRegion(ctx, regionPendingItemA)
+		_, err := regionsOld.AtomicCheckAndPutRegion(ctx, regionPendingItemA)
+		re.NoError(err)
 		re.Equal(int32(2), regionPendingItemA.GetRef())
 		// check new item
 		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemA, regionPendingItemA)
@@ -1088,7 +1096,8 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		re.True(saveCache)
 		re.False(saveKV)
 		// update cache
-		regionsOld.AtomicCheckAndPutRegion(ctx, regionItemA)
+		_, err = regionsOld.AtomicCheckAndPutRegion(ctx, regionItemA)
+		re.NoError(err)
 		re.Equal(int32(2), regionItemA.GetRef())
 	}
 
@@ -1096,10 +1105,12 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 	{
 		// root tree part in order, and updated in order, updated regionPendingItemB first, then regionItemB
 		ctx := ContextTODO()
-		regionsNew.CheckAndPutRootTree(ctx, regionPendingItemB)
+		_, err := regionsNew.CheckAndPutRootTree(ctx, regionPendingItemB)
+		re.NoError(err)
 		re.Equal(int32(1), regionPendingItemB.GetRef())
 		ctx = ContextTODO()
-		regionsNew.CheckAndPutRootTree(ctx, regionItemB)
+		_, err = regionsNew.CheckAndPutRootTree(ctx, regionItemB)
+		re.NoError(err)
 		re.Equal(int32(1), regionItemB.GetRef())
 		re.Equal(int32(0), regionPendingItemB.GetRef())
 
@@ -1323,45 +1334,6 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
 }
 
-func TestGetPeers(t *testing.T) {
-	re := require.New(t)
-	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
-	leader := &metapb.Peer{StoreId: 2, Id: 2}
-	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
-	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
-	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-		leader, follower1, follower2, learner,
-	}}, leader, WithLearners([]*metapb.Peer{learner}))
-	for _, v := range []struct {
-		rule  string
-		peers []*metapb.Peer
-	}{
-		{
-			rule:  "leader-scatter",
-			peers: []*metapb.Peer{leader},
-		},
-		{
-			rule:  "peer-scatter",
-			peers: []*metapb.Peer{learner, leader, follower1, follower2},
-		},
-		{
-			rule:  "learner-scatter",
-			peers: []*metapb.Peer{learner},
-		},
-		{
-			rule:  "witness-scatter",
-			peers: nil,
-		},
-	} {
-		role := NewRule(v.rule)
-		peers := region.GetPeersByRule(role)
-		sort.Slice(peers, func(i, j int) bool {
-			return peers[i].Id <= peers[j].Id
-		})
-		re.Equal(v.peers, peers, role)
-	}
-}
-
 func TestCodecRule(t *testing.T) {
 	re := require.New(t)
 	for _, v := range []string{"leader", "peer", "learner", "witness"} {
@@ -1375,5 +1347,31 @@ func TestCodecRule(t *testing.T) {
 		var rule2 Rule
 		re.NoError(json.Unmarshal(body, &rule2))
 		re.Equal(rule.String(), rule2.String())
+	}
+}
+
+func TestRegionCount(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("c")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("e"), []byte("g")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("g"), []byte("i")))
+	for _, key := range [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f"), []byte("g"), []byte("h"), []byte("")} {
+		count := regions.GetRegionCount([]byte("a"), key)
+		scanCount := len(regions.ScanRegions([]byte("a"), key, 100))
+		re.Equal(count, scanCount, "endKey: %s", key)
+
+		count = regions.GetRegionCount([]byte(""), key)
+		scanCount = len(regions.ScanRegions([]byte(""), key, 100))
+		re.Equal(count, scanCount, "endKey: %s", key)
+
+		count = regions.GetRegionCount(key, []byte("i"))
+		scanCount = len(regions.ScanRegions(key, []byte("i"), 100))
+		re.Equal(count, scanCount, "startKey: %s", key)
+
+		count = regions.GetRegionCount(key, []byte(""))
+		scanCount = len(regions.ScanRegions(key, []byte(""), 100))
+		re.Equal(count, scanCount, "startKey: %s", key)
 	}
 }

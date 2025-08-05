@@ -158,7 +158,8 @@ func TestGRPCRateLimit(t *testing.T) {
 	clusterID := leaderServer.GetClusterID()
 	addr := leaderServer.GetAddr()
 	grpcPDClient := testutil.MustNewGrpcClient(re, addr)
-	leaderServer.BootstrapCluster()
+	err = leaderServer.BootstrapCluster()
+	re.NoError(err)
 	for range 100 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: clusterID},
@@ -294,7 +295,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 	for range 3 {
 		svr := <-ch
 		suite.svrs[svr.GetAddr()] = svr
-		suite.leaderPath = svr.GetMember().GetLeaderPath()
+		suite.leaderPath = svr.GetMember().GetElectionPath()
 	}
 }
 
@@ -543,7 +544,7 @@ func TestCheckClusterID(t *testing.T) {
 	re.NoError(err)
 	urlsMap, err := etcdtypes.NewURLsMap(svr.GetConfig().InitialCluster)
 	re.NoError(err)
-	tlsConfig, err := svr.GetConfig().Security.ToTLSConfig()
+	tlsConfig, err := svr.GetConfig().Security.ToClientTLSConfig()
 	re.NoError(err)
 	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
 	re.Error(err)

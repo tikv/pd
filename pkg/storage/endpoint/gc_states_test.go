@@ -16,6 +16,7 @@ package endpoint
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -32,10 +33,11 @@ import (
 	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func newEtcdStorageEndpoint(t *testing.T) (se *StorageEndpoint, clean func()) {
@@ -91,7 +93,7 @@ func TestGCBarriersConversions(t *testing.T) {
 	}
 }
 
-func TestGlobalGCBarriersConversions(t *testing.T) {
+func TestGlobalGCBarriersMarshalling(t *testing.T) {
 	re := require.New(t)
 
 	t1 := time.Date(2025, 2, 20, 15, 30, 00, 0, time.Local)
@@ -109,29 +111,18 @@ func TestGlobalGCBarriersConversions(t *testing.T) {
 
 	// Check t3 & t4 are rounded
 	t3Rounded := time.Date(2025, 2, 20, 15, 30, 01, 0, time.Local)
-	re.Equal(t3Rounded, *gcBarriers[3].ExpirationTime)
-	re.Equal(t3Rounded, *gcBarriers[4].ExpirationTime)
+	re.Equal(t3Rounded, *gcBarriers[3].ExpirationTime.Time)
+	re.Equal(t3Rounded, *gcBarriers[4].ExpirationTime.Time)
 
-	serviceSafePoints := []*ServiceSafePoint{
-		{ServiceID: "a", ExpiredAt: math.MaxInt64, SafePoint: 1},
-		{ServiceID: "b", ExpiredAt: t1.Unix(), SafePoint: 2},
-		{ServiceID: "c", ExpiredAt: t2.Unix(), SafePoint: uint64(t1.UnixMilli()) << 18},
-		{ServiceID: "d", ExpiredAt: t3Rounded.Unix(), SafePoint: math.MaxUint64 - 1},
-		{ServiceID: "e", ExpiredAt: t3Rounded.Unix(), SafePoint: 456139133457530881},
-	}
+	// Test Marshal & Unmarshal for GlobalGCBarrier
+	for _, gcBarrier := range gcBarriers {
+		str, err := json.Marshal(gcBarrier)
+		re.NoError(err)
 
-	// Test representing GC barriers by service safe points.
-	for i, gcBarrier := range gcBarriers {
-		expectedServiceSafePoint := serviceSafePoints[i]
-		serviceSafePoint := gcBarrier.ToServiceSafePoint()
-		re.Equal(expectedServiceSafePoint, serviceSafePoint)
-	}
-
-	var dec globalGCBarrierDecoder
-	for i, serviceSafePoint := range serviceSafePoints {
-		expectedGCBarrier := gcBarriers[i]
-		dec.decode(serviceSafePoint)
-		re.Equal(expectedGCBarrier, dec.barriers[i])
+		var barrier GlobalGCBarrier
+		err = json.Unmarshal(str, &barrier)
+		re.NoError(err)
+		re.Equal(barrier, *gcBarrier)
 	}
 }
 
@@ -524,7 +515,7 @@ func TestGCBarrier(t *testing.T) {
 
 		if keyspaceID == constant.NullKeyspaceID {
 			// Check by the legacy service safe point API for null keyspace.
-			keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
+			keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
 			re.NoError(err)
 			re.Len(keys, 3)
 			re.Len(ssps, 3)
@@ -571,13 +562,13 @@ func TestGlobalGCBarrier(t *testing.T) {
 	expirationTime := time.Unix(1740127928, 0)
 
 	gcBarriers := []*GlobalGCBarrier{
-		{BarrierID: "1", BarrierTS: 1, ExpirationTime: &expirationTime},
-		{BarrierID: "2", BarrierTS: 2, ExpirationTime: nil},
-		{BarrierID: "3", BarrierTS: 3, ExpirationTime: &expirationTime},
+		{BarrierID: "1", BarrierTS: 1, ExpirationTime: typeutil.TimeOptional{Time: &expirationTime}},
+		{BarrierID: "2", BarrierTS: 2, ExpirationTime: typeutil.TimeOptional{Time: nil}},
+		{BarrierID: "3", BarrierTS: 3, ExpirationTime: typeutil.TimeOptional{Time: &expirationTime}},
 	}
 
 	// Empty.
-	loadedBarriers, err := provider.LoadGlobalGCBarriers()
+	loadedBarriers, err := provider.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	re.Empty(loadedBarriers)
 
@@ -597,15 +588,15 @@ func TestGlobalGCBarrier(t *testing.T) {
 
 	// Check the raw data.
 	pathPrefix := keypath.GlobalGCBarrierPrefix()
-	re.JSONEq(`{"service_id":"1","expired_at":1740127928,"safe_point":1,"keyspace_id":0}`,
+	re.JSONEq(`{"barrier_id":"1","expiration_time":1740127928,"barrier_ts":1}`,
 		loadValue(re, se, pathPrefix+"1"))
-	re.JSONEq(`{"service_id":"2","expired_at":9223372036854775807,"safe_point":2,"keyspace_id":0}`,
+	re.JSONEq(`{"barrier_id":"2","expiration_time":0,"barrier_ts":2}`,
 		loadValue(re, se, pathPrefix+"2"))
-	re.JSONEq(`{"service_id":"3","expired_at":1740127928,"safe_point":3,"keyspace_id":0}`,
+	re.JSONEq(`{"barrier_id":"3","expiration_time":1740127928,"barrier_ts":3}`,
 		loadValue(re, se, pathPrefix+"3"))
 
 	// Check with the GC barrier API.
-	loadedBarriers, err = provider.LoadGlobalGCBarriers()
+	loadedBarriers, err = provider.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	re.Len(loadedBarriers, 3)
 	for i, barrier := range loadedBarriers {
@@ -633,7 +624,7 @@ func TestGlobalGCBarrier(t *testing.T) {
 	}
 
 	// After deletion, reading range returns empty again.
-	loadedBarriers, err = provider.LoadGlobalGCBarriers()
+	loadedBarriers, err = provider.LoadAllGlobalGCBarriers()
 	re.NoError(err)
 	re.Empty(loadedBarriers)
 }
@@ -877,7 +868,7 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		re.Equal("instance2", key)
 		re.Equal(uint64(456139133457530888), minStartTS)
 
-		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
+		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints(constant.NullKeyspaceID)
 		re.NoError(err)
 		re.Equal([]string{
 			"/pd/0/gc/safe_point/service/gc_worker",

@@ -24,7 +24,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -250,7 +251,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 			ID:        uint32(2),
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{111, 222, 333},
-			Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
+			Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 		},
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
@@ -343,7 +344,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplitRange() {
 			ID:        uint32(2),
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{111, 333, 444, 555, 666},
-			Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
+			Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 		},
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
@@ -390,7 +391,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 			ID:        uint32(1),
 			UserKind:  endpoint.Basic.String(),
 			Keyspaces: []uint32{111, 222, 333},
-			Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
+			Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 		},
 		{
 			ID:        uint32(3),
@@ -562,5 +563,26 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			re.Equal(testCase.expectedOld, old, "test case %d", idx)
 			re.Equal(testCase.expectedNew, new, "test case %d", idx)
 		}
+	}
+}
+
+func TestParsePrimaryName(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		name     string
+		expected string
+	}{
+		{"127.0.0.1:2379-00000", "127.0.0.1:2379"},
+		{"http://127.0.0.1:2379-10000", "http://127.0.0.1:2379"},
+		{"https://127.0.0.1:2379-00001", "https://127.0.0.1:2379"},
+		{"http://[::1]:2379-00002", "http://[::1]:2379"},
+		{"https://[::1]:2379-00003", "https://[::1]:2379"},
+		{"https://a-b-c-d-e-f-g:2379-00004", "https://a-b-c-d-e-f-g:2379"},
+		{"https://pd-tso-server-0.tso-service.tidb-serverless.svc:2379-00002", "https://pd-tso-server-0.tso-service.tidb-serverless.svc:2379"},
+		{"http://pd-tso-server-0.tso-service.tidb-serverless.svc:2379-00002", "http://pd-tso-server-0.tso-service.tidb-serverless.svc:2379"},
+		{"pd-tso-server-0.tso-service.tidb-serverless.svc:2379-00000", "pd-tso-server-0.tso-service.tidb-serverless.svc:2379"},
+	}
+	for _, tc := range testCases {
+		re.Equal(tc.expected, parsePrimaryName(tc.name))
 	}
 }

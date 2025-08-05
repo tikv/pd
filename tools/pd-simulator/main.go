@@ -60,7 +60,7 @@ func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel, *simLogFile)
-	statistics.Denoising = false
+	statistics.DisableDenoising()
 	schedulers.Register() // register schedulers, which is needed by simConfig.Adjust
 	simConfig := sc.NewSimConfig(*serverLogLevel)
 	if simConfig.EnableTransferRegionCounter {
@@ -102,7 +102,7 @@ func run(simCase string, simConfig *sc.SimConfig) {
 		if err != nil {
 			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
-		for local.IsClosed() || !local.GetMember().IsLeader() {
+		for local.IsClosed() || !local.GetMember().IsServing() {
 			time.Sleep(100 * time.Millisecond)
 		}
 		simStart(local.GetAddr(), "", simCase, simConfig, clean)

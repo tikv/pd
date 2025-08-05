@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -96,7 +97,9 @@ func TestConfigClone(t *testing.T) {
 	con2 := emptyConf.clone()
 	re.Empty(con2.getKeyRangesByID(1))
 
-	con2.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
+	var err error
+	con2.StoreIDWithRanges[1], err = getKeyRanges([]string{"a", "b", "c", "d"})
+	re.NoError(err)
 	con3 := con2.clone()
 	re.Len(con3.getRanges(1), len(con2.getRanges(1)))
 
@@ -137,4 +140,33 @@ func TestBatchEvict(t *testing.T) {
 		ops, _ := sl.Schedule(tc, false)
 		return len(ops) == 5
 	})
+}
+
+func TestEvictLeaderSchedulerCompatibility(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	saveConf := &evictLeaderSchedulerConfig{
+		StoreIDWithRanges: map[uint64][]keyutil.KeyRange{
+			1: {keyutil.KeyRange{StartKey: []byte(""), EndKey: []byte("")}},
+		},
+	}
+
+	configJSON, err := json.Marshal(saveConf)
+	re.NoError(err)
+
+	// Save the serialized config to storage
+	err = tc.GetStorage().SaveSchedulerConfig(string(types.EvictLeaderScheduler), configJSON)
+	re.NoError(err)
+
+	scheduleNames, configs, err := tc.GetStorage().LoadAllSchedulerConfigs()
+	re.NoError(err)
+	re.Len(scheduleNames, 1)
+	data := configs[0]
+	es, err := CreateScheduler(types.EvictLeaderScheduler, oc, tc.GetStorage(), ConfigJSONDecoder([]byte(data)), func(string) error { return nil })
+	re.NoError(err)
+	re.Equal(3, es.(*evictLeaderScheduler).conf.Batch)
+	re.NotEmpty(es.(*evictLeaderScheduler).conf.StoreIDWithRanges[1])
 }

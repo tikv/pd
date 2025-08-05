@@ -30,9 +30,11 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
@@ -227,7 +229,7 @@ func GetHealth(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if allocator.GetMember().IsLeaderElected() {
+	if allocator.GetMember().(*member.Participant).IsPrimaryElected() {
 		c.IndentedJSON(http.StatusOK, "ok")
 		return
 	}
@@ -256,12 +258,12 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 				zap.Uint32("keyspace-group-id", id), zap.Error(err))
 			continue
 		}
-		member := allocator.GetMember()
+		m := allocator.GetMember().(*member.Participant)
 		members[id] = &KeyspaceGroupMember{
 			Group:     group,
-			Member:    member.GetMember().(*tsopb.Participant),
-			IsPrimary: member.IsLeader(),
-			PrimaryID: member.GetLeaderID(),
+			Member:    m.GetMember().(*tsopb.Participant),
+			IsPrimary: m.IsServing(),
+			PrimaryID: m.GetPrimaryID(),
 		}
 	}
 	c.IndentedJSON(http.StatusOK, members)
@@ -312,7 +314,7 @@ func transferPrimary(c *gin.Context) {
 	}
 
 	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetExpectedPrimaryLease(),
-		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
+		mcs.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

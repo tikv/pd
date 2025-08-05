@@ -22,7 +22,7 @@ import (
 
 	"github.com/pingcap/log"
 
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -55,7 +55,7 @@ func (suite *logTestSuite) checkSetLogLevel(cluster *tests.TestCluster) {
 	level := "error"
 	data, err := json.Marshal(level)
 	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/admin/log", data, tu.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/admin/log", data, testutil.StatusOK(re))
 	re.NoError(err)
 	re.Equal(level, log.GetLevel().String())
 }

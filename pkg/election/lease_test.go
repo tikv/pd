@@ -83,6 +83,8 @@ func TestLease(t *testing.T) {
 
 func TestLeaseKeepAlive(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
 
@@ -90,7 +92,7 @@ func TestLeaseKeepAlive(t *testing.T) {
 	lease := NewLease(client, "test_lease")
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
-	ch := lease.keepAliveWorker(context.Background(), 2*time.Second)
+	ch := lease.keepAliveWorker(ctx, 2*time.Second)
 	time.Sleep(2 * time.Second)
 	<-ch
 	re.NoError(lease.Close())

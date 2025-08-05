@@ -16,16 +16,19 @@ package storelimit
 
 import (
 	"container/list"
-	"context"
 	"math/rand"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/core/constant"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
@@ -115,37 +118,18 @@ func TestWindow(t *testing.T) {
 }
 
 func TestFeedback(t *testing.T) {
-	s := NewSlidingWindows()
 	re := require.New(t)
+	s := NewSlidingWindows()
 	type SnapshotStats struct {
-		total     int64
-		remaining int64
-		size      int64
-		start     int64
+		expectCost int64
+		remaining  int64
+		size       int64
+		start      int64
 	}
 	// region size is 10GB, snapshot write limit is 100MB/s and the snapshot concurrency is 3.
 	// the best strategy is that the tikv executing queue equals the wait.
 	const regionSize, limit, wait = int64(10000), int64(100), int64(4)
-	var iter atomic.Int32
-	iter.Store(100)
-	ops := make(chan int64, 10)
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// generate the operator
-	go func() {
-		for {
-			if s.Available(regionSize, SendSnapshot, constant.Low) && iter.Load() > 0 {
-				iter.Add(-1)
-				size := regionSize - rand.Int63n(regionSize/10)
-				s.Take(size, SendSnapshot, constant.Low)
-				ops <- size
-			}
-			if iter.Load() == 0 {
-				cancel()
-				return
-			}
-		}
-	}()
+	iter := 100
 
 	// receive the operator
 	queue := list.List{}
@@ -153,44 +137,49 @@ func TestFeedback(t *testing.T) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// create one region operator
+	generateOp := func(tick int64) {
+		if s.Available(regionSize, SendSnapshot, constant.Low) && iter > 0 {
+			iter--
+			size := regionSize - rand.Int63n(regionSize/10)
+			stats := &SnapshotStats{
+				expectCost: size / limit,
+				remaining:  size,
+				size:       size,
+				start:      tick,
+			}
+			s.Take(size, SendSnapshot, constant.Low)
+			queue.PushBack(stats)
+		}
+	}
+
 	// tick is the time that the snapshot has been executed.
 	tick := int64(0)
-	for {
-		select {
-		case op := <-ops:
-			stats := &SnapshotStats{
-				total:     op / limit,
-				remaining: op,
-				size:      op,
-				start:     tick,
-			}
-			queue.PushBack(stats)
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			tick++
-			first := queue.Front()
-			if first == nil {
-				continue
-			}
-			stats := first.Value.(*SnapshotStats)
-			if stats.remaining > 0 {
-				stats.remaining -= limit
-				continue
-			}
-			cost := tick - stats.start
-			exec := stats.total
-			if exec < 5 {
-				exec = 5
-			}
-			err := exec*wait - cost
-			queue.Remove(first)
-			s.Feedback(float64(err))
-			if iter.Load() < 5 {
-				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
-				re.Less(float64(s.GetCap()), float64(regionSize*wait))
-			}
-			s.Ack(stats.size, SendSnapshot)
+	for range ticker.C {
+		tick++
+		generateOp(tick)
+		first := queue.Front()
+		if first == nil {
+			continue
 		}
+		stats := first.Value.(*SnapshotStats)
+		if stats.remaining > 0 {
+			stats.remaining -= limit
+			continue
+		}
+		cost := tick - stats.start
+		exec := stats.expectCost
+		if exec < 5 {
+			exec = 5
+		}
+		err := exec*wait - cost
+		queue.Remove(first)
+		s.Feedback(float64(err))
+		if iter <= 0 {
+			re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
+			re.Less(float64(s.GetCap()), float64(regionSize*wait))
+			return
+		}
+		s.Ack(stats.size, SendSnapshot)
 	}
 }

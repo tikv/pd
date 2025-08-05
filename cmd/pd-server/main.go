@@ -224,7 +224,8 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	}
 	grpcprometheus.EnableHandlingTimeHistogram()
 
-	metricutil.Push(&cfg.Metric)
+	ctx, cancel := context.WithCancel(context.Background())
+	metricutil.Push(ctx, &cfg.Metric)
 	metricutil.EnablePyroscope()
 
 	err = join.PrepareJoinCluster(cfg)
@@ -233,7 +234,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	}
 
 	// Creates server.
-	ctx, cancel := context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 	if swaggerserver.Enabled() {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)

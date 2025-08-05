@@ -24,12 +24,17 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 const defaultLeaseTimeout = 1
 
@@ -120,9 +125,9 @@ func TestExitWatch(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Case1: close the client before the watch loop starts
 	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		client.Close()
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case2: close the client when the watch loop is running
@@ -141,9 +146,9 @@ func TestExitWatch(t *testing.T) {
 	})
 	// Case4: close the server before the watch loop starts
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
 		server.Close()
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
 	// Case5: close the server when the watch loop is running
@@ -157,14 +162,23 @@ func TestExitWatch(t *testing.T) {
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
+		cfg2 := etcd2.Config()
+		etcd3 := etcdutil.MustAddEtcdMember(t, &cfg2, client)
 		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls)
 		re.NoError(err)
 		// close the original leader
 		server.Server.HardStop()
+		// wait new leader
+		testutil.Eventually(re, func() bool {
+			_, err := client2.Get(context.Background(), leaderKey, clientv3.WithLimit(1))
+			return err == nil
+		})
 		// delete the leader key with the new client
-		client2.Delete(context.Background(), leaderKey)
+		_, err = client2.Delete(context.Background(), leaderKey)
+		re.NoError(err)
 		return func() {
 			etcd2.Close()
+			etcd3.Close()
 			client2.Close()
 		}
 	})
@@ -181,7 +195,10 @@ func TestExitWatch(t *testing.T) {
 
 		etcd2.Server.HardStop()
 		etcd3.Server.HardStop()
-		return func() {}
+		return func() {
+			etcd2.Close()
+			etcd3.Close()
+		}
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/fastTick"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
@@ -246,16 +263,18 @@ func TestRequestProgress(t *testing.T) {
 		}()
 
 		if injectWatchChanBlock {
-			failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)")
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
-			failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock")
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock"))
 		} else {
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(fname)
+				b, err := os.ReadFile(fname)
+				re.NoError(err)
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})

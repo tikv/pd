@@ -29,7 +29,8 @@ func TestAdjustDefaultValue(t *testing.T) {
 	err := config.Adjust()
 	re.NoError(err)
 	re.Equal(methodPlaintext, config.DataEncryptionMethod)
-	defaultRotationPeriod, _ := time.ParseDuration(defaultDataKeyRotationPeriod)
+	defaultRotationPeriod, err := time.ParseDuration(defaultDataKeyRotationPeriod)
+	re.NoError(err)
 	re.Equal(defaultRotationPeriod, config.DataKeyRotationPeriod.Duration)
 	re.Equal(masterKeyTypePlaintext, config.MasterKey.Type)
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -59,7 +60,7 @@ type tsoObject struct {
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
 	keyspaceGroupID uint32
-	member          ElectionMember
+	member          member.Election
 	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
@@ -209,7 +210,7 @@ func (t *timestampOracle) isInitialized() bool {
 func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if !t.member.IsLeader() {
+	if !t.member.IsServing() {
 		t.metrics.errLeaseResetTSEvent.Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs(errs.NotLeaderErr)
 	}
@@ -280,8 +281,6 @@ func (t *timestampOracle) updateTimestamp() error {
 		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
 	prevPhysical, prevLogical := t.getTSO()
-	t.metrics.tsoPhysicalGauge.Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
-	t.metrics.tsoPhysicalGapGauge.Set(float64(time.Since(prevPhysical).Milliseconds()))
 
 	now := time.Now()
 	failpoint.Inject("fallBackUpdate", func() {
@@ -290,10 +289,12 @@ func (t *timestampOracle) updateTimestamp() error {
 	failpoint.Inject("systemTimeSlow", func() {
 		now = now.Add(-time.Hour)
 	})
+	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 
+	t.metrics.tsoPhysicalGauge.Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
+	t.metrics.tsoPhysicalGapGauge.Set(float64(jetLag.Milliseconds()))
 	t.metrics.saveEvent.Inc()
 
-	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
 		log.Warn("clock offset",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
@@ -358,7 +359,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if t.member.IsLeader() {
+			if t.member.IsServing() {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -380,7 +381,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 			continue
 		}
 		// In case lease expired after the first check.
-		if !t.member.IsLeader() {
+		if !t.member.IsServing() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		return resp, nil

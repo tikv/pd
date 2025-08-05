@@ -38,14 +38,17 @@ import (
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -216,13 +219,17 @@ func (suite *httpClientTestSuite) TestMeta() {
 	version, err := client.GetClusterVersion(ctx)
 	re.NoError(err)
 	re.Equal("1.0.0", version)
-	rgs, _ := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	rgs, err := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	re.NoError(err)
 	re.Equal(int64(0), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	re.NoError(err)
 	re.Equal(int64(1), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
 	// store 2 origin status:offline
 	err = client.DeleteStore(ctx, 2)
@@ -359,6 +366,49 @@ func (suite *httpClientTestSuite) TestRule() {
 	err = client.SetPlacementRule(ctx, testRule)
 	re.NoError(err)
 	suite.checkRuleResult(ctx, re, testRule, 1, true)
+
+	// ***** Test placement rule failed passing check after transfer leader
+	// Transfer the leader to another store to ensure the PD follower
+	// exists stale store labels.
+	suite.transferLeader(ctx, re)
+	tranferLeaderRule := []*pd.GroupBundle{
+		{
+			ID: "test-transfer-leader",
+			Rules: []*pd.Rule{
+				{
+					GroupID:  "test-transfer-leader",
+					ID:       "readonly",
+					Role:     pd.Voter,
+					Count:    3,
+					StartKey: []byte{},
+					EndKey:   []byte{},
+					LabelConstraints: []pd.LabelConstraint{
+						{
+							Key:    "$mode",
+							Op:     pd.In,
+							Values: []string{"readonly"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.Error(err)
+	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"$mode": "readonly",
+	})
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.NoError(err)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+
+	suite.transferLeader(ctx, re)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "$mode"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -699,19 +749,14 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.Equal("cancelled", status)
 }
 
-func (suite *httpClientTestSuite) TestStoreLabels() {
-	re := suite.Require()
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, re *require.Assertions, storeLabels map[string]string) int64 {
 	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
 	resp, err := client.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
 	re.Empty(firstStore.Store.Labels, nil)
-	storeLabels := map[string]string{
-		"zone": "zone1",
-	}
+
 	err = client.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels)
 	re.NoError(err)
 
@@ -728,17 +773,27 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 		re.Equal(value, labelsMap[key])
 	}
 
-	re.NoError(client.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
-	store, err := client.GetStore(ctx, uint64(firstStore.Store.ID))
-	re.NoError(err)
-	re.Empty(store.Store.Labels)
+	return firstStore.Store.ID
 }
 
-func (suite *httpClientTestSuite) TestTransferLeader() {
+func (suite *httpClientTestSuite) TestStoreLabels() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"zone": "zone1",
+	})
+
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "zone"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
+}
+
+func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
+	client := suite.client
 	members, err := client.GetMembers(ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
@@ -770,6 +825,13 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
 }
+func (suite *httpClientTestSuite) TestTransferLeader() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	suite.transferLeader(ctx, re)
+}
 
 func (suite *httpClientTestSuite) TestVersion() {
 	re := suite.Require()
@@ -786,6 +848,7 @@ func (suite *httpClientTestSuite) TestStatus() {
 	re.Equal(versioninfo.PDGitHash, status.GitHash)
 	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
 	re.GreaterOrEqual(time.Now().Unix(), status.StartTimestamp)
+	re.Equal(versioninfo.PDKernelType, status.KernelType)
 }
 
 func (suite *httpClientTestSuite) TestAdmin() {
@@ -839,11 +902,13 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err := c.CreateScheduler(context.Background(), "test", 0)
+	re.ErrorContains(err, "mock error")
 	var out dto.Metric
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	c.Close()
 
@@ -856,10 +921,12 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(1), out.GetCounter().GetValue())
 	c.Close()
 
@@ -871,14 +938,17 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	failureCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(3), out.GetCounter().GetValue())
 	c.Close()
 }
@@ -960,7 +1030,8 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
 	for range 3 {
-		leader.ResignLeader()
+		err := leader.ResignLeader()
+		re.NoError(err)
 		re.NotEmpty(suite.cluster.WaitLeader())
 		leader = suite.cluster.GetLeaderServer()
 		re.NotNil(leader)
@@ -978,21 +1049,22 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	defer cancel()
 
 	// adding some safepoints to the server
+	now := time.Now().Truncate(time.Second)
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "AAA",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 1,
 			},
 			{
 				ServiceID: "BBB",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 2,
 			},
 			{
 				ServiceID: "CCC",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 3,
 			},
 		},
@@ -1000,12 +1072,15 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		MinServiceGcSafepoint: 1,
 	}
 
-	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
 	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	re.NoError(err)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	re.NoError(err)
 
 	// get the safepoints and start testing
 	l, err := client.GetGCSafePoint(ctx)
@@ -1040,13 +1115,91 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re.Equal(uint64(0), l.MinServiceGcSafepoint)
 	re.Empty(l.ServiceGCSafepoints)
 
-	// try delete gc_worker, should get an error
+	// Deleting "gc_worker" should result in an error in earlier version. As the service safe point becomes a
+	// compatibility layer over GC barriers, it won't take any effect except that possibly deleting the residual
+	// service safe point of "gc_worker" that was written by previous version.
 	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
-	re.Error(err)
+	re.NoError(err)
 
 	// try delete some non-exist safepoints, should return normally
 	var msg string
 	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
 	re.NoError(err)
 	re.Equal("Delete service GC safepoint successfully.", msg)
+}
+
+func TestGetSiblingsRegions(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2, func(conf *config.Config, _ string) {
+		conf.Replication.MaxReplicas = 1
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	leaderServer := cluster.GetLeaderServer()
+
+	err = leaderServer.BootstrapCluster()
+	// Add 2 more stores to the cluster.
+	for i := 2; i <= 4; i++ {
+		tests.MustPutStore(re, cluster, &metapb.Store{
+			Id:            uint64(i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		})
+	}
+	re.NoError(err)
+	for _, region := range []*core.RegionInfo{
+		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
+		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+		core.NewTestRegionInfo(12, 1, []byte("a3"), []byte("a4")),
+	} {
+		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
+	var (
+		testServers = cluster.GetServers()
+		endpoints   = make([]string, 0, len(testServers))
+	)
+	for _, s := range testServers {
+		addr := s.GetConfig().AdvertiseClientUrls
+		url, err := url.Parse(addr)
+		re.NoError(err)
+		endpoints = append(endpoints, url.Host)
+	}
+	client := pd.NewClient("pd-http-client-it-http", endpoints)
+	defer client.Close()
+	rg, err := client.GetRegionByID(ctx, 11)
+	re.NoError(err)
+	re.NotNil(rg)
+
+	rgs, err := client.GetRegionSiblingsByID(ctx, 11)
+	re.NoError(err)
+	re.Equal(int64(2), rgs.Count)
+	re.Equal(int64(10), rgs.Regions[0].ID)
+	re.Equal(int64(12), rgs.Regions[1].ID)
+
+	rightStartKey := rgs.Regions[rgs.Count-1].GetStartKey()
+	re.Zero(strings.Compare(rightStartKey, rg.EndKey))
+
+	input := map[string]any{
+		"name":             "merge-region",
+		"source_region_id": 10,
+		"target_region_id": 11,
+	}
+	err = client.CreateOperators(ctx, input)
+	re.NoError(err)
+	ops := leaderServer.GetRaftCluster().GetOperatorController().GetOperators()
+	re.Len(ops, 2)
+	re.NotZero(ops[0].Kind() & operator.OpMerge)
+	re.NotZero(ops[1].Kind() & operator.OpMerge)
 }

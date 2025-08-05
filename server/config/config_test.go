@@ -26,13 +26,19 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestSecurity(t *testing.T) {
 	re := require.New(t)
@@ -43,7 +49,7 @@ func TestSecurity(t *testing.T) {
 func TestTLS(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
-	tls, err := cfg.Security.ToTLSConfig()
+	tls, err := cfg.Security.ToClientTLSConfig()
 	re.NoError(err)
 	re.Nil(tls)
 }
@@ -167,9 +173,10 @@ leader-schedule-limit = 0
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
 	flagSet.StringP("log-file", "", "pd.log", "log file path")
-	flagSet.Parse(nil)
+	err := flagSet.Parse(nil)
+	re.NoError(err)
 	cfg := NewConfig()
-	err := cfg.Parse(flagSet)
+	err = cfg.Parse(flagSet)
 	re.NoError(err)
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
@@ -267,7 +274,8 @@ max-backups = 5
 	flagSet = pflag.NewFlagSet("testlog", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
 	flagSet.StringP("log-file", "", "pd.log", "log file path")
-	flagSet.Parse(nil)
+	err = flagSet.Parse(nil)
+	re.NoError(err)
 	cfg = NewConfig()
 	err = cfg.Parse(flagSet)
 	re.NoError(err)
@@ -483,21 +491,25 @@ hot-regions-write-interval= "30m"
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 	cfg := &Config{}
-	cfg.Adjust(nil, false)
+	err := cfg.Adjust(nil, false)
+	re.NoError(err)
 	re.Equal(cfg, cfg.Clone())
 
 	emptyConfigMetaData := configutil.NewConfigMetadata(nil)
 
 	schedule := &sc.ScheduleConfig{}
-	schedule.Adjust(emptyConfigMetaData, false)
+	err = schedule.Adjust(emptyConfigMetaData, false)
+	re.NoError(err)
 	re.Equal(schedule, schedule.Clone())
 
 	replication := &sc.ReplicationConfig{}
-	replication.Adjust(emptyConfigMetaData)
+	err = replication.Adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(replication, replication.Clone())
 
 	pdServer := &PDServerConfig{}
-	pdServer.adjust(emptyConfigMetaData)
+	err = pdServer.adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(pdServer, pdServer.Clone())
 
 	replicationMode := &ReplicationModeConfig{}

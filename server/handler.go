@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -332,12 +333,12 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 }
 
 // GetProgressByID returns the progress details for a given store ID.
-func (h *Handler) GetProgressByID(storeID string) (action string, p, ls, cs float64, err error) {
+func (h *Handler) GetProgressByID(storeID uint64) (*progress.Progress, error) {
 	return h.s.GetRaftCluster().GetProgressByID(storeID)
 }
 
 // GetProgressByAction returns the progress details for a given action.
-func (h *Handler) GetProgressByAction(action string) (p, ls, cs float64, err error) {
+func (h *Handler) GetProgressByAction(action string) (*progress.Progress, error) {
 	return h.s.GetRaftCluster().GetProgressByAction(action)
 }
 
@@ -388,7 +389,7 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 
 // IsLeader return true if this server is leader
 func (h *Handler) IsLeader() bool {
-	return h.s.member.IsLeader()
+	return h.s.member.IsServing()
 }
 
 // GetHistoryHotRegions get hot region info in HistoryHotRegion form.

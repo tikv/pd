@@ -298,7 +298,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		// so we check the etcd availability first.
 		if !etcdutil.IsHealthy(serverCtx, ls.client) {
 			if time.Since(lastReceivedResponseTime) > unhealthyTimeout {
-				log.Error("the connection is unhealthy for a while, exit leader watch loop",
+				log.Warn("the connection is unhealthy for a while, exit leader watch loop",
 					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				return
 			}
@@ -328,7 +328,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
-		watchChan := etcdutil.Watch(watcherCtx, watcher, ls.leaderKey,
+		watchChan := watcher.Watch(watcherCtx, ls.leaderKey,
 			clientv3.WithRev(revision), clientv3.WithProgressNotify())
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {

@@ -381,11 +381,6 @@ error = '''
 etcd move leader error
 '''
 
-["PD:etcd:ErrEtcdTLSConfig"]
-error = '''
-etcd TLS config error
-'''
-
 ["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
 etcd transaction failed, conflicted and rolled back
@@ -451,6 +446,11 @@ error = '''
 trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v
 '''
 
+["PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"]
+error = '''
+trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace %s
+'''
+
 ["PD:gc:ErrReservedGCBarrierID"]
 error = '''
 trying to set a GC barrier with a barrier ID that is reserved: %v
@@ -496,6 +496,11 @@ error = '''
 security config error: %s
 '''
 
+["PD:grpcutil:ErrTLSConfig"]
+error = '''
+TLS config error
+'''
+
 ["PD:hex:ErrHexDecodingString"]
 error = '''
 decode string %s error
@@ -514,6 +519,11 @@ send HTTP request failed
 ["PD:http:ErrWriteHTTPBody"]
 error = '''
 write HTTP body failed
+'''
+
+["PD:idalloc:ErrIDExhausted"]
+error = '''
+id exhausted
 '''
 
 ["PD:ioutil:ErrIORead"]
@@ -616,6 +626,11 @@ error = '''
 default keyspace group cannot be modified
 '''
 
+["PD:keyspace:ErrModifyReservedKeyspace"]
+error = '''
+cannot modify reserved keyspace's state
+'''
+
 ["PD:keyspace:ErrNoAvailableNode"]
 error = '''
 no available node
@@ -689,6 +704,11 @@ etcd leader not found
 ["PD:member:ErrMarshalMember"]
 error = '''
 marshal member failed
+'''
+
+["PD:member:ErrMarshalParticipant"]
+error = '''
+marshal participant failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]

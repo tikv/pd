@@ -90,7 +90,7 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z1", "rack": "r3", "host": "h1"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:        placement.DefaultGroupID,
 		ID:             "test",
 		Index:          100,
@@ -100,10 +100,11 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 		LocationLabels: []string{"zone", "rack", "host"},
 		IsolationLevel: "zone",
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.Nil(op)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:        placement.DefaultGroupID,
 		ID:             "test",
 		Index:          100,
@@ -113,6 +114,7 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 		LocationLabels: []string{"zone", "rack", "host"},
 		IsolationLevel: "rack",
 	})
+	re.NoError(err)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("add-rule-peer", op.Desc())
@@ -129,8 +131,7 @@ func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
 	suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3", "host": "h5"})
 	suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
-	suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:        placement.DefaultGroupID,
 		ID:             "test",
 		Index:          100,
@@ -140,6 +141,9 @@ func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
 		LocationLabels: []string{"zone", "host"},
 		IsolationLevel: "zone",
 	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.Nil(op)
 	region := suite.cluster.GetRegion(1)
@@ -339,17 +343,18 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeers2() {
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"foo": "bar"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"foo": "baz"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:  placement.DefaultGroupID,
 		ID:       "r1",
 		Index:    100,
 		Override: true,
-		Role:     placement.Leader,
+		Role:     placement.Voter,
 		Count:    2,
 		LabelConstraints: []placement.LabelConstraint{
 			{Key: "foo", Op: "in", Values: []string{"baz"}},
 		},
 	})
+	re.NoError(err)
 	suite.cluster.SetStoreDown(2)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.Nil(op)
@@ -377,7 +382,7 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"role": "follower"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"role": "voter"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:  placement.DefaultGroupID,
 		ID:       "r1",
 		Index:    100,
@@ -388,7 +393,8 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 			{Key: "role", Op: "in", Values: []string{"voter"}},
 		},
 	})
-	suite.ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "r2",
 		Index:   101,
@@ -398,6 +404,7 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 			{Key: "role", Op: "in", Values: []string{"follower"}},
 		},
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("fix-follower-role", op.Desc())
@@ -409,7 +416,7 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"role": "follower"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"role": "leader"})
 	suite.cluster.AddLeaderRegion(1, 1, 2)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:  placement.DefaultGroupID,
 		ID:       "r1",
 		Index:    100,
@@ -420,6 +427,7 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {
 			{Key: "role", Op: "in", Values: []string{"leader"}},
 		},
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("fix-leader-role", op.Desc())
@@ -442,12 +450,13 @@ func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"rule": "follower"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"rule": "follower"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"rule": "leader"})
-	suite.ruleManager.SetRuleGroup(&placement.RuleGroup{
+	err := suite.ruleManager.SetRuleGroup(&placement.RuleGroup{
 		ID:       "cluster",
 		Index:    2,
 		Override: true,
 	})
-	err := suite.ruleManager.SetRules([]*placement.Rule{
+	re.NoError(err)
+	err = suite.ruleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "cluster",
 			ID:      "r1",
@@ -484,7 +493,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
 	suite.cluster.AddLeaderRegion(1, 1)
 
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   placement.DefaultGroupID,
 		ID:        "r1",
 		Index:     100,
@@ -496,6 +505,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
 			{Key: "C", Op: "in", Values: []string{"voter"}},
 		},
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("add-rule-peer", op.Desc())
@@ -511,7 +521,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness2() {
 	suite.cluster.AddLabelsStore(4, 1, map[string]string{"D": "voter"})
 	suite.cluster.AddLeaderRegion(1, 1, 2, 3, 4)
 
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   placement.DefaultGroupID,
 		ID:        "r1",
 		Index:     100,
@@ -523,6 +533,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness2() {
 			{Key: "D", Op: "in", Values: []string{"voter"}},
 		},
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("fix-witness-peer", op.Desc())
@@ -700,7 +711,7 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
 	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host3"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:        placement.DefaultGroupID,
 		ID:             "test",
 		Index:          100,
@@ -709,6 +720,7 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
 		Count:          3,
 		LocationLabels: []string{"host"},
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("move-to-better-location", op.Desc())
@@ -725,7 +737,7 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement2() {
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "host": "host3"})
 	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "host1"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:        placement.DefaultGroupID,
 		ID:             "test",
 		Index:          100,
@@ -734,6 +746,7 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement2() {
 		Count:          3,
 		LocationLabels: []string{"zone", "host"},
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("move-to-better-location", op.Desc())
@@ -743,13 +756,139 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement2() {
 	re.Nil(op)
 }
 
+func (suite *ruleCheckerTestSuite) TestBetterReplacement3() {
+	re := suite.Require()
+	cfg := suite.cluster.GetReplicationConfig().Clone()
+	cfg.LocationLabels = []string{"region", "zone", "host"}
+	suite.cluster.SetReplicationConfig(cfg)
+	suite.cluster.AddLabelsStore(1, 10, map[string]string{"region": "R1", "host": "host-1", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(2, 10, map[string]string{"region": "R1", "host": "host-2", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(3, 10, map[string]string{"region": "R1", "host": "host-3", "zone": "z2", "type": "ap"})
+	suite.cluster.AddLabelsStore(4, 10, map[string]string{"region": "R1", "host": "host-4", "zone": "z2", "type": "ap"})
+	suite.cluster.AddLabelsStore(5, 10, map[string]string{"region": "R1", "host": "host-5", "zone": "z3", "type": "tp"})
+	suite.cluster.AddLabelsStore(6, 10, map[string]string{"region": "R1", "host": "host-6", "zone": "z3", "type": "tp"})
+	suite.cluster.AddLeaderRegionWithRange(10, "a", "b", 1, 2, 6)
+	rule1 := &placement.Rule{
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_0",
+		Index:          40,
+		Role:           placement.Leader,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule2 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_1",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule3 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_2",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"tp"}},
+		},
+	}
+	err := suite.ruleManager.SetRule(rule1)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule2)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule3)
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
+	region := suite.cluster.GetRegion(10)
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("move-to-better-location", op.Desc())
+	if op.Step(0).(operator.AddLearner).ToStore != 4 {
+		re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
+	}
+}
+
+func (suite *ruleCheckerTestSuite) TestBetterReplacement4() {
+	re := suite.Require()
+	cfg := suite.cluster.GetReplicationConfig().Clone()
+	cfg.LocationLabels = []string{"region", "zone", "host"}
+	suite.cluster.SetReplicationConfig(cfg)
+	suite.cluster.AddLabelsStore(1, 10, map[string]string{"region": "R1", "host": "host-1", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(2, 10, map[string]string{"region": "R1", "host": "host-2", "zone": "z1", "type": "ap"})
+	suite.cluster.AddLabelsStore(3, 10, map[string]string{"region": "R1", "host": "host-3", "zone": "z2", "type": "ap"})
+	suite.cluster.AddLabelsStore(4, 10, map[string]string{"region": "R1", "host": "host-4", "zone": "z2", "type": "tp"})
+	suite.cluster.AddLabelsStore(5, 10, map[string]string{"region": "R1", "host": "host-5", "zone": "z3", "type": "ap"})
+	suite.cluster.AddLabelsStore(6, 10, map[string]string{"region": "R1", "host": "host-6", "zone": "z3", "type": "tp"})
+	suite.cluster.AddLeaderRegionWithRange(10, "a", "b", 2, 3, 4)
+	rule1 := &placement.Rule{
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_0",
+		Index:          40,
+		Role:           placement.Leader,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule2 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_1",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"ap"}},
+		},
+	}
+	rule3 := &placement.Rule{
+
+		GroupID:        "TiDB_DDL_122",
+		ID:             "table_rule_122_2",
+		Index:          40,
+		Role:           placement.Voter,
+		Count:          1,
+		LocationLabels: []string{"zone"},
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "type", Op: "in", Values: []string{"tp"}},
+		},
+	}
+	err := suite.ruleManager.SetRule(rule1)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule2)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule3)
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
+	region := suite.cluster.GetRegion(10)
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("move-to-better-location", op.Desc())
+	re.Equal(uint64(5), op.Step(0).(operator.AddLearner).ToStore)
+}
+
 func (suite *ruleCheckerTestSuite) TestNoBetterReplacement() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:        placement.DefaultGroupID,
 		ID:             "test",
 		Index:          100,
@@ -758,6 +897,7 @@ func (suite *ruleCheckerTestSuite) TestNoBetterReplacement() {
 		Count:          3,
 		LocationLabels: []string{"host"},
 	})
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.Nil(op)
 }
@@ -887,7 +1027,8 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 				EndKey:   []byte{},
 				Override: true,
 			}
-			suite.ruleManager.SetRule(rule)
+			err = suite.ruleManager.SetRule(rule)
+			re.NoError(err)
 
 			// remove peer from region 1
 			for j := 1; j <= 2; j++ {
@@ -1002,8 +1143,9 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 				suite.cluster.SetStoreDisconnect(testCase[2])
 
 				// change rule to 3 replicas
-				suite.ruleManager.DeleteRule(placement.DefaultGroupID, "r1")
-				suite.ruleManager.SetRule(&placement.Rule{
+				err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "r1")
+				re.NoError(err)
+				err = suite.ruleManager.SetRule(&placement.Rule{
 					GroupID:  placement.DefaultGroupID,
 					ID:       placement.DefaultRuleID,
 					Role:     placement.Voter,
@@ -1012,6 +1154,7 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 					EndKey:   []byte{},
 					Override: true,
 				})
+				re.NoError(err)
 
 				// remove peer from region 1
 				for j := 1; j <= 3; j++ {
@@ -1154,9 +1297,12 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeersAndTiFlash() {
 			},
 		},
 	}
-	suite.ruleManager.SetRule(rule)
-	suite.ruleManager.SetRule(rule2)
-	suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule2)
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
 
 	r1 := suite.cluster.GetRegion(1)
 	// set peer3 to pending and down
@@ -1331,7 +1477,8 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 		Count:          3,
 		LocationLabels: []string{"zone"},
 	}
-	suite.ruleManager.SetRule(rule)
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
 
 	region := suite.cluster.GetRegion(1)
 	re.Nil(suite.rc.Check(region))
@@ -1346,7 +1493,8 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	operatorutil.CheckTransferPeer(re, suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
-	suite.ruleManager.SetRule(rule)
+	err = suite.ruleManager.SetRule(rule)
+	re.NoError(err)
 	re.Nil(suite.rc.Check(region))
 }
 
@@ -1380,19 +1528,21 @@ func (suite *ruleCheckerTestSuite) TestFixDownWitnessPeer() {
 	// set peer2 to witness
 	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(2)}))
 
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	suite.ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   placement.DefaultGroupID,
 		ID:        "r1",
 		Role:      placement.Voter,
 		Count:     1,
 		IsWitness: true,
 	})
+	re.NoError(err)
 	re.Nil(suite.rc.Check(r))
 
 	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-31 * time.Minute).UnixNano()
@@ -1414,19 +1564,21 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness() {
 	// set peer3 to witness
 	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
 
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	suite.ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   placement.DefaultGroupID,
 		ID:        "r1",
 		Role:      placement.Voter,
 		Count:     1,
 		IsWitness: true,
 	})
+	re.NoError(err)
 
 	op := suite.rc.Check(r)
 
@@ -1453,22 +1605,23 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness2() {
 	// set peer3 to witness
 	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
 
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	suite.ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   placement.DefaultGroupID,
 		ID:        "r1",
 		Role:      placement.Voter,
 		Count:     1,
 		IsWitness: true,
 	})
+	re.NoError(err)
 
 	op := suite.rc.Check(r)
-
 	re.Nil(op)
 }
 
@@ -1488,19 +1641,21 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness3() {
 	// set peer3 to witness
 	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
 
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	suite.ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   placement.DefaultGroupID,
 		ID:        "r1",
 		Role:      placement.Voter,
 		Count:     1,
 		IsWitness: true,
 	})
+	re.NoError(err)
 
 	op := suite.rc.Check(r)
 
@@ -1556,7 +1711,8 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 		Count:          3,
 		LocationLabels: []string{"zone"},
 	}
-	suite.ruleManager.SetRule(rule)
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
 
 	region := suite.cluster.GetRegion(1)
 	re.Nil(suite.rc.Check(region))
@@ -1568,7 +1724,8 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	operatorutil.CheckTransferPeer(re, suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
-	suite.ruleManager.SetRule(rule)
+	err = suite.ruleManager.SetRule(rule)
+	re.NoError(err)
 	re.Nil(suite.rc.Check(region))
 }
 
@@ -1583,19 +1740,21 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvailableWitness() {
 
 	r := suite.cluster.GetRegion(1)
 	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(2)}))
-	suite.ruleManager.SetRule(&placement.Rule{
+	err := suite.ruleManager.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	suite.ruleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   placement.DefaultGroupID,
 		ID:        "r1",
 		Role:      placement.Voter,
 		Count:     1,
 		IsWitness: true,
 	})
+	re.NoError(err)
 	re.Nil(suite.rc.Check(r))
 
 	suite.cluster.SetStoreOffline(4)
@@ -1623,7 +1782,8 @@ func (suite *ruleCheckerTestSuite) TestRuleCache() {
 		Count:          3,
 		LocationLabels: []string{"zone"},
 	}
-	suite.ruleManager.SetRule(rule)
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
 	region := suite.cluster.GetRegion(1)
 	region = region.Clone(core.WithIncConfVer(), core.WithIncVersion())
 	re.Nil(suite.rc.Check(region))
@@ -1788,9 +1948,12 @@ func (suite *ruleCheckerTestSuite) TestDemoteVoter() {
 			},
 		},
 	}
-	suite.ruleManager.SetRule(rule)
-	suite.ruleManager.SetRule(rule2)
-	suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule2)
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
 	op := suite.rc.Check(region)
 	re.NotNil(op)
 	re.Equal("fix-demote-voter", op.Desc())
@@ -1896,10 +2059,14 @@ func (suite *ruleCheckerTestSuite) TestLocationLabels() {
 		},
 		LocationLabels: []string{"rack"},
 	}
-	suite.ruleManager.SetRule(rule1)
-	suite.ruleManager.SetRule(rule2)
-	suite.ruleManager.SetRule(rule3)
-	suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	err := suite.ruleManager.SetRule(rule1)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule2)
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(rule3)
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("move-to-better-location", op.Desc())
@@ -1930,10 +2097,12 @@ func (suite *ruleCheckerTestSuite) TestTiFlashLocationLabels() {
 			},
 		},
 	}
-	suite.ruleManager.SetRule(rule1)
+	err := suite.ruleManager.SetRule(rule1)
+	re.NoError(err)
 	rule := suite.ruleManager.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	rule.LocationLabels = []string{"zone", "rack", "host"}
-	suite.ruleManager.SetRule(rule)
+	err = suite.ruleManager.SetRule(rule)
+	re.NoError(err)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.Nil(op)
 }
@@ -1989,7 +2158,7 @@ func makeStores() placement.StoreSet {
 }
 
 // example: "1111_leader,1234,2111_learner"
-func makeRegion(def string) *core.RegionInfo {
+func makeRegion(def string) (*core.RegionInfo, error) {
 	var regionMeta metapb.Region
 	var leader *metapb.Peer
 	for _, peerDef := range strings.Split(def, ",") {
@@ -1998,7 +2167,10 @@ func makeRegion(def string) *core.RegionInfo {
 			splits := strings.Split(peerDef, "_")
 			idStr, role = splits[0], placement.PeerRoleType(splits[1])
 		}
-		id, _ := strconv.Atoi(idStr)
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return nil, err
+		}
 		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), Role: role.MetaPeerRole()}
 		regionMeta.Peers = append(regionMeta.Peers, peer)
 		if role == placement.Leader {
@@ -2006,15 +2178,21 @@ func makeRegion(def string) *core.RegionInfo {
 			regionMeta.Id = peer.Id - 1
 		}
 	}
-	return core.NewRegionInfo(&regionMeta, leader)
+	return core.NewRegionInfo(&regionMeta, leader), nil
 }
 
 // example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"
 // count role constraints location_labels
-func makeRule(def string) *placement.Rule {
-	var rule placement.Rule
+func makeRule(def string) (*placement.Rule, error) {
+	var (
+		rule placement.Rule
+		err  error
+	)
 	splits := strings.Split(def, "/")
-	rule.Count, _ = strconv.Atoi(splits[0])
+	rule.Count, err = strconv.Atoi(splits[0])
+	if err != nil {
+		return nil, err
+	}
 	rule.Role = placement.PeerRoleType(splits[1])
 	// only support k=v type constraint
 	for _, c := range strings.Split(splits[2], ",") {
@@ -2029,7 +2207,7 @@ func makeRule(def string) *placement.Rule {
 		})
 	}
 	rule.LocationLabels = strings.Split(splits[3], ",")
-	return &rule
+	return &rule, nil
 }
 
 // TestReplaceAnExistingPeerCases address issue: https://github.com/tikv/pd/issues/7185
@@ -2062,19 +2240,22 @@ func (suite *ruleCheckerTestAdvancedSuite) TestReplaceAnExistingPeerCases() {
 			Rules:    make([]*placement.Rule, 0, len(cas.rules)),
 		}
 		for id, r := range cas.rules {
-			rule := makeRule(r)
+			rule, err := makeRule(r)
+			re.NoError(err)
 			rule.ID = fmt.Sprintf("r%d", id)
 			bundle.Rules = append(bundle.Rules, rule)
 		}
 		err := suite.ruleManager.SetGroupBundle(bundle)
 		re.NoError(err)
-		region := makeRegion(cas.region)
+		region, err := makeRegion(cas.region)
+		re.NoError(err)
 		suite.cluster.PutRegion(region)
 		op := suite.rc.Check(region)
 		if len(cas.opStr) > 0 {
 			re.Contains(op.String(), cas.opStr, cas.opStr)
 		}
-		suite.ruleManager.DeleteGroupBundle(groupName, false)
+		err = suite.ruleManager.DeleteGroupBundle(groupName, false)
+		re.NoError(err)
 	}
 }
 
@@ -2099,8 +2280,10 @@ func (suite *ruleCheckerTestSuite) TestRemoveOrphanPeer() {
 			},
 		},
 	}
-	suite.ruleManager.SetRule(rule)
-	suite.ruleManager.DeleteRule("pd", "default")
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
 
 	// case1: regionA has 3 peers but not extra peer can be removed, so it needs to add peer first
 	suite.cluster.AddLeaderRegionWithRange(1, "200", "300", 1, 2, 3)
@@ -2173,4 +2356,57 @@ func (suite *ruleCheckerTestSuite) TestIssue7808() {
 	re.NotNil(op)
 	re.Equal("fast-replace-rule-down-peer", op.Desc())
 	re.Contains(op.Brief(), "mv peer: store [1] to [2]")
+}
+
+func (suite *ruleCheckerTestSuite) TestFixBetterLocationEngineConstraint() {
+	re := suite.Require()
+
+	// Setup stores with different engine types
+	suite.cluster.AddLabelsStore(1, 10, map[string]string{"zone": "z1", "host": "host1"})
+	suite.cluster.AddLabelsStore(2, 10, map[string]string{"zone": "z2", "host": "host2"})
+	suite.cluster.AddLabelsStore(3, 10, map[string]string{"zone": "z2", "host": "host3"})
+	suite.cluster.AddLabelsStore(4, 10, map[string]string{"zone": "z2", "host": "host4"})
+	suite.cluster.AddLabelsStore(5, 10, map[string]string{"zone": "z3", "host": "host5", "engine": "tiflash"})
+	suite.cluster.AddLabelsStore(6, 10, map[string]string{"zone": "z3", "host": "host6", "engine": "tiflash"})
+	suite.cluster.AddLabelsStore(7, 10, map[string]string{"zone": "z3", "host": "host7", "engine": "tiflash"})
+
+	// Create a TiKV region on stores 1, 2, 3
+	suite.cluster.AddLeaderRegionWithRange(1, "a", "b", 1, 2, 3)
+
+	rule := &placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Index:          0,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+	}
+	err := suite.ruleManager.SetRule(rule)
+	re.NoError(err)
+	region1 := suite.cluster.GetRegion(1)
+	op := suite.rc.Check(region1)
+	re.Empty(op)
+
+	ruleTiFlash := &placement.Rule{
+		GroupID: "tiflash",
+		ID:      "tiflash",
+		Index:   40,
+		Role:    placement.Learner,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "engine",
+				Op:     placement.In,
+				Values: []string{"tiflash"},
+			},
+		},
+		LocationLabels: []string{"zone", "host"},
+	}
+
+	err = suite.ruleManager.SetRule(ruleTiFlash)
+	re.NoError(err)
+	suite.cluster.AddRegionWithLearner(2, 1, []uint64{2, 3}, []uint64{5, 6, 7})
+	region2 := suite.cluster.GetRegion(2)
+	op = suite.rc.Check(region2)
+	re.Empty(op)
 }

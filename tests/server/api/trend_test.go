@@ -25,7 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
@@ -104,7 +104,7 @@ func (suite *trendTestSuite) checkTrend(cluster *tests.TestCluster) {
 	time.Sleep(50 * time.Millisecond)
 
 	var trend api.Trend
-	err = tu.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/trend", urlPrefix), &trend)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/trend", urlPrefix), &trend)
 	re.NoError(err)
 
 	// Check store states.

@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -253,80 +253,8 @@ func TestGCOperations(t *testing.T) {
 	}
 
 	// Global GC Barrier API
-	{
-		req := &pdpb.SetGlobalGCBarrierRequest{
-			Header:     header,
-			BarrierId:  "b1",
-			BarrierTs:  20,
-			TtlSeconds: 3600,
-		}
-		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
-		re.NoError(err)
-		re.NotNil(resp.Header)
-		re.Nil(resp.Header.Error)
-		re.Equal("b1", resp.GetNewBarrierInfo().GetBarrierId())
-		re.Equal(uint64(20), resp.GetNewBarrierInfo().GetBarrierTs())
-		re.Greater(resp.GetNewBarrierInfo().GetTtlSeconds(), int64(3599))
-		re.Less(resp.GetNewBarrierInfo().GetTtlSeconds(), int64(3601))
-
-		resp1, err := grpcPDClient.GetAllKeyspacesGCStates(ctx, &pdpb.GetAllKeyspacesGCStatesRequest{
-			Header: header,
-		})
-		re.NoError(err)
-		re.Len(resp1.GetGlobalGcBarriers(), 1)
-		re.Equal(resp1.GetGlobalGcBarriers()[0], resp.GetNewBarrierInfo())
-	}
-
-	// Successfully sets a global GC barrier with infinite ttl.
-	{
-		req := &pdpb.SetGlobalGCBarrierRequest{
-			Header:     header,
-			BarrierId:  "b2",
-			BarrierTs:  24,
-			TtlSeconds: math.MaxInt64,
-		}
-		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
-		re.NoError(err)
-		re.NotNil(resp.Header)
-		re.Nil(resp.Header.Error)
-		re.Equal("b2", resp.GetNewBarrierInfo().GetBarrierId())
-		re.Equal(uint64(24), resp.GetNewBarrierInfo().GetBarrierTs())
-		re.Equal(math.MaxInt64, int(resp.GetNewBarrierInfo().GetTtlSeconds()))
-	}
-
-	// Failed to set a global GC barrier (below txn safe point)
-	{
-		req := &pdpb.SetGlobalGCBarrierRequest{
-			Header:     header,
-			BarrierId:  "b3",
-			BarrierTs:  9,
-			TtlSeconds: 3600,
-		}
-		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
-		re.NoError(err)
-		re.NotNil(resp.Header)
-		re.NotNil(resp.Header.Error)
-		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBehindTxnSafePoint")
-	}
-
-	{
-		// Delete a global GC barrier
-		req := &pdpb.DeleteGlobalGCBarrierRequest{
-			Header:    header,
-			BarrierId: "b2",
-		}
-		resp, err := grpcPDClient.DeleteGlobalGCBarrier(ctx, req)
-		re.NoError(err)
-		re.NotNil(resp.Header)
-		re.Nil(resp.Header.Error)
-		re.Equal("b2", resp.GetDeletedBarrierInfo().GetBarrierId())
-		re.Equal(uint64(24), resp.GetDeletedBarrierInfo().GetBarrierTs())
-		re.Equal(math.MaxInt64, int(resp.GetDeletedBarrierInfo().GetTtlSeconds()))
-	}
-
-	{
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
 		// Cleanup before test
-		keyspaceID := ks1.Id
 		req1 := &pdpb.GetGCStateRequest{
 			Header:        header,
 			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
@@ -342,7 +270,59 @@ func TestGCOperations(t *testing.T) {
 			_, err := grpcPDClient.DeleteGCBarrier(ctx, req)
 			re.NoError(err)
 		}
+	}
 
+	{
+		// Successfully sets a global GC barrier
+		req := &pdpb.SetGlobalGCBarrierRequest{
+			Header:     header,
+			BarrierId:  "b1",
+			BarrierTs:  20,
+			TtlSeconds: 3600,
+		}
+		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
+		re.NoError(err)
+		re.NotNil(resp.Header)
+		re.Nil(resp.Header.Error)
+		re.Equal("b1", resp.GetNewBarrierInfo().GetBarrierId())
+		re.Equal(uint64(20), resp.GetNewBarrierInfo().GetBarrierTs())
+		re.Greater(resp.GetNewBarrierInfo().GetTtlSeconds(), int64(3599))
+		re.Less(resp.GetNewBarrierInfo().GetTtlSeconds(), int64(3601))
+	}
+
+	{
+		// Successfully sets a global GC barrier with infinite ttl.
+		req := &pdpb.SetGlobalGCBarrierRequest{
+			Header:     header,
+			BarrierId:  "b2",
+			BarrierTs:  24,
+			TtlSeconds: math.MaxInt64,
+		}
+		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
+		re.NoError(err)
+		re.NotNil(resp.Header)
+		re.Nil(resp.Header.Error)
+		re.Equal("b2", resp.GetNewBarrierInfo().GetBarrierId())
+		re.Equal(uint64(24), resp.GetNewBarrierInfo().GetBarrierTs())
+		re.Equal(math.MaxInt64, int(resp.GetNewBarrierInfo().GetTtlSeconds()))
+	}
+
+	{
+		// Failed to set a global GC barrier (below txn safe point)
+		req := &pdpb.SetGlobalGCBarrierRequest{
+			Header:     header,
+			BarrierId:  "b3",
+			BarrierTs:  9,
+			TtlSeconds: 3600,
+		}
+		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
+		re.NoError(err)
+		re.NotNil(resp.Header)
+		re.NotNil(resp.Header.Error)
+		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+	}
+
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
 		// Advance txn safe point reports the reason of being blocked
 		req := &pdpb.AdvanceTxnSafePointRequest{
 			Header:        header,
@@ -356,5 +336,36 @@ func TestGCOperations(t *testing.T) {
 		re.Equal(uint64(20), resp.GetNewTxnSafePoint())
 		re.Equal(uint64(15), resp.GetOldTxnSafePoint())
 		re.Contains(resp.GetBlockerDescription(), "b1")
+	}
+
+	{
+		// Delete a global GC barrier
+		req := &pdpb.DeleteGlobalGCBarrierRequest{
+			Header:    header,
+			BarrierId: "b1",
+		}
+		resp, err := grpcPDClient.DeleteGlobalGCBarrier(ctx, req)
+		re.NoError(err)
+		re.NotNil(resp.Header)
+		re.Nil(resp.Header.Error)
+		re.Equal("b1", resp.GetDeletedBarrierInfo().GetBarrierId())
+		re.Equal(uint64(20), resp.GetDeletedBarrierInfo().GetBarrierTs())
+		re.Equal(3600, int(resp.GetDeletedBarrierInfo().GetTtlSeconds()))
+	}
+
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
+		// Advance txn safe point reports the reason of being blocked
+		req := &pdpb.AdvanceTxnSafePointRequest{
+			Header:        header,
+			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+			Target:        30,
+		}
+		resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
+		re.NoError(err)
+		re.NotNil(resp.Header)
+		re.Nil(resp.Header.Error)
+		re.Equal(uint64(24), resp.GetNewTxnSafePoint())
+		re.Equal(uint64(20), resp.GetOldTxnSafePoint())
+		re.Contains(resp.GetBlockerDescription(), "b2")
 	}
 }
