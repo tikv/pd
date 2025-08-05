@@ -27,6 +27,8 @@ import (
 const (
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
+	// NativeBRServiceSafePointID is the service id of native BR.
+	NativeBRServiceSafePointID = "native_br"
 )
 
 // Leader and primary are the same thing in this context.
@@ -58,6 +60,9 @@ const (
 	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
+	// Maintenance task path format
+	maintenanceTaskPathFormat = "/pd/%d/maintenance/%s" // "/pd/{cluster_id}/maintenance/{task_type}"
+
 	// "%08d" adds extra padding to make encoded ID ordered.
 	// Encoded ID can be decoded directly with strconv.ParseUint. Width of the
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
@@ -71,6 +76,8 @@ const (
 	keyspaceLevelTxnSafePointPath     = "/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point" // "/keyspaces/tidb/{keyspace_id}/tidb/store/gcworker/saved_safe_point"
 	unifiedGCBarrierPathFormat        = "/pd/%d/gc/safe_point/service/%s"                         // "/pd/{cluster_id}/gc/safe_point/service/{barrier_id}"
 	keyspaceLevelGCBarrierPathFormat  = "/pd/%d/keyspaces/service_safe_point/%08d/%s"             // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{barrier_id}"
+	globalGCBarrierPathFormat         = "/pd/%d/gc/global_gc_barriers/%s"                         // "/pd/{cluster_id}/gc/global_gc_barriers/{barrier_id}"
+	globalGCBarrierPathPrefix         = "/pd/%d/gc/global_gc_barriers/"
 	unifiedTiDBMinStartTSPrefix       = "/tidb/server/minstartts/"
 	keyspaceLevelTiDBMinStartTSPrefix = "/keyspaces/tidb/%d/tidb/server/minstartts/" // "/keyspaces/tidb/{keyspace_id}/tidb/server/minstartts"
 	gcSafePointV2PrefixFormat         = keyspaceLevelGCSafePointPrefixFormat
@@ -94,17 +101,17 @@ const (
 	servicePathFormat  = "/ms/%d/%s/registry/"   // "/ms/{cluster_id}/{service_name}/registry/"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
 
-	msLeaderPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
-	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msPrimaryPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
+	msTsoDefaultPrimaryPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKespacePrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
-	// `expected_primary` is the flag to indicate the expected primary/leader.
-	// 1. When the leader was campaigned successfully, it will set the `expected_primary` flag.
+	// `expected_primary` is the flag to indicate the expected primary.
+	// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
 	// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
 	// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-	msExpectedLeaderPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
-	msTsoDefaultExpectedLeaderPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceExpectedLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msExpectedPrimaryPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
+	msTsoDefaultExpectedPrimaryPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKespaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
 	// resource group path
 	keyspaceResourceGroupSettingsPathPrefixFormat = "resource_group/keyspace/settings/"      // "resource_group/keyspace/settings/"

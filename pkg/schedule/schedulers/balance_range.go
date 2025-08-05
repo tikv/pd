@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -597,30 +596,6 @@ type balanceRangeSchedulerPlan struct {
 	solver       *solver
 }
 
-func fetchAllRegions(cluster sche.SchedulerCluster, ranges *keyutil.KeyRanges) []*core.RegionInfo {
-	scanLimit := 32
-	regions := make([]*core.RegionInfo, 0)
-	krs := ranges.Ranges()
-
-	for _, kr := range krs {
-		for {
-			region := cluster.ScanRegions(kr.StartKey, kr.EndKey, scanLimit)
-			if len(region) == 0 {
-				break
-			}
-			regions = append(regions, region...)
-			if len(region) < scanLimit {
-				break
-			}
-			kr.StartKey = region[len(region)-1].GetEndKey()
-			if bytes.Equal(kr.StartKey, kr.EndKey) {
-				break
-			}
-		}
-	}
-	return regions
-}
-
 func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	// todo: if supports to balance region size, it needs to change here.
@@ -647,23 +622,23 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		return nil, errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
 	}
 
-	krs := keyutil.NewKeyRanges(job.Ranges)
-	scanRegions := fetchAllRegions(cluster, krs)
-	if len(scanRegions) == 0 {
-		return nil, errs.ErrRegionNotFound.FastGenByArgs("no region found")
-	}
-
 	// storeID <--> score mapping
-	scoreMap := make(map[uint64]float64, len(sources))
+	scoreMap := make(map[uint64]int64, len(sources))
+	totalScore := int64(0)
 	for _, source := range sources {
-		scoreMap[source.GetID()] = 0
-	}
-	totalScore := float64(0)
-	for _, region := range scanRegions {
-		for _, peer := range region.GetPeersByRule(job.Rule) {
-			scoreMap[peer.GetStoreId()] += 1
-			totalScore += 1
+		count := 0
+		for _, kr := range job.Ranges {
+			switch job.Rule {
+			case core.LeaderScatter:
+				count += cluster.GetStoreLeaderCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			case core.PeerScatter:
+				count += cluster.GetStorePeerCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			case core.LearnerScatter:
+				count += cluster.GetStoreLearnerCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			}
 		}
+		scoreMap[source.GetID()] = int64(count)
+		totalScore += int64(count)
 	}
 
 	sort.Slice(sources, func(i, j int) bool {
@@ -678,7 +653,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	averageScore := float64(0)
 	averageScore = totalScore / float64(len(sources))
 
-	tolerantSizeRatio := int64(float64(len(scanRegions)) * adjustRatio)
+	tolerantSizeRatio := int64(float64(totalScore) * adjustRatio)
 	if tolerantSizeRatio < 1 {
 		tolerantSizeRatio = 1
 	}

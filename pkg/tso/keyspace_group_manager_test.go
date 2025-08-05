@@ -629,11 +629,11 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 
 	// Wait until the keyspace group 0 is ready for serving tso requests.
 	testutil.Eventually(re, func() bool {
-		member, err := mgr.GetElectionMember(0, 0)
+		member, err := mgr.GetMember(0, 0)
 		if err != nil {
 			return false
 		}
-		return member.IsLeader()
+		return member.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Should succeed because keyspace 0 is actually in keyspace group 0, which is served
@@ -1188,7 +1188,7 @@ func waitForPrimariesServing(
 ) {
 	testutil.Eventually(re, func() bool {
 		for j, id := range ids {
-			if member, err := mgrs[j].GetElectionMember(id, id); err != nil || member == nil || !member.IsLeader() {
+			if member, err := mgrs[j].GetMember(id, id); err != nil || member == nil || !member.IsServing() {
 				return false
 			}
 			if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, 1); err != nil {

@@ -154,30 +154,6 @@ func TestTIFLASHEngine(t *testing.T) {
 	re.Contains(op.Brief(), "mv peer: store [4] to")
 }
 
-func TestFetchAllRegions(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, _ := prepareSchedulersTest()
-	defer cancel()
-	for i := 1; i <= 3; i++ {
-		tc.AddLeaderStore(uint64(i), 0)
-	}
-	for i := 1; i <= 100; i++ {
-		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
-	}
-
-	ranges := keyutil.NewKeyRangesWithSize(1)
-	ranges.Append([]byte(""), []byte(""))
-	regions := fetchAllRegions(tc, ranges)
-	re.Len(regions, 100)
-
-	ranges = keyutil.NewKeyRangesWithSize(1)
-	region := tc.GetRegion(50)
-	ranges.Append([]byte(""), region.GetStartKey())
-	ranges.Append(region.GetStartKey(), []byte(""))
-	regions = fetchAllRegions(tc, ranges)
-	re.Len(regions, 100)
-}
-
 func TestCodecConfig(t *testing.T) {
 	re := require.New(t)
 	job := &balanceRangeSchedulerJob{

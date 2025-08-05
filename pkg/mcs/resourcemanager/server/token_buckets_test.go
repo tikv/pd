@@ -24,6 +24,8 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
+const testResourceGroupName = "test"
+
 func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	re := require.New(t)
 	tbSetting := &rmpb.TokenBucket{
@@ -35,7 +37,7 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	}
 
 	clientUniqueID := uint64(0)
-	tb := NewGroupTokenBucket(tbSetting)
+	tb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
 	time1 := time.Now()
 	tb.request(time1, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(tbSetting.Tokens-tb.Tokens), 1e-7)
@@ -62,7 +64,7 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 			BurstLimit: -1,
 		},
 	}
-	tb = NewGroupTokenBucket(tbSetting)
+	tb = NewGroupTokenBucket(testResourceGroupName, tbSetting)
 	tb.request(time2, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
 	time3 := time.Now()
@@ -76,7 +78,7 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 			BurstLimit: -1,
 		},
 	}
-	tb = NewGroupTokenBucket(tbSetting)
+	tb = NewGroupTokenBucket(testResourceGroupName, tbSetting)
 	tb.request(time3, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
 	time.Sleep(10 * time.Millisecond)
@@ -95,7 +97,7 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 		},
 	}
 
-	gtb := NewGroupTokenBucket(tbSetting)
+	gtb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
 	time1 := time.Now()
 	clientUniqueID := uint64(0)
 	tb, trickle := gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
@@ -128,7 +130,7 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
 	re := require.New(t)
 	testGroupSetting := func(tbSetting *rmpb.TokenBucket, expectedFillRate, expectedBurstLimit int64) {
-		gtb := NewGroupTokenBucket(tbSetting)
+		gtb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
 		time1 := time.Now()
 		clientUniqueID := uint64(0)
 		gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
@@ -219,7 +221,7 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 		},
 	}
 
-	gtb := NewGroupTokenBucket(tbSetting)
+	gtb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
 	clientUniqueID := uint64(0)
 	initialTime := time.Now()
 

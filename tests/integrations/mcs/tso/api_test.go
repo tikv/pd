@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -94,7 +95,7 @@ func (suite *tsoAPITestSuite) TestGetKeyspaceGroupMembers() {
 	re.True(defaultGroupMember.IsPrimary)
 	primaryMember, err := primary.GetMember(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.Equal(primaryMember.GetLeaderID(), defaultGroupMember.PrimaryID)
+	re.Equal(primaryMember.(*member.Participant).GetPrimaryID(), defaultGroupMember.PrimaryID)
 }
 
 func (suite *tsoAPITestSuite) TestForwardResetTS() {
