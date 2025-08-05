@@ -966,17 +966,21 @@ func (u *Controller) buildUpFromReports() (*regionTree, map[uint64][]*regionItem
 
 		// find the orphaned peers, i.e. the peers exist in the forced leader but not in the target stores' reports
 		// this is expected when some of the peers were destroyed by TombstoneTiFlashLearner phase.
-		exists := func(peers []*regionItem, peer *metapb.Peer) bool {
+		orphaned := func(peers []*regionItem, peer *metapb.Peer) bool {
+			// If the peer is in the failed stores, it is considered failed instead of orphaned.
+			if u.isFailed(peer) {
+				return false
+			}
 			for _, p := range peers {
 				if p.storeID == peer.StoreId {
-					return true
+					return false
 				}
 			}
-			return false
+			return true
 		}
 
 		for _, peer := range latest.report.RegionState.GetRegion().Peers {
-			if !exists(peers, peer) {
+			if orphaned(peers, peer) {
 				u.orphanedPeers[latest.region().GetId()] = append(u.orphanedPeers[latest.region().GetId()], peer)
 			}
 		}

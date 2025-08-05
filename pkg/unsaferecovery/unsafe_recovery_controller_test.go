@@ -153,9 +153,14 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 						}
 					}
 					for _, failedVoter := range demote.GetFailedVoters() {
-						for _, peer := range region.GetPeers() {
+						for i, peer := range region.GetPeers() {
 							if failedVoter.GetId() == peer.GetId() {
-								peer.Role = metapb.PeerRole_Learner
+								if peer.Role == metapb.PeerRole_Learner {
+									// Remove learner peers
+									region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
+								} else {
+									peer.Role = metapb.PeerRole_Learner
+								}
 								break
 							}
 						}
@@ -1543,7 +1548,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 4}, {Id: 13, StoreId: 5}}}}},
-		}},
+		}, Step: 1},
 		2: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1554,8 +1559,8 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 8},
 						Peers: []*metapb.Peer{
-							{Id: 21, StoreId: 1}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
-		}},
+							{Id: 21, StoreId: 2}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
+		}, Step: 1},
 		3: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1566,8 +1571,8 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 4, Version: 6},
 						Peers: []*metapb.Peer{
-							{Id: 31, StoreId: 1}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
-		}},
+							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
+		}, Step: 1},
 	}
 
 	advanceUntilFinished(re, recoveryController, reports)
@@ -1595,7 +1600,7 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 6},
 						Peers: []*metapb.Peer{
-							{Id: 31, StoreId: 1}, {Id: 32, StoreId: 4, Role: metapb.PeerRole_Learner}, {Id: 33, StoreId: 5, Role: metapb.PeerRole_Learner}}}}},
+							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4, Role: metapb.PeerRole_Learner}, {Id: 33, StoreId: 5, Role: metapb.PeerRole_Learner}}}}},
 		}},
 	}
 
