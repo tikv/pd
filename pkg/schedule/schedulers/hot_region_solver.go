@@ -1084,7 +1084,7 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
-		balanceDirectionCounter.WithLabelValues(bs.sche.GetName(), sourceLabel, targetLabel))
+	)
 	op.Counters = append(op.Counters,
 		hotSchedulerNewOperatorCounter,
 		opCounter(typ))
