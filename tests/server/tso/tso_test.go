@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -59,9 +58,8 @@ func TestRequestFollower(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
@@ -109,9 +107,8 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
@@ -182,9 +179,8 @@ func TestLogicalOverflow(t *testing.T) {
 	for range 20 {
 		begin := time.Now()
 		req := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      uint32(count),
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  uint32(count),
 		}
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
