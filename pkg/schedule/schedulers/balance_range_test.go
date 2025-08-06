@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -70,7 +69,7 @@ func TestTIKVEngine(t *testing.T) {
 	re.Equal(ranges[1], keyutil.NewKeyRange("300", ""))
 
 	re.NoError(err)
-	ops, _ := scheduler.Schedule(tc, true)
+	ops, _ := scheduler.Schedule(tc, false)
 	re.Empty(ops)
 
 	// add regions:
@@ -93,11 +92,6 @@ func TestTIKVEngine(t *testing.T) {
 	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("1.00", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
-
-	// case2: all regions are balanced, so no operator is generated
-	tc.AddLeaderRegionWithRange(7, "200", "210", 3, 1, 2)
-	_, plans := scheduler.Schedule(tc, true)
-	re.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
 
 	// case2: move leader from store 1 to store 4
 	tc.AddLeaderStore(4, 0)

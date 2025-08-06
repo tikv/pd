@@ -427,7 +427,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 }
 
 // Schedule schedules the balance key range operator.
-func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
 	_, job := s.conf.peek()
 	if job == nil {
@@ -444,20 +444,12 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 		return nil, nil
 	}
 	solver := p.solver
-	var collector *plan.Collector
-	if dryRun {
-		collector = plan.NewCollector(solver.BalanceSchedulerPlan)
-	}
-
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
 	pendingFilter := filter.NewRegionPendingFilter()
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
 
-	if collector != nil && len(p.stores) > 0 {
-		collector.Collect(plan.SetResource(p.stores[0]), plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
-	}
 	solver.Step++
 	for sourceIndex, sourceStore := range p.stores {
 		solver.Source = sourceStore
@@ -467,16 +459,16 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 		}
 		switch job.Rule {
 		case core.LeaderScatter:
-			solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), collector, baseRegionFilters...)
+			solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 		case core.LearnerScatter:
-			solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), collector, baseRegionFilters...)
+			solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 		case core.PeerScatter:
-			solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), job.Ranges), collector, baseRegionFilters...)
+			solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 			if solver.Region == nil {
-				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), collector, baseRegionFilters...)
+				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 			}
 			if solver.Region == nil {
-				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), collector, baseRegionFilters...)
+				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 			}
 		}
 		if solver.Region == nil {
@@ -486,9 +478,6 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 		// Skip hot regions.
 		if cluster.IsRegionHot(solver.Region) {
-			if collector != nil {
-				collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
-			}
 			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 			balanceRangeHotCounter.Inc()
 			continue
@@ -496,25 +485,22 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 		// Check region leader
 		if solver.Region.GetLeader() == nil {
 			log.Warn("region has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-			if collector != nil {
-				collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
-			}
 			balanceRangeNoLeaderCounter.Inc()
 			continue
 		}
 		solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
 		solver.Step++
-		if op := s.transferPeer(p, p.stores[sourceIndex+1:], collector); op != nil {
+		if op := s.transferPeer(p, p.stores[sourceIndex+1:]); op != nil {
 			op.Counters = append(op.Counters, balanceRangeNewOperatorCounter)
 			return []*operator.Operator{op}, nil
 		}
 		solver.Step--
 	}
-	return nil, collector.GetPlans()
+	return nil, nil
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo, collector *plan.Collector) *operator.Operator {
+func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
 	solver := p.solver
 	excludeTargets := solver.Region.GetStoreIDs()
 	if p.job.Rule == core.LeaderScatter {
@@ -528,7 +514,7 @@ func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstSt
 		filter.NewPlacementSafeguard(s.GetName(), conf, p.GetBasicCluster(), p.GetRuleManager(), solver.Region, solver.Source, solver.fit),
 	)
 
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {
 		solver.Step++
 	}
@@ -542,9 +528,6 @@ func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstSt
 		regionID := solver.Region.GetID()
 		sourceID := solver.sourceStoreID()
 		if !solver.shouldBalance(s.GetName()) {
-			if collector != nil {
-				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
-			}
 			continue
 		}
 		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
@@ -576,13 +559,7 @@ func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstSt
 
 		if err != nil {
 			balanceRangeCreateOpFailCounter.Inc()
-			if collector != nil {
-				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
-			}
 			return nil
-		}
-		if collector != nil {
-			collector.Collect()
 		}
 		solver.Step--
 		sourceLabel := strconv.FormatUint(sourceID, 10)
