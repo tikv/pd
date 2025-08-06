@@ -1118,7 +1118,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	}
 
 	// check that the safepoitns are indeed deleted.
-	// 'gc_worker" will still exist in the result set as it's pseudo.
+	// "gc_worker" will still exist in the result set as it's pseudo.
 	l, err = client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
