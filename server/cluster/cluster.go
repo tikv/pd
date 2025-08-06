@@ -1262,13 +1262,15 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		tracer.OnUpdateSubTreeFinished()
 
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-			ctx.MiscRunner.RunTask(
-				regionID,
-				ratelimit.HandleOverlaps,
-				func(ctx context.Context) {
-					cluster.HandleOverlaps(ctx, c, overlaps)
-				},
-			)
+			if len(overlaps) > 0 {
+				ctx.MiscRunner.RunTask(
+					regionID,
+					ratelimit.HandleOverlaps,
+					func(ctx context.Context) {
+						cluster.HandleOverlaps(ctx, c, overlaps)
+					},
+				)
+			}
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
