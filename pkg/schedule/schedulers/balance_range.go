@@ -450,7 +450,6 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	pendingFilter := filter.NewRegionPendingFilter()
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
 
-	solver.Step++
 	for sourceIndex, sourceStore := range p.stores {
 		solver.Source = sourceStore
 		solver.sourceScore = p.sourceScore(solver.sourceStoreID())
@@ -489,12 +488,10 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 			continue
 		}
 		solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-		solver.Step++
 		if op := s.transferPeer(p, p.stores[sourceIndex+1:]); op != nil {
 			op.Counters = append(op.Counters, balanceRangeNewOperatorCounter)
 			return []*operator.Operator{op}, nil
 		}
-		solver.Step--
 	}
 	return nil, nil
 }
@@ -545,7 +542,6 @@ func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstSt
 		}
 		var op *operator.Operator
 		var err error
-		solver.Step++
 		if exist {
 			op, err = operator.CreateTransferLeaderOperator(s.GetName(), p, solver.Region, targetID, []uint64{}, operator.OpRange)
 		} else {
@@ -561,7 +557,6 @@ func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstSt
 			balanceRangeCreateOpFailCounter.Inc()
 			return nil
 		}
-		solver.Step--
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
@@ -573,9 +568,6 @@ func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstSt
 		return op
 	}
 	balanceRangeNoReplacementCounter.Inc()
-	if len(candidates.Stores) != 0 {
-		solver.Step--
-	}
 	return nil
 }
 
@@ -674,6 +666,8 @@ func (p *balanceRangeSchedulerPlan) sourceScore(storeID uint64) float64 {
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
 	influence := s.getOpInfluence(storeID)
+	// if influence is positive, it means that there are some other operator to move out this store,
+	// to avoid balance a lot, we can think the influence must be negative.
 	if influence > 0 {
 		influence = -influence
 	}
@@ -687,10 +681,12 @@ func (p *balanceRangeSchedulerPlan) targetScore(storeID uint64) float64 {
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
 	influence := s.getOpInfluence(storeID)
+	// if influence is positive, it means that there are some other operator to move in this store,
+	// to avoid balance a lot, we can think the influence must be negative.
 	if influence < 0 {
 		influence = -influence
 	}
-	return originScore + float64(influence-tolerantResource)
+	return originScore + float64(influence+tolerantResource)
 }
 
 // JobStatus is the status of the job.
