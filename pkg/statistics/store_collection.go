@@ -37,8 +37,8 @@ var (
 	tikvUpCounter          = clusterStatusGauge.WithLabelValues("store_up_count", "tikv")
 	tikvDiconnectedCounter = clusterStatusGauge.WithLabelValues("store_disconnected_count", "tikv")
 	tikvDownCounter        = clusterStatusGauge.WithLabelValues("store_down_count", "tikv")
-	TikvUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tikv")
-	tikvOfflinepCounter    = clusterStatusGauge.WithLabelValues("store_offline_count", "tikv")
+	tikvUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tikv")
+	tikvOfflineCounter     = clusterStatusGauge.WithLabelValues("store_offline_count", "tikv")
 	tikvTombstoneCounter   = clusterStatusGauge.WithLabelValues("store_tombstone_count", "tikv")
 	tikvLowSpaceCounter    = clusterStatusGauge.WithLabelValues("store_low_space_count", "tikv")
 	tikvPreparingCounter   = clusterStatusGauge.WithLabelValues("store_preparing_count", "tikv")
@@ -50,8 +50,8 @@ var (
 	tiflashUpCounter          = clusterStatusGauge.WithLabelValues("store_up_count", "tiflash")
 	tiflashDiconnectedCounter = clusterStatusGauge.WithLabelValues("store_disconnected_count", "tiflash")
 	tiflashDownCounter        = clusterStatusGauge.WithLabelValues("store_down_count", "tiflash")
-	TiflashUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tiflash")
-	tiflashOfflinepCounter    = clusterStatusGauge.WithLabelValues("store_offline_count", "tiflash")
+	tiflashUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tiflash")
+	tiflashOfflineCounter     = clusterStatusGauge.WithLabelValues("store_offline_count", "tiflash")
 	tiflashTombstoneCounter   = clusterStatusGauge.WithLabelValues("store_tombstone_count", "tiflash")
 	tiflashLowSpaceCounter    = clusterStatusGauge.WithLabelValues("store_low_space_count", "tiflash")
 	tiflashPreparingCounter   = clusterStatusGauge.WithLabelValues("store_preparing_count", "tiflash")
@@ -137,6 +137,8 @@ func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
 		LabelCounter: make(map[string][]uint64),
+		tiflash:      &storeStatusStatistics{opt: opt},
+		tikv:         &storeStatusStatistics{opt: opt},
 	}
 }
 
@@ -159,7 +161,7 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	if store.IsTiFlash() {
 		statistics = s.tiflash
 	} else {
-		statistics = s.tiflash
+		statistics = s.tikv
 	}
 	statistics.observe(store)
 
@@ -240,8 +242,8 @@ func (s *storeStatistics) collect() {
 	tikvUpCounter.Set(float64(s.tikv.Up))
 	tikvDiconnectedCounter.Set(float64(s.tikv.Disconnect))
 	tikvDownCounter.Set(float64(s.tikv.Down))
-	TikvUnhealthCounter.Set(float64(s.tikv.Unhealthy))
-	tikvOfflinepCounter.Set(float64(s.tikv.Offline))
+	tikvUnhealthCounter.Set(float64(s.tikv.Unhealthy))
+	tikvOfflineCounter.Set(float64(s.tikv.Offline))
 	tikvTombstoneCounter.Set(float64(s.tikv.Tombstone))
 	tikvLowSpaceCounter.Set(float64(s.tikv.LowSpace))
 	tikvPreparingCounter.Set(float64(s.tikv.Preparing))
@@ -253,8 +255,8 @@ func (s *storeStatistics) collect() {
 	tiflashUpCounter.Set(float64(s.tiflash.Up))
 	tiflashDiconnectedCounter.Set(float64(s.tiflash.Disconnect))
 	tiflashDownCounter.Set(float64(s.tiflash.Down))
-	TiflashUnhealthCounter.Set(float64(s.tiflash.Unhealthy))
-	tiflashOfflinepCounter.Set(float64(s.tiflash.Offline))
+	tiflashUnhealthCounter.Set(float64(s.tiflash.Unhealthy))
+	tiflashOfflineCounter.Set(float64(s.tiflash.Offline))
 	tiflashTombstoneCounter.Set(float64(s.tiflash.Tombstone))
 	tiflashLowSpaceCounter.Set(float64(s.tiflash.LowSpace))
 	tiflashPreparingCounter.Set(float64(s.tiflash.Preparing))
