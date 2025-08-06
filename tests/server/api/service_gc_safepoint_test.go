@@ -15,6 +15,7 @@
 package api
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -71,26 +72,33 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 			{
 				ServiceID:  "a",
 				ExpiredAt:  now.Unix() + 10,
-				SafePoint:  1,
+				SafePoint:  10,
 				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
 				ServiceID:  "b",
 				ExpiredAt:  now.Unix() + 10,
-				SafePoint:  2,
+				SafePoint:  20,
 				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
 				ServiceID:  "c",
 				ExpiredAt:  now.Unix() + 10,
-				SafePoint:  3,
+				SafePoint:  30,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  1,
 				KeyspaceID: constant.NullKeyspaceID,
 			},
 		},
 		GCSafePoint:           1,
 		MinServiceGcSafepoint: 1,
 	}
-	for _, ssp := range list.ServiceGCSafepoints {
+	// Skip writing the "gc_worker" one.
+	for _, ssp := range list.ServiceGCSafepoints[:3] {
 		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, 10, now)
 		re.NoError(err)
 	}
@@ -117,5 +125,6 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	for _, barrier := range left {
 		leftSsps = append(leftSsps, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
 	}
-	re.Equal(list.ServiceGCSafepoints[1:], leftSsps)
+	// Exclude the gc_worker as it's not included in GetGCState's result.
+	re.Equal(list.ServiceGCSafepoints[1:3], leftSsps)
 }
