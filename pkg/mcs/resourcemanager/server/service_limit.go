@@ -57,15 +57,6 @@ func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint
 	}
 }
 
-func (krl *serviceLimiter) getServiceLimit() float64 {
-	if krl == nil {
-		return 0
-	}
-	krl.RLock()
-	defer krl.RUnlock()
-	return krl.ServiceLimit
-}
-
 func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 	// The service limit should be non-negative.
 	newServiceLimit = math.Max(0, newServiceLimit)
