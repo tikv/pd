@@ -46,7 +46,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if checker.prepared {
 		return true
 	}
-	if time.Since(checker.start) > collectTimeout {
+	if time.Since(checker.start) > CollectTimeout {
 		checker.prepared = true
 		return true
 	}
