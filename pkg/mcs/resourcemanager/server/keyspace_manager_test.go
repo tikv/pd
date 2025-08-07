@@ -55,58 +55,41 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	// Verify the default resource group has unlimited rate and burst limit.
 	re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
 	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
-}
 
-func TestInitDefaultResourceGroupWithServiceLimit(t *testing.T) {
-	re := require.New(t)
-
-	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
-	re.NotNil(krgm)
-	re.Equal(uint32(1), krgm.keyspaceID)
-	re.Empty(krgm.groups)
-
-	// Set the service limit to 1000.
-	krgm.setServiceLimit(1000)
-	serviceLimit := krgm.getServiceLimiter().getServiceLimit()
-	re.Equal(1000.0, serviceLimit)
-
-	// Initialize the default resource group.
-	krgm.initDefaultResourceGroup()
-
-	// Verify the settings of the default resource group.
-	defaultGroup, exists := krgm.groups[DefaultResourceGroupName]
+	// Conciliation should override the fill rate of the default resource group to the service limit.
+	const serviceLimit = 100.0
+	krgm.setServiceLimit(serviceLimit)
+	// Add another resource group with the same priority as the default resource group.
+	err := krgm.addResourceGroup(&rmpb.ResourceGroup{
+		Name:     testResourceGroupName,
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: defaultGroup.Priority,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   serviceLimit,
+					BurstLimit: UnlimitedBurstLimit,
+				},
+			},
+		},
+	})
+	re.NoError(err)
+	// Mock the RU demand of the two resource groups.
+	ruPerSec := serviceLimit * 10
+	for range 10 {
+		krgm.getOrCreateRUTracker(DefaultResourceGroupName).sample(time.Now(), ruPerSec)
+		krgm.getOrCreateRUTracker(testResourceGroupName).sample(time.Now(), ruPerSec)
+	}
+	krgm.conciliateFillRates()
+	// Verify the fill rate and burst limit of the resource groups are reasonable.
+	expectedFillRate := serviceLimit / 2
+	expectedBurstLimit := int64(expectedFillRate)
+	re.Equal(expectedFillRate, defaultGroup.getFillRate())
+	re.Equal(expectedBurstLimit, defaultGroup.getBurstLimit())
+	testGroup, exists := krgm.groups[testResourceGroupName]
 	re.True(exists)
-	re.Equal(1000.0, defaultGroup.getFillRate())
-	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
-}
-
-func TestServiceLimitUpdateDefaultResourceGroup(t *testing.T) {
-	re := require.New(t)
-
-	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
-	re.NotNil(krgm)
-	re.Equal(uint32(1), krgm.keyspaceID)
-	re.Empty(krgm.groups)
-
-	// Initialize the default resource group.
-	krgm.initDefaultResourceGroup()
-
-	// Verify the settings of the default resource group before setting the service limit.
-	defaultGroup, exists := krgm.groups[DefaultResourceGroupName]
-	re.True(exists)
-	re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
-	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
-
-	// Set the service limit to 1000.
-	krgm.setServiceLimit(1000)
-	serviceLimit := krgm.getServiceLimiter().getServiceLimit()
-	re.Equal(1000.0, serviceLimit)
-
-	// Verify the settings of the default resource group after setting the service limit.
-	defaultGroup, exists = krgm.groups[DefaultResourceGroupName]
-	re.True(exists)
-	re.Equal(1000.0, defaultGroup.getFillRate())
-	re.Equal(int64(1000), defaultGroup.getBurstLimit())
+	re.Equal(expectedFillRate, testGroup.getFillRate())
+	re.Equal(expectedBurstLimit, testGroup.getBurstLimit())
 }
 
 func TestAddResourceGroup(t *testing.T) {
