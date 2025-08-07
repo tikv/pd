@@ -14,6 +14,8 @@
 
 package types
 
+import "github.com/tikv/pd/pkg/versioninfo/kerneltype"
+
 // CheckerSchedulerType is the type of checker/scheduler.
 type CheckerSchedulerType string
 
@@ -156,10 +158,16 @@ var (
 	//   2. change the `schedulerConfig` interface to the `baseDefaultSchedulerConfig`
 	// 		structure in related `xxxxSchedulerConfig`
 	//   3. remove `syncutil.RWMutex` from related `xxxxSchedulerConfig`
-	DefaultSchedulers = []CheckerSchedulerType{
-		BalanceLeaderScheduler,
-		BalanceRegionScheduler,
-		BalanceHotRegionScheduler,
-		EvictSlowStoreScheduler,
+	DefaultSchedulers     = defaultSchedulersInit()
+	defaultSchedulersInit = func() []CheckerSchedulerType {
+		defaultSchedulers := []CheckerSchedulerType{
+			BalanceLeaderScheduler,
+			BalanceRegionScheduler,
+			BalanceHotRegionScheduler,
+		}
+		if !kerneltype.IsNextGen() {
+			defaultSchedulers = append(defaultSchedulers, EvictSlowStoreScheduler)
+		}
+		return defaultSchedulers
 	}
 )
