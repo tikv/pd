@@ -46,7 +46,7 @@ import (
 
 const (
 	runSchedulerCheckInterval = 3 * time.Second
-	collectTimeout            = 5 * time.Minute
+	CollectTimeout            = 5 * time.Minute
 	maxLoadConfigRetries      = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond

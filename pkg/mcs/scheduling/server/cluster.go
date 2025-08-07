@@ -94,7 +94,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
-	requestInterval       = 5 * time.Second
+	requestInterval       = 10 * time.Second
 
 	// heartbeat relative const
 	heartbeatTaskRunner = "heartbeat-task-runner"
@@ -551,7 +551,12 @@ func (c *Cluster) GetPrepareRegionCount() int {
 		ctx    context.Context
 		cancel context.CancelFunc
 	)
+
+	start := time.Now()
 	for {
+		if time.Since(start) > schedule.CollectTimeout {
+			return 0
+		}
 		select {
 		case <-c.ctx.Done():
 			return 0
