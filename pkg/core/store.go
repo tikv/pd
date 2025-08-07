@@ -175,6 +175,17 @@ func (s *StoreInfo) IsTiFlash() bool {
 	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
 }
 
+// Engine returns the engine type of the store.
+// if not found the engine key label, returns default engine(tikv).
+func (s *StoreInfo) Engine() string {
+	for _, l := range s.GetLabels() {
+		if l.GetKey() == EngineKey {
+			return l.GetValue()
+		}
+	}
+	return EngineTiKV
+}
+
 // IsUp returns true if store is serving or preparing.
 func (s *StoreInfo) IsUp() bool {
 	return s.IsServing() || s.IsPreparing()

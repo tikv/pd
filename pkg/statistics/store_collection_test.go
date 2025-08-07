@@ -74,7 +74,7 @@ func TestStoreStatistics(t *testing.T) {
 		ObserveHotStat(store, storesStats)
 	}
 	stats := storeStats.stats
-	tikvStats := stats.tikv
+	tikvStats := stats.engineStatistics[core.EngineTiKV]
 
 	re.Equal(6, tikvStats.Up)
 	re.Equal(7, tikvStats.Preparing)
@@ -89,7 +89,7 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal(0, tikvStats.Disconnect)
 	re.Equal(1, tikvStats.Tombstone)
 	re.Equal(1, tikvStats.LowSpace)
-	re.Equal(1, stats.tiflash.Up)
+	re.Equal(1, stats.engineStatistics[core.EngineTiFlash].Up)
 	re.Len(stats.LabelCounter["zone:z1"], 2)
 	re.Equal([]uint64{1, 2}, stats.LabelCounter["zone:z1"])
 	re.Len(stats.LabelCounter["zone:z2"], 2)

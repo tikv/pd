@@ -78,8 +78,7 @@ type storeStatistics struct {
 	WitnessCount    int
 	LabelCounter    map[string][]uint64
 
-	tiflash *storeStatusStatistics
-	tikv    *storeStatusStatistics
+	engineStatistics map[string]*storeStatusStatistics
 }
 
 type storeStatusStatistics struct {
@@ -135,10 +134,9 @@ func (s *storeStatusStatistics) observe(store *core.StoreInfo) {
 
 func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 	return &storeStatistics{
-		opt:          opt,
-		LabelCounter: make(map[string][]uint64),
-		tiflash:      &storeStatusStatistics{opt: opt},
-		tikv:         &storeStatusStatistics{opt: opt},
+		opt:              opt,
+		LabelCounter:     make(map[string][]uint64),
+		engineStatistics: make(map[string]*storeStatusStatistics),
 	}
 }
 
@@ -158,10 +156,11 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
 	var statistics *storeStatusStatistics
-	if store.IsTiFlash() {
-		statistics = s.tiflash
-	} else {
-		statistics = s.tikv
+	engine := store.Engine()
+	statistics, ok := s.engineStatistics[engine]
+	if !ok {
+		s.engineStatistics[engine] = &storeStatusStatistics{opt: s.opt}
+		statistics = s.engineStatistics[engine]
 	}
 	statistics.observe(store)
 
@@ -239,30 +238,36 @@ func (s *storeStatistics) collect() {
 	placementStatusGauge.Reset()
 
 	// tikv store status metrics.
-	tikvUpCounter.Set(float64(s.tikv.Up))
-	tikvDiconnectedCounter.Set(float64(s.tikv.Disconnect))
-	tikvDownCounter.Set(float64(s.tikv.Down))
-	tikvUnhealthCounter.Set(float64(s.tikv.Unhealthy))
-	tikvOfflineCounter.Set(float64(s.tikv.Offline))
-	tikvTombstoneCounter.Set(float64(s.tikv.Tombstone))
-	tikvLowSpaceCounter.Set(float64(s.tikv.LowSpace))
-	tikvPreparingCounter.Set(float64(s.tikv.Preparing))
-	tikvServingCounter.Set(float64(s.tikv.Serving))
-	tikvRemovingCounter.Set(float64(s.tikv.Removing))
-	tikvRemovedCounter.Set(float64(s.tikv.Removed))
+	tikvStatistics, ok := s.engineStatistics[core.EngineTiKV]
+	if ok {
+		tikvUpCounter.Set(float64(tikvStatistics.Up))
+		tikvDiconnectedCounter.Set(float64(tikvStatistics.Disconnect))
+		tikvDownCounter.Set(float64(tikvStatistics.Down))
+		tikvUnhealthCounter.Set(float64(tikvStatistics.Unhealthy))
+		tikvOfflineCounter.Set(float64(tikvStatistics.Offline))
+		tikvTombstoneCounter.Set(float64(tikvStatistics.Tombstone))
+		tikvLowSpaceCounter.Set(float64(tikvStatistics.LowSpace))
+		tikvPreparingCounter.Set(float64(tikvStatistics.Preparing))
+		tikvServingCounter.Set(float64(tikvStatistics.Serving))
+		tikvRemovingCounter.Set(float64(tikvStatistics.Removing))
+		tikvRemovedCounter.Set(float64(tikvStatistics.Removed))
+	}
 
 	// tiflash store status metrics.
-	tiflashUpCounter.Set(float64(s.tiflash.Up))
-	tiflashDiconnectedCounter.Set(float64(s.tiflash.Disconnect))
-	tiflashDownCounter.Set(float64(s.tiflash.Down))
-	tiflashUnhealthCounter.Set(float64(s.tiflash.Unhealthy))
-	tiflashOfflineCounter.Set(float64(s.tiflash.Offline))
-	tiflashTombstoneCounter.Set(float64(s.tiflash.Tombstone))
-	tiflashLowSpaceCounter.Set(float64(s.tiflash.LowSpace))
-	tiflashPreparingCounter.Set(float64(s.tiflash.Preparing))
-	tiflashServingCounter.Set(float64(s.tiflash.Serving))
-	tiflashRemovingCounter.Set(float64(s.tiflash.Removing))
-	tiflashRemovedCounter.Set(float64(s.tiflash.Removed))
+	tiflashStatistics, ok := s.engineStatistics[core.EngineTiFlash]
+	if ok {
+		tiflashUpCounter.Set(float64(tiflashStatistics.Up))
+		tiflashDiconnectedCounter.Set(float64(tiflashStatistics.Disconnect))
+		tiflashDownCounter.Set(float64(tiflashStatistics.Down))
+		tiflashUnhealthCounter.Set(float64(tiflashStatistics.Unhealthy))
+		tiflashOfflineCounter.Set(float64(tiflashStatistics.Offline))
+		tiflashTombstoneCounter.Set(float64(tiflashStatistics.Tombstone))
+		tiflashLowSpaceCounter.Set(float64(tiflashStatistics.LowSpace))
+		tiflashPreparingCounter.Set(float64(tiflashStatistics.Preparing))
+		tiflashServingCounter.Set(float64(tiflashStatistics.Serving))
+		tiflashRemovingCounter.Set(float64(tiflashStatistics.Removing))
+		tiflashRemovedCounter.Set(float64(tiflashStatistics.Removed))
+	}
 
 	// Store status metrics.
 	storeRegionCountGauge.Set(float64(s.RegionCount))
