@@ -53,6 +53,7 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 	suite.tc.AddLeaderStore(1, 0)
 	suite.tc.AddLeaderStore(2, 0)
 	suite.tc.AddLeaderStore(3, 0)
+	suite.tc.AddLeaderStore(4, 0)
 	// Add regions 1, 2 with leaders in stores 1, 2
 	suite.tc.AddLeaderRegion(1, 1, 2)
 	suite.tc.AddLeaderRegion(2, 2, 1)
@@ -116,47 +117,107 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 }
 
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
+	const (
+		storeID1 = 1
+		storeID2 = 2
+		storeID3 = 3
+		storeID4 = 4
+	)
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
-	storeInfo := suite.tc.GetStore(1)
-	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
-			1: 100,
-		}
-	})
-	suite.tc.PutStore(newStoreInfo)
+	testCases := []struct {
+		networkSlowScoreFunc func(store *core.StoreInfo)
+		expectedSlow         bool
+	}{
+		// Note: The test cases are sequential.
+		// There will be a causal relationship between before and after
+		{
+			// One 100 score does not trigger evict slow store
+			networkSlowScoreFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+					storeID2: 100,
+				}
+			},
+			expectedSlow: false,
+		},
+		{
+			// Does not meet networkSlowStoreSecondThreshold
+			networkSlowScoreFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+					storeID2: 1,
+					storeID3: 1,
+					storeID4: 100,
+				}
+			},
+			expectedSlow: false,
+		},
+		{
+			networkSlowScoreFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+					storeID2: 10,
+					storeID3: 10,
+					storeID4: 100,
+				}
+			},
+			expectedSlow: true,
+		},
+		{
+			networkSlowScoreFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+					storeID2: 10,
+					storeID3: 10,
+					storeID4: 10,
+				}
+			},
+			expectedSlow: true,
+		},
+		{
+			networkSlowScoreFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+					storeID2: 1,
+					storeID3: 1,
+					storeID4: 1,
+				}
+			},
+			expectedSlow: false,
+		},
+		{
+			// Test large cluster with many stores
+			networkSlowScoreFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+					storeID2: 100,
+					storeID3: 10,
+					storeID4: 10,
+					5:        1,
+					6:        1,
+					7:        1,
+					8:        1,
+					9:        1,
+					10:       1,
+				}
+			},
+			expectedSlow: true,
+		},
+	}
 
-	// NetworkSlowStore works
-	suite.es.Schedule(suite.tc, false)
-	_, ok := suite.es.(*evictSlowStoreScheduler).conf.NetworkSlowStores[1]
+	es, ok := suite.es.(*evictSlowStoreScheduler)
 	re.True(ok)
-	re.False(suite.tc.BasicCluster.GetStore(1).AllowLeaderTransferIn())
+	for i, tc := range testCases {
+		suite.T().Logf("Test case %d", i+1)
+		storeInfo := suite.tc.GetStore(storeID1)
+		suite.tc.PutStore(storeInfo.Clone(tc.networkSlowScoreFunc))
 
-	es2, ok := suite.es.(*evictSlowStoreScheduler)
-	re.True(ok)
+		suite.es.Schedule(suite.tc, false)
+		_, ok = es.conf.NetworkSlowStores[storeID1]
+		re.Equal(tc.expectedSlow, ok)
+		re.Equal(tc.expectedSlow, !suite.tc.BasicCluster.GetStore(storeID1).AllowLeaderTransferIn())
 
-	// check the value from storage.
-	var persistValue evictSlowStoreSchedulerConfig
-	re.NoError(es2.conf.load(&persistValue))
-	_, ok = persistValue.NetworkSlowStores[1]
-	re.True(ok)
-
-	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
-			1: 1,
-		}
-	})
-	suite.tc.PutStore(newStoreInfo)
-	suite.es.Schedule(suite.tc, false)
-	_, ok = suite.es.(*evictSlowStoreScheduler).conf.NetworkSlowStores[1]
-	re.False(ok)
-	re.True(suite.tc.BasicCluster.GetStore(1).AllowLeaderTransferIn())
-
-	// check the value from storage.
-	persistValue = evictSlowStoreSchedulerConfig{}
-	re.NoError(es2.conf.load(&persistValue))
-	_, ok = persistValue.NetworkSlowStores[1]
-	re.False(ok)
+		// check the value from storage.
+		var persistValue evictSlowStoreSchedulerConfig
+		es.conf.load(&persistValue)
+		_, ok = persistValue.NetworkSlowStores[storeID1]
+		re.Equal(tc.expectedSlow, ok)
+	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 

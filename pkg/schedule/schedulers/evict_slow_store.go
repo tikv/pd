@@ -38,8 +38,18 @@ import (
 )
 
 const (
-	slowStoreEvictThreshold   = 100
-	slowStoreRecoverThreshold = 1
+	slowStoreEvictThreshold = 100
+	// For network slow store, its slow scores include the scores from each tikv.
+	// These scores should meet the following conditions and then will be
+	// considered as a slow store:
+	// 1. One network slow score is greater than networkSlowStoreFirstThreshold.
+	// 2. After removing the maximum value, if the number of stores with a score
+	//    greater than networkSlowStoreSecondThreshold is greater than or equal
+	//    to 2, it is considered a slow store.
+	networkSlowStoreFirstThreshold  = 95
+	networkSlowStoreSecondThreshold = 10
+	slowStoreRecoverThreshold       = 1
+	defaultMaxNetworkSlowStore      = 1
 )
 
 type slowStoreType string
@@ -373,18 +383,54 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 			deleteStore(storeID)
 		}
 	}
+
+	var firstThresholdStore uint64
+	countScoreGreaterThan := func(slowScores map[uint64]uint64, score uint64) int {
+		count := 0
+
+		for store_id, s := range slowScores {
+			if s >= score {
+				if score == networkSlowStoreFirstThreshold {
+					firstThresholdStore = store_id
+				}
+				count++
+			}
+		}
+		return count
+	}
 	stores := cluster.GetStores()
 	for _, store := range stores {
-		if calculateAvgScore(store.GetNetworkSlowScore()) < 0.95*slowStoreEvictThreshold {
-			continue
-		}
 		if _, exist := networkSlowStores[store.GetID()]; exist {
 			continue
 		}
-		if len(networkSlowStores) >= int(s.conf.MaxNetworkSlowStore) {
-			log.Warn("network slow store has reached the max limit, skip",
+
+		networkSlowScores := store.GetNetworkSlowScore()
+		for storeID := range networkSlowStores {
+			delete(networkSlowScores, storeID)
+		}
+		if len(networkSlowScores) == 0 {
+			continue
+		}
+		if countScoreGreaterThan(networkSlowScores, networkSlowStoreFirstThreshold) < 1 {
+			continue
+		}
+		if firstThresholdStore != 0 {
+			delete(networkSlowScores, firstThresholdStore)
+			firstThresholdStore = 0
+		}
+
+		// After removing the maximum value, if the number of stores with a score greater
+		// than networkSlowStoreSecondThreshold is greater than or equal to 2, it is
+		// considered a slow store.
+		if countScoreGreaterThan(networkSlowScores, networkSlowStoreSecondThreshold) < 2 {
+			log.Info("network slow store is not slow enough, skip",
 				zap.Uint64("store-id", store.GetID()),
-			)
+				zap.Any("network-slow-score", store.GetNetworkSlowScore()))
+			continue
+		}
+
+		if len(networkSlowStores) >= int(s.conf.MaxNetworkSlowStore) {
+			slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(store.GetID(), 10), string(networkSlowStore)).Set(1)
 			continue
 		}
 		log.Info("detected network slow store, start to pause scheduler",

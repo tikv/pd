@@ -211,7 +211,13 @@ func (s *StoreInfo) GetSlowScore() uint64 {
 func (s *StoreInfo) GetNetworkSlowScore() map[uint64]uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.rawStats.GetNetworkSlowScore()
+
+	result := make(map[uint64]uint64)
+	original := s.rawStats.GetNetworkSlowScore()
+	for k, v := range original {
+		result[k] = v
+	}
+	return result
 }
 
 // WitnessScore returns the store's witness score.
