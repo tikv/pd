@@ -217,7 +217,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 
 		// check the value from storage.
 		var persistValue evictSlowStoreSchedulerConfig
-		es.conf.load(&persistValue)
+		_ = es.conf.load(&persistValue)
 		_, ok = persistValue.NetworkSlowStores[storeID1]
 		re.Equal(tc.expectedSlow, ok)
 	}
@@ -341,7 +341,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 
 		// check the value from storage.
 		var persistValue evictSlowStoreSchedulerConfig
-		es.conf.load(&persistValue)
+		_ = es.conf.load(&persistValue)
 		_, ok = persistValue.NetworkSlowStores[tc.scheduleStore]
 		re.Equal(tc.expectedSlow, ok)
 

@@ -388,10 +388,10 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 	countScoreGreaterThan := func(slowScores map[uint64]uint64, score uint64) int {
 		count := 0
 
-		for store_id, s := range slowScores {
+		for storeID, s := range slowScores {
 			if s >= score {
 				if score == networkSlowStoreFirstThreshold {
-					firstThresholdStore = store_id
+					firstThresholdStore = storeID
 				}
 				count++
 			}
