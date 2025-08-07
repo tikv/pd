@@ -34,7 +34,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 					"/resource-manager/",
 					"/resource-manager",
 					constant.ResourceManagerServiceName,
-					[]string{http.MethodGet, http.MethodPost, http.MethodDelete}),
+					[]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete}),
 			),
 		), apiutil.APIServiceGroup{
 			Name:       "resource-manager",
