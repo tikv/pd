@@ -439,7 +439,7 @@ func (gtb *GroupTokenBucket) inspectAnomalies(
 ) bool {
 	var errMsg string
 	if rand.Intn(10) == 0 {
-		tb.Tokens = math.NaN
+		tb.Tokens = -1
 		log.Info("gjt debug inject nan")
 	}
 	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
