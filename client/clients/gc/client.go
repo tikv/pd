@@ -73,6 +73,12 @@ type GCStatesClient interface {
 	// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 	// the NullKeyspace.
 	GetGCState(ctx context.Context) (GCState, error)
+	// SetGlobalGCBarrier sets (creates or updates) a global GC barrier.
+	SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*GlobalGCBarrierInfo, error)
+	// DeleteGlobalGCBarrier deletes a global GC barrier.
+	DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*GlobalGCBarrierInfo, error)
+	// Get the GC states from all keyspaces.
+	GetAllKeyspacesGCStates(ctx context.Context) (GCStates, error)
 }
 
 // InternalController is the interface for controlling GC execution.
@@ -141,6 +147,16 @@ type GCBarrierInfo struct {
 	getReqStartTime time.Time
 }
 
+// GlobalGCBarrierInfo represents the information of a global GC barrier.
+type GlobalGCBarrierInfo struct {
+	BarrierID string
+	BarrierTS uint64
+	TTL       time.Duration
+	// The time when the RPC that fetches the GC barrier info.
+	// It will be used as the basis for determining whether the barrier is expired.
+	getReqStartTime time.Time
+}
+
 // TTLNeverExpire is a special value for TTL that indicates the barrier never expires.
 const TTLNeverExpire = time.Duration(math.MaxInt64)
 
@@ -171,6 +187,24 @@ func (b *GCBarrierInfo) isExpiredImpl(now time.Time) bool {
 	return now.Sub(b.getReqStartTime) > b.TTL
 }
 
+// NewGlobalGCBarrierInfo creates a new GCBarrierInfo instance.
+func NewGlobalGCBarrierInfo(barrierID string, barrierTS uint64, ttl time.Duration, getReqStartTime time.Time) *GlobalGCBarrierInfo {
+	return &GlobalGCBarrierInfo{
+		BarrierID:       barrierID,
+		BarrierTS:       barrierTS,
+		TTL:             ttl,
+		getReqStartTime: getReqStartTime,
+	}
+}
+
+// IsExpired checks whether the barrier is expired.
+func (b *GlobalGCBarrierInfo) IsExpired() bool {
+	if b.TTL == TTLNeverExpire {
+		return false
+	}
+	return time.Since(b.getReqStartTime) > b.TTL
+}
+
 // GCState represents the information of the GC state.
 //
 //nolint:revive
@@ -180,4 +214,14 @@ type GCState struct {
 	TxnSafePoint uint64
 	GCSafePoint  uint64
 	GCBarriers   []*GCBarrierInfo
+}
+
+// GCStates represents the information of the GC state for all keyspaces.
+//
+//nolint:revive
+type GCStates struct {
+	// Maps from keyspace id to GC state of that keyspace.
+	GCStates map[uint32]GCState
+	// All existing global GC barriers.
+	GlobalGCBarriers []*GlobalGCBarrierInfo
 }
