@@ -75,7 +75,7 @@ func TestTIKVEngine(t *testing.T) {
 	// add regions:
 	// store-1: 3 leader regions
 	// store-2: 2 leader regions
-	// store-3: 1 leader regions
+	// store-3: 0 leader regions
 	for i := 1; i <= 3; i++ {
 		tc.AddLeaderStore(uint64(i), 0)
 	}
@@ -84,13 +84,12 @@ func TestTIKVEngine(t *testing.T) {
 	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
-	tc.AddLeaderRegionWithRange(6, "180", "200", 3, 1, 2)
 	// case1: transfer leader from store 1 to store 3
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
 	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("1.00", op.GetAdditionalInfo("targetScore"))
+	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
 	// case2: move leader from store 1 to store 4
