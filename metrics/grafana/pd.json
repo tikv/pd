@@ -9347,9 +9347,9 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_service_audit_handling_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance,service,ip)",
+              "expr": "sum(rate(pd_service_audit_handling_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, service)",
               "intervalFactor": 2,
-              "legendFormat": "{{instance}}-{{service}}-{{ip}}",
+              "legendFormat": "{{instance}}-{{service}}",
               "refId": "A",
               "step": 4
             }
