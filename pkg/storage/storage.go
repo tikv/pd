@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -221,4 +222,13 @@ func AreRegionsLoaded(s Storage) bool {
 		return ps.regionLoaded == fromLeveldb
 	}
 	return ps.regionLoaded == fromEtcd
+}
+
+// IsBootstrapped returns whether the cluster is bootstrapped.
+func IsBootstrapped(s Storage) bool {
+	data, err := s.Load(keypath.ClusterBootstrapTimePath())
+	if err != nil {
+		return false
+	}
+	return data != ""
 }
