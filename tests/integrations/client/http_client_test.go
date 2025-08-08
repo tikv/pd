@@ -998,19 +998,28 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
-				ServiceID: "AAA",
-				ExpiredAt: now.Unix() + 10,
-				SafePoint: 1,
+				ServiceID:  "AAA",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  10,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "BBB",
-				ExpiredAt: now.Unix() + 10,
-				SafePoint: 2,
+				ServiceID:  "BBB",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  20,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "CCC",
-				ExpiredAt: now.Unix() + 10,
-				SafePoint: 3,
+				ServiceID:  "CCC",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  30,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  1,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 		},
 		GCSafePoint:           1,
@@ -1018,7 +1027,8 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	}
 
 	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
-	for _, ssp := range list.ServiceGCSafepoints {
+	// Skip writing "gc_worker".
+	for _, ssp := range list.ServiceGCSafepoints[:3] {
 		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
@@ -1033,7 +1043,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
-	re.Len(l.ServiceGCSafepoints, 3)
+	re.Len(l.ServiceGCSafepoints, 4)
 
 	// sort the gc safepoints based on order of ServiceID
 	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
@@ -1052,19 +1062,30 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal("Delete service GC safepoint successfully.", msg)
 	}
 
-	// check that the safepoitns are indeed deleted
+	// check that the safepoitns are indeed deleted.
+	// "gc_worker" will still exist in the result set as it's pseudo.
 	l, err = client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
 	re.Equal(uint64(1), l.GCSafePoint)
-	re.Equal(uint64(0), l.MinServiceGcSafepoint)
-	re.Empty(l.ServiceGCSafepoints)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
 	// Deleting "gc_worker" should result in an error in earlier version. As the service safe point becomes a
 	// compatibility layer over GC barriers, it won't take any effect except that possibly deleting the residual
 	// service safe point of "gc_worker" that was written by previous version.
 	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
 	re.NoError(err)
+
+	// However, after the deletion, it doesn't affect the behavior that generates the pseudo service safe point for
+	// "gc_worker".
+	l, err = client.GetGCSafePoint(ctx)
+	re.NoError(err)
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
 	// try delete some non-exist safepoints, should return normally
 	var msg string
