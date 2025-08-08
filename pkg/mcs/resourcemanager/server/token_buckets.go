@@ -23,6 +23,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"math/rand"
 )
 
 const (
@@ -437,6 +438,10 @@ func (gtb *GroupTokenBucket) inspectAnomalies(
 	logFields []zap.Field,
 ) bool {
 	var errMsg string
+	if rand.Intn(10) == 0 {
+		tb.Tokens = math.NaN
+		log.Info("gjt debug inject nan")
+	}
 	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
 	if tb.Tokens <= 0 || math.IsInf(tb.Tokens, 0) || math.IsNaN(tb.Tokens) {
 		errMsg = "assigned token is invalid"
