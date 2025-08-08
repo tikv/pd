@@ -133,10 +133,12 @@ func (s *storeStatusStatistics) observe(store *core.StoreInfo) {
 }
 
 func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
+	statistics := make(map[string]*storeStatusStatistics, 1)
+	statistics[core.EngineTiKV] = &storeStatusStatistics{opt: opt}
 	return &storeStatistics{
 		opt:              opt,
 		LabelCounter:     make(map[string][]uint64),
-		engineStatistics: make(map[string]*storeStatusStatistics),
+		engineStatistics: statistics,
 	}
 }
 
@@ -156,11 +158,15 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
 	var statistics *storeStatusStatistics
-	engine := store.Engine()
-	statistics, ok := s.engineStatistics[engine]
-	if !ok {
-		s.engineStatistics[engine] = &storeStatusStatistics{opt: s.opt}
-		statistics = s.engineStatistics[engine]
+	if store.IsTiFlash() {
+		statistics = s.engineStatistics[core.EngineTiFlash]
+		if statistics == nil {
+			s.engineStatistics[core.EngineTiFlash] = &storeStatusStatistics{opt: s.opt}
+			statistics = s.engineStatistics[core.EngineTiFlash]
+		}
+	} else {
+		// tikv statistics has been initialized in newStoreStatistics.
+		statistics = s.engineStatistics[core.EngineTiKV]
 	}
 	statistics.observe(store)
 
