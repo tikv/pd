@@ -231,6 +231,10 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		store.LastHeartbeat = time.Now().UnixNano()
 	}
 	re.NoError(raftCluster.PutMetaStore(store))
+	ts := store.GetLastHeartbeat()
+	if ts == 0 {
+		ts = time.Now().UnixNano()
+	}
 
 	storeInfo := raftCluster.GetStore(store.GetId())
 	newStore := storeInfo.Clone(
@@ -241,6 +245,7 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		}),
 		core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed()),
 		core.SetNodeState(store.GetNodeState()),
+		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)
 	raftCluster.UpdateAllStoreStatus()
