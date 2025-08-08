@@ -126,15 +126,15 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
 	testCases := []struct {
-		networkSlowScoreFunc func(store *core.StoreInfo)
-		expectedSlow         bool
+		NetworkSlowScoresFunc func(store *core.StoreInfo)
+		expectedSlow          bool
 	}{
 		// Note: The test cases are sequential.
 		// There will be a causal relationship between before and after
 		{
 			// One 100 score does not trigger evict slow store
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 100,
 				}
 			},
@@ -142,8 +142,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		},
 		{
 			// Does not meet networkSlowStoreSecondThreshold
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 1,
 					storeID3: 1,
 					storeID4: 100,
@@ -153,8 +153,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		},
 		{
 			// Successfully triggers slow store
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 10,
 					storeID3: 10,
 					storeID4: 100,
@@ -164,8 +164,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		},
 		{
 			// Score decreases but still slow store
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 10,
 					storeID3: 10,
 					storeID4: 10,
@@ -175,8 +175,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		},
 		{
 			// Successfully recovers from slow store
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 1,
 					storeID3: 1,
 					storeID4: 1,
@@ -186,8 +186,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		},
 		{
 			// Test large cluster with many stores
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 100,
 					storeID3: 10,
 					storeID4: 10,
@@ -208,7 +208,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 	for i, tc := range testCases {
 		suite.T().Logf("Test case %d", i+1)
 		storeInfo := suite.tc.GetStore(storeID1)
-		suite.tc.PutStore(storeInfo.Clone(tc.networkSlowScoreFunc))
+		suite.tc.PutStore(storeInfo.Clone(tc.NetworkSlowScoresFunc))
 
 		suite.es.Schedule(suite.tc, false)
 		_, ok = es.conf.NetworkSlowStores[storeID1]
@@ -239,18 +239,18 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		reachedLimit = true
 	}))
 	testCases := []struct {
-		scheduleStore        uint64
-		networkSlowScoreFunc func(store *core.StoreInfo)
-		expectedSlow         bool
-		expectedReachedLimit bool
+		scheduleStore         uint64
+		NetworkSlowScoresFunc func(store *core.StoreInfo)
+		expectedSlow          bool
+		expectedReachedLimit  bool
 	}{
 		// Note: The test cases are sequential.
 		// There will be a causal relationship between before and after
 		{
 			// store 1 becomes slow
 			scheduleStore: storeID1,
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 10,
 					storeID3: 10,
 					storeID4: 100,
@@ -261,8 +261,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		{
 			// store 2 is normal
 			scheduleStore: storeID2,
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID1: 100,
 					storeID3: 1,
 					storeID4: 1,
@@ -274,8 +274,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 			// store 2 becomes slow, but it does not meet the number of networkSlowStoreSecondThreshold
 			// so it is not considered as slow store
 			scheduleStore: storeID2,
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID1: 100, // storeID1 will be filtered out because it is already slow
 					storeID3: 100,
 					storeID4: 100,
@@ -287,8 +287,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 			// Scale out store 5, thus store 2 meet the number of networkSlowStoreSecondThreshold
 			// and it is considered as slow store. And reached limit.
 			scheduleStore: storeID2,
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID1: 100, // storeID1 will be filtered out because it is already slow
 					storeID3: 100,
 					storeID4: 100,
@@ -301,8 +301,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		{
 			// Store 1 successfully recovers from slow store
 			scheduleStore: storeID1,
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 1,
 					storeID3: 1,
 					storeID4: 1,
@@ -314,8 +314,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		{
 			// Store 2 is still slow, but does not reach the limit
 			scheduleStore: storeID2,
-			networkSlowScoreFunc: func(store *core.StoreInfo) {
-				store.GetStoreStats().NetworkSlowScore = map[uint64]uint64{
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID1: 100, // storeID1 will be filtered out because it is already slow
 					storeID3: 100,
 					storeID4: 100,
@@ -332,7 +332,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 	for i, tc := range testCases {
 		suite.T().Logf("Test case %d", i+1)
 		storeInfo := suite.tc.GetStore(tc.scheduleStore)
-		suite.tc.PutStore(storeInfo.Clone(tc.networkSlowScoreFunc))
+		suite.tc.PutStore(storeInfo.Clone(tc.NetworkSlowScoresFunc))
 
 		suite.es.Schedule(suite.tc, false)
 		_, ok = es.conf.NetworkSlowStores[tc.scheduleStore]

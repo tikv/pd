@@ -117,7 +117,7 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			LearnerCount:       store.GetLearnerCount(),
 			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
-			NetworkSlowScore:   store.GetNetworkSlowScore(),
+			NetworkSlowScore:   store.GetNetworkSlowScores(),
 			SlowTrend:          slowTrend,
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),

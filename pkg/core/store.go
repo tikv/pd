@@ -207,13 +207,13 @@ func (s *StoreInfo) GetSlowScore() uint64 {
 	return s.rawStats.GetSlowScore()
 }
 
-// GetNetworkSlowScore returns the network slow score of the store.
-func (s *StoreInfo) GetNetworkSlowScore() map[uint64]uint64 {
+// GetNetworkSlowScores returns the network slow score of the store.
+func (s *StoreInfo) GetNetworkSlowScores() map[uint64]uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	result := make(map[uint64]uint64)
-	original := s.rawStats.GetNetworkSlowScore()
+	original := s.rawStats.GetNetworkSlowScores()
 	for k, v := range original {
 		result[k] = v
 	}

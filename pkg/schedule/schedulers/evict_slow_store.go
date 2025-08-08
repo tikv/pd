@@ -378,7 +378,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 			continue
 		}
 
-		if calculateAvgScore(store.GetNetworkSlowScore()) <= slowStoreRecoverThreshold && uint64(time.Since(startTime).Seconds()) >= recoveryGap {
+		if calculateAvgScore(store.GetNetworkSlowScores()) <= slowStoreRecoverThreshold && uint64(time.Since(startTime).Seconds()) >= recoveryGap {
 			cluster.ResumeLeaderTransfer(storeID, constant.In)
 			deleteStore(storeID)
 		}
@@ -404,7 +404,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 			continue
 		}
 
-		networkSlowScores := store.GetNetworkSlowScore()
+		networkSlowScores := store.GetNetworkSlowScores()
 		for storeID := range networkSlowStores {
 			delete(networkSlowScores, storeID)
 		}
@@ -425,7 +425,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 		if countScoreGreaterThan(networkSlowScores, networkSlowStoreSecondThreshold) < 2 {
 			log.Info("network slow store is not slow enough, skip",
 				zap.Uint64("store-id", store.GetID()),
-				zap.Any("network-slow-score", store.GetNetworkSlowScore()))
+				zap.Any("network-slow-score", store.GetNetworkSlowScores()))
 			continue
 		}
 
@@ -436,7 +436,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 		}
 		log.Info("detected network slow store, start to pause scheduler",
 			zap.Uint64("store-id", store.GetID()),
-			zap.Any("network-slow-score", store.GetNetworkSlowScore()))
+			zap.Any("network-slow-score", store.GetNetworkSlowScores()))
 		if err := cluster.PauseLeaderTransfer(store.GetID(), constant.In); err != nil {
 			log.Warn("failed to pause leader transfer for network slow store",
 				zap.Uint64("store-id", store.GetID()),
