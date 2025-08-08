@@ -701,8 +701,11 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	return results, nil
 }
 
-// LoadGlobalGCBarriers returns global GC barriers.
+// LoadAllGlobalGCBarriers returns global GC barriers.
 func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	return m.gcMetaStorage.LoadAllGlobalGCBarriers()
 }
 
