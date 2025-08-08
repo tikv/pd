@@ -29,7 +29,8 @@ import (
 // ReadyStatus reflects the cluster's ready status.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReadyStatus struct {
-	RegionLoaded bool `json:"region_loaded"`
+	RegionLoaded   bool `json:"region_loaded"`
+	IsBootstrapped bool `json:"is_bootstrapped"`
 }
 
 // Ready checks if the region is loaded.
@@ -41,27 +42,36 @@ type ReadyStatus struct {
 func Ready(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	s := svr.GetStorage()
-	regionLoaded := storage.AreRegionsLoaded(s)
-	failpoint.Inject("loadRegionSlow", func(val failpoint.Value) {
-		if s, ok := val.(string); ok {
-			if svr.GetAddr() == s {
-				regionLoaded = false
+
+	var regionLoaded bool
+	isBootstrapped := storage.IsBootstrapped(s)
+	if isBootstrapped {
+		regionLoaded = storage.AreRegionsLoaded(s)
+		failpoint.Inject("loadRegionSlow", func(val failpoint.Value) {
+			if s, ok := val.(string); ok {
+				if svr.GetAddr() == s {
+					regionLoaded = false
+				}
 			}
+		})
+		if regionLoaded {
+			c.Status(http.StatusOK)
+		} else {
+			c.Status(http.StatusInternalServerError)
 		}
-	})
-	if regionLoaded {
-		c.Status(http.StatusOK)
 	} else {
-		c.Status(http.StatusInternalServerError)
+		// If the cluster is not bootstrapped, we consider it as ready.
+		c.Status(http.StatusOK)
 	}
 
 	if _, ok := c.GetQuery("verbose"); !ok {
 		return
 	}
 	resp := &ReadyStatus{
-		RegionLoaded: regionLoaded,
+		RegionLoaded:   regionLoaded,
+		IsBootstrapped: isBootstrapped,
 	}
-	if regionLoaded {
+	if !isBootstrapped || regionLoaded {
 		c.IndentedJSON(http.StatusOK, resp)
 	} else {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
