@@ -362,7 +362,7 @@ func (c *Cluster) updateScheduler() {
 			}
 			name := s.GetName()
 			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
-				log.Info("scheduler has already existed, skip adding it",
+				log.Debug("scheduler has already existed, skip adding it",
 					zap.String("scheduler-name", name),
 					zap.Strings("scheduler-args", scheduler.Args))
 				continue
