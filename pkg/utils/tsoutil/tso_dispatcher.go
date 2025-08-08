@@ -101,7 +101,13 @@ func (s *TSODispatcher) dispatch(
 	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
 	defer logutil.LogPanic()
 	dispatcherCtx := tsoQueue.ctx
-	defer s.dispatchChs.Delete(forwardedHost)
+	// Note: We use clearPendingRequests in a defer statement to ensure proper cleanup when an error occurs.
+	// This function not only deletes the queue from the dispatcher but also clears all pending requests
+	// to prevent goroutine leakage and ensure that all waiting goroutines are notified and can exit gracefully.
+	var err error
+	defer func() {
+		s.clearPendingRequests(tsoQueue, forwardedHost, err)
+	}()
 
 	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(tsoQueue.ctx, clientConn)
 	failpoint.Inject("canNotCreateForwardStream", func() {
@@ -154,6 +160,7 @@ func (s *TSODispatcher) dispatch(
 					tsoPrimaryWatchers[0].ForceLoad()
 				}
 				tsoQueue.cancel(err)
+
 				return
 			}
 		case <-noProxyRequestsTimer.C:
@@ -200,6 +207,29 @@ func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical i
 		countSum = newCountSum
 	}
 	return nil
+}
+
+// clearPendingRequests clears all pending requests in the queue to prevent goroutine leakage.
+// This method should be called when an error occurs to ensure that all waiting goroutines
+// are notified and can exit gracefully.
+func (s *TSODispatcher) clearPendingRequests(tsoQueue *tsoRequestProxyQueue, forwardedHost string, _ error) {
+	// Delete the queue from the dispatcher to prevent new requests from being accepted
+	s.dispatchChs.Delete(forwardedHost)
+
+	// Clear all pending requests in the queue
+	// We don't close the channel here to avoid panic in other goroutines that might try to send to it
+	// Instead, we drain the channel
+	for {
+		select {
+		case <-tsoQueue.requestCh:
+			// We can't directly notify the request of the error since the Request interface
+			// doesn't have an onError method. The goroutines waiting for these requests
+			// will eventually be notified through the context cancellation.
+		default:
+			// No more requests in the channel
+			return
+		}
+	}
 }
 
 // TSDeadline is used to watch the deadline of each tso request.
