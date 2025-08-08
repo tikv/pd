@@ -824,13 +824,21 @@ func TestConciliateFillRate(t *testing.T) {
 			expectedOverrideBurstLimitList: []int64{100},
 		},
 		{
-			name:                           "Proportional allocation with normalization check - case 1",
-			serviceLimit:                   100,
-			priorityList:                   []uint32{1, 1, 1},
-			fillRateSettingList:            []uint64{100, 100, 100},
-			ruDemandList:                   []float64{40, 80, 10},
-			expectedOverrideFillRateList:   []float64{40, 50, 10},
-			expectedOverrideBurstLimitList: []int64{40, 50, 10},
+			name:                "Proportional allocation with normalization check - case 1",
+			serviceLimit:        100,
+			priorityList:        []uint32{1, 1, 1},
+			fillRateSettingList: []uint64{100, 100, 100},
+			ruDemandList:        []float64{40, 80, 10},
+			expectedOverrideFillRateList: []float64{
+				(100.0 - 10.0) * 100 / 200,
+				(100.0 - 10.0 - 40.0) * 100 / 100,
+				100 * 100.0 / 300.0,
+			},
+			expectedOverrideBurstLimitList: []int64{
+				(100.0 - 10.0) * 100 / 200,
+				50,
+				100 * 100 / 300,
+			},
 		},
 		{
 			name:                           "Proportional allocation with normalization check - case 2",
