@@ -227,11 +227,10 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		// Wait for the raft cluster on the leader to be bootstrapped.
 		return raftCluster != nil && raftCluster.IsRunning()
 	})
-	re.NoError(raftCluster.PutMetaStore(store))
-	ts := store.GetLastHeartbeat()
-	if ts == 0 {
-		ts = time.Now().UnixNano()
+	if store.LastHeartbeat == 0 {
+		store.LastHeartbeat = time.Now().UnixNano()
 	}
+	re.NoError(raftCluster.PutMetaStore(store))
 
 	storeInfo := raftCluster.GetStore(store.GetId())
 	newStore := storeInfo.Clone(
@@ -242,7 +241,6 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		}),
 		core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed()),
 		core.SetNodeState(store.GetNodeState()),
-		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)
 	raftCluster.UpdateAllStoreStatus()
