@@ -289,9 +289,9 @@ var (
 	CmdDurationSetGCBarrier             prometheus.Observer
 	CmdDurationDeleteGCBarrier          prometheus.Observer
 	CmdDurationGetGCState               prometheus.Observer
-	CmdDurationSetGlobalGCBarrier             prometheus.Observer
-	CmdDurationDeleteGlobalGCBarrier          prometheus.Observer
-	CmdDurationGetAllKeyspacesGCStates          prometheus.Observer
+	CmdDurationSetGlobalGCBarrier       prometheus.Observer
+	CmdDurationDeleteGlobalGCBarrier    prometheus.Observer
+	CmdDurationGetAllKeyspacesGCStates  prometheus.Observer
 
 	CmdFailedDurationGetRegion                prometheus.Observer
 	CmdFailedDurationTSOWait                  prometheus.Observer
@@ -321,7 +321,7 @@ var (
 	CmdFailedDurationSetGlobalGCBarrier       prometheus.Observer
 	CmdFailedDurationDeleteGlobalGCBarrier    prometheus.Observer
 	CmdFailedDurationGetGCState               prometheus.Observer
-	CmdFailedDurationGetAllKeyspacesGCStates prometheus.Observer
+	CmdFailedDurationGetAllKeyspacesGCStates  prometheus.Observer
 
 	InternalCmdDurationGetClusterInfo prometheus.Observer
 	InternalCmdDurationGetMembers     prometheus.Observer

@@ -187,7 +187,6 @@ func (b *GCBarrierInfo) isExpiredImpl(now time.Time) bool {
 	return now.Sub(b.getReqStartTime) > b.TTL
 }
 
-
 // NewGlobalGCBarrierInfo creates a new GCBarrierInfo instance.
 func NewGlobalGCBarrierInfo(barrierID string, barrierTS uint64, ttl time.Duration, getReqStartTime time.Time) *GlobalGCBarrierInfo {
 	return &GlobalGCBarrierInfo{
@@ -203,7 +202,7 @@ func (b *GlobalGCBarrierInfo) IsExpired() bool {
 	if b.TTL == TTLNeverExpire {
 		return false
 	}
-	return time.Now().Sub(b.getReqStartTime) > b.TTL
+	return time.Since(b.getReqStartTime) > b.TTL
 }
 
 // GCState represents the information of the GC state.
@@ -218,9 +217,11 @@ type GCState struct {
 }
 
 // GCStates represents the information of the GC state for all keyspaces.
+//
+//nolint:revive
 type GCStates struct {
-    // Maps from keyspace id to GC state of that keyspace.
-    GCStates map[uint32]GCState
-    // All existing global GC barriers.
-    GlobalGCBarriers []*GlobalGCBarrierInfo
+	// Maps from keyspace id to GC state of that keyspace.
+	GCStates map[uint32]GCState
+	// All existing global GC barriers.
+	GlobalGCBarriers []*GlobalGCBarrierInfo
 }

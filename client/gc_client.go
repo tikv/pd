@@ -351,10 +351,10 @@ func (c gcStatesClient) SetGlobalGCBarrier(ctx context.Context, barrierID string
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.SetGlobalGCBarrierRequest{
-		Header:        c.client.requestHeader(),
-		BarrierId:     barrierID,
-		BarrierTs:     barrierTS,
-		TtlSeconds:    roundUpDurationToSeconds(ttl),
+		Header:     c.client.requestHeader(),
+		BarrierId:  barrierID,
+		BarrierTs:  barrierTS,
+		TtlSeconds: roundUpDurationToSeconds(ttl),
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -379,8 +379,8 @@ func (c gcStatesClient) DeleteGlobalGCBarrier(ctx context.Context, barrierID str
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.DeleteGlobalGCBarrierRequest{
-		Header:        c.client.requestHeader(),
-		BarrierId:     barrierID,
+		Header:    c.client.requestHeader(),
+		BarrierId: barrierID,
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -393,7 +393,7 @@ func (c gcStatesClient) DeleteGlobalGCBarrier(ctx context.Context, barrierID str
 	return pbToGlobalGCBarrierInfo(resp.GetDeletedBarrierInfo(), start), nil
 }
 
-// Get the GC states from all keyspaces.
+// GetAllKeyspacesGCStates gets the GC states from all keyspaces.
 func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.GCStates, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetAllKeyspacesGCState", opentracing.ChildOf(span.Context()))
@@ -405,7 +405,7 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.GCState
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.GetAllKeyspacesGCStatesRequest{
-		Header:        c.client.requestHeader(),
+		Header: c.client.requestHeader(),
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
