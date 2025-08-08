@@ -393,6 +393,12 @@ func (c *Controller) RemovePendingProcessedRegion(id uint64) {
 	c.pendingProcessedRegions.Remove(id)
 }
 
+// ClearPendingProcessedRegions clears the pending processed regions cache.
+// It is only used for tests.
+func (c *Controller) ClearPendingProcessedRegions() {
+	c.pendingProcessedRegions.Clear()
+}
+
 // GetPriorityRegions returns the region in priority queue
 func (c *Controller) GetPriorityRegions() []uint64 {
 	return c.priorityInspector.GetPriorityRegions()
