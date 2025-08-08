@@ -15,6 +15,7 @@
 package api
 
 import (
+	"math"
 	"net/http"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server"
 )
 
@@ -63,11 +65,31 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 	}
 
 	ssps := make([]*endpoint.ServiceSafePoint, 0, len(gcState.GCBarriers))
+	var gcWorkerSsp *endpoint.ServiceSafePoint
 	for _, barrier := range gcState.GCBarriers {
-		ssps = append(ssps, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
+		equivalentSsp := barrier.ToServiceSafePoint(constant.NullKeyspaceID)
+		ssps = append(ssps, equivalentSsp)
+		if equivalentSsp.ServiceID == keypath.GCWorkerServiceSafePointID {
+			gcWorkerSsp = equivalentSsp
+		}
+	}
+	if gcWorkerSsp == nil {
+		// Generate a pseudo service safe point for GC worker. While GC worker's service safe point won't exist after
+		// the new GC states API is adopted, some existing tests relies on the fact to pass: the minimal service safe
+		// point indicates the lower bound of the timestamp that is safe to read. Now, this value becomes the txn safe
+		// point. We generate a pseudo service safe point with the value of txn safe point to provide the compatibility.
+		gcWorkerSsp = &endpoint.ServiceSafePoint{
+			ServiceID:  keypath.GCWorkerServiceSafePointID,
+			ExpiredAt:  math.MaxInt64,
+			SafePoint:  gcState.TxnSafePoint,
+			KeyspaceID: constant.NullKeyspaceID,
+		}
+		ssps = append(ssps, gcWorkerSsp)
 	}
 
-	var minSSp *endpoint.ServiceSafePoint
+	// GC worker should always be the minimum one in most cases. However, this can be violated if the cluster is just
+	// upgraded from a old version where GC states API is not yet ready.
+	minSSp := gcWorkerSsp
 	for _, ssp := range ssps {
 		if (minSSp == nil || minSSp.SafePoint > ssp.SafePoint) &&
 			ssp.ExpiredAt > time.Now().Unix() {
