@@ -36,7 +36,6 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -439,57 +438,57 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
 	// todo: don't prepare every times, the prepare information can be reused.
-	plan, err := s.prepare(cluster, opInfluence, job)
+	p, err := s.prepare(cluster, opInfluence, job)
 	if err != nil {
 		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
 		return nil, nil
 	}
-
+	solver := p.solver
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
 	pendingFilter := filter.NewRegionPendingFilter()
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
 
-	for sourceIndex, sourceStore := range plan.stores {
-		plan.source = sourceStore
-		plan.sourceScore = plan.score(plan.source.GetID())
-		if plan.sourceScore < plan.averageScore {
+	for sourceIndex, sourceStore := range p.stores {
+		solver.Source = sourceStore
+		solver.sourceScore = p.sourceScore(solver.sourceStoreID())
+		if p.solver.sourceScore < p.averageScore {
 			break
 		}
 		switch job.Rule {
 		case core.LeaderScatter:
-			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 		case core.LearnerScatter:
-			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 		case core.PeerScatter:
-			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-			if plan.region == nil {
-				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			if solver.Region == nil {
+				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 			}
-			if plan.region == nil {
-				plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			if solver.Region == nil {
+				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 			}
 		}
-		if plan.region == nil {
+		if solver.Region == nil {
 			balanceRangeNoRegionCounter.Inc()
 			continue
 		}
-		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 		// Skip hot regions.
-		if cluster.IsRegionHot(plan.region) {
-			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		if cluster.IsRegionHot(solver.Region) {
+			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 			balanceRangeHotCounter.Inc()
 			continue
 		}
 		// Check region leader
-		if plan.region.GetLeader() == nil {
-			log.Warn("region has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		if solver.Region.GetLeader() == nil {
+			log.Warn("region has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 			balanceRangeNoLeaderCounter.Inc()
 			continue
 		}
-		plan.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-		if op := s.transferPeer(plan, plan.stores[sourceIndex+1:]); op != nil {
+		solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
+		if op := s.transferPeer(p, p.stores[sourceIndex+1:]); op != nil {
 			op.Counters = append(op.Counters, balanceRangeNewOperatorCounter)
 			return []*operator.Operator{op}, nil
 		}
@@ -498,38 +497,42 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
-	excludeTargets := plan.region.GetStoreIDs()
-	if plan.job.Rule == core.LeaderScatter {
+func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
+	solver := p.solver
+	excludeTargets := solver.Region.GetStoreIDs()
+	if p.job.Rule == core.LeaderScatter {
 		excludeTargets = make(map[uint64]struct{})
-		excludeTargets[plan.region.GetLeader().GetStoreId()] = struct{}{}
+		excludeTargets[solver.Region.GetLeader().GetStoreId()] = struct{}{}
 	}
-	conf := plan.GetSchedulerConfig()
+	conf := p.GetSchedulerConfig()
 	filters := s.filters
 	filters = append(filters,
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
-		filter.NewPlacementSafeguard(s.GetName(), conf, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, plan.fit),
+		filter.NewPlacementSafeguard(s.GetName(), conf, p.GetBasicCluster(), p.GetRuleManager(), solver.Region, solver.Source, solver.fit),
 	)
 
 	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
+	if len(candidates.Stores) != 0 {
+		solver.Step++
+	}
 	for i := range candidates.Stores {
-		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
-		plan.targetScore = plan.score(plan.target.GetID())
-		if plan.targetScore > plan.averageScore {
+		solver.Target = candidates.Stores[len(candidates.Stores)-i-1]
+		targetID := solver.targetStoreID()
+		solver.targetScore = p.targetScore(targetID)
+		if solver.targetScore > p.averageScore {
 			break
 		}
-		regionID := plan.region.GetID()
-		sourceID := plan.source.GetID()
-		targetID := plan.target.GetID()
-		if !plan.shouldBalance(s.GetName()) {
+		regionID := solver.Region.GetID()
+		sourceID := solver.sourceStoreID()
+		if !solver.shouldBalance(s.GetName()) {
 			continue
 		}
 		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
-		oldPeer := plan.region.GetStorePeer(sourceID)
+		oldPeer := solver.Region.GetStorePeer(sourceID)
 		exist := false
-		if plan.job.Rule == core.LeaderScatter {
-			peers := plan.region.GetPeers()
+		if p.job.Rule == core.LeaderScatter {
+			peers := solver.Region.GetPeers()
 			for _, peer := range peers {
 				if peer.GetStoreId() == targetID {
 					exist = true
@@ -540,13 +543,13 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		var op *operator.Operator
 		var err error
 		if exist {
-			op, err = operator.CreateTransferLeaderOperator(s.GetName(), plan, plan.region, plan.targetStoreID(), []uint64{}, operator.OpRange)
+			op, err = operator.CreateTransferLeaderOperator(s.GetName(), p, solver.Region, targetID, []uint64{}, operator.OpRange)
 		} else {
-			newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-			if plan.region.GetLeader().GetStoreId() == sourceID {
-				op, err = operator.CreateReplaceLeaderPeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer, newPeer)
+			newPeer := &metapb.Peer{StoreId: targetID, Role: oldPeer.Role}
+			if solver.Region.GetLeader().GetStoreId() == sourceID {
+				op, err = operator.CreateReplaceLeaderPeerOperator(s.GetName(), p, solver.Region, operator.OpRange, oldPeer.GetStoreId(), newPeer, newPeer)
 			} else {
-				op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+				op, err = operator.CreateMovePeerOperator(s.GetName(), p, solver.Region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
 			}
 		}
 
@@ -559,9 +562,9 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		op.FinishedCounters = append(op.FinishedCounters,
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 		)
-		op.SetAdditionalInfo("sourceScore", strconv.FormatInt(plan.sourceScore, 10))
-		op.SetAdditionalInfo("targetScore", strconv.FormatInt(plan.targetScore, 10))
-		op.SetAdditionalInfo("tolerate", strconv.FormatInt(plan.tolerate, 10))
+		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(p.score(sourceID), 'f', 2, 64))
+		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(p.score(targetID), 'f', 2, 64))
+		op.SetAdditionalInfo("tolerate", strconv.FormatInt(solver.tolerantSource, 10))
 		return op
 	}
 	balanceRangeNoReplacementCounter.Inc()
@@ -574,20 +577,24 @@ type balanceRangeSchedulerPlan struct {
 	// stores is sorted by score desc
 	stores []*core.StoreInfo
 	// scoreMap records the storeID -> score
-	scoreMap     map[uint64]int64
-	source       *core.StoreInfo
-	sourceScore  int64
-	target       *core.StoreInfo
-	targetScore  int64
-	region       *core.RegionInfo
-	fit          *placement.RegionFit
-	averageScore int64
+	scoreMap     map[uint64]float64
+	averageScore float64
 	job          *balanceRangeSchedulerJob
-	opInfluence  operator.OpInfluence
-	tolerate     int64
+	solver       *solver
 }
 
 func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
+	basePlan := plan.NewBalanceSchedulerPlan()
+	// todo: if supports to balance region size, it needs to change here.
+	var kind constant.ScheduleKind
+	switch job.Rule {
+	case core.LeaderScatter:
+		kind = constant.NewScheduleKind(constant.LeaderKind, constant.ByCount)
+	default:
+		kind = constant.NewScheduleKind(constant.RegionKind, constant.ByCount)
+	}
+	solver := newSolver(basePlan, kind, cluster, opInfluence)
+
 	filters := s.filters
 	switch job.Engine {
 	case core.EngineTiKV:
@@ -603,8 +610,8 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	}
 
 	// storeID <--> score mapping
-	scoreMap := make(map[uint64]int64, len(sources))
-	totalScore := int64(0)
+	scoreMap := make(map[uint64]float64, len(sources))
+	totalScore := float64(0)
 	for _, source := range sources {
 		count := 0
 		for _, kr := range job.Ranges {
@@ -617,88 +624,69 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 				count += cluster.GetStoreLearnerCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
 			}
 		}
-		scoreMap[source.GetID()] = int64(count)
-		totalScore += int64(count)
+		scoreMap[source.GetID()] = float64(count)
+		totalScore += float64(count)
 	}
 
 	sort.Slice(sources, func(i, j int) bool {
 		rule := job.Rule
-		iop := opInfluence.GetStoreInfluence(sources[i].GetID()).GetStoreInfluenceByRole(rule)
-		jop := opInfluence.GetStoreInfluence(sources[j].GetID()).GetStoreInfluenceByRole(rule)
+		iop := float64(opInfluence.GetStoreInfluence(sources[i].GetID()).GetStoreInfluenceByRole(rule))
+		jop := float64(opInfluence.GetStoreInfluence(sources[j].GetID()).GetStoreInfluenceByRole(rule))
 		iScore := scoreMap[sources[i].GetID()]
 		jScore := scoreMap[sources[j].GetID()]
 		return iScore+iop > jScore+jop
 	})
 
-	averageScore := int64(0)
-	averageScore = totalScore / int64(len(sources))
+	averageScore := float64(0)
+	averageScore = totalScore / float64(len(sources))
 
 	tolerantSizeRatio := int64(float64(totalScore) * adjustRatio)
 	if tolerantSizeRatio < 1 {
 		tolerantSizeRatio = 1
 	}
+	solver.tolerantSource = tolerantSizeRatio
 	return &balanceRangeSchedulerPlan{
 		SchedulerCluster: cluster,
 		stores:           sources,
 		scoreMap:         scoreMap,
-		source:           nil,
-		target:           nil,
-		region:           nil,
 		averageScore:     averageScore,
 		job:              job,
-		opInfluence:      opInfluence,
-		tolerate:         tolerantSizeRatio,
+		solver:           solver,
 	}, nil
 }
 
-func (p *balanceRangeSchedulerPlan) sourceStoreID() uint64 {
-	return p.source.GetID()
-}
-
-func (p *balanceRangeSchedulerPlan) targetStoreID() uint64 {
-	return p.target.GetID()
-}
-
-func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
+func (p *balanceRangeSchedulerPlan) score(storeID uint64) float64 {
 	return p.scoreMap[storeID]
 }
 
-func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
-	sourceInfluence := p.opInfluence.GetStoreInfluence(p.sourceStoreID())
-	sourceInf := sourceInfluence.GetStoreInfluenceByRole(p.job.Rule)
-	// Sometimes, there are many remove-peer operators in the source store, we don't want to pick this store as source.
-	if sourceInf < 0 {
-		sourceInf = -sourceInf
-	}
+func (p *balanceRangeSchedulerPlan) sourceScore(storeID uint64) float64 {
+	originScore := p.score(storeID)
+	s := p.solver
+	tolerantResource := s.getTolerantResource()
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
-	sourceScore := p.sourceScore - sourceInf - p.tolerate
-
-	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
-	targetInf := targetInfluence.GetStoreInfluenceByRole(p.job.Rule)
-	// Sometimes, there are many add-peer operators in the target store, we don't want to pick this store as target.
-	if targetInf < 0 {
-		targetInf = -targetInf
+	influence := s.getOpInfluence(storeID)
+	// if influence is positive, it means that there are some other operator to move in this store,
+	// to avoid balance a lot, we can think the influence must be negative.
+	if influence > 0 {
+		influence = -influence
 	}
-	targetScore := p.targetScore + targetInf + p.tolerate
+	return originScore + float64(influence-tolerantResource)
+}
 
-	// the source score must be greater than the target score
-	shouldBalance := sourceScore >= targetScore
-	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
-		log.Debug("skip balance",
-			zap.String("scheduler", scheduler),
-			zap.Uint64("region-id", p.region.GetID()),
-			zap.Uint64("source-store", p.sourceStoreID()),
-			zap.Uint64("target-store", p.targetStoreID()),
-			zap.Int64("origin-source-score", p.sourceScore),
-			zap.Int64("origin-target-score", p.targetScore),
-			zap.Int64("influence-source-score", sourceScore),
-			zap.Int64("influence-target-score", targetScore),
-			zap.Int64("average-region-score", p.averageScore),
-			zap.Int64("tolerate", p.tolerate),
-		)
+func (p *balanceRangeSchedulerPlan) targetScore(storeID uint64) float64 {
+	originScore := p.score(storeID)
+	s := p.solver
+	tolerantResource := s.getTolerantResource()
+	// to avoid schedule too much, if A's core greater than B and C a little
+	// we want that A should be moved out one region not two
+	influence := s.getOpInfluence(storeID)
+	// if influence is negative, it means that there are some other operator to move out this store,
+	// to avoid balance a lot, we can think the influence must be positive.
+	if influence < 0 {
+		influence = -influence
 	}
-	return shouldBalance
+	return originScore + float64(influence+tolerantResource)
 }
 
 // JobStatus is the status of the job.
