@@ -24,9 +24,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 // mockStream is a mock stream used to test TSO request processing
@@ -114,6 +117,10 @@ func (m *mockRequest) postProcess(countSum int64, _ int64, _ int64) (int64, erro
 type tsoDispatcherTestSuite struct {
 	suite.Suite
 	dispatcher *TSODispatcher
+}
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
 func TestTSODispatcherTestSuite(t *testing.T) {
