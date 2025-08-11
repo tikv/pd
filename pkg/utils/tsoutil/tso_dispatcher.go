@@ -127,7 +127,8 @@ func (s *TSODispatcher) dispatch(
 	}
 	defer cancel()
 
-	requests := make([]Request, maxMergeRequests+1)
+	// make(chan Request, maxMergeRequests+1) + 1
+	requests := make([]Request, maxMergeRequests+2)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
 	for {
