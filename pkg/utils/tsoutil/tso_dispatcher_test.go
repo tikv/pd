@@ -17,6 +17,7 @@ package tsoutil
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -140,7 +141,8 @@ func (suite *tsoDispatcherTestSuite) SetupTest() {
 }
 
 func (suite *tsoDispatcherTestSuite) TearDownTest() {
-	suite.dispatcher = nil
+	suite.dispatcher.Stop()
+	runtime.GC() // Force garbage collection to clean up any lingering goroutines
 }
 
 func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
@@ -192,4 +194,8 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 	wg.Wait()
 
 	re.LessOrEqual(reqPendingCount.Load(), int64(0), "There should be no pending requests after processing")
+
+	suite.dispatcher.Stop()
+	time.Sleep(5 * time.Second) // Give some time for goroutines to clean up
+	runtime.GC()                // Force garbage collection to clean up any lingering goroutines
 }
