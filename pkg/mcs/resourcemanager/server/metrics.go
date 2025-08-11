@@ -138,6 +138,22 @@ var (
 			Help:      "The duration of pushing RU metrics to Prometheus.",
 			Buckets:   prometheus.DefBuckets,
 		})
+
+	requestUnitSumPerSec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "request_unit_sum_per_sec",
+			Help:      "The number of the request unit cost per second for all resource groups.",
+		}, []string{newResourceGroupNameLabel})
+
+	requestUnitConsumeRate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "request_unit_consume_rate",
+			Help:      "request_unit_per_second/fill_rate for all resource groups.",
+		}, []string{newResourceGroupNameLabel})
 )
 
 func init() {
@@ -154,4 +170,6 @@ func init() {
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
 	prometheus.MustRegister(pushRUMetricsDuration)
+	prometheus.MustRegister(requestUnitSumPerSec)
+	prometheus.MustRegister(requestUnitConsumeRate)
 }

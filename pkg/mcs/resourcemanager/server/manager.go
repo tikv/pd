@@ -52,6 +52,7 @@ const (
 	middlePriority           = 8
 
 	pushMetricsTimeout = 10 * time.Second
+	rcuMetricsInterval = 10 * time.Second
 )
 
 // Manager is the manager of resource group.
@@ -370,6 +371,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 	recordMaxTicker := time.NewTicker(tickPerSecond)
 	defer recordMaxTicker.Stop()
 	maxPerSecTrackers := make(map[string]*maxPerSecCostTracker)
+	rcuTicker := time.NewTicker(rcuMetricsInterval)
+	defer rcuTicker.Stop()
+	rcuTrackers := make(map[string]*rcuTracker)
 
 	pushMetricsTickerC := make(<-chan time.Time)
 	if pushMetricsAddr != "" && pushMetricsInterval.Seconds() > 0 {
@@ -412,6 +416,13 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				maxPerSecTrackers[name] = t
 			}
 			t.CollectConsumption(consumption)
+
+			rt, ok := rcuTrackers[name]
+			if !ok {
+				rt = newRCUTracker(name)
+				rcuTrackers[name] = rt
+			}
+			rt.CollectConsumption(consumption)
 
 			// RU info.
 			if consumption.RRU > 0 {
@@ -465,9 +476,12 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 					availableRUCounter.DeleteLabelValues(r.name, r.name)
 					delete(m.consumptionRecord, r)
 					delete(maxPerSecTrackers, r.name)
+					delete(rcuTrackers, r.name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
 					writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
 					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: r.name})
+					requestUnitSumPerSec.DeleteLabelValues(r.name)
+					requestUnitConsumeRate.DeleteLabelValues(r.name)
 				}
 			}
 		case <-availableRUTicker.C:
@@ -504,6 +518,25 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 					maxPerSecTrackers[name] = newMaxPerSecCostTracker(name, defaultCollectIntervalSec)
 				} else {
 					t.FlushMetrics()
+				}
+			}
+
+		case <-rcuTicker.C:
+			m.RLock()
+			names := make([]string, 0, len(m.groups))
+			fillRates := make([]float64, 0, len(m.groups))
+			for name, group := range m.groups {
+				if name == reservedDefaultGroupName {
+					continue
+				}
+				names = append(names, name)
+				fillRates = append(fillRates, group.getFillRate())
+			}
+			cpuMsCost := m.controllerConfig.RequestUnit.CPUMsCost
+			m.RUnlock()
+			for i, name := range names {
+				if t, ok := rcuTrackers[name]; ok {
+					t.FlushMetrics(fillRates[i], cpuMsCost)
 				}
 			}
 
@@ -582,5 +615,51 @@ func (t *maxPerSecCostTracker) FlushMetrics() {
 		t.wruMaxMetrics.Set(t.maxPerSecWRU)
 		t.maxPerSecRRU = 0
 		t.maxPerSecWRU = 0
+	}
+}
+
+type rcuTracker struct {
+	name                    string
+	totalRU, totalCPUTimeMs float64
+	lastRU, lastCPUTimeMs   float64
+	lastFlushTime           time.Time
+	rcuMetrics              prometheus.Gauge
+	consumeRateMetrics      prometheus.Gauge
+}
+
+func newRCUTracker(name string) *rcuTracker {
+	return &rcuTracker{
+		name:               name,
+		rcuMetrics:         requestUnitSumPerSec.WithLabelValues(name),
+		consumeRateMetrics: requestUnitConsumeRate.WithLabelValues(name),
+	}
+}
+
+// CollectConsumption collects the consumption info.
+func (t *rcuTracker) CollectConsumption(consume *rmpb.Consumption) {
+	t.totalRU += consume.RRU + consume.WRU
+	t.totalCPUTimeMs += consume.TotalCpuTimeMs
+}
+
+// FlushMetrics calculates the RCU and updates the metrics.
+func (t *rcuTracker) FlushMetrics(fillRate float64, cpuMsCost float64) {
+	if t.lastRU == 0 && t.lastCPUTimeMs == 0 {
+		t.lastRU, t.lastCPUTimeMs = t.totalRU, t.totalCPUTimeMs
+		t.lastFlushTime = time.Now()
+		return
+	}
+
+	deltaRU := t.totalRU - t.lastRU + (t.totalCPUTimeMs-t.lastCPUTimeMs)*cpuMsCost
+	deltaTime := time.Since(t.lastFlushTime).Seconds()
+	if deltaTime <= 0 {
+		return
+	}
+	rcu := deltaRU / deltaTime
+	t.lastRU, t.lastCPUTimeMs = t.totalRU, t.totalCPUTimeMs
+	t.lastFlushTime = time.Now()
+
+	t.rcuMetrics.Set(rcu)
+	if fillRate > 0 {
+		t.consumeRateMetrics.Set(rcu / fillRate)
 	}
 }
