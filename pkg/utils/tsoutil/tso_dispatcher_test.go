@@ -22,10 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 // mockStream is a mock stream used to test TSO request processing
@@ -37,7 +38,7 @@ type mockStream struct {
 }
 
 // process simulates the process of handling TSO requests
-func (m *mockStream) process(clusterID uint64, count uint32, keyspaceID, keyspaceGroupID uint32) (tsoResp, error) {
+func (m *mockStream) process(clusterID uint64, _ uint32, _ uint32, _ uint32) (tsoResp, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -61,18 +62,17 @@ func (m *mockStream) process(clusterID uint64, count uint32, keyspaceID, keyspac
 			ClusterId: clusterID,
 		},
 		Timestamp: &pdpb.Timestamp{
-			Physical: time.Now().UnixMilli(),
-			Logical:  1,
+			Physical: time.Now().UnixMilli(), // Use current time as physical timestamp
+			Logical:  1,                      // Logical timestamp is fixed at 1
 		},
 	}, nil
 }
 
-// mockProtoFactory is a mock factory for creating forward streams
 type mockProtoFactory struct {
 	stream *mockStream
 }
 
-func (m *mockProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (stream, context.CancelFunc, error) {
+func (m *mockProtoFactory) createForwardStream(_ context.Context, _ *grpc.ClientConn) (stream, context.CancelFunc, error) {
 	if m.stream == nil {
 		return nil, nil, errors.New("no stream available")
 	}
@@ -100,10 +100,13 @@ func (m *mockRequest) getCount() uint32 {
 }
 
 func (m *mockRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	return forwardStream.process(0, count, 0, 0)
 }
 
-func (m *mockRequest) postProcess(countSum, physical, firstLogical int64) (int64, error) {
+func (m *mockRequest) postProcess(countSum int64, _ int64, _ int64) (int64, error) {
 	close(m.doneCh)
 	return countSum, m.err
 }
@@ -130,6 +133,7 @@ func (suite *tsoDispatcherTestSuite) SetupTest() {
 }
 
 func (suite *tsoDispatcherTestSuite) TearDownTest() {
+	suite.dispatcher = nil
 }
 
 func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
@@ -149,12 +153,12 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 	var reqDispatchCount atomic.Int64
 	var wg sync.WaitGroup
 	// mock 11000 goroutines as tso proxy client
-	for i := 0; i < 11000; i++ {
+	for range 11000 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			dispatchReqDoneCh := make(chan struct{})
-			for j := 0; j < 10; j++ {
+			dipatchReqDoneCh := make(chan struct{})
+			for range 10 {
 				req := &mockRequest{
 					forwardedHost: forwardedHost,
 					clientConn:    nil,
@@ -165,11 +169,11 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 				go func() {
 					// if there has goroutine leak, it will block here
 					suite.dispatcher.DispatchRequest(ctx, req, protoFactory)
-					dispatchReqDoneCh <- struct{}{}
+					dipatchReqDoneCh <- struct{}{}
 				}()
 
 				select {
-				case <-dispatchReqDoneCh:
+				case <-dipatchReqDoneCh:
 					reqDispatchCount.Add(1)
 				case <-time.After(20 * time.Second):
 					reqPendingCount.Add(1)
