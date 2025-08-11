@@ -43,7 +43,11 @@ const (
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
 	// EngineTiFlash is the tiflash value of the engine label.
+	// Classic TiFlash and TiFlash write node will use this value.
 	EngineTiFlash = "tiflash"
+	// EngineTiFlashCompute is the tiflash value of the engine label.
+	// TiFlash compute node will use this value.
+	EngineTiFlashCompute = "tiflash_compute"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"
 )
@@ -170,9 +174,19 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type, level constant.Priori
 	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, level)
 }
 
-// IsTiFlash returns true if the store is tiflash.
+// IsTiFlash returns true if the store is TiFlash
 func (s *StoreInfo) IsTiFlash() bool {
+	return s.IsTiFlashWrite() || s.IsTiFlashCompute()
+}
+
+// IsTiFlashWrite returns true if the store is TiFlash write node or TiFlash classic node.
+func (s *StoreInfo) IsTiFlashWrite() bool {
 	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
+}
+
+// IsTiFlashCompute returns true if the store is TiFlash compute node.
+func (s *StoreInfo) IsTiFlashCompute() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlashCompute)
 }
 
 // IsUp returns true if store is serving or preparing.
