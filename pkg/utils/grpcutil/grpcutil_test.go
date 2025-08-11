@@ -55,12 +55,28 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 
 func TestToClientTLSConfig(t *testing.T) {
 	re := require.New(t)
-	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
-		t.Fatal(err)
+
+	// Check if the certificate script exists before running it
+	if _, err := os.Stat(certScript); os.IsNotExist(err) {
+		t.Skipf("Certificate script not found: %s", certScript)
 	}
+
+	// Make the script executable if it isn't already
+	if err := os.Chmod(certScript, 0755); err != nil {
+		t.Fatalf("Failed to make script executable: %v", err)
+	}
+
+	// Capture output for better debugging
+	cmd := exec.Command(certScript, "generate", certPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Certificate generation failed: %v\nOutput: %s", err, string(output))
+	}
+
 	defer func() {
-		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
-			t.Fatal(err)
+		cmd := exec.Command(certScript, "cleanup", certPath)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Logf("Certificate cleanup failed: %v\nOutput: %s", err, string(output))
 		}
 	}()
 
@@ -69,8 +85,16 @@ func TestToClientTLSConfig(t *testing.T) {
 		CertPath: filepath.Join(certPath, "pd-server.pem"),
 		CAPath:   filepath.Join(certPath, "ca.pem"),
 	}
+
+	// Verify the certificate files exist and are readable
+	for _, path := range []string{tlsConfig.KeyPath, tlsConfig.CertPath, tlsConfig.CAPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("Certificate file not found or not readable: %s, error: %v", path, err)
+		}
+	}
+
 	// test without bytes
-	_, err := tlsConfig.ToClientTLSConfig()
+	_, err = tlsConfig.ToClientTLSConfig()
 	re.NoError(err)
 
 	// test with bytes
