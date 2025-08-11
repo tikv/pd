@@ -666,7 +666,7 @@ func (p *balanceRangeSchedulerPlan) sourceScore(storeID uint64) float64 {
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
 	influence := s.getOpInfluence(storeID)
-	// if influence is positive, it means that there are some other operator to move out this store,
+	// if influence is positive, it means that there are some other operator to move in this store,
 	// to avoid balance a lot, we can think the influence must be negative.
 	if influence > 0 {
 		influence = -influence
@@ -681,8 +681,8 @@ func (p *balanceRangeSchedulerPlan) targetScore(storeID uint64) float64 {
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
 	influence := s.getOpInfluence(storeID)
-	// if influence is positive, it means that there are some other operator to move in this store,
-	// to avoid balance a lot, we can think the influence must be negative.
+	// if influence is negative, it means that there are some other operator to move out this store,
+	// to avoid balance a lot, we can think the influence must be positive.
 	if influence < 0 {
 		influence = -influence
 	}
