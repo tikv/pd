@@ -84,10 +84,9 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -166,10 +165,9 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -621,10 +619,9 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -733,10 +730,9 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}
