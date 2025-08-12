@@ -75,19 +75,21 @@ func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, 
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
-		tsoQueue := &tsoRequestProxyQueue{requestCh: make(chan Request, maxMergeRequests+1)}
 		dispatcherCtx, ctxCancel := context.WithCancelCause(serverCtx)
-		tsoQueue.ctx = dispatcherCtx
-		tsoQueue.cancel = ctxCancel
+		tsoQueue := &tsoRequestProxyQueue{
+			ctx:       dispatcherCtx,
+			cancel:    ctxCancel,
+			requestCh: make(chan Request, maxMergeRequests+1),
+		}
 		val, loaded = s.dispatchChs.LoadOrStore(key, tsoQueue)
+		if !loaded {
+			log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
+			tsDeadlineCh := make(chan *TSDeadline, 1)
+			go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
+			go WatchTSDeadline(tsoQueue.ctx, tsDeadlineCh)
+		}
 	}
 	tsoQueue := val.(*tsoRequestProxyQueue)
-	if !loaded {
-		log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
-		tsDeadlineCh := make(chan *TSDeadline, 1)
-		go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
-		go WatchTSDeadline(tsoQueue.ctx, tsDeadlineCh)
-	}
 	tsoQueue.requestCh <- req
 	return tsoQueue.ctx
 }
@@ -161,7 +163,6 @@ func (s *TSODispatcher) dispatch(
 					tsoPrimaryWatchers[0].ForceLoad()
 				}
 				tsoQueue.cancel(err)
-
 				return
 			}
 		case <-noProxyRequestsTimer.C:
@@ -187,7 +188,9 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 		return err
 	}
 	s.tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
-	s.tsoProxyBatchSize.Observe(float64(count))
+	if s.tsoProxyBatchSize != nil {
+		s.tsoProxyBatchSize.Observe(float64(count))
+	}
 	// Split the response
 	ts := resp.GetTimestamp()
 	physical, logical := ts.GetPhysical(), ts.GetLogical()

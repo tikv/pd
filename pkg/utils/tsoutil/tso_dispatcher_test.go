@@ -133,11 +133,7 @@ func (suite *tsoDispatcherTestSuite) SetupTest() {
 		Name: "test_tso_proxy_handle_duration_seconds",
 		Help: "Histogram of TSO proxy handle duration",
 	})
-	tsoProxyBatchSize := prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name: "test_tso_proxy_batch_size",
-		Help: "Histogram of TSO proxy batch size",
-	})
-	suite.dispatcher = NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
+	suite.dispatcher = NewTSODispatcher(tsoProxyHandleDuration, nil)
 }
 
 func (suite *tsoDispatcherTestSuite) TearDownTest() {
@@ -156,7 +152,7 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 		stream: mockStream,
 	}
 
-	ctx := context.TODO()
+	ctx := context.Background()
 	forwardedHost := "test-host"
 	var reqPendingCount atomic.Int64
 	var reqDispatchCount atomic.Int64
@@ -197,5 +193,4 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 
 	suite.dispatcher.Stop()
 	time.Sleep(5 * time.Second) // Give some time for goroutines to clean up
-	runtime.GC()                // Force garbage collection to clean up any lingering goroutines
 }
