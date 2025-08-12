@@ -633,6 +633,7 @@
         {
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_disconnected_count\"})",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "Disconnect Stores",
           "refId": "B",
@@ -641,6 +642,7 @@
         {
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_unhealth_count\"})",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "Unhealth Stores",
           "refId": "C",
@@ -649,6 +651,7 @@
         {
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_low_space_count\"})",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "LowSpace Stores",
           "refId": "D",
@@ -657,6 +660,7 @@
         {
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_down_count\"})",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "Down Stores",
           "refId": "E",
@@ -665,6 +669,7 @@
         {
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_offline_count\"})",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "Offline Stores",
           "refId": "F",
@@ -673,6 +678,7 @@
         {
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_tombstone_count\"})",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "Tombstone Stores",
           "refId": "G",
@@ -681,6 +687,7 @@
         {
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_slow_count\"})",
           "format": "time_series",
+          "instant": true,
           "intervalFactor": 2,
           "legendFormat": "Slow Stores",
           "refId": "H",
@@ -1302,6 +1309,7 @@
             {
               "expr": "pd_config_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
               "format": "time_series",
+              "instant": true,
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
               "refId": "A"
@@ -1569,6 +1577,7 @@
             {
               "expr": "pd_regions_label_level{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
               "format": "time_series",
+              "instant": true,
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
               "refId": "A"
@@ -1656,6 +1665,7 @@
             {
               "expr": "sum(pd_cluster_placement_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}) by (name)",
               "format": "time_series",
+              "instant": true,
               "hide": false,
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
