@@ -58,8 +58,7 @@ type TSODispatcher struct {
 	tsoProxyBatchSize      prometheus.Histogram
 
 	// dispatchChs is used to dispatch different TSO requests to the corresponding forwarding TSO channels.
-	dispatchChs sync.Map   // Store as map[string]chan Request
-	lock        sync.Mutex // Protects the dispatchChs map
+	dispatchChs sync.Map // Store as map[string]chan Request
 }
 
 // NewTSODispatcher creates and returns a TSODispatcher
@@ -75,33 +74,20 @@ func NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize prometheus.Histo
 func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, tsoProtoFactory ProtoFactory, tsoPrimaryWatchers ...*etcdutil.LoopWatcher) context.Context {
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
-	if loaded {
-		tsoQueue := val.(*tsoRequestProxyQueue)
-		tsoQueue.requestCh <- req
-		return tsoQueue.ctx
+	if !loaded {
+		tsoQueue := &tsoRequestProxyQueue{requestCh: make(chan Request, maxMergeRequests+1)}
+		dispatcherCtx, ctxCancel := context.WithCancelCause(serverCtx)
+		tsoQueue.ctx = dispatcherCtx
+		tsoQueue.cancel = ctxCancel
+		val, loaded = s.dispatchChs.LoadOrStore(key, tsoQueue)
 	}
-
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	// Double check
-	val, loaded = s.dispatchChs.Load(key)
-	if loaded {
-		tsoQueue := val.(*tsoRequestProxyQueue)
-		tsoQueue.requestCh <- req
-		return tsoQueue.ctx
+	tsoQueue := val.(*tsoRequestProxyQueue)
+	if !loaded {
+		log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
+		tsDeadlineCh := make(chan *TSDeadline, 1)
+		go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
+		go WatchTSDeadline(tsoQueue.ctx, tsDeadlineCh)
 	}
-
-	// Not found, create a new tsoRequestProxyQueue and start a new goroutine to handle the requests
-	tsoQueue := &tsoRequestProxyQueue{requestCh: make(chan Request, maxMergeRequests+1)}
-	dispatcherCtx, ctxCancel := context.WithCancelCause(serverCtx)
-	tsoQueue.ctx = dispatcherCtx
-	tsoQueue.cancel = ctxCancel
-	tsDeadlineCh := make(chan *TSDeadline, 1)
-	log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
-	go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
-	go WatchTSDeadline(dispatcherCtx, tsDeadlineCh)
-	s.dispatchChs.Store(key, tsoQueue)
-
 	tsoQueue.requestCh <- req
 	return tsoQueue.ctx
 }
@@ -250,9 +236,6 @@ func (s *TSODispatcher) clearPendingRequests(tsoQueue *tsoRequestProxyQueue, for
 
 // Stop the TSODispatcher and clears all pending requests
 func (s *TSODispatcher) Stop() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
 	s.dispatchChs.Range(func(key, value any) bool {
 		tsoQueue := value.(*tsoRequestProxyQueue)
 		s.clearPendingRequests(tsoQueue, key.(string), errors.New("TSODispatcher stopped"))
