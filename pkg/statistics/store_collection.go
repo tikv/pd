@@ -169,6 +169,10 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 		statistics = s.engineStatistics[core.EngineTiKV]
 	}
 	statistics.observe(store)
+	// skip tombstone store avoid to overwrite metrics
+	if store.GetNodeState() == metapb.NodeState_Removed {
+		return
+	}
 
 	// Store stats.
 	s.StorageSize += store.StorageSize()
