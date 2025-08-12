@@ -189,7 +189,8 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 
 	wg.Wait()
 
-	re.LessOrEqual(reqPendingCount.Load(), int64(0), "There should be no pending requests after processing")
+	re.Equal(int64(0), reqPendingCount.Load(), "There should be no pending requests after processing")
+	re.Equal(int64(11000*10), reqDispatchCount.Load(), "The number of dispatched requests should match the total requests sent")
 
 	suite.dispatcher.Stop()
 }
