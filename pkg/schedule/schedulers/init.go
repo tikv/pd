@@ -503,24 +503,6 @@ func schedulersRegister() {
 		return sche, nil
 	})
 
-	// split bucket
-	RegisterSliceDecoderBuilder(types.SplitBucketScheduler, func([]string) ConfigDecoder {
-		return func(any) error {
-			return nil
-		}
-	})
-
-	RegisterScheduler(types.SplitBucketScheduler, func(opController *operator.Controller,
-		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := initSplitBucketConfig()
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		sche := newSplitBucketScheduler(opController, conf)
-		conf.init(sche.GetName(), storage, conf)
-		return sche, nil
-	})
-
 	// transfer witness leader
 	RegisterSliceDecoderBuilder(types.TransferWitnessLeaderScheduler, func([]string) ConfigDecoder {
 		return func(any) error {

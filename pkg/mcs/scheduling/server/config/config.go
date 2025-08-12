@@ -139,7 +139,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 		return err
 	}
 
-	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLease)
 
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
