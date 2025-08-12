@@ -486,12 +486,15 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			}
 		case <-availableRUTicker.C:
 			m.RLock()
-			groups := make([]*ResourceGroup, 0, len(m.groups))
-			for name, group := range m.groups {
-				if name == reservedDefaultGroupName {
+			groups := make([]*ResourceGroup, 0, len(m.consumptionRecord))
+			for r := range m.consumptionRecord {
+				if r.name == reservedDefaultGroupName {
 					continue
 				}
-				groups = append(groups, group)
+				group, ok := m.groups[r.name]
+				if ok {
+					groups = append(groups, group)
+				}
 			}
 			m.RUnlock()
 			// prevent many groups and hold the lock long time.
@@ -507,37 +510,28 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			}
 		case <-recordMaxTicker.C:
 			// Record the sum of RRU and WRU every second.
-			m.RLock()
-			names := make([]string, 0, len(m.groups))
-			for name := range m.groups {
-				names = append(names, name)
-			}
-			m.RUnlock()
-			for _, name := range names {
-				if t, ok := maxPerSecTrackers[name]; !ok {
-					maxPerSecTrackers[name] = newMaxPerSecCostTracker(name, defaultCollectIntervalSec)
-				} else {
-					t.FlushMetrics()
-				}
+			for _, t := range maxPerSecTrackers {
+				t.FlushMetrics()
 			}
 
 		case <-rcuTicker.C:
 			m.RLock()
-			names := make([]string, 0, len(m.groups))
-			fillRates := make([]float64, 0, len(m.groups))
-			for name, group := range m.groups {
+			names := make([]string, 0, len(rcuTrackers))
+			fillRates := make([]float64, 0, len(rcuTrackers))
+			for name := range rcuTrackers {
 				if name == reservedDefaultGroupName {
 					continue
 				}
-				names = append(names, name)
-				fillRates = append(fillRates, group.getFillRate())
+				group, ok := m.groups[name]
+				if ok {
+					names = append(names, name)
+					fillRates = append(fillRates, group.getFillRate())
+				}
 			}
 			cpuMsCost := m.controllerConfig.RequestUnit.CPUMsCost
 			m.RUnlock()
 			for i, name := range names {
-				if t, ok := rcuTrackers[name]; ok {
-					t.FlushMetrics(fillRates[i], cpuMsCost)
-				}
+				rcuTrackers[name].FlushMetrics(fillRates[i], cpuMsCost)
 			}
 
 		case <-pushMetricsTickerC:
