@@ -132,7 +132,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.Len(plan.stores, 3)
 	re.Len(plan.scoreMap, 3)
 	re.Equal(float64(1), plan.score(1))
-	re.Equal(int64(0), plan.expectScoreMap[1])
+	re.Equal(1.0/3.0, plan.expectScoreMap[1])
 }
 
 func TestTIKVEngine(t *testing.T) {
@@ -175,6 +175,7 @@ func TestTIKVEngine(t *testing.T) {
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
 	// case2: move leader from store 1 to store 4
+	tc.AddLeaderRegionWithRange(6, "160", "180", 3, 1, 3)
 	tc.AddLeaderStore(4, 0)
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
@@ -259,7 +260,7 @@ func TestTIFLASHEngine(t *testing.T) {
 		tc.AddLeaderStore(uint64(i), 0)
 	}
 	for i := tikvCount + 1; i <= tikvCount+3; i++ {
-		tc.AddLabelsStore(uint64(i), 0, map[string]string{"engine": "tiflash"})
+		tc.AddLabelsStore(uint64(i), 0, map[string]string{core.EngineKey: core.EngineTiFlash})
 	}
 	tc.AddRegionWithLearner(uint64(1), 1, []uint64{2, 3}, []uint64{4})
 
