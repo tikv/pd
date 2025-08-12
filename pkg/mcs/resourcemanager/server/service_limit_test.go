@@ -231,7 +231,6 @@ func TestServiceLimiterEdgeCases(t *testing.T) {
 	tokens = limiter.applyServiceLimit(now, 5)
 	re.Equal(0.0, tokens)
 	re.Equal(0.0, limiter.AvailableTokens)
-
 }
 
 func TestSetServiceLimit(t *testing.T) {
