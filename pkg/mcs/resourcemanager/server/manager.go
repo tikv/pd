@@ -530,14 +530,12 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
+				setServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().GetServiceLimit())
+
 				for _, group := range krgm.getResourceGroupList(true, true) {
 					groupName := group.Name
 					// Record the sum of RRU and WRU every second.
 					m.metrics.getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, groupName).flushMetrics()
-					// Skip the default resource group for the later metrics.
-					if groupName == DefaultResourceGroupName {
-						continue
-					}
 					metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
 					metrics.setGroup(group, keyspaceName)
 					// Record the tracked RU per second.

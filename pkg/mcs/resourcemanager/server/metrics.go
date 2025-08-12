@@ -162,6 +162,14 @@ var (
 			Name:      "override_settings",
 			Help:      "Gauge of the override settings for all resource groups.",
 		}, []string{newResourceGroupNameLabel, keyspaceNameLabel, typeLabel})
+	serviceLimit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "service_limit",
+			Help:      "Gauge of the total RU limit of specific keyspace.",
+		}, []string{keyspaceNameLabel})
+	)
 )
 
 type metrics struct {
@@ -208,6 +216,7 @@ func init() {
 	prometheus.MustRegister(resourceGroupConfigGauge)
 	prometheus.MustRegister(sampledRequestUnitPerSec)
 	prometheus.MustRegister(overrideSettings)
+	prometheus.MustRegister(serviceLimit)
 }
 
 func newMetrics() *metrics {
@@ -386,11 +395,14 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 }
 
 func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
-	ru := math.Max(group.getRUToken(), 0)
-	m.availableRUCounter.Set(ru)
-	m.priorityResourceGroupConfigGauge.Set(group.getPriority())
-	m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRate(true))
-	m.ruCapacityResourceGroupConfigGauge.Set(float64(group.getBurstLimit(true)))
+	// skip basic metrics for the default group.
+	if group.Name != DefaultResourceGroupName {
+		ru := math.Max(group.getRUToken(), 0)
+		m.availableRUCounter.Set(ru)
+		m.priorityResourceGroupConfigGauge.Set(group.getPriority())
+		m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRate(true))
+		m.ruCapacityResourceGroupConfigGauge.Set(float64(group.getBurstLimit(true)))
+	}
 
 	// Set the override fill rate and burst limit and delete the metrics if the override is not set.
 	overrideFillRate := group.getOverrideFillRate()
@@ -409,6 +421,10 @@ func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
 
 func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
 	m.sampledRequestUnitPerSecGauge.Set(ruPerSec)
+}
+
+func setServiceLimitMetrics(keyspaceName string, limit float64) {
+	serviceLimit.WithLabelValues(keyspaceName).Set(limit)
 }
 
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
