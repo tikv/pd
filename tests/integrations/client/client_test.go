@@ -2017,16 +2017,11 @@ func (*clientStatefulTestSuite) waitForGCBarrierExpiring(re *require.Assertions,
 }
 
 func (*clientStatefulTestSuite) waitForGlobalGCBarrierExpiring(re *require.Assertions, b *gc.GlobalGCBarrierInfo, maxWaitTime time.Duration) {
-	waitStartTime := time.Now()
-	for {
-		if b.IsExpired() {
-			return
-		}
-		if time.Since(waitStartTime) > maxWaitTime {
-			re.Failf("global GC barrier not expired in expected time", "barrier: %+v, maxWaitTime: %v", *b, maxWaitTime)
-		}
-		time.Sleep(time.Millisecond * 50)
-	}
+	testutil.Eventually(re, func() bool {
+		return b.IsExpired()
+	},
+		testutil.WithWaitFor(maxWaitTime),
+		testutil.WithTickInterval(50*time.Millisecond))
 }
 
 // checkGCBarrier checks whether the specified GC barrier has the specified barrier TS. This function assumes the
