@@ -2016,14 +2016,6 @@ func (*clientStatefulTestSuite) waitForGCBarrierExpiring(re *require.Assertions,
 	}
 }
 
-func (*clientStatefulTestSuite) waitForGlobalGCBarrierExpiring(re *require.Assertions, b *gc.GlobalGCBarrierInfo, maxWaitTime time.Duration) {
-	testutil.Eventually(re, func() bool {
-		return b.IsExpired()
-	},
-		testutil.WithWaitFor(maxWaitTime),
-		testutil.WithTickInterval(50*time.Millisecond))
-}
-
 // checkGCBarrier checks whether the specified GC barrier has the specified barrier TS. This function assumes the
 // barrier TS is never 0, and passing 0 means asserting the GC barrier does not exist.
 func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspaceID uint32, barrierID string, expectedBarrierTS uint64) {
@@ -2589,8 +2581,11 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	// Considering the rounding-up behaviors, the actual TTL might be slightly greater.
 	re.GreaterOrEqual(b.TTL, time.Second)
 	re.LessOrEqual(b.TTL, 3*time.Second)
-	s.waitForGlobalGCBarrierExpiring(re, b, b.TTL)
-	// After the returned GCBarrierInfo is expired, the server might be still keeping it due to its rounding
+	testutil.Eventually(re, b.IsExpired,
+		testutil.WithWaitFor(b.TTL+time.Second),
+		testutil.WithTickInterval(50*time.Millisecond))
+
+	// After the returned GlobalGCBarrierInfo is expired, the server might be still keeping it due to its rounding
 	// behavior. Wait another 1 second.
 	time.Sleep(time.Second)
 
