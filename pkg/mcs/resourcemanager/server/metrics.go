@@ -162,6 +162,7 @@ var (
 			Name:      "override_settings",
 			Help:      "Gauge of the override settings for all resource groups.",
 		}, []string{newResourceGroupNameLabel, keyspaceNameLabel, typeLabel})
+
 	serviceLimit = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -169,7 +170,6 @@ var (
 			Name:      "service_limit",
 			Help:      "Gauge of the total RU limit of specific keyspace.",
 		}, []string{keyspaceNameLabel})
-	)
 )
 
 type metrics struct {
