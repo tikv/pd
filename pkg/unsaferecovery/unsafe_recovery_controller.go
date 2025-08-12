@@ -745,17 +745,17 @@ func (u *Controller) getFailedPeers(region *metapb.Region) []*metapb.Peer {
 		return nil
 	}
 
+	exists := func(peers []*metapb.Peer, peer *metapb.Peer) bool {
+		for _, p := range peers {
+			if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
+				return true
+			}
+		}
+		return false
+	}
+
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
-		exists := func(peers []*metapb.Peer, peer *metapb.Peer) bool {
-			for _, p := range peers {
-				if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
-					return true
-				}
-			}
-			return false
-		}
-
 		if u.isFailed(peer) || exists(u.orphanedPeers[region.GetId()], peer) {
 			failedPeers = append(failedPeers, peer)
 		}
