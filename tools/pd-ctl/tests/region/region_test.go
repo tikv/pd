@@ -50,9 +50,8 @@ func TestRegionKeyFormat(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	url := cluster.GetConfig().GetClientURL()
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -78,9 +77,8 @@ func TestRegion(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -282,19 +280,16 @@ func TestRegionNoLeader(t *testing.T) {
 	url := cluster.GetConfig().GetClientURL()
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    3,
+			State: metapb.StoreState_Up,
 		},
 	}
 

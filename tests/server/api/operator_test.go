@@ -65,22 +65,19 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	pauseAllCheckers(re, cluster)
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        1,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        2,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        3,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 	}
 
@@ -174,22 +171,19 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 	re := suite.Require()
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        1,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        2,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        3,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 	}
 
@@ -238,25 +232,22 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 	pauseAllCheckers(re, cluster)
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "1"}},
+			Id:        1,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Labels:    []*metapb.StoreLabel{{Key: "key", Value: "1"}},
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "2"}},
+			Id:        2,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Labels:    []*metapb.StoreLabel{{Key: "key", Value: "2"}},
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "3"}},
+			Id:        3,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Labels:    []*metapb.StoreLabel{{Key: "key", Value: "3"}},
 		},
 	}
 
@@ -518,22 +509,19 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 	pauseAllCheckers(re, cluster)
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        1,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        2,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        3,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 	}
 
@@ -613,22 +601,19 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 	re := suite.Require()
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        1,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        2,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        4,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 	}
 
