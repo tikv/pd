@@ -437,11 +437,14 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	defer s.filterCounter.Flush()
 
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+
 	p, err := s.prepare(cluster, opInfluence, job)
 	if err != nil {
 		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
 		return nil, nil
 	}
+	faultStores := filter.SelectUnavailableTargetStores(p.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
+	sources := filter.SelectSourceStores(p.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	solver := p.solver
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	baseRegionFilters := []filter.RegionFilter{
@@ -451,7 +454,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		replicaFilter,
 	}
 
-	for sourceIndex, sourceStore := range p.stores {
+	for sourceIndex, sourceStore := range sources {
 		solver.Source = sourceStore
 		solver.sourceScore = p.score(solver.sourceStoreID())
 		if solver.sourceScore <= p.expectScoreMap[solver.sourceStoreID()] {
@@ -489,7 +492,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 			continue
 		}
 		solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-		if op := s.transferPeer(p, p.stores[sourceIndex+1:]); op != nil {
+		if op := s.transferPeer(p, sources[sourceIndex+1:], faultStores); op != nil {
 			op.Counters = append(op.Counters, balanceRangeNewOperatorCounter)
 			return []*operator.Operator{op}, nil
 		}
@@ -498,12 +501,15 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
+func (s *balanceRangeScheduler) transferPeer(p *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) *operator.Operator {
 	solver := p.solver
 	excludeTargets := solver.Region.GetStoreIDs()
 	if p.job.Rule == core.LeaderScatter {
 		excludeTargets = make(map[uint64]struct{})
 		excludeTargets[solver.Region.GetLeader().GetStoreId()] = struct{}{}
+	}
+	for _, store := range faultStores {
+		excludeTargets[store.GetID()] = struct{}{}
 	}
 	conf := p.GetSchedulerConfig()
 	filters := s.filters
@@ -595,7 +601,8 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 	// only select source stores that are healthy and match the engine type and ignore the store limit restriction,
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), HealthyCheck: true, OperatorLevel: constant.Medium},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: constant.Medium},
+		filter.NewStorageThresholdFilter(s.GetName()),
 	}
 
 	switch job.Engine {
