@@ -40,6 +40,7 @@ import (
 
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
+	constant2 "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gctuner"
@@ -1826,11 +1827,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			kr := keyutil.NewKeyRange("", "")
-			threshold = c.getThreshold(stores, store, &kr)
-			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
-				zap.Float64("threshold", threshold),
-				zap.Float64("region-size", regionSize))
-			readyToServe = regionSize >= threshold
+			readyToServe = c.isReady(stores, store, &kr)
 		}
 		if readyToServe {
 			if err := c.ReadyToServeLocked(storeID); err != nil {
@@ -1875,34 +1872,56 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 	return
 }
 
-func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange) float64 {
+func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange, fn getThresholdFunc) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		regionSize := c.GetRegionSizeByRange(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
+		threshold := fn(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
 		weight := core.GetStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
-		return float64(regionSize) * weight * 0.9
+		return float64(threshold) * weight * 0.9
 	}
-
 	keys := c.ruleManager.GetSplitKeys(kr.StartKey, kr.EndKey)
 	if len(keys) == 0 {
-		return c.calculateRange(stores, store, kr.StartKey, kr.EndKey) * 0.9
+		return c.calculateThreshold(stores, store, kr.StartKey, kr.EndKey, fn) * 0.9
 	}
-
-	storeSize := 0.0
+	threshold := 0.0
 	startKey := kr.StartKey
 	for _, key := range keys {
 		endKey := key
-		storeSize += c.calculateRange(stores, store, startKey, endKey)
+		threshold += c.calculateThreshold(stores, store, startKey, endKey, fn)
 		startKey = endKey
 	}
 	// the range from the last split key to the last key
-	storeSize += c.calculateRange(stores, store, startKey, kr.EndKey)
-	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
-	return storeSize * 0.9
+	threshold += c.calculateThreshold(stores, store, startKey, kr.EndKey, fn)
+	log.Debug("get threshold calculation time", zap.Duration("cost", time.Since(start)))
+	return threshold * 0.9
 }
 
-func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte) float64 {
-	var storeSize float64
+func (c *RaftCluster) isReady(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange) bool {
+	switch c.opt.GetStorePreparingPolicy() {
+	case constant2.BySize:
+		threshold := c.getThreshold(stores, store, kr, c.GetRegionSizeByRange)
+		size := float64(store.GetRegionSize())
+		log.Debug("store preparing threshold", zap.Uint64("store-id", store.GetID()),
+			zap.Float64("threshold", threshold),
+			zap.Float64("region-size", size))
+		return size >= threshold
+	case constant2.ByCount:
+		threshold := c.getThreshold(stores, store, kr, func(startKey, endKey []byte) int64 {
+			return int64(c.GetRegionCount(startKey, endKey))
+		})
+		count := float64(store.GetRegionCount())
+		log.Debug("store preparing threshold", zap.Uint64("store-id", store.GetID()),
+			zap.Float64("threshold", threshold),
+			zap.Float64("region-count", count))
+		return count >= threshold
+	}
+	return true
+}
+
+type getThresholdFunc func(startKey, endKey []byte) int64
+
+func (c *RaftCluster) calculateThreshold(stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte, fn getThresholdFunc) float64 {
+	var expect float64
 	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
 	for _, rule := range rules {
 		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
@@ -1918,20 +1937,20 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 				matchStores = append(matchStores, s)
 			}
 		}
-		regionSize := c.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
+		total := fn(startKey, endKey) * int64(rule.Count)
 		weight := core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
-		storeSize += float64(regionSize) * weight
+		expect += float64(total) * weight
 		log.Debug("calculate range result",
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
 			zap.String("rule", rule.String()),
-			zap.Int64("region-size", regionSize),
+			zap.Int64("total", total),
 			zap.Float64("weight", weight),
-			zap.Float64("store-size", storeSize),
+			zap.Float64("expect", expect),
 		)
 	}
-	return storeSize
+	return expect
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.

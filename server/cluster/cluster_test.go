@@ -1690,13 +1690,27 @@ func TestCalculateStoreSize1(t *testing.T) {
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
 	kr := keyutil.NewKeyRange("", "")
+	store1 := store.Clone(core.SetRegionSize(4500.0), core.SetRegionCount(45))
+
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr))
+	re.True(cluster.isReady(stores, store1, &kr))
+	schedulerCfg := opt.GetScheduleConfig()
+	schedulerCfg.StorePreparingPolicy = constant.BySize.String()
+	opt.SetScheduleConfig(schedulerCfg)
+	re.True(cluster.isReady(stores, store1, &kr))
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
+	store1 = store.Clone(core.SetRegionSize(2250.0), core.SetRegionCount(22))
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr))
+	// 300 (total region count) / 3 (zone) / 4 (host) * 0.9 = 22.5
+	re.True(cluster.isReady(stores, store1, &kr))
+	schedulerCfg = opt.GetScheduleConfig()
+	schedulerCfg.StorePreparingPolicy = constant.ByCount.String()
+	opt.SetScheduleConfig(schedulerCfg)
+	re.False(cluster.isReady(stores, store1, &kr))
+	store1 = store.Clone(core.SetRegionCount(23))
+	re.True(cluster.isReady(stores, store1, &kr))
 }
 
 func TestCalculateStoreSize2(t *testing.T) {
@@ -1710,6 +1724,7 @@ func TestCalculateStoreSize2(t *testing.T) {
 	cfg.EnablePlacementRules = true
 	opt.SetReplicationConfig(cfg)
 	opt.SetMaxReplicas(3)
+
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.regionStats = statistics.NewRegionStatistics(
@@ -1779,8 +1794,14 @@ func TestCalculateStoreSize2(t *testing.T) {
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
 	kr := keyutil.NewKeyRange("", "")
+	store1 := store.Clone(core.SetRegionSize(3000.0), core.SetRegionCount(30))
+	//  100 * 4 (total region count) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 30
+	re.True(cluster.isReady(stores, store1, &kr))
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr))
+	schedulerCfg := opt.GetScheduleConfig()
+	schedulerCfg.StorePreparingPolicy = constant.BySize.String()
+	opt.SetScheduleConfig(schedulerCfg)
+	re.True(cluster.isReady(stores, store1, &kr))
 }
 
 func TestStores(t *testing.T) {
