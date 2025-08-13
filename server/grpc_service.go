@@ -497,6 +497,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		// The following are tso forward stream related variables.
 		tsoRequestProxyCtx context.Context
 		forwarder          = newTSOForwarder(stream)
+		tsoRespCh          = make(chan *pdpb.TsoResponse, 2)
 		tsoStreamErr       error
 	)
 
@@ -561,9 +562,25 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return errors.WithStack(err)
 			}
 
-			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
+			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream, tsoRespCh)
 			// don't pass a stream context here as dispatcher serves multiple streams
 			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
+			select {
+			case response := <-tsoRespCh:
+				// in this case, tsoRespCh should be drained, and all responses should be sent through stream.Send
+				for response != nil {
+					if err = stream.Send(response); err != nil {
+						return errors.WithStack(err)
+					}
+					select {
+					case response = <-tsoRespCh:
+					default:
+						response = nil
+					}
+				}
+			case <-tsoRequestProxyCtx.Done():
+				return errors.WithStack(context.Cause(tsoRequestProxyCtx))
+			}
 			continue
 		}
 

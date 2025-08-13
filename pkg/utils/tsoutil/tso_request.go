@@ -15,10 +15,12 @@
 package tsoutil
 
 import (
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -106,15 +108,17 @@ type PDProtoRequest struct {
 	clientConn    *grpc.ClientConn
 	request       *pdpb.TsoRequest
 	stream        pdpb.PD_TsoServer
+	tsoRespCh     chan *pdpb.TsoResponse
 }
 
 // NewPDProtoRequest creates a PDProtoRequest and returns as a Request
-func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer) Request {
+func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer, tsoRespCh chan *pdpb.TsoResponse) Request {
 	tsoRequest := &PDProtoRequest{
 		forwardedHost: forwardedHost,
 		clientConn:    clientConn,
 		request:       request,
 		stream:        stream,
+		tsoRespCh:     tsoRespCh,
 	}
 	return tsoRequest
 }
@@ -154,9 +158,11 @@ func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64) (in
 			Logical:  firstLogical + countSum,
 		},
 	}
-	// Send back to the client.
-	if err := r.stream.Send(response); err != nil {
-		return countSum, err
+	select {
+	case r.tsoRespCh <- response:
+	default:
+		// If the channel is full, we drop the response to avoid blocking. and return nil error
+		log.Warn("tso response channel is full, drop the response", zap.Uint32("count", count), zap.Int64("physical", physical), zap.Int64("firstLogical", firstLogical))
 	}
 	return countSum, nil
 }
