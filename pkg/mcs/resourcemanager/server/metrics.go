@@ -423,7 +423,7 @@ func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
 	m.sampledRequestUnitPerSecGauge.Set(ruPerSec)
 }
 
-func setServiceLimitMetrics(keyspaceName string, limit float64) {
+func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
 	if limit > 0 {
 		serviceLimit.WithLabelValues(keyspaceName).Set(limit)
 	} else {
