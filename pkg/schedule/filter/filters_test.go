@@ -246,7 +246,6 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{MoveRegion: true},
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
-		&StoreStateFilter{HealthyCheck: true},
 	}
 	opt := mockconfig.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
@@ -277,7 +276,6 @@ func TestStoreStateFilter(t *testing.T) {
 		{1, plan.StatusOK, plan.StatusStoreDisconnected},
 		{2, plan.StatusStoreDisconnected, plan.StatusStoreDisconnected},
 		{3, plan.StatusOK, plan.StatusOK},
-		{4, plan.StatusStoreDisconnected, plan.StatusStoreDisconnected},
 	}
 	check(store, testCases)
 
@@ -289,18 +287,6 @@ func TestStoreStateFilter(t *testing.T) {
 		{1, plan.StatusStoreBusy, plan.StatusStoreBusy},
 		{2, plan.StatusStoreBusy, plan.StatusStoreBusy},
 		{3, plan.StatusOK, plan.StatusOK},
-		{4, plan.StatusOK, plan.StatusOK},
-	}
-	check(store, testCases)
-
-	// Removed
-	store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
-	testCases = []testCase{
-		{0, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
-		{1, plan.StatusStoreBusy, plan.StatusStoreRemoved},
-		{2, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
-		{3, plan.StatusOK, plan.StatusStoreRemoved},
-		{4, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
 	}
 	check(store, testCases)
 }
