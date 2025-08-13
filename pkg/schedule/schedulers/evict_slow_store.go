@@ -42,14 +42,14 @@ const (
 	// For network slow store, its slow scores include the scores from each tikv.
 	// These scores should meet the following conditions and then will be
 	// considered as a slow store:
-	// 1. One network slow score is greater than networkSlowStoreFirstThreshold.
+	// 1. One network slow score is greater than networkSlowStoreIssueThreshold.
 	// 2. After removing the maximum value, if the number of stores with a score
-	//    greater than networkSlowStoreSecondThreshold is greater than or equal
+	//    greater than networkSlowStoreFluctuationThreshold is greater than or equal
 	//    to 2, it is considered a slow store.
-	networkSlowStoreFirstThreshold  = 95
-	networkSlowStoreSecondThreshold = 10
-	slowStoreRecoverThreshold       = 1
-	defaultMaxNetworkSlowStore      = 1
+	networkSlowStoreIssueThreshold       = 95 // Threshold for detecting network issues with a specific store
+	networkSlowStoreFluctuationThreshold = 10 // Threshold for detecting network fluctuations with other stores
+	slowStoreRecoverThreshold            = 1
+	defaultMaxNetworkSlowStore           = 1
 )
 
 type slowStoreType string
@@ -344,7 +344,9 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 // Schedule implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
-	s.scheduleNetworkSlowStore(cluster)
+	if !(len(s.conf.getNetworkSlowStores()) == 0 && s.conf.MaxNetworkSlowStore == 0) {
+		s.scheduleNetworkSlowStore(cluster)
+	}
 	return s.scheduleDiskSlowStore(cluster), nil
 }
 
@@ -384,20 +386,6 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 		}
 	}
 
-	var firstThresholdStore uint64
-	countScoreGreaterThan := func(slowScores map[uint64]uint64, score uint64) int {
-		count := 0
-
-		for storeID, s := range slowScores {
-			if s >= score {
-				if score == networkSlowStoreFirstThreshold {
-					firstThresholdStore = storeID
-				}
-				count++
-			}
-		}
-		return count
-	}
 	stores := cluster.GetStores()
 	for _, store := range stores {
 		if _, exist := networkSlowStores[store.GetID()]; exist {
@@ -405,24 +393,27 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 		}
 
 		networkSlowScores := store.GetNetworkSlowScores()
+		// Remove already slow stores from the scores map to avoid duplicate detection
 		for storeID := range networkSlowStores {
 			delete(networkSlowScores, storeID)
 		}
 		if len(networkSlowScores) == 0 {
 			continue
 		}
-		if countScoreGreaterThan(networkSlowScores, networkSlowStoreFirstThreshold) < 1 {
+
+		// Check condition 1: At least one score >= networkSlowStoreIssueThreshold (95)
+		// This identifies a store with network issues to a specific peer
+		maxScoreStoreID := findMaxScoreStore(networkSlowScores, networkSlowStoreIssueThreshold)
+		if maxScoreStoreID == 0 {
 			continue
 		}
-		if firstThresholdStore != 0 {
-			delete(networkSlowScores, firstThresholdStore)
-			firstThresholdStore = 0
-		}
 
-		// After removing the maximum value, if the number of stores with a score greater
-		// than networkSlowStoreSecondThreshold is greater than or equal to 2, it is
-		// considered a slow store.
-		if countScoreGreaterThan(networkSlowScores, networkSlowStoreSecondThreshold) < 2 {
+		// Remove the max score store for condition 2
+		delete(networkSlowScores, maxScoreStoreID)
+
+		// Check condition 2: At least 2 scores >= networkSlowStoreFluctuationThreshold (10) after removing max
+		// This confirms the store has network fluctuations with other peers
+		if countScoresAboveThreshold(networkSlowScores, networkSlowStoreFluctuationThreshold) < 2 {
 			log.Info("network slow store is not slow enough, skip",
 				zap.Uint64("store-id", store.GetID()),
 				zap.Any("network-slow-score", store.GetNetworkSlowScores()))
@@ -552,4 +543,30 @@ func calculateAvgScore(scores map[uint64]uint64) uint64 {
 	}
 
 	return sum / uint64(len(scores))
+}
+
+// findMaxScoreStore finds the store with the highest score that meets the threshold
+// Returns 0 if no store meets the threshold
+func findMaxScoreStore(scores map[uint64]uint64, threshold uint64) uint64 {
+	var maxStoreID uint64
+	var maxScore uint64
+
+	for storeID, score := range scores {
+		if score >= threshold && score > maxScore {
+			maxScore = score
+			maxStoreID = storeID
+		}
+	}
+	return maxStoreID
+}
+
+// countScoresAboveThreshold counts how many scores are above or equal to the threshold
+func countScoresAboveThreshold(scores map[uint64]uint64, threshold uint64) int {
+	count := 0
+	for _, score := range scores {
+		if score >= threshold {
+			count++
+		}
+	}
+	return count
 }

@@ -554,3 +554,42 @@ func TestRecoveryTime(t *testing.T) {
 	re.Zero(persistValue.evictStore())
 	re.True(persistValue.readyForRecovery())
 }
+func TestCalculateAvgScore(t *testing.T) {
+	re := require.New(t)
+	// Empty map
+	re.Equal(uint64(0), calculateAvgScore(map[uint64]uint64{}))
+	// Single value
+	re.Equal(uint64(10), calculateAvgScore(map[uint64]uint64{1: 10}))
+	// Multiple values
+	re.Equal(uint64(5), calculateAvgScore(map[uint64]uint64{1: 2, 2: 5, 3: 8}))
+	// All zeros
+	re.Equal(uint64(0), calculateAvgScore(map[uint64]uint64{1: 0, 2: 0}))
+}
+
+func TestFindMaxScoreStore(t *testing.T) {
+	re := require.New(t)
+	// No scores meet threshold
+	re.Equal(uint64(0), findMaxScoreStore(map[uint64]uint64{1: 5, 2: 7}, 10))
+	// One score meets threshold
+	re.Equal(uint64(2), findMaxScoreStore(map[uint64]uint64{1: 5, 2: 15}, 10))
+	// Multiple scores meet threshold, pick max
+	re.Equal(uint64(3), findMaxScoreStore(map[uint64]uint64{1: 12, 2: 15, 3: 20}, 10))
+	// Multiple scores, same value, pick first max
+	re.Equal(uint64(2), findMaxScoreStore(map[uint64]uint64{1: 10, 2: 20, 3: 20}, 10))
+	// Empty map
+	re.Equal(uint64(0), findMaxScoreStore(map[uint64]uint64{}, 10))
+}
+
+func TestCountScoresAboveThreshold(t *testing.T) {
+	re := require.New(t)
+	// No scores
+	re.Equal(0, countScoresAboveThreshold(map[uint64]uint64{}, 5))
+	// All below threshold
+	re.Equal(0, countScoresAboveThreshold(map[uint64]uint64{1: 1, 2: 2}, 5))
+	// Some above threshold
+	re.Equal(2, countScoresAboveThreshold(map[uint64]uint64{1: 5, 2: 10, 3: 3}, 5))
+	// All above threshold
+	re.Equal(3, countScoresAboveThreshold(map[uint64]uint64{1: 5, 2: 6, 3: 7}, 5))
+	// Equal to threshold
+	re.Equal(2, countScoresAboveThreshold(map[uint64]uint64{1: 5, 2: 4, 3: 5}, 5))
+}
