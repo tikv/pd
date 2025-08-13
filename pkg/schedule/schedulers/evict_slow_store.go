@@ -110,6 +110,12 @@ func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []keyutil
 	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
+func (conf *evictSlowStoreSchedulerConfig) getMaxNetworkSlowStore() uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.MaxNetworkSlowStore
+}
+
 func (conf *evictSlowStoreSchedulerConfig) getBatch() int {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -344,7 +350,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 // Schedule implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
-	if !(len(s.conf.getNetworkSlowStores()) == 0 && s.conf.MaxNetworkSlowStore == 0) {
+	if len(s.conf.getNetworkSlowStores()) != 0 || s.conf.getMaxNetworkSlowStore() != 0 {
 		s.scheduleNetworkSlowStore(cluster)
 	}
 	return s.scheduleDiskSlowStore(cluster), nil
