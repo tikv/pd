@@ -93,6 +93,9 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 
 // GetServiceLimit return the service limit value of this keyspace.
 func (krl *serviceLimiter) GetServiceLimit() float64 {
+	if krl == nil {
+		return 0.0
+	}
 	krl.RLock()
 	defer krl.RUnlock()
 	return krl.ServiceLimit

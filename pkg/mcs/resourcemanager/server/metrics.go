@@ -424,7 +424,12 @@ func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
 }
 
 func setServiceLimitMetrics(keyspaceName string, limit float64) {
-	serviceLimit.WithLabelValues(keyspaceName).Set(limit)
+	if limit > 0 {
+		serviceLimit.WithLabelValues(keyspaceName).Set(limit)
+	} else {
+		serviceLimit.DeleteLabelValues(keyspaceName)
+	}
+
 }
 
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
