@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -288,7 +289,7 @@ type ScheduleConfig struct {
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 
-	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
+	// MaxMovableHotPeerSize is the threshold of region size for balance hot region.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 
@@ -580,11 +581,17 @@ type SchedulerConfig struct {
 // DefaultSchedulers are the schedulers be created by default.
 // If these schedulers are not in the persistent configuration, they
 // will be created automatically when reloading.
-var DefaultSchedulers = SchedulerConfigs{
-	{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
-	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
-	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
-	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
+var DefaultSchedulers = defaultSchedulersInit()
+var defaultSchedulersInit = func() SchedulerConfigs {
+	defaultSchedulers := SchedulerConfigs{
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
+	}
+	if !kerneltype.IsNextGen() {
+		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]})
+	}
+	return defaultSchedulers
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.

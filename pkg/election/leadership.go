@@ -176,7 +176,7 @@ func (ls *Leadership) AddCampaignTimes() {
 	ls.campaignTimes = append(ls.campaignTimes, time.Now())
 }
 
-// Campaign is used to campaign the leader with given lease and returns a leadership
+// Campaign is used to campaign with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue.Store(leaderData)
 	// Create a new lease to campaign

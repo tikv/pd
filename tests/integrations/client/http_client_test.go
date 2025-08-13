@@ -366,6 +366,49 @@ func (suite *httpClientTestSuite) TestRule() {
 	err = client.SetPlacementRule(ctx, testRule)
 	re.NoError(err)
 	suite.checkRuleResult(ctx, re, testRule, 1, true)
+
+	// ***** Test placement rule failed passing check after transfer leader
+	// Transfer the leader to another store to ensure the PD follower
+	// exists stale store labels.
+	suite.transferLeader(ctx, re)
+	tranferLeaderRule := []*pd.GroupBundle{
+		{
+			ID: "test-transfer-leader",
+			Rules: []*pd.Rule{
+				{
+					GroupID:  "test-transfer-leader",
+					ID:       "readonly",
+					Role:     pd.Voter,
+					Count:    3,
+					StartKey: []byte{},
+					EndKey:   []byte{},
+					LabelConstraints: []pd.LabelConstraint{
+						{
+							Key:    "$mode",
+							Op:     pd.In,
+							Values: []string{"readonly"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.Error(err)
+	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"$mode": "readonly",
+	})
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.NoError(err)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+
+	suite.transferLeader(ctx, re)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "$mode"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -706,19 +749,14 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.Equal("cancelled", status)
 }
 
-func (suite *httpClientTestSuite) TestStoreLabels() {
-	re := suite.Require()
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, re *require.Assertions, storeLabels map[string]string) int64 {
 	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
 	resp, err := client.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
 	re.Empty(firstStore.Store.Labels, nil)
-	storeLabels := map[string]string{
-		"zone": "zone1",
-	}
+
 	err = client.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels)
 	re.NoError(err)
 
@@ -735,17 +773,27 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 		re.Equal(value, labelsMap[key])
 	}
 
-	re.NoError(client.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
-	store, err := client.GetStore(ctx, uint64(firstStore.Store.ID))
-	re.NoError(err)
-	re.Empty(store.Store.Labels)
+	return firstStore.Store.ID
 }
 
-func (suite *httpClientTestSuite) TestTransferLeader() {
+func (suite *httpClientTestSuite) TestStoreLabels() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"zone": "zone1",
+	})
+
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "zone"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
+}
+
+func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
+	client := suite.client
 	members, err := client.GetMembers(ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
@@ -776,6 +824,13 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
+}
+func (suite *httpClientTestSuite) TestTransferLeader() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	suite.transferLeader(ctx, re)
 }
 
 func (suite *httpClientTestSuite) TestVersion() {
@@ -998,19 +1053,28 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
-				ServiceID: "AAA",
-				ExpiredAt: now.Unix() + 10,
-				SafePoint: 1,
+				ServiceID:  "AAA",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  10,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "BBB",
-				ExpiredAt: now.Unix() + 10,
-				SafePoint: 2,
+				ServiceID:  "BBB",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  20,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "CCC",
-				ExpiredAt: now.Unix() + 10,
-				SafePoint: 3,
+				ServiceID:  "CCC",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  30,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  1,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 		},
 		GCSafePoint:           1,
@@ -1018,7 +1082,8 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	}
 
 	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
-	for _, ssp := range list.ServiceGCSafepoints {
+	// Skip writing "gc_worker".
+	for _, ssp := range list.ServiceGCSafepoints[:3] {
 		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
@@ -1033,7 +1098,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
-	re.Len(l.ServiceGCSafepoints, 3)
+	re.Len(l.ServiceGCSafepoints, 4)
 
 	// sort the gc safepoints based on order of ServiceID
 	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
@@ -1052,19 +1117,30 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal("Delete service GC safepoint successfully.", msg)
 	}
 
-	// check that the safepoitns are indeed deleted
+	// check that the safepoitns are indeed deleted.
+	// "gc_worker" will still exist in the result set as it's pseudo.
 	l, err = client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
 	re.Equal(uint64(1), l.GCSafePoint)
-	re.Equal(uint64(0), l.MinServiceGcSafepoint)
-	re.Empty(l.ServiceGCSafepoints)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
 	// Deleting "gc_worker" should result in an error in earlier version. As the service safe point becomes a
 	// compatibility layer over GC barriers, it won't take any effect except that possibly deleting the residual
 	// service safe point of "gc_worker" that was written by previous version.
 	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
 	re.NoError(err)
+
+	// However, after the deletion, it doesn't affect the behavior that generates the pseudo service safe point for
+	// "gc_worker".
+	l, err = client.GetGCSafePoint(ctx)
+	re.NoError(err)
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
 	// try delete some non-exist safepoints, should return normally
 	var msg string

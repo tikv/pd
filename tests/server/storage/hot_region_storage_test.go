@@ -70,12 +70,10 @@ func (s *hotRegionStorageTestSuite) SetupTest() {
 			{
 				Id:            1,
 				State:         metapb.StoreState_Up,
-				LastHeartbeat: time.Now().UnixNano(),
 			},
 			{
 				Id:            2,
 				State:         metapb.StoreState_Up,
-				LastHeartbeat: time.Now().UnixNano(),
 			},
 		}
 		for _, store := range stores {

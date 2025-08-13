@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -1335,45 +1334,6 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
 }
 
-func TestGetPeers(t *testing.T) {
-	re := require.New(t)
-	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
-	leader := &metapb.Peer{StoreId: 2, Id: 2}
-	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
-	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
-	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-		leader, follower1, follower2, learner,
-	}}, leader, WithLearners([]*metapb.Peer{learner}))
-	for _, v := range []struct {
-		rule  string
-		peers []*metapb.Peer
-	}{
-		{
-			rule:  "leader-scatter",
-			peers: []*metapb.Peer{leader},
-		},
-		{
-			rule:  "peer-scatter",
-			peers: []*metapb.Peer{learner, leader, follower1, follower2},
-		},
-		{
-			rule:  "learner-scatter",
-			peers: []*metapb.Peer{learner},
-		},
-		{
-			rule:  "witness-scatter",
-			peers: nil,
-		},
-	} {
-		role := NewRule(v.rule)
-		peers := region.GetPeersByRule(role)
-		sort.Slice(peers, func(i, j int) bool {
-			return peers[i].Id <= peers[j].Id
-		})
-		re.Equal(v.peers, peers, role)
-	}
-}
-
 func TestCodecRule(t *testing.T) {
 	re := require.New(t)
 	for _, v := range []string{"leader", "peer", "learner", "witness"} {
@@ -1414,4 +1374,57 @@ func TestRegionCount(t *testing.T) {
 		scanCount = len(regions.ScanRegions(key, []byte(""), 100))
 		re.Equal(count, scanCount, "startKey: %s", key)
 	}
+}
+
+func TestResetRegionCache(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	// Create and add some regions
+	region1 := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	region2 := NewTestRegionInfo(2, 1, []byte("b"), []byte("c"))
+	region3 := NewTestRegionInfo(3, 1, []byte("c"), []byte("d"))
+
+	// Put regions to populate all the maps and trees
+	regions.CheckAndPutRegion(region1)
+	regions.CheckAndPutRegion(region2)
+	regions.CheckAndPutRegion(region3)
+
+	// Verify that regions are populated
+	re.Equal(3, regions.GetTotalRegionCount())
+	re.NotNil(regions.GetRegion(1))
+	re.NotNil(regions.GetRegion(2))
+	re.NotNil(regions.GetRegion(3))
+
+	// Verify that subRegions is populated
+	re.NotEmpty(regions.subRegions)
+
+	// Reset the cache
+	regions.ResetRegionCache()
+
+	// Verify that all fields are properly reset
+	re.Equal(0, regions.GetTotalRegionCount())
+	re.Nil(regions.GetRegion(1))
+	re.Nil(regions.GetRegion(2))
+	re.Nil(regions.GetRegion(3))
+
+	// Verify that subRegions is properly reset
+	re.Empty(regions.subRegions)
+
+	// Verify that all other maps are reset
+	re.Empty(regions.leaders)
+	re.Empty(regions.followers)
+	re.Empty(regions.learners)
+	re.Empty(regions.witnesses)
+	re.Empty(regions.pendingPeers)
+
+	// Verify that trees are reset
+	re.Equal(0, regions.tree.length())
+	re.Equal(0, regions.overlapTree.length())
+
+	// Verify that we can add new regions after reset
+	newRegion := NewTestRegionInfo(4, 1, []byte("d"), []byte("e"))
+	regions.CheckAndPutRegion(newRegion)
+	re.Equal(1, regions.GetTotalRegionCount())
+	re.NotNil(regions.GetRegion(4))
 }

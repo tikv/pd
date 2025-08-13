@@ -289,8 +289,8 @@ func (s *Server) campaignPrimary() {
 
 	// Start keepalive the leadership and enable Scheduling service.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
+	var resetPrimaryOnce sync.Once
+	defer resetPrimaryOnce.Do(func() {
 		cancel()
 		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
@@ -328,12 +328,12 @@ func (s *Server) campaignPrimary() {
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
-	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
-	defer leaderTicker.Stop()
+	primaryTicker := time.NewTicker(constant.PrimaryTickInterval)
+	defer primaryTicker.Stop()
 
 	for {
 		select {
-		case <-leaderTicker.C:
+		case <-primaryTicker.C:
 			if !s.participant.IsServing() {
 				log.Info("no longer a primary because lease has expired, the scheduling primary will step down")
 				return

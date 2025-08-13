@@ -84,10 +84,9 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -166,10 +165,9 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -304,48 +302,6 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					testutil.StatusOK(re),
 					testutil.StringEqual(re, "Config is the same with origin, so do nothing."))
-				re.NoError(err)
-				// config item not found
-				dataMap = map[string]any{}
-				dataMap["error"] = 3
-				body, err = json.Marshal(dataMap)
-				re.NoError(err)
-				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, body,
-					testutil.Status(re, http.StatusBadRequest),
-					testutil.StringEqual(re, "Config item is not found."))
-				re.NoError(err)
-			},
-		},
-		{
-			name:        "split-bucket-scheduler",
-			createdName: "split-bucket-scheduler",
-			extraTestFunc: func(name string) {
-				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
-				resp := make(map[string]any)
-				testutil.Eventually(re, func() bool {
-					re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-					return resp["degree"] == 3.0 && resp["split-limit"] == 0.0
-				})
-				dataMap := make(map[string]any)
-				dataMap["degree"] = 4
-				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
-				body, err := json.Marshal(dataMap)
-				re.NoError(err)
-				re.NoError(testutil.CheckPostJSON(tests.TestDialClient, updateURL, body, testutil.StatusOK(re)))
-				resp = make(map[string]any)
-				testutil.Eventually(re, func() bool {
-					re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-					return resp["degree"] == 4.0
-				})
-				// update again
-				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, body,
-					testutil.StatusOK(re),
-					testutil.StringEqual(re, "Config is the same with origin, so do nothing."))
-				re.NoError(err)
-				// empty body
-				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, nil,
-					testutil.Status(re, http.StatusInternalServerError),
-					testutil.StringEqual(re, "\"unexpected end of JSON input\"\n"))
 				re.NoError(err)
 				// config item not found
 				dataMap = map[string]any{}
@@ -663,10 +619,9 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -775,10 +730,9 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
 	for i := 1; i <= 4; i++ {
 		store := &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		tests.MustPutStore(re, cluster, store)
 	}

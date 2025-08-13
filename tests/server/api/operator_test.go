@@ -61,21 +61,18 @@ func (suite *operatorTestSuite) SetupTest() {
 				Id:            1,
 				State:         metapb.StoreState_Up,
 				NodeState:     metapb.NodeState_Serving,
-				LastHeartbeat: time.Now().UnixNano(),
 				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "1"}},
 			},
 			{
 				Id:            2,
 				State:         metapb.StoreState_Up,
 				NodeState:     metapb.NodeState_Serving,
-				LastHeartbeat: time.Now().UnixNano(),
 				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "2"}},
 			},
 			{
 				Id:            3,
 				State:         metapb.StoreState_Up,
 				NodeState:     metapb.NodeState_Serving,
-				LastHeartbeat: time.Now().UnixNano(),
 				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "3"}},
 			},
 		}

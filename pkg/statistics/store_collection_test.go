@@ -48,6 +48,7 @@ func TestStoreStatistics(t *testing.T) {
 		{Id: 7, Address: "mock://tikv-7:7", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}}},
 		{Id: 8, Address: "mock://tikv-8:8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
 		{Id: 8, Address: "mock://tikv-9:9", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h3"}}, State: metapb.StoreState_Tombstone, NodeState: metapb.NodeState_Removed},
+		{Id: 10, Address: "mock://tikv-10:10", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z4"}, {Key: "host", Value: "h4"}, {Key: core.EngineKey, Value: core.EngineTiFlash}}},
 	}
 	storesStats := NewStoresStats()
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
@@ -67,26 +68,30 @@ func TestStoreStatistics(t *testing.T) {
 		UsedSize:  0,
 	}))
 	stores[5] = store5
+	stores[8] = stores[8].Clone(core.SetLeaderCount(100))
+
 	storeStats := NewStoreStatisticsMap(opt)
 	for _, store := range stores {
 		storeStats.Observe(store)
 		ObserveHotStat(store, storesStats)
 	}
 	stats := storeStats.stats
+	tikvStats := stats.engineStatistics[core.EngineTiKV]
 
-	re.Equal(6, stats.Up)
-	re.Equal(7, stats.Preparing)
-	re.Equal(0, stats.Serving)
-	re.Equal(1, stats.Removing)
-	re.Equal(1, stats.Removed)
-	re.Equal(1, stats.Down)
-	re.Equal(1, stats.Offline)
+	re.Equal(6, tikvStats.Up)
+	re.Equal(7, tikvStats.Preparing)
+	re.Equal(0, tikvStats.Serving)
+	re.Equal(1, tikvStats.Removing)
+	re.Equal(1, tikvStats.Removed)
+	re.Equal(1, tikvStats.Down)
+	re.Equal(1, tikvStats.Offline)
 	re.Equal(0, stats.RegionCount)
 	re.Equal(0, stats.WitnessCount)
-	re.Equal(0, stats.Unhealthy)
-	re.Equal(0, stats.Disconnect)
-	re.Equal(1, stats.Tombstone)
-	re.Equal(1, stats.LowSpace)
+	re.Equal(0, tikvStats.Unhealthy)
+	re.Equal(0, tikvStats.Disconnect)
+	re.Equal(1, tikvStats.Tombstone)
+	re.Equal(1, tikvStats.LowSpace)
+	re.Equal(1, stats.engineStatistics[core.EngineTiFlash].Up)
 	re.Len(stats.LabelCounter["zone:z1"], 2)
 	re.Equal([]uint64{1, 2}, stats.LabelCounter["zone:z1"])
 	re.Len(stats.LabelCounter["zone:z2"], 2)
@@ -95,6 +100,7 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal([]uint64{1, 3, 5, 7}, stats.LabelCounter["host:h1"])
 	re.Len(stats.LabelCounter["host:h2"], 4)
 	re.Len(stats.LabelCounter["zone:unknown"], 2)
+	re.Equal(0, stats.LeaderCount)
 }
 
 func TestSummaryStoreInfos(t *testing.T) {

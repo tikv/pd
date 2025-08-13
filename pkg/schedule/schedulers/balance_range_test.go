@@ -50,8 +50,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.NotNil(plan)
 	re.Len(plan.stores, 3)
 	re.Len(plan.scoreMap, 3)
-	re.Equal(int64(1), plan.scoreMap[1])
-	re.Equal(int64(1), plan.tolerate)
+	re.Equal(float64(1), plan.score(1))
 }
 
 func TestTIKVEngine(t *testing.T) {
@@ -60,37 +59,37 @@ func TestTIKVEngine(t *testing.T) {
 	defer cancel()
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
-			[]string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
 	re.True(scheduler.IsScheduleAllowed(tc))
 	km := tc.GetKeyRangeManager()
 	kr := keyutil.NewKeyRange("", "")
 	ranges := km.GetNonOverlappingKeyRanges(&kr)
 	re.Len(ranges, 2)
 	re.Equal(ranges[0], keyutil.NewKeyRange("", "100"))
-	re.Equal(ranges[1], keyutil.NewKeyRange("200", ""))
+	re.Equal(ranges[1], keyutil.NewKeyRange("300", ""))
 
 	re.NoError(err)
-	ops, _ := scheduler.Schedule(tc, true)
+	ops, _ := scheduler.Schedule(tc, false)
 	re.Empty(ops)
-	for i := 1; i <= 3; i++ {
-		tc.AddLeaderStore(uint64(i), 0)
-	}
+
 	// add regions:
 	// store-1: 3 leader regions
 	// store-2: 2 leader regions
-	// store-3: 1 leader regions
+	// store-3: 0 leader regions
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 0)
+	}
 	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
 	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
-	tc.AddLeaderRegionWithRange(6, "180", "200", 3, 1, 2)
 	// case1: transfer leader from store 1 to store 3
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("1", op.GetAdditionalInfo("targetScore"))
+	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
 	// case2: move leader from store 1 to store 4
@@ -98,8 +97,8 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
-	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0", op.GetAdditionalInfo("targetScore"))
+	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
 	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
@@ -149,34 +148,10 @@ func TestTIFLASHEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0", op.GetAdditionalInfo("targetScore"))
+	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
 	re.Equal("1", op.GetAdditionalInfo("tolerate"))
 	re.Contains(op.Brief(), "mv peer: store [4] to")
-}
-
-func TestFetchAllRegions(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, _ := prepareSchedulersTest()
-	defer cancel()
-	for i := 1; i <= 3; i++ {
-		tc.AddLeaderStore(uint64(i), 0)
-	}
-	for i := 1; i <= 100; i++ {
-		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
-	}
-
-	ranges := keyutil.NewKeyRangesWithSize(1)
-	ranges.Append([]byte(""), []byte(""))
-	regions := fetchAllRegions(tc, ranges)
-	re.Len(regions, 100)
-
-	ranges = keyutil.NewKeyRangesWithSize(1)
-	region := tc.GetRegion(50)
-	ranges.Append([]byte(""), region.GetStartKey())
-	ranges.Append(region.GetStartKey(), []byte(""))
-	regions = fetchAllRegions(tc, ranges)
-	re.Len(regions, 100)
 }
 
 func TestCodecConfig(t *testing.T) {

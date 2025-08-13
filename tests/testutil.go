@@ -228,6 +228,9 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		// Wait for the raft cluster on the leader to be bootstrapped.
 		return raftCluster != nil && raftCluster.IsRunning()
 	})
+	if store.LastHeartbeat == 0 {
+		store.LastHeartbeat = time.Now().UnixNano()
+	}
 	re.NoError(raftCluster.PutMetaStore(store))
 	ts := store.GetLastHeartbeat()
 	if ts == 0 {

@@ -699,13 +699,15 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			ratelimit.WithRetained(retained),
 		)
 		tracer.OnUpdateSubTreeFinished()
-		ctx.TaskRunner.RunTask(
-			regionID,
-			ratelimit.HandleOverlaps,
-			func(ctx context.Context) {
-				cluster.HandleOverlaps(ctx, c, overlaps)
-			},
-		)
+		if len(overlaps) > 0 {
+			ctx.TaskRunner.RunTask(
+				regionID,
+				ratelimit.HandleOverlaps,
+				func(ctx context.Context) {
+					cluster.HandleOverlaps(ctx, c, overlaps)
+				},
+			)
+		}
 	}
 	tracer.OnSaveCacheFinished()
 	if hasRegionStats {
