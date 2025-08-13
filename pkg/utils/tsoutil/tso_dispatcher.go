@@ -238,6 +238,7 @@ func (s *TSODispatcher) clearPendingRequests(tsoQueue *tsoRequestProxyQueue, for
 }
 
 // Stop the TSODispatcher and clears all pending requests
+// Used for test only.
 func (s *TSODispatcher) Stop() {
 	s.dispatchChs.Range(func(_, value any) bool {
 		tsoQueue := value.(*tsoRequestProxyQueue)
