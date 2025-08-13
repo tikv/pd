@@ -89,10 +89,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            1,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        1,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -100,10 +99,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            3,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        3,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -111,10 +109,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -330,10 +327,9 @@ func TestStore(t *testing.T) {
 	// put enough stores for replica.
 	for id := 1000; id <= 1005; id++ {
 		store2 := &metapb.Store{
-			Id:            uint64(id),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(id),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		pdTests.MustPutStore(re, cluster, store2)
 	}
@@ -511,10 +507,9 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -522,10 +517,9 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            3,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        3,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -533,10 +527,9 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            4,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        4,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -611,10 +604,9 @@ func TestStoreTLS(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            1,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        1,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -622,10 +614,9 @@ func TestStoreTLS(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},

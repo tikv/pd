@@ -57,14 +57,12 @@ func TestHotRegionStorage(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 
@@ -167,14 +165,12 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 
@@ -262,14 +258,12 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 

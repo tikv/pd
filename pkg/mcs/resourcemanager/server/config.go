@@ -239,7 +239,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
-	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLease)
 
 	return nil
 }

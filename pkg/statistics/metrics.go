@@ -47,7 +47,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "status",
 			Help:      "Status of the cluster.",
-		}, []string{"type"})
+		}, []string{"type", "engine"})
 
 	placementStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

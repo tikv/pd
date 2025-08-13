@@ -39,32 +39,31 @@ func TestReadyAPI(t *testing.T) {
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	re.NoError(leader.BootstrapCluster())
 	leaderURL := leader.GetConfig().ClientUrls + v2Prefix + "/ready"
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	followerURL := followerServer.GetConfig().ClientUrls + v2Prefix + "/ready"
-	checkReadyAPI(re, leaderURL, true)
-	checkReadyAPI(re, followerURL, true)
+	// check leader ready status before bootstrap
+	checkReadyAPI(re, leaderURL, http.StatusOK, false, false)
+	re.NoError(leader.BootstrapCluster())
+
+	// check ready status after bootstrap
+	checkReadyAPI(re, leaderURL, http.StatusOK, true, true)
+	checkReadyAPI(re, followerURL, http.StatusOK, true, true)
 
 	// check ready status when region is not loaded for leader
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+leader.GetAddr()+`")`))
-	checkReadyAPI(re, leaderURL, false)
-	checkReadyAPI(re, followerURL, true)
+	checkReadyAPI(re, leaderURL, http.StatusInternalServerError, true, false)
+	checkReadyAPI(re, followerURL, http.StatusOK, true, true)
 
 	// check ready status when region is not loaded for follower
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+followerServer.GetAddr()+`")`))
-	checkReadyAPI(re, leaderURL, true)
-	checkReadyAPI(re, followerURL, false)
+	checkReadyAPI(re, leaderURL, http.StatusOK, true, true)
+	checkReadyAPI(re, followerURL, http.StatusInternalServerError, true, false)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow"))
 }
 
-func checkReadyAPI(re *require.Assertions, url string, isReady bool) {
-	expectCode := http.StatusOK
-	if !isReady {
-		expectCode = http.StatusInternalServerError
-	}
-	// check ready status
+func checkReadyAPI(re *require.Assertions, url string, expectCode int, expectBootstrapped bool, expectRegionLoaded bool) {
 	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	resp, err := tests.TestDialClient.Do(req)
@@ -85,5 +84,6 @@ func checkReadyAPI(re *require.Assertions, url string, isReady bool) {
 	r := &handlers.ReadyStatus{}
 	re.NoError(json.Unmarshal(buf, &r))
 	re.Equal(expectCode, resp.StatusCode)
-	re.Equal(isReady, r.RegionLoaded)
+	re.Equal(expectBootstrapped, r.IsBootstrapped)
+	re.Equal(expectRegionLoaded, r.RegionLoaded)
 }

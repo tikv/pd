@@ -570,9 +570,8 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	pdTests.MustPutStore(re, cluster, store)
 
@@ -639,9 +638,8 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	pdTests.MustPutStore(re, cluster, store)
 	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -716,9 +714,8 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	pdTests.MustPutStore(re, cluster, store)
 
@@ -908,9 +905,8 @@ func TestReplicationMode(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -967,9 +963,8 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -1250,9 +1245,8 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	pdTests.MustPutStore(re, cluster, store)
 
@@ -1283,9 +1277,8 @@ func (suite *configTestSuite) checkMicroserviceConfig(cluster *pdTests.TestClust
 	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	pdTests.MustPutStore(re, cluster, store)
 	svr := leaderServer.GetServer()

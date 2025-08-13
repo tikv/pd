@@ -232,10 +232,6 @@ func shuffleRegionCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.ShuffleRegionScheduler.String(), event)
 }
 
-func splitBucketCounterWithEvent(event string) prometheus.Counter {
-	return schedulerCounter.WithLabelValues(types.SplitBucketScheduler.String(), event)
-}
-
 func transferWitnessLeaderCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.TransferWitnessLeaderScheduler.String(), event)
 }
@@ -349,17 +345,6 @@ var (
 	shuffleRegionNoNewPeerCounter          = shuffleRegionCounterWithEvent("no-new-peer")
 	shuffleRegionCreateOperatorFailCounter = shuffleRegionCounterWithEvent("create-operator-fail")
 	shuffleRegionNoSourceStoreCounter      = shuffleRegionCounterWithEvent("no-source-store")
-
-	splitBucketDisableCounter            = splitBucketCounterWithEvent("bucket-disable")
-	splitBucketSplitLimitCounter         = splitBucketCounterWithEvent("split-limit")
-	splitBucketScheduleCounter           = splitBucketCounterWithEvent("schedule")
-	splitBucketNoRegionCounter           = splitBucketCounterWithEvent("no-region")
-	splitBucketRegionTooSmallCounter     = splitBucketCounterWithEvent("region-too-small")
-	splitBucketOperatorExistCounter      = splitBucketCounterWithEvent("operator-exist")
-	splitBucketKeyRangeNotMatchCounter   = splitBucketCounterWithEvent("key-range-not-match")
-	splitBucketNoSplitKeysCounter        = splitBucketCounterWithEvent("no-split-keys")
-	splitBucketCreateOperatorFailCounter = splitBucketCounterWithEvent("create-operator-fail")
-	splitBucketNewOperatorCounter        = splitBucketCounterWithEvent("new-operator")
 
 	transferWitnessLeaderCounter              = transferWitnessLeaderCounterWithEvent("schedule")
 	transferWitnessLeaderNewOperatorCounter   = transferWitnessLeaderCounterWithEvent("new-operator")
