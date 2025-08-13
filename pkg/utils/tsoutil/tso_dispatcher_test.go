@@ -154,7 +154,6 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 
 	ctx := context.Background()
 	forwardedHost := "test-host"
-	var reqPendingCount atomic.Int64
 	var reqDispatchCount atomic.Int64
 	var wg sync.WaitGroup
 	// mock 11000 goroutines as tso proxy client
@@ -163,7 +162,7 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 		go func() {
 			defer wg.Done()
 			dipatchReqDoneCh := make(chan struct{})
-			for range 10 {
+			for range 20 {
 				req := &mockRequest{
 					forwardedHost: forwardedHost,
 					clientConn:    nil,
@@ -181,7 +180,7 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 				case <-dipatchReqDoneCh:
 					reqDispatchCount.Add(1)
 				case <-time.After(20 * time.Second):
-					reqPendingCount.Add(1)
+					// If the request takes too long, we assume there is a goroutine leak
 				}
 			}
 		}()
@@ -189,8 +188,7 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 
 	wg.Wait()
 
-	re.Equal(int64(0), reqPendingCount.Load(), "There should be no pending requests after processing")
-	re.Equal(int64(11000*10), reqDispatchCount.Load(), "The number of dispatched requests should match the total requests sent")
+	re.Equal(int64(11000*20), reqDispatchCount.Load(), "The number of dispatched requests should match the total requests sent")
 
 	suite.dispatcher.Stop()
 }
