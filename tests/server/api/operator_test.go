@@ -58,22 +58,22 @@ func (suite *operatorTestSuite) SetupTest() {
 		pauseAllCheckers(re, cluster)
 		stores := []*metapb.Store{
 			{
-				Id:            1,
-				State:         metapb.StoreState_Up,
-				NodeState:     metapb.NodeState_Serving,
-				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "1"}},
+				Id:        1,
+				State:     metapb.StoreState_Up,
+				NodeState: metapb.NodeState_Serving,
+				Labels:    []*metapb.StoreLabel{{Key: "key", Value: "1"}},
 			},
 			{
-				Id:            2,
-				State:         metapb.StoreState_Up,
-				NodeState:     metapb.NodeState_Serving,
-				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "2"}},
+				Id:        2,
+				State:     metapb.StoreState_Up,
+				NodeState: metapb.NodeState_Serving,
+				Labels:    []*metapb.StoreLabel{{Key: "key", Value: "2"}},
 			},
 			{
-				Id:            3,
-				State:         metapb.StoreState_Up,
-				NodeState:     metapb.NodeState_Serving,
-				Labels:        []*metapb.StoreLabel{{Key: "key", Value: "3"}},
+				Id:        3,
+				State:     metapb.StoreState_Up,
+				NodeState: metapb.NodeState_Serving,
+				Labels:    []*metapb.StoreLabel{{Key: "key", Value: "3"}},
 			},
 		}
 		for _, store := range stores {

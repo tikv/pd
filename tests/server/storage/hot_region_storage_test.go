@@ -68,12 +68,12 @@ func (s *hotRegionStorageTestSuite) SetupTest() {
 	s.env.RunFunc(func(cluster *tests.TestCluster) {
 		stores := []*metapb.Store{
 			{
-				Id:            1,
-				State:         metapb.StoreState_Up,
+				Id:    1,
+				State: metapb.StoreState_Up,
 			},
 			{
-				Id:            2,
-				State:         metapb.StoreState_Up,
+				Id:    2,
+				State: metapb.StoreState_Up,
 			},
 		}
 		for _, store := range stores {
