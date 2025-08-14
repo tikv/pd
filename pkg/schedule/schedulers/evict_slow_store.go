@@ -444,7 +444,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 			continue
 		}
 
-		if len(networkSlowStores) >= int(s.conf.MaxNetworkSlowStore) {
+		if len(networkSlowStores) >= int(s.conf.getMaxNetworkSlowStore()) {
 			failpoint.InjectCall("evictSlowStoreTriggerLimit")
 			slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(store.GetID(), 10), string(networkSlowStore)).Inc()
 
