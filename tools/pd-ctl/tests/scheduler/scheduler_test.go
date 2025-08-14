@@ -61,20 +61,24 @@ func (suite *schedulerTestSuite) SetupTest() {
 	suite.env.RunFunc(func(cluster *pdTests.TestCluster) {
 		stores := []*metapb.Store{
 			{
-				Id:    1,
-				State: metapb.StoreState_Up,
+				Id:            1,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 			{
-				Id:    2,
-				State: metapb.StoreState_Up,
+				Id:            2,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 			{
-				Id:    3,
-				State: metapb.StoreState_Up,
+				Id:            3,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 			{
-				Id:    4,
-				State: metapb.StoreState_Up,
+				Id:            4,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 		}
 		for _, store := range stores {
