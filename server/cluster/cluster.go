@@ -40,7 +40,6 @@ import (
 
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
-	constant2 "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gctuner"
@@ -59,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -68,7 +68,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -1826,8 +1825,11 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 		readyToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
-			kr := keyutil.NewKeyRange("", "")
-			readyToServe = c.isReady(stores, store, &kr)
+			threshold = c.getThreshold(stores, store)
+			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
+				zap.Float64("threshold", threshold),
+				zap.Float64("region-size", regionSize))
+			readyToServe = regionSize >= threshold
 		}
 		if readyToServe {
 			if err := c.ReadyToServeLocked(storeID); err != nil {
@@ -1872,56 +1874,34 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 	return
 }
 
-func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange, fn getThresholdFunc) float64 {
+func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		threshold := fn(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
-		weight := core.GetStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
-		return float64(threshold) * weight * 0.9
+		regionSize := c.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
+		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
+		return float64(regionSize) * weight * 0.9
 	}
-	keys := c.ruleManager.GetSplitKeys(kr.StartKey, kr.EndKey)
+
+	keys := c.ruleManager.GetSplitKeys([]byte(""), []byte(""))
 	if len(keys) == 0 {
-		return c.calculateThreshold(stores, store, kr.StartKey, kr.EndKey, fn) * 0.9
+		return c.calculateRange(stores, store, []byte(""), []byte("")) * 0.9
 	}
-	threshold := 0.0
-	startKey := kr.StartKey
+
+	storeSize := 0.0
+	startKey := []byte("")
 	for _, key := range keys {
 		endKey := key
-		threshold += c.calculateThreshold(stores, store, startKey, endKey, fn)
+		storeSize += c.calculateRange(stores, store, startKey, endKey)
 		startKey = endKey
 	}
 	// the range from the last split key to the last key
-	threshold += c.calculateThreshold(stores, store, startKey, kr.EndKey, fn)
-	log.Debug("get threshold calculation time", zap.Duration("cost", time.Since(start)))
-	return threshold * 0.9
+	storeSize += c.calculateRange(stores, store, startKey, []byte(""))
+	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
+	return storeSize * 0.9
 }
 
-func (c *RaftCluster) isReady(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange) bool {
-	switch c.opt.GetStorePreparingPolicy() {
-	case constant2.BySize:
-		threshold := c.getThreshold(stores, store, kr, c.GetRegionSizeByRange)
-		size := float64(store.GetRegionSize())
-		log.Debug("store preparing threshold", zap.Uint64("store-id", store.GetID()),
-			zap.Float64("threshold", threshold),
-			zap.Float64("region-size", size))
-		return size >= threshold
-	case constant2.ByCount:
-		threshold := c.getThreshold(stores, store, kr, func(startKey, endKey []byte) int64 {
-			return int64(c.GetRegionCount(startKey, endKey))
-		})
-		count := float64(store.GetRegionCount())
-		log.Debug("store preparing threshold", zap.Uint64("store-id", store.GetID()),
-			zap.Float64("threshold", threshold),
-			zap.Float64("region-count", count))
-		return count >= threshold
-	}
-	return true
-}
-
-type getThresholdFunc func(startKey, endKey []byte) int64
-
-func (c *RaftCluster) calculateThreshold(stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte, fn getThresholdFunc) float64 {
-	var expect float64
+func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte) float64 {
+	var storeSize float64
 	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
 	for _, rule := range rules {
 		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
@@ -1937,20 +1917,117 @@ func (c *RaftCluster) calculateThreshold(stores []*core.StoreInfo, store *core.S
 				matchStores = append(matchStores, s)
 			}
 		}
-		total := fn(startKey, endKey) * int64(rule.Count)
-		weight := core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
-		expect += float64(total) * weight
+		regionSize := c.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
+		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+		storeSize += float64(regionSize) * weight
 		log.Debug("calculate range result",
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
 			zap.String("rule", rule.String()),
-			zap.Int64("total", total),
+			zap.Int64("region-size", regionSize),
 			zap.Float64("weight", weight),
-			zap.Float64("expect", expect),
+			zap.Float64("store-size", storeSize),
 		)
 	}
-	return expect
+	return storeSize
+}
+
+func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) float64 {
+	topology, validLabels, sameLocationStoreNum, isMatch := buildTopology(store, stores, locationLabels, count)
+	weight := 1.0
+	topo := topology
+	if isMatch {
+		return weight / float64(count) / sameLocationStoreNum
+	}
+
+	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
+	for _, label := range storeLabels {
+		if _, ok := topo[label.Value]; ok {
+			if slice.Contains(validLabels, label.Key) {
+				weight /= float64(len(topo))
+			}
+			topo = topo[label.Value].(map[string]any)
+		} else {
+			break
+		}
+	}
+
+	return weight / sameLocationStoreNum
+}
+
+func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]any, []string, float64, bool) {
+	topology := make(map[string]any)
+	sameLocationStoreNum := 1.0
+	totalLabelCount := make([]int, len(locationLabels))
+	for _, store := range stores {
+		if store.IsServing() || store.IsPreparing() {
+			labelCount := updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
+			for i, c := range labelCount {
+				totalLabelCount[i] += c
+			}
+		}
+	}
+
+	validLabels := locationLabels
+	var isMatch bool
+	for i, c := range totalLabelCount {
+		if count/c == 0 {
+			validLabels = validLabels[:i]
+			break
+		}
+		if count/c == 1 && count%c == 0 {
+			validLabels = validLabels[:i+1]
+			isMatch = true
+			break
+		}
+	}
+	for _, store := range stores {
+		if store.GetID() == s.GetID() {
+			continue
+		}
+		if s.CompareLocation(store, validLabels) == -1 {
+			sameLocationStoreNum++
+		}
+	}
+
+	return topology, validLabels, sameLocationStoreNum, isMatch
+}
+
+func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
+	var sortedLabels []*metapb.StoreLabel
+	for _, ll := range locationLabels {
+		find := false
+		for _, sl := range storeLabels {
+			if ll == sl.Key {
+				sortedLabels = append(sortedLabels, sl)
+				find = true
+				break
+			}
+		}
+		// TODO: we need to improve this logic to make the label calculation more accurate if the user has the wrong label settings.
+		if !find {
+			sortedLabels = append(sortedLabels, &metapb.StoreLabel{Key: ll, Value: ""})
+		}
+	}
+	return sortedLabels
+}
+
+// updateTopology records stores' topology in the `topology` variable.
+func updateTopology(topology map[string]any, sortedLabels []*metapb.StoreLabel) []int {
+	labelCount := make([]int, len(sortedLabels))
+	if len(sortedLabels) == 0 {
+		return labelCount
+	}
+	topo := topology
+	for i, l := range sortedLabels {
+		if _, exist := topo[l.Value]; !exist {
+			topo[l.Value] = make(map[string]any)
+			labelCount[i] += 1
+		}
+		topo = topo[l.Value].(map[string]any)
+	}
+	return labelCount
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.

@@ -340,8 +340,6 @@ type StoreStateFilter struct {
 	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
-	// Set true only if it needs to check the store healthy status include removed,down and disconnected.
-	HealthyCheck bool
 	// Set the priority level of the filter, it should be same with the operator level.
 	// The priority level can be higher than the operator level in checker,
 	// the operator controller should check it again by using the actual operator level.
@@ -518,7 +516,6 @@ const (
 	witnessTarget
 	scatterRegionTarget
 	fastFailoverTarget
-	healthyCheck
 )
 
 func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
@@ -542,8 +539,6 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case fastFailoverTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
-	case healthyCheck:
-		funcs = []conditionFunc{f.isRemoved, f.isDown, f.isDisconnected}
 	}
 	for _, cf := range funcs {
 		if status := cf(conf, store); !status.IsOK() {
@@ -563,11 +558,6 @@ func (f *StoreStateFilter) Source(conf config.SharedConfigProvider, store *core.
 	}
 	if f.MoveRegion {
 		if status = f.anyConditionMatch(regionSource, conf, store); !status.IsOK() {
-			return
-		}
-	}
-	if f.HealthyCheck {
-		if status = f.anyConditionMatch(healthyCheck, conf, store); !status.IsOK() {
 			return
 		}
 	}
@@ -593,11 +583,6 @@ func (f *StoreStateFilter) Target(conf config.SharedConfigProvider, store *core.
 	}
 	if f.MoveRegion && !f.ScatterRegion {
 		if status = f.anyConditionMatch(regionTarget, conf, store); !status.IsOK() {
-			return
-		}
-	}
-	if f.HealthyCheck {
-		if status = f.anyConditionMatch(healthyCheck, conf, store); !status.IsOK() {
 			return
 		}
 	}

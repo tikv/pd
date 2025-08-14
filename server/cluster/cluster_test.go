@@ -1608,6 +1608,108 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
 }
 
+func TestTopologyWeight(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"zone", "rack", "host"}
+	zones := []string{"z1", "z2", "z3"}
+	racks := []string{"r1", "r2", "r3"}
+	hosts := []string{"h1", "h2", "h3", "h4"}
+
+	var stores []*core.StoreInfo
+	var testStore *core.StoreInfo
+	for i, zone := range zones {
+		for j, rack := range racks {
+			for k, host := range hosts {
+				storeID := uint64(i*len(racks)*len(hosts) + j*len(hosts) + k)
+				storeLabels := map[string]string{
+					"zone": zone,
+					"rack": rack,
+					"host": host,
+				}
+				store := core.NewStoreInfoWithLabel(storeID, storeLabels)
+				if i == 0 && j == 0 && k == 0 {
+					testStore = store
+				}
+				stores = append(stores, store)
+			}
+		}
+	}
+
+	re.Equal(1.0/3/3/4, getStoreTopoWeight(testStore, stores, labels, 3))
+}
+
+func TestTopologyWeight1(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc2", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc3", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store6 := core.NewStoreInfoWithLabel(6, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6}
+
+	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
+	re.Equal(1.0/3/4, getStoreTopoWeight(store1, stores, labels, 3))
+	re.Equal(1.0/3/4, getStoreTopoWeight(store6, stores, labels, 3))
+}
+
+func TestTopologyWeight2(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host1"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5}
+
+	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
+	re.Equal(1.0/3/3, getStoreTopoWeight(store1, stores, labels, 3))
+}
+
+func TestTopologyWeight3(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host4"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host5"})
+	store6 := core.NewStoreInfoWithLabel(6, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host6"})
+
+	store7 := core.NewStoreInfoWithLabel(7, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host7"})
+	store8 := core.NewStoreInfoWithLabel(8, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host8"})
+	store9 := core.NewStoreInfoWithLabel(9, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host9"})
+	store10 := core.NewStoreInfoWithLabel(10, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host10"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6, store7, store8, store9, store10}
+
+	re.Equal(1.0/5/2, getStoreTopoWeight(store7, stores, labels, 5))
+	re.Equal(1.0/5/4, getStoreTopoWeight(store8, stores, labels, 5))
+	re.Equal(1.0/5/4, getStoreTopoWeight(store9, stores, labels, 5))
+	re.Equal(1.0/5/2, getStoreTopoWeight(store10, stores, labels, 5))
+}
+
+func TestTopologyWeight4(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
+
+	stores := []*core.StoreInfo{store1, store2, store3, store4}
+
+	re.Equal(1.0/3/2, getStoreTopoWeight(store1, stores, labels, 3))
+	re.Equal(1.0/3, getStoreTopoWeight(store3, stores, labels, 3))
+	re.Equal(1.0/3, getStoreTopoWeight(store4, stores, labels, 3))
+}
+
 func TestCalculateStoreSize1(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1689,28 +1791,13 @@ func TestCalculateStoreSize1(t *testing.T) {
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-	kr := keyutil.NewKeyRange("", "")
-	store1 := store.Clone(core.SetRegionSize(4500.0), core.SetRegionCount(45))
-
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.True(cluster.isReady(stores, store1, &kr))
-	schedulerCfg := opt.GetScheduleConfig()
-	schedulerCfg.StorePreparingPolicy = constant.BySize.String()
-	opt.SetScheduleConfig(schedulerCfg)
-	re.True(cluster.isReady(stores, store1, &kr))
+	re.Equal(4500.0, cluster.getThreshold(stores, store))
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
-	store1 = store.Clone(core.SetRegionSize(2250.0), core.SetRegionCount(22))
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-	// 300 (total region count) / 3 (zone) / 4 (host) * 0.9 = 22.5
-	re.True(cluster.isReady(stores, store1, &kr))
-	schedulerCfg = opt.GetScheduleConfig()
-	schedulerCfg.StorePreparingPolicy = constant.ByCount.String()
-	opt.SetScheduleConfig(schedulerCfg)
-	re.False(cluster.isReady(stores, store1, &kr))
-	store1 = store.Clone(core.SetRegionCount(23))
-	re.True(cluster.isReady(stores, store1, &kr))
+	re.Equal(2250.0, cluster.getThreshold(stores, store))
 }
 
 func TestCalculateStoreSize2(t *testing.T) {
@@ -1724,7 +1811,6 @@ func TestCalculateStoreSize2(t *testing.T) {
 	cfg.EnablePlacementRules = true
 	opt.SetReplicationConfig(cfg)
 	opt.SetMaxReplicas(3)
-
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.regionStats = statistics.NewRegionStatistics(
@@ -1793,15 +1879,9 @@ func TestCalculateStoreSize2(t *testing.T) {
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-	kr := keyutil.NewKeyRange("", "")
-	store1 := store.Clone(core.SetRegionSize(3000.0), core.SetRegionCount(30))
-	//  100 * 4 (total region count) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 30
-	re.True(cluster.isReady(stores, store1, &kr))
+
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	schedulerCfg := opt.GetScheduleConfig()
-	schedulerCfg.StorePreparingPolicy = constant.BySize.String()
-	opt.SetScheduleConfig(schedulerCfg)
-	re.True(cluster.isReady(stores, store1, &kr))
+	re.Equal(3000.0, cluster.getThreshold(stores, store))
 }
 
 func TestStores(t *testing.T) {
