@@ -119,6 +119,9 @@ const (
 	miscTaskRunner       = "misc-async"
 	logTaskRunner        = "log-async"
 	syncRegionTaskRunner = "sync-region-async"
+
+	// defaultScanRegionsLimit is the default limit for scanning regions.
+	defaultScanRegionsLimit = 100
 )
 
 // Server is the interface for cluster.
@@ -2180,7 +2183,19 @@ func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine 
 		storeMap[store.GetID()] = store.GetLabelValue(core.EngineKey)
 	}
 	opt := statistics.WithStoreMapOption(storeMap)
-	stats := statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), c, opt)
+	stats := statistics.NewRegionStats()
+	for {
+		regions := c.ScanRegions(startKey, endKey, defaultScanRegionsLimit)
+
+		for _, region := range regions {
+			stats.Observe(region, c, opt)
+		}
+		if len(regions) < defaultScanRegionsLimit {
+			break
+		}
+
+		startKey = regions[len(regions)-1].GetEndKey()
+	}
 	// Fill in the hot write region statistics.
 	for storeID, label := range storeMap {
 		if _, ok := stats.StoreLeaderCount[storeID]; !ok {
@@ -2226,11 +2241,11 @@ func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte,
 	opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
 	stats := statistics.NewRegionStats()
 	for {
-		regions := c.ScanRegions(startKey, endKey, 100)
+		regions := c.ScanRegions(startKey, endKey, defaultScanRegionsLimit)
 		for _, region := range regions {
 			stats.Observe(region, nil, opts...)
 		}
-		if len(regions) < 100 {
+		if len(regions) < defaultScanRegionsLimit {
 			break
 		}
 		startKey = regions[len(regions)-1].GetEndKey()
