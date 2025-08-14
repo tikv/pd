@@ -497,6 +497,8 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		// The following are tso forward stream related variables.
 		tsoRequestProxyCtx context.Context
 		forwarder          = newTSOForwarder(stream)
+		semaphore          = make(chan struct{}, 70)
+		tsoRespCh          = make(chan *pdpb.TsoResponse, 100)
 		tsoStreamErr       error
 	)
 
@@ -516,6 +518,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		)
 
 		if tsoRequestProxyCtx == nil {
+			semaphore <- struct{}{}
 			request, err = stream.Recv()
 		} else {
 			// if we forward requests to TSO proxy we can't block on the next request in the stream
@@ -525,6 +528,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			streamCh := make(chan *pdpb.TsoRequest, 1)
 			streamErrCh := make(chan error, 1)
 			go func() {
+				semaphore <- struct{}{}
 				req, err := stream.Recv()
 				if err != nil {
 					streamErrCh <- err
@@ -534,12 +538,27 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			}()
 
 			// Wait for either stream data or error from tso proxy
-			select {
-			case <-tsoRequestProxyCtx.Done():
-				err = context.Cause(tsoRequestProxyCtx)
-			case err = <-streamErrCh:
-			case req := <-streamCh:
-				request = req
+			for request == nil && err == nil {
+				select {
+				case <-tsoRequestProxyCtx.Done():
+					err = context.Cause(tsoRequestProxyCtx)
+				case err = <-streamErrCh:
+				case req := <-streamCh:
+					request = req
+				case response := <-tsoRespCh:
+					// in this case, tsoRespCh should be drained, and all responses should be sent through stream.Send
+					for response != nil {
+						if err = stream.Send(response); err != nil {
+							return errors.WithStack(err)
+						}
+						<-semaphore
+						select {
+						case response = <-tsoRespCh:
+						default:
+							response = nil
+						}
+					}
+				}
 			}
 		}
 
@@ -561,7 +580,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return errors.WithStack(err)
 			}
 
-			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
+			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream, tsoRespCh)
 			// don't pass a stream context here as dispatcher serves multiple streams
 			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
@@ -602,6 +621,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}
+		<-semaphore
 	}
 }
 
