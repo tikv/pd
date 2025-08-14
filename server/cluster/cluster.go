@@ -2224,8 +2224,18 @@ func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine 
 // if useHotFlow is true, the hot region statistics will be returned.
 func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte,
 	opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
-	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1),
-		nil, opts...)
+	stats := statistics.NewRegionStats()
+	for {
+		regions := c.ScanRegions(startKey, endKey, 100)
+		for _, region := range regions {
+			stats.Observe(region, nil, opts...)
+		}
+		if len(regions) < 100 {
+			break
+		}
+		startKey = regions[len(regions)-1].GetEndKey()
+	}
+	return stats
 }
 
 // GetRegionStatsCount returns the number of regions in the range.
