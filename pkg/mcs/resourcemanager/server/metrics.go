@@ -429,7 +429,6 @@ func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
 	} else {
 		serviceLimit.DeleteLabelValues(keyspaceName)
 	}
-
 }
 
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
