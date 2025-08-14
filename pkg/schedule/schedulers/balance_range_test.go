@@ -95,21 +95,19 @@ func TestPlacementRule(t *testing.T) {
 	}
 
 	// only store-1 can match the leader rule
-	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
 	re.Error(err)
-	re.Nil(plan)
 
 	// all store can match the rules
 	job.Rule = core.PeerScatter
-	plan, err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
 	re.NoError(err)
-	re.Len(plan.stores, 3)
+	re.Len(sc.stores, 3)
 
 	// only store-1 can match the learner rule
 	job.Rule = core.LearnerScatter
-	plan, err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
 	re.Error(err)
-	re.Nil(plan)
 }
 
 func TestBalanceRangePlan(t *testing.T) {
@@ -126,13 +124,12 @@ func TestBalanceRangePlan(t *testing.T) {
 		Rule:   core.LeaderScatter,
 		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
-	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
 	re.NoError(err)
-	re.NotNil(plan)
-	re.Len(plan.stores, 3)
-	re.Len(plan.scoreMap, 3)
-	re.Equal(float64(1), plan.score(1))
-	re.Equal(1.0/3.0, plan.expectScoreMap[1])
+	re.Len(sc.stores, 3)
+	re.Len(sc.scoreMap, 3)
+	re.Equal(float64(1), sc.score(1))
+	re.Equal(1.0/3.0, sc.expectScoreMap[1])
 }
 
 func TestTIKVEngine(t *testing.T) {
