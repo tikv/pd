@@ -15,7 +15,6 @@
 package config_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"reflect"
@@ -891,16 +890,11 @@ func checkShowRuleKey(re *require.Assertions, pdAddr string, expectValues [][2]s
 	}
 }
 
-func TestReplicationMode(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (suite *configTestSuite) TestReplicationMode() {
+	suite.env.RunTest(suite.checkReplicationMode)
+}
+func (suite *configTestSuite) checkReplicationMode(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -908,8 +902,6 @@ func TestReplicationMode(t *testing.T) {
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	pdTests.MustPutStore(re, cluster, store)
 
 	conf := config.ReplicationModeConfig{
@@ -928,7 +920,7 @@ func TestReplicationMode(t *testing.T) {
 
 	check()
 
-	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync")
+	_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync")
 	re.NoError(err)
 	conf.ReplicationMode = "dr-auto-sync"
 	check()
@@ -949,16 +941,12 @@ func TestReplicationMode(t *testing.T) {
 	check()
 }
 
-func TestServiceMiddlewareConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (suite *configTestSuite) TestServiceMiddlewareConfig() {
+	suite.env.RunTest(suite.checkServiceMiddlewareConfig)
+}
+
+func (suite *configTestSuite) checkServiceMiddlewareConfig(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -966,8 +954,6 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	pdTests.MustPutStore(re, cluster, store)
 
 	conf := config.ServiceMiddlewareConfig{
@@ -994,7 +980,7 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 
 	check()
 
-	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "audit", "enable-audit", "false")
+	_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "audit", "enable-audit", "false")
 	re.NoError(err)
 	conf.EnableAudit = false
 	check()

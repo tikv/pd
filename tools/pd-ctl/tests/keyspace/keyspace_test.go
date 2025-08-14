@@ -38,6 +38,8 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
+// TestKeyspace need to prealloc keyspace IDs
+// So we need another cluster to run this test.
 func TestKeyspace(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -111,36 +113,6 @@ func TestKeyspace(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
-// Show command should auto retry without refresh_group_id if keyspace group manager not initialized.
-// See issue: #7441
-func TestKeyspaceGroupUninitialized(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
-	tc, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer tc.Destroy()
-	re.NoError(tc.RunInitialServers())
-	tc.WaitLeader()
-	re.NoError(tc.GetLeaderServer().BootstrapCluster())
-	pdAddr := tc.GetConfig().GetClientURL()
-
-	keyspaceName := "DEFAULT"
-	keyspaceID := uint32(0)
-	args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
-	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
-	re.NoError(err)
-	var meta api.KeyspaceMeta
-	re.NoError(json.Unmarshal(output, &meta))
-	re.Equal(keyspaceName, meta.GetName())
-	re.Equal(keyspaceID, meta.GetId())
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
-}
-
 type keyspaceTestSuite struct {
 	suite.Suite
 	ctx     context.Context
@@ -196,19 +168,6 @@ func (suite *keyspaceTestSuite) TestShowKeyspace() {
 	re.Equal(k1, k2)
 }
 
-func mustCreateKeyspace(suite *keyspaceTestSuite, param api.CreateKeyspaceParams) api.KeyspaceMeta {
-	re := suite.Require()
-	var meta api.KeyspaceMeta
-	args := []string{"-u", suite.pdAddr, "keyspace", "create", param.Name}
-	for k, v := range param.Config {
-		args = append(args, "--config", fmt.Sprintf("%s=%s", k, v))
-	}
-	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &meta))
-	return meta
-}
-
 func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	re := suite.Require()
 	param := api.CreateKeyspaceParams{
@@ -218,7 +177,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 			"foo2": "bar2",
 		},
 	}
-	meta := mustCreateKeyspace(suite, param)
+	meta := suite.mustCreateKeyspace(param)
 	re.Equal(param.Name, meta.GetName())
 	for k, v := range param.Config {
 		re.Equal(v, meta.Config[k])
@@ -231,7 +190,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		Name:   "test_keyspace",
 		Config: map[string]string{"foo": "1"},
 	}
-	meta := mustCreateKeyspace(suite, param)
+	meta := suite.mustCreateKeyspace(param)
 	re.Equal("1", meta.Config["foo"])
 
 	// Update one existing config and add a new config, resulting in config: {foo: 2, foo2: 1}.
@@ -267,7 +226,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	param := api.CreateKeyspaceParams{
 		Name: "test_keyspace",
 	}
-	meta := mustCreateKeyspace(suite, param)
+	meta := suite.mustCreateKeyspace(param)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
 	// Disable the keyspace, capitalization shouldn't matter.
 	args := []string{"-u", suite.pdAddr, "keyspace", "update-state", param.Name, "DiSAbleD"}
@@ -292,7 +251,7 @@ func (suite *keyspaceTestSuite) TestListKeyspace() {
 				"foo": fmt.Sprintf("bar_%d", i),
 			},
 		}
-		mustCreateKeyspace(suite, param)
+		suite.mustCreateKeyspace(param)
 	}
 	// List all keyspaces, there should be 11 of them (default + 10 created above).
 	args := []string{"-u", suite.pdAddr, "keyspace", "list"}
@@ -319,4 +278,32 @@ func (suite *keyspaceTestSuite) TestListKeyspace() {
 		re.Equal(fmt.Sprintf("bar_%d", i+2), meta.Config["foo"])
 	}
 	re.Equal("6", resp.NextPageToken)
+}
+
+// Show command should auto retry without refresh_group_id if keyspace group manager not initialized.
+// See issue: #7441
+func (suite *keyspaceTestSuite) TestKeyspaceGroupUninitialized() {
+	re := suite.Require()
+	keyspaceName := "DEFAULT"
+	keyspaceID := uint32(0)
+	args := []string{"-u", suite.pdAddr, "keyspace", "show", "name", keyspaceName}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	var meta api.KeyspaceMeta
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal(keyspaceName, meta.GetName())
+	re.Equal(keyspaceID, meta.GetId())
+}
+
+func (suite *keyspaceTestSuite) mustCreateKeyspace(param api.CreateKeyspaceParams) api.KeyspaceMeta {
+	re := suite.Require()
+	var meta api.KeyspaceMeta
+	args := []string{"-u", suite.pdAddr, "keyspace", "create", param.Name}
+	for k, v := range param.Config {
+		args = append(args, "--config", fmt.Sprintf("%s=%s", k, v))
+	}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &meta))
+	return meta
 }
