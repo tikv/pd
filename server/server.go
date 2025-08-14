@@ -1954,6 +1954,36 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	return err
 }
 
+// MarkPitrRecovering mark pd that we're pitr recovering
+func (s *Server) MarkPitrRecovering() error {
+	log.Info("mark pitr recovering")
+	markPath := keypath.PitrRecoveringMarkPath()
+	// the value doesn't matter, set to a static string
+	_, err := kv.NewSlowLogTxn(s.client).
+		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
+		Then(clientv3.OpPut(markPath, "on")).
+		Commit()
+	// if other client already marked, return success too
+	return err
+}
+
+// IsPitrRecovering check whether pitr-recovering-mark marked
+func (s *Server) IsPitrRecovering(ctx context.Context) (bool, error) {
+	resp, err := s.client.Get(ctx, keypath.PitrRecoveringMarkPath())
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
+}
+
+// UnmarkPitrRecovering unmark pitr recovering mark
+func (s *Server) UnmarkPitrRecovering(ctx context.Context) error {
+	log.Info("unmark pitr recovering")
+	_, err := s.client.Delete(ctx, keypath.PitrRecoveringMarkPath())
+	// if other client already unmarked, return success too
+	return err
+}
+
 // GetServicePrimaryAddr returns the primary address for a given service.
 // Note: This function will only return primary address without judging if it's alive.
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
