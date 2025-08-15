@@ -242,9 +242,21 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(100+i), strconv.Itoa(200+i), strconv.Itoa(200+i+1),
 			1, 2, 4)
 	}
-	op, _ = scheduler.Schedule(tc, true)
-	re.NotEmpty(op)
-	re.Contains(op[0].Brief(), "mv peer")
+	ops, _ := scheduler.Schedule(tc, true)
+	re.NotEmpty(ops)
+	re.Len(ops, 1)
+	re.Contains(ops[0].Brief(), "mv peer")
+
+	// case3: add 10 down stores, scheduler should ignore this unhealthy ,it should not move peer to this unhealthy store.
+	for i := range 10 {
+		store := core.NewStoreInfoWithLabel(uint64(i+6), map[string]string{"region": "z3", "zone": "z3"})
+		opt := core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 24 * 10))
+		tc.PutStore(store.Clone(opt))
+	}
+	ops, _ = scheduler.Schedule(tc, true)
+	re.NotEmpty(ops)
+	re.Len(ops, 1)
+	re.Contains(ops[0].Brief(), "mv peer")
 }
 
 func TestTIFLASHEngine(t *testing.T) {
