@@ -495,43 +495,111 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
-func TestTSONotLeaderWhenRebaseErr(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
+	// This test checks the behavior of PD leader resign when rebase fails.
+	if !suite.legacy {
+		suite.T().Skip("skipping test in microservice mode")
+	}
+	re := suite.Require()
+	pdClient := suite.clients[0]
 
-	pdCluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer pdCluster.Destroy()
-	err = pdCluster.RunInitialServers()
-	re.NoError(err)
-	leaderName := pdCluster.WaitLeader()
-	re.NotEmpty(leaderName)
-	pdLeader := pdCluster.GetServer(leaderName)
-	backendEndpoints := pdLeader.GetAddr()
-	pdClient, err := pd.NewClientWithContext(ctx,
-		caller.TestComponent,
-		[]string{backendEndpoints}, pd.SecurityOption{})
-	re.NoError(err)
-	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
 	// Resign the leader to trigger the rebase error.
-	err = pdLeader.ResignLeaderWithRetry()
+	err := suite.pdLeaderServer.ResignLeaderWithRetry()
 	re.NoError(err)
 	// Trying to get TSO should fail with "not leader" error.
-	_, _, err = pdClient.GetTS(ctx)
+	_, _, err = pdClient.GetTS(suite.ctx)
 	re.ErrorContains(err, "not leader")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
 	// The TSO should be eventually available.
 	testutil.Eventually(re, func() bool {
-		_, _, err := pdClient.GetTS(ctx)
+		_, _, err := pdClient.GetTS(suite.ctx)
 		return err == nil
 	})
 }
 
+func (suite *tsoClientTestSuite) TestRetryGetTSNotLeader() {
+	re := suite.Require()
+	pdClient := suite.clients[0]
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockMaxTSORetryTimes", "return(2000)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/mockMaxTSORetryTimes"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	ctx1, cancel1 := context.WithCancel(suite.ctx)
+	var lastTS uint64
+	go func(client pd.Client) {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx1.Done():
+				return
+			default:
+			}
+			physical, logical, err := client.GetTS(ctx1)
+			if err != nil {
+				re.ErrorContains(err, context.Canceled.Error())
+				continue
+			}
+			ts := tsoutil.ComposeTS(physical, logical)
+			re.Less(lastTS, ts)
+			lastTS = ts
+		}
+	}(pdClient)
+
+	for range 5 {
+		time.Sleep(time.Second)
+		err := suite.pdLeaderServer.ResignLeaderWithRetry()
+		re.NoError(err)
+		leaderName := suite.cluster.WaitLeader()
+		re.NotEmpty(leaderName)
+		suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
+	}
+
+	cancel1()
+	wg.Wait()
+	// Make sure the lastTS is not empty
+	re.NotZero(lastTS)
+}
+
+func (suite *tsoClientTestSuite) TestGetTSRetry() {
+	re := suite.Require()
+	pdClient := suite.clients[0]
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/checkRetry", "return(1)"))
+	_, _, err := pdClient.GetTS(suite.ctx)
+	re.NoError(err)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/checkRetry"))
+}
+
+func (suite *tsoClientTestSuite) TestTSOServiceDiscovery() {
+	// This test checks the behavior of PD service discovery.
+	if suite.legacy {
+		suite.T().Skip("skipping test in legacy mode")
+	}
+	re := suite.Require()
+	pdClient := suite.clients[0]
+
+	physical, logical, err := pdClient.GetTS(suite.ctx)
+	re.NoError(err)
+	ts := tsoutil.ComposeTS(physical, logical)
+	re.NotEmpty(ts)
+	checkServiceDiscovery(re, pdClient, 3)
+
+	_, cleanup2 := tests.StartSingleTSOTestServer(suite.ctx, re, suite.pdLeaderServer.GetAddr(), tempurl.Alloc())
+	checkServiceDiscovery(re, pdClient, 4)
+	cleanup2()
+	checkServiceDiscovery(re, pdClient, 3)
+}
+
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
+// So we need another cluster to run this test.
 func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
 
@@ -581,6 +649,7 @@ func TestMixedTSODeployment(t *testing.T) {
 
 // TestUpgradingPDAndTSOClusters tests the scenario that after we restart the PD cluster
 // then restart the TSO cluster, the TSO service can still serve TSO requests normally.
+// So we need another cluster to run this test.
 func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -657,130 +726,6 @@ func checkTSO(
 			}
 		}()
 	}
-}
-
-func TestRetryGetTSNotLeader(t *testing.T) {
-	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockMaxTSORetryTimes", "return(2000)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/mockMaxTSORetryTimes"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pdCluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer pdCluster.Destroy()
-	err = pdCluster.RunInitialServers()
-	re.NoError(err)
-	leaderName := pdCluster.WaitLeader()
-	re.NotEmpty(leaderName)
-	pdLeader := pdCluster.GetServer(leaderName)
-	backendEndpoints := pdLeader.GetAddr()
-	pdClient, err := pd.NewClientWithContext(ctx,
-		caller.TestComponent,
-		[]string{backendEndpoints}, pd.SecurityOption{})
-	re.NoError(err)
-	defer pdClient.Close()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	ctx1, cancel1 := context.WithCancel(ctx)
-	var lastTS uint64
-	go func(client pd.Client) {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx1.Done():
-				return
-			default:
-			}
-			physical, logical, err := client.GetTS(ctx1)
-			if err != nil {
-				re.ErrorContains(err, context.Canceled.Error())
-				continue
-			}
-			ts := tsoutil.ComposeTS(physical, logical)
-			re.Less(lastTS, ts)
-			lastTS = ts
-		}
-	}(pdClient)
-
-	for range 5 {
-		time.Sleep(time.Second)
-		err = pdLeader.ResignLeaderWithRetry()
-		re.NoError(err)
-		leaderName = pdCluster.WaitLeader()
-		re.NotEmpty(leaderName)
-		pdLeader = pdCluster.GetServer(leaderName)
-	}
-
-	cancel1()
-	wg.Wait()
-	// Make sure the lastTS is not empty
-	re.NotZero(lastTS)
-}
-
-func TestGetTSRetry(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pdCluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer pdCluster.Destroy()
-	err = pdCluster.RunInitialServers()
-	re.NoError(err)
-	leaderName := pdCluster.WaitLeader()
-	re.NotEmpty(leaderName)
-	pdLeader := pdCluster.GetServer(leaderName)
-	backendEndpoints := pdLeader.GetAddr()
-	pdClient, err := pd.NewClientWithContext(ctx,
-		caller.TestComponent,
-		[]string{backendEndpoints}, pd.SecurityOption{})
-	re.NoError(err)
-	defer pdClient.Close()
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/checkRetry", "return(1)"))
-	_, _, err = pdClient.GetTS(ctx)
-	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/checkRetry"))
-}
-
-func TestTSOServiceDiscovery(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
-	re.NoError(err)
-	defer pdCluster.Destroy()
-	err = pdCluster.RunInitialServers()
-	re.NoError(err)
-	leaderName := pdCluster.WaitLeader()
-	re.NotEmpty(leaderName)
-	pdLeader := pdCluster.GetServer(leaderName)
-	re.NoError(pdLeader.BootstrapCluster())
-
-	_, cleanup1 := tests.StartSingleTSOTestServer(ctx, re, pdLeader.GetAddr(), tempurl.Alloc())
-	defer cleanup1()
-
-	pdClient, err := pd.NewClientWithKeyspace(context.Background(),
-		caller.TestComponent, constant.DefaultKeyspaceID,
-		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
-	re.NoError(err)
-	defer pdClient.Close()
-	physical, logical, err := pdClient.GetTS(ctx)
-	re.NoError(err)
-	ts := tsoutil.ComposeTS(physical, logical)
-	re.NotEmpty(ts)
-	checkServiceDiscovery(re, pdClient, 1)
-
-	_, cleanup2 := tests.StartSingleTSOTestServer(ctx, re, pdLeader.GetAddr(), tempurl.Alloc())
-	defer cleanup2()
-	checkServiceDiscovery(re, pdClient, 2)
 }
 
 func checkServiceDiscovery(re *require.Assertions, client pd.Client, urlsLen int) {

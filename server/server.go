@@ -909,6 +909,12 @@ func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager
 }
 
+// SetKeyspaceGroupManager sets the keyspace group manager of server.
+// Note: it is only used for test.
+func (s *Server) SetKeyspaceGroupManager(keyspaceGroupManager *keyspace.GroupManager) {
+	s.keyspaceGroupManager = keyspaceGroupManager
+}
+
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
