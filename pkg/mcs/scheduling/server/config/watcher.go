@@ -17,6 +17,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
@@ -198,7 +200,16 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		}
 		// Ensure the scheduler config could be updated as soon as possible.
 		if sc := cw.getSchedulersController(); sc != nil {
-			return sc.ReloadSchedulerConfig(name)
+			err1 := sc.ReloadSchedulerConfig(name)
+			if errors.Is(err1, errs.ErrSchedulerNotFound) {
+				// Mostly it is caused by the coordinator doesn't start running.
+				// But to prevent the scheduler is truly not found, we still add a debug log here.
+				log.Debug("failed to reload scheduler config, scheduler not found",
+					zap.String("scheduler-name", name),
+					zap.Error(err1))
+				return nil
+			}
+			return err1
 		}
 		return nil
 	}
