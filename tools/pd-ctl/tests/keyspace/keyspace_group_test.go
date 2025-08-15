@@ -22,7 +22,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
@@ -483,6 +482,49 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 }
 
+func (suite *keyspaceGroupTestSuite) TestCmdWithoutKeyspaceGroupInitialized() {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+
+	leaderServer := suite.cluster.GetLeaderServer().GetServer()
+	kgm := leaderServer.GetKeyspaceGroupManager()
+	leaderServer.SetKeyspaceGroupManager(nil)
+	defer leaderServer.SetKeyspaceGroupManager(kgm)
+
+	argsList := [][]string{
+		{"-u", suite.pdAddr, "keyspace-group"},
+		{"-u", suite.pdAddr, "keyspace-group", "0"},
+		{"-u", suite.pdAddr, "keyspace-group", "split", "0", "1", "2"},
+		{"-u", suite.pdAddr, "keyspace-group", "split-range", "1", "2", "3", "4"},
+		{"-u", suite.pdAddr, "keyspace-group", "finish-split", "1"},
+		{"-u", suite.pdAddr, "keyspace-group", "merge", "1", "2"},
+		{"-u", suite.pdAddr, "keyspace-group", "merge", "0", "--all"},
+		{"-u", suite.pdAddr, "keyspace-group", "finish-merge", "1"},
+		{"-u", suite.pdAddr, "keyspace-group", "set-node", "0", "http://127.0.0.1:2379"},
+		{"-u", suite.pdAddr, "keyspace-group", "set-priority", "0", "http://127.0.0.1:2379", "200"},
+		{"-u", suite.pdAddr, "keyspace-group", "primary", "0"},
+	}
+	for _, args := range argsList {
+		output, err := tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		re.Contains(string(output), "Failed",
+			"args: %v, output: %v", args, string(output))
+		re.Contains(string(output), "keyspace group manager is not initialized",
+			"args: %v, output: %v", args, string(output))
+	}
+
+	km := leaderServer.GetKeyspaceManager()
+	leaderServer.SetKeyspaceManager(nil)
+	defer leaderServer.SetKeyspaceManager(km)
+	args := []string{"-u", suite.pdAddr, "keyspace-group", "split", "0", "1", "2"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Failed",
+		"args: %v, output: %v", args, string(output))
+	re.Contains(string(output), "keyspace manager is not initialized",
+		"args: %v, output: %v", args, string(output))
+}
+
 func (suite *keyspaceGroupTestSuite) checkKeyspaceContains(keyspaceGroupID uint32, keyspaceIDs ...uint32) {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
@@ -497,53 +539,4 @@ func (suite *keyspaceGroupTestSuite) checkKeyspaceContains(keyspaceGroupID uint3
 	for _, keyspaceID := range keyspaceIDs {
 		re.Contains(keyspaceGroup.Keyspaces, keyspaceID)
 	}
-}
-
-// TestCmdWithoutKeyspaceGroupInitialized tests without keyspace group initialized
-// So we need another cluster to run this test.
-func TestCmdWithoutKeyspaceGroupInitialized(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tc, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-	cmd := ctl.GetRootCmd()
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
-	argsList := [][]string{
-		{"-u", pdAddr, "keyspace-group"},
-		{"-u", pdAddr, "keyspace-group", "0"},
-		{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"},
-		{"-u", pdAddr, "keyspace-group", "split-range", "1", "2", "3", "4"},
-		{"-u", pdAddr, "keyspace-group", "finish-split", "1"},
-		{"-u", pdAddr, "keyspace-group", "merge", "1", "2"},
-		{"-u", pdAddr, "keyspace-group", "merge", "0", "--all"},
-		{"-u", pdAddr, "keyspace-group", "finish-merge", "1"},
-		{"-u", pdAddr, "keyspace-group", "set-node", "0", "http://127.0.0.1:2379"},
-		{"-u", pdAddr, "keyspace-group", "set-priority", "0", "http://127.0.0.1:2379", "200"},
-		{"-u", pdAddr, "keyspace-group", "primary", "0"},
-	}
-	for _, args := range argsList {
-		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.Contains(string(output), "Failed",
-			"args: %v, output: %v", args, string(output))
-		re.Contains(string(output), "keyspace group manager is not initialized",
-			"args: %v, output: %v", args, string(output))
-	}
-
-	leaderServer.SetKeyspaceManager(nil)
-	args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
-	output, err := tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.Contains(string(output), "Failed",
-		"args: %v, output: %v", args, string(output))
-	re.Contains(string(output), "keyspace manager is not initialized",
-		"args: %v, output: %v", args, string(output))
 }

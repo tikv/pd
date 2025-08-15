@@ -284,6 +284,10 @@ func (suite *keyspaceTestSuite) TestListKeyspace() {
 // See issue: #7441
 func (suite *keyspaceTestSuite) TestKeyspaceGroupUninitialized() {
 	re := suite.Require()
+	leaderServer := suite.cluster.GetLeaderServer().GetServer()
+	kgm := leaderServer.GetKeyspaceGroupManager()
+	leaderServer.SetKeyspaceGroupManager(nil)
+	defer leaderServer.SetKeyspaceGroupManager(kgm)
 	keyspaceName := "DEFAULT"
 	keyspaceID := uint32(0)
 	args := []string{"-u", suite.pdAddr, "keyspace", "show", "name", keyspaceName}
