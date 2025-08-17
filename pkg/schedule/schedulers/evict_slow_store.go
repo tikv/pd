@@ -673,14 +673,3 @@ func filterPotentialSlowStores(scores map[uint64]uint64, threshold uint64) map[u
 	}
 	return potentialSlowStores
 }
-
-// countScoresAboveThreshold counts how many scores are above or equal to the threshold
-func countScoresAboveThreshold(scores map[uint64]uint64, threshold uint64) int {
-	count := 0
-	for _, score := range scores {
-		if score >= threshold {
-			count++
-		}
-	}
-	return count
-}

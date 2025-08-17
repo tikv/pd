@@ -224,7 +224,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		var persistValue evictSlowStoreSchedulerConfig
 		_ = es.conf.load(&persistValue)
 		_, ok = persistValue.networkSlowStoreCaptureTSs[storeID1]
-		re.Equal(false, ok)
+		re.False(ok)
 		if tc.expectedSlow {
 			re.Contains(persistValue.PausedNetworkSlowStores, storeID1)
 		} else {
@@ -380,7 +380,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		var persistValue evictSlowStoreSchedulerConfig
 		_ = es.conf.load(&persistValue)
 		_, ok = persistValue.networkSlowStoreCaptureTSs[tc.scheduleStore]
-		re.Equal(false, ok)
+		re.False(ok)
 		if tc.expectedPausedTransfer {
 			re.Contains(persistValue.PausedNetworkSlowStores, tc.scheduleStore)
 		} else {
@@ -606,18 +606,4 @@ func TestCalculateAvgScore(t *testing.T) {
 	re.Equal(uint64(5), calculateAvgScore(map[uint64]uint64{1: 2, 2: 5, 3: 8}))
 	// All zeros
 	re.Equal(uint64(0), calculateAvgScore(map[uint64]uint64{1: 0, 2: 0}))
-}
-
-func TestCountScoresAboveThreshold(t *testing.T) {
-	re := require.New(t)
-	// No scores
-	re.Equal(0, countScoresAboveThreshold(map[uint64]uint64{}, 5))
-	// All below threshold
-	re.Equal(0, countScoresAboveThreshold(map[uint64]uint64{1: 1, 2: 2}, 5))
-	// Some above threshold
-	re.Equal(2, countScoresAboveThreshold(map[uint64]uint64{1: 5, 2: 10, 3: 3}, 5))
-	// All above threshold
-	re.Equal(3, countScoresAboveThreshold(map[uint64]uint64{1: 5, 2: 6, 3: 7}, 5))
-	// Equal to threshold
-	re.Equal(2, countScoresAboveThreshold(map[uint64]uint64{1: 5, 2: 4, 3: 5}, 5))
 }
