@@ -15,6 +15,7 @@
 package core
 
 import (
+	"maps"
 	"math"
 	"strings"
 	"time"
@@ -227,10 +228,7 @@ func (s *StoreInfo) GetNetworkSlowScores() map[uint64]uint64 {
 	defer s.mu.RUnlock()
 
 	result := make(map[uint64]uint64)
-	original := s.rawStats.GetNetworkSlowScores()
-	for k, v := range original {
-		result[k] = v
-	}
+	maps.Copy(result, s.rawStats.GetNetworkSlowScores())
 	return result
 }
 

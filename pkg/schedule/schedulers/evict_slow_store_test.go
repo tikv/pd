@@ -49,7 +49,7 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.cancel, _, suite.tc, suite.oc = prepareSchedulersTest()
 
-	// Add stores 1, 2
+	// Add stores 1, 2, 3, 4
 	suite.tc.AddLeaderStore(1, 0)
 	suite.tc.AddLeaderStore(2, 0)
 	suite.tc.AddLeaderStore(3, 0)
@@ -118,10 +118,10 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 	const (
-		storeID1 = 1
-		storeID2 = 2
-		storeID3 = 3
-		storeID4 = 4
+		storeID1 uint64 = 1
+		storeID2 uint64 = 2
+		storeID3 uint64 = 3
+		storeID4 uint64 = 4
 	)
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
@@ -141,7 +141,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 			expectedSlow: false,
 		},
 		{
-			// Does not meet networkSlowStoreSecondThreshold
+			// Does not meet PausedNetworkSlowStoresecondThreshold
 			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
 				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID2: 1,
@@ -211,15 +211,25 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		suite.tc.PutStore(storeInfo.Clone(tc.NetworkSlowScoresFunc))
 
 		suite.es.Schedule(suite.tc, false)
-		_, ok = es.conf.NetworkSlowStores[storeID1]
+		_, ok = es.conf.networkSlowStoreCaptureTSs[storeID1]
 		re.Equal(tc.expectedSlow, ok)
+		if tc.expectedSlow {
+			re.Contains(es.conf.PausedNetworkSlowStores, storeID1)
+		} else {
+			re.NotContains(es.conf.PausedNetworkSlowStores, storeID1)
+		}
 		re.Equal(tc.expectedSlow, !suite.tc.BasicCluster.GetStore(storeID1).AllowLeaderTransferIn())
 
 		// check the value from storage.
 		var persistValue evictSlowStoreSchedulerConfig
 		_ = es.conf.load(&persistValue)
-		_, ok = persistValue.NetworkSlowStores[storeID1]
-		re.Equal(tc.expectedSlow, ok)
+		_, ok = persistValue.networkSlowStoreCaptureTSs[storeID1]
+		re.Equal(false, ok)
+		if tc.expectedSlow {
+			re.Contains(persistValue.PausedNetworkSlowStores, storeID1)
+		} else {
+			re.NotContains(persistValue.PausedNetworkSlowStores, storeID1)
+		}
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
@@ -239,10 +249,11 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		reachedLimit = true
 	}))
 	testCases := []struct {
-		scheduleStore         uint64
-		NetworkSlowScoresFunc func(store *core.StoreInfo)
-		expectedSlow          bool
-		expectedReachedLimit  bool
+		scheduleStore          uint64
+		NetworkSlowScoresFunc  func(store *core.StoreInfo)
+		expectedSlow           bool
+		expectedPausedTransfer bool
+		expectedReachedLimit   bool
 	}{
 		// Note: The test cases are sequential.
 		// There will be a causal relationship between before and after
@@ -256,7 +267,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 					storeID4: 100,
 				}
 			},
-			expectedSlow: true,
+			expectedSlow:           true,
+			expectedPausedTransfer: true,
 		},
 		{
 			// store 2 is normal
@@ -268,62 +280,82 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 					storeID4: 1,
 				}
 			},
-			expectedSlow: false,
+			expectedSlow:           false,
+			expectedPausedTransfer: false,
 		},
 		{
-			// store 2 becomes slow, but it does not meet the number of networkSlowStoreSecondThreshold
+			// store 2 becomes slow, but it does not meet the number of PausedNetworkSlowStoresecondThreshold
 			// so it is not considered as slow store
 			scheduleStore: storeID2,
 			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
 				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID1: 100, // storeID1 will be filtered out because it is already slow
 					storeID3: 100,
-					storeID4: 100,
+					storeID4: 10,
 				}
 			},
-			expectedSlow: false,
+			expectedSlow:           false,
+			expectedPausedTransfer: false,
 		},
 		{
-			// Scale out store 5, thus store 2 meet the number of networkSlowStoreSecondThreshold
+			// Scale out store 5, thus store 2 meet the number of PausedNetworkSlowStoresecondThreshold
 			// and it is considered as slow store. And reached limit.
 			scheduleStore: storeID2,
 			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
 				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
 					storeID1: 100, // storeID1 will be filtered out because it is already slow
 					storeID3: 100,
-					storeID4: 100,
-					storeID5: 100,
+					storeID4: 10,
+					storeID5: 10,
 				}
 			},
-			expectedSlow:         false,
-			expectedReachedLimit: true,
+			expectedSlow:           true,
+			expectedPausedTransfer: false,
+			expectedReachedLimit:   true,
 		},
 		{
 			// Store 1 successfully recovers from slow store
 			scheduleStore: storeID1,
 			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
 				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
-					storeID2: 1,
+					storeID2: 100,
 					storeID3: 1,
 					storeID4: 1,
 					storeID5: 1,
 				}
 			},
-			expectedSlow: false,
+			expectedSlow:           false,
+			expectedPausedTransfer: false,
 		},
 		{
 			// Store 2 is still slow, but does not reach the limit
 			scheduleStore: storeID2,
 			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
 				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
-					storeID1: 100, // storeID1 will be filtered out because it is already slow
+					storeID1: 100,
 					storeID3: 100,
 					storeID4: 100,
 					storeID5: 100,
 				}
 			},
-			expectedSlow:         true,
-			expectedReachedLimit: false,
+			expectedSlow:           true,
+			expectedPausedTransfer: true,
+			expectedReachedLimit:   false,
+		},
+		{
+			// Store 3 becomes slow, and reaches the limit
+			scheduleStore: storeID3,
+			NetworkSlowScoresFunc: func(store *core.StoreInfo) {
+				store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+					storeID1: 100, // storeID1 will be filtered out because it is already slow
+					storeID2: 100,
+					storeID4: 100,
+					storeID5: 100,
+				}
+			},
+			expectedSlow:           true,
+			expectedPausedTransfer: false,
+			expectedReachedLimit:   true,
 		},
 	}
 
@@ -335,15 +367,25 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		suite.tc.PutStore(storeInfo.Clone(tc.NetworkSlowScoresFunc))
 
 		suite.es.Schedule(suite.tc, false)
-		_, ok = es.conf.NetworkSlowStores[tc.scheduleStore]
+		_, ok = es.conf.networkSlowStoreCaptureTSs[tc.scheduleStore]
 		re.Equal(tc.expectedSlow, ok)
-		re.Equal(tc.expectedSlow, !suite.tc.BasicCluster.GetStore(tc.scheduleStore).AllowLeaderTransferIn())
+		if tc.expectedPausedTransfer {
+			re.Contains(es.conf.PausedNetworkSlowStores, tc.scheduleStore)
+		} else {
+			re.NotContains(es.conf.PausedNetworkSlowStores, tc.scheduleStore)
+		}
+		re.Equal(tc.expectedPausedTransfer, !suite.tc.BasicCluster.GetStore(tc.scheduleStore).AllowLeaderTransferIn())
 
 		// check the value from storage.
 		var persistValue evictSlowStoreSchedulerConfig
 		_ = es.conf.load(&persistValue)
-		_, ok = persistValue.NetworkSlowStores[tc.scheduleStore]
-		re.Equal(tc.expectedSlow, ok)
+		_, ok = persistValue.networkSlowStoreCaptureTSs[tc.scheduleStore]
+		re.Equal(false, ok)
+		if tc.expectedPausedTransfer {
+			re.Contains(persistValue.PausedNetworkSlowStores, tc.scheduleStore)
+		} else {
+			re.NotContains(persistValue.PausedNetworkSlowStores, tc.scheduleStore)
+		}
 
 		re.Equal(tc.expectedReachedLimit, reachedLimit)
 		if reachedLimit {
@@ -564,20 +606,6 @@ func TestCalculateAvgScore(t *testing.T) {
 	re.Equal(uint64(5), calculateAvgScore(map[uint64]uint64{1: 2, 2: 5, 3: 8}))
 	// All zeros
 	re.Equal(uint64(0), calculateAvgScore(map[uint64]uint64{1: 0, 2: 0}))
-}
-
-func TestFindMaxScoreStore(t *testing.T) {
-	re := require.New(t)
-	// No scores meet threshold
-	re.Equal(uint64(0), findMaxScoreStore(map[uint64]uint64{1: 5, 2: 7}, 10))
-	// One score meets threshold
-	re.Equal(uint64(2), findMaxScoreStore(map[uint64]uint64{1: 5, 2: 15}, 10))
-	// Multiple scores meet threshold, pick max
-	re.Equal(uint64(3), findMaxScoreStore(map[uint64]uint64{1: 12, 2: 15, 3: 20}, 10))
-	// Multiple scores, same value, pick first max
-	re.Equal(uint64(2), findMaxScoreStore(map[uint64]uint64{1: 10, 2: 20, 3: 20}, 10))
-	// Empty map
-	re.Equal(uint64(0), findMaxScoreStore(map[uint64]uint64{}, 10))
 }
 
 func TestCountScoresAboveThreshold(t *testing.T) {
