@@ -18,7 +18,6 @@ import (
 	"context"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -127,19 +126,17 @@ func (suite *serviceLimitTestSuite) TestKeyspaceServiceLimit() {
 	re.Equal(requestRU, token.GetTokens())
 	re.Equal(int64(server.UnlimitedBurstLimit), token.GetSettings().GetBurstLimit())
 	// Set the service limit to a smaller value.
-	serviceLimit := requestRU / 2
+	serviceLimit := requestRU / 10
 	suite.setAndGetServiceLimit(re, serviceLimit)
 	// Acquire token buckets after setting the service limit.
-	time.Sleep(time.Second)
 	token = suite.acquireTokenBuckets(ctx, re, tokenBucketRequest)
-	// Due to the service limit has a 5-second burst limit, the returned tokens might be slightly exceed the service limit..
-	re.InDelta(serviceLimit, token.GetTokens(), serviceLimit*0.1)
+	// At most 5 * serviceLimit tokens can be granted.
+	re.Equal(serviceLimit*5, token.GetTokens())
 	re.Equal(int64(serviceLimit), token.GetSettings().GetBurstLimit())
 	// Set the service limit to a larger value.
-	serviceLimit = requestRU * 2
+	serviceLimit = requestRU
 	suite.setAndGetServiceLimit(re, serviceLimit)
 	// Acquire token buckets after setting the service limit.
-	time.Sleep(time.Second)
 	token = suite.acquireTokenBuckets(ctx, re, tokenBucketRequest)
 	re.Equal(requestRU, token.GetTokens())
 	re.Equal(int64(serviceLimit), token.GetSettings().GetBurstLimit())

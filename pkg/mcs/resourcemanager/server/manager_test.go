@@ -288,7 +288,6 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	limiter := m.GetKeyspaceServiceLimiter(constant.NullKeyspaceID)
 	re.NotNil(limiter)
 	re.Equal(0.0, limiter.ServiceLimit)
-	re.Equal(0.0, limiter.AvailableTokens)
 	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
 		Mode:     rmpb.GroupMode_RUMode,
@@ -311,19 +310,16 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	re.NoError(err)
 	limiter = m.GetKeyspaceServiceLimiter(1)
 	re.Equal(0.0, limiter.ServiceLimit)
-	re.Equal(0.0, limiter.AvailableTokens)
 	// Test set the service limit of the keyspace.
 	m.SetKeyspaceServiceLimit(1, 100.0)
 	limiter = m.GetKeyspaceServiceLimiter(1)
 	re.Equal(100.0, limiter.ServiceLimit)
-	re.Equal(0.0, limiter.AvailableTokens) // When setting from 0 to positive, available tokens remain 0
 	// Test set the service limit of the non-existing keyspace.
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Nil(limiter)
 	m.SetKeyspaceServiceLimit(2, 100.0)
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Equal(100.0, limiter.ServiceLimit)
-	re.Equal(0.0, limiter.AvailableTokens)
 	// Ensure the keyspace resource group manager is initialized correctly.
 	krgm := m.getKeyspaceResourceGroupManager(2)
 	re.NotNil(krgm)
