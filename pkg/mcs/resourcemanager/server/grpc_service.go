@@ -196,9 +196,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			logFields[0] = zap.Uint32("keyspace-id", keyspaceID)
 			logFields[1] = zap.String("resource-group", resourceGroupName)
 			// Get keyspace resource group manager to apply service limit later.
-			krgm := s.manager.getKeyspaceResourceGroupManager(keyspaceID)
+			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {
-				log.Warn("keyspace resource group manager not found", logFields...)
+				log.Warn("keyspace resource group manager not found", append(logFields, zap.Error(err))...)
 				continue
 			}
 			// Get the resource group from manager to acquire token buckets.

@@ -17,12 +17,14 @@ package safepoint_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
@@ -46,34 +48,48 @@ func TestSafepoint(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	// add some gc_safepoint to the server
+	now := time.Now().Truncate(time.Second)
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
-				ServiceID: "AAA",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 1,
+				ServiceID:  "AAA",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  10,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "BBB",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 2,
+				ServiceID:  "BBB",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  20,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "CCC",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 3,
+				ServiceID:  "CCC",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  30,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  1,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 		},
 		GCSafePoint:           1,
 		MinServiceGcSafepoint: 1,
 	}
 
-	storage := leaderServer.GetServer().GetStorage()
-	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+	gcStateManager := leaderServer.GetServer().GetGCStateManager()
+	// Skip writing "gc_worker.
+	for _, ssp := range list.ServiceGCSafepoints[:3] {
+		_, _, err = gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	_, err = gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	re.NoError(err)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	re.NoError(err)
 
 	// get the safepoints
 	args := []string{"-u", pdAddr, "service-gc-safepoint"}
@@ -87,7 +103,7 @@ func TestSafepoint(t *testing.T) {
 	// test if the points are what we expected
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
-	re.Len(l.ServiceGCSafepoints, 3)
+	re.Len(l.ServiceGCSafepoints, 4)
 
 	// sort the gc safepoints based on order of ServiceID
 	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
@@ -114,26 +130,41 @@ func TestSafepoint(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 
+	// "gc_worker" will still exist in the result set as it's pseudo.
 	var ll api.ListServiceGCSafepoint
 	re.NoError(json.Unmarshal(output, &ll))
 
 	re.Equal(uint64(1), ll.GCSafePoint)
-	re.Equal(uint64(0), ll.MinServiceGcSafepoint)
-	re.Empty(ll.ServiceGCSafepoints)
+	re.Equal(uint64(1), ll.MinServiceGcSafepoint)
+	re.Len(ll.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", ll.ServiceGCSafepoints[0].ServiceID)
 
-	// try delete the "gc_worker", should get an error message
+	// try delete the "gc_worker"
 	args = []string{"-u", pdAddr, "service-gc-safepoint", "delete", "gc_worker"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 
-	// output should be an error message
-	re.Equal("Failed to delete service GC safepoint: request pd http api failed with status: '500 Internal Server Error', body: '\"cannot remove service safe point of gc_worker\"'\n", string(output))
+	// This should be rejected previously, but as GC barrier became the replacement of services safe points and we no
+	// longer require the service safe point of "gc_worker", the deletion is now still allowed.
+	var msg string
+	re.NoError(json.Unmarshal(output, &msg))
+	re.Equal("Delete service GC safepoint successfully.", msg)
+
+	// "gc_worker" still exist after the deletion as it's pseudo.
+	args = []string{"-u", pdAddr, "service-gc-safepoint"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &ll))
+
+	re.Equal(uint64(1), ll.GCSafePoint)
+	re.Equal(uint64(1), ll.MinServiceGcSafepoint)
+	re.Len(ll.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", ll.ServiceGCSafepoints[0].ServiceID)
 
 	// try delete a non-exist safepoint, should return normally
 	args = []string{"-u", pdAddr, "service-gc-safepoint", "delete", "non_exist"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	var msg string
 	re.NoError(json.Unmarshal(output, &msg))
 	re.Equal("Delete service GC safepoint successfully.", msg)
 }

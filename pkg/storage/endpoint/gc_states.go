@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 // This file contains the definition of GCStateProvider. It provides methods for reading and writing GC states,
@@ -119,6 +120,47 @@ var (
 	_ json.Marshaler   = (*ServiceSafePoint)(nil)
 	_ json.Unmarshaler = (*ServiceSafePoint)(nil)
 )
+
+// GlobalGCBarrier represents a global GC barrier.
+// It looks like a GCBarrier now but the struct might change with the code evolve.
+// A more important reason is to distinguish from GC barrier by the type system,
+// avoiding potential misuse between them in code.
+type GlobalGCBarrier struct {
+	BarrierID      string                `json:"barrier_id"`
+	BarrierTS      uint64                `json:"barrier_ts"`
+	ExpirationTime typeutil.TimeOptional `json:"expiration_time"`
+}
+
+// NewGlobalGCBarrier creates a new GlobalGCBarrier. The given expirationTime will be rounded up to the next second if it's
+// not in integral seconds.
+// Passing nil to `expirationTime` means the barrier never expires.
+func NewGlobalGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time) *GlobalGCBarrier {
+	// Round up the expirationTime.
+	if expirationTime != nil {
+		rounded := expirationTime.Add(time.Second - time.Nanosecond).Truncate(time.Second)
+		*expirationTime = rounded
+	}
+	return &GlobalGCBarrier{
+		BarrierID:      barrierID,
+		BarrierTS:      barrierTS,
+		ExpirationTime: typeutil.TimeOptional{Time: expirationTime},
+	}
+}
+
+// IsExpired checks whether the GlobalGCBarrier is expired at the given time.
+func (b *GlobalGCBarrier) IsExpired(now time.Time) bool {
+	return b.ExpirationTime.Time != nil && now.After(*b.ExpirationTime.Time)
+}
+
+// String implements fmt.Stringer.
+func (b *GlobalGCBarrier) String() string {
+	expirationTime := "<nil>"
+	if b.ExpirationTime.Time != nil {
+		expirationTime = b.ExpirationTime.Time.String()
+	}
+	return fmt.Sprintf("GlobalGCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
+		b.BarrierID, b.BarrierTS, expirationTime)
+}
 
 // GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
 // barrier to be safe to read. The concept *GC barrier* is replacing the *service safe points*, but it reuses the
@@ -306,6 +348,7 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 }
 
 // LoadAllGCBarriers loads all GC barriers of the given keyspace.
+// Note that reserved barrier IDs (e.g., "gc_worker") are not filtered out here.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix(keyspaceID)
 	// TODO: Limit the count for each call.
@@ -321,6 +364,31 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 		barriers = append(barriers, gcBarrierFromServiceSafePoint(serviceSafePoint))
 	}
 	return barriers, nil
+}
+
+// LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
+func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier, error) {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	barrier, err := loadJSON[*GlobalGCBarrier](p.storage, key)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return barrier, nil
+}
+
+// LoadAllGlobalGCBarriers loads all global GC barriers.
+func (p GCStateProvider) LoadAllGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
+	prefix := keypath.GlobalGCBarrierPrefix()
+	return p.loadAllGlobalGCBarriersImpl(prefix)
+}
+
+func (p GCStateProvider) loadAllGlobalGCBarriersImpl(prefix string) ([]*GlobalGCBarrier, error) {
+	// TODO: Limit the count for each call.
+	_, barriers, err := loadJSONByPrefix[*GlobalGCBarrier](p.storage, prefix, 0)
+	if err != nil {
+		return nil, err
+	}
+	return barriers, err
 }
 
 // CompatibleLoadTiDBMinStartTS loads the minStartTS reported to etcd directly by TiDB.
@@ -422,12 +490,13 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 }
 
 // CompatibleLoadAllServiceGCSafePoints returns all services GC safe points with their etcd key.
-func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*ServiceSafePoint, error) {
-	prefix := keypath.GCBarrierPrefix(constant.NullKeyspaceID)
+func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints(keyspaceID uint32) ([]string, []*ServiceSafePoint, error) {
+	prefix := keypath.GCBarrierPrefix(keyspaceID)
 	keys, ssps, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	if len(keys) == 0 {
 		return []string{}, []*ServiceSafePoint{}, nil
 	}
@@ -485,6 +554,22 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 		Key:    key,
 		OpType: kv.RawTxnOpPut,
 		Value:  value,
+	})
+	return nil
+}
+
+// SetGlobalGCBarrier sets a global GCBarrier.
+func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GlobalGCBarrier) error {
+	key := keypath.GlobalGCBarrierPath(barrier.BarrierID)
+	return wb.writeJSON(key, barrier)
+}
+
+// DeleteGlobalGCBarrier deletes the global GCBarrier with the given barrierID.
+func (wb *GCStateWriteBatch) DeleteGlobalGCBarrier(barrierID string) error {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	wb.ops = append(wb.ops, kv.RawTxnOp{
+		Key:    key,
+		OpType: kv.RawTxnOpDelete,
 	})
 	return nil
 }

@@ -53,8 +53,8 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Equal(uint32(middlePriority), defaultGroup.Priority)
 
 	// Verify the default resource group has unlimited rate and burst limit.
-	re.Equal(float64(unlimitedRate), defaultGroup.getFillRate())
-	re.Equal(int64(unlimitedBurstLimit), defaultGroup.getBurstLimit())
+	re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
+	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
 }
 
 func TestAddResourceGroup(t *testing.T) {
@@ -784,7 +784,7 @@ func TestConciliateFillRate(t *testing.T) {
 			// Priority 2: basic 30+40=70, burst 0+5=5, total 75 < service limit 100, so gets full allocation (remaining: 25)
 			// Priority 1: basic 20+30=50, burst 2+0=2, total 52 > service limit 25, so gets basic demand proportionally
 			expectedOverrideFillRateList:   []float64{-1, -1, 10, 15},
-			expectedOverrideBurstLimitList: []int64{-1, -1, 10, 15},
+			expectedOverrideBurstLimitList: []int64{-1, 100, 10, 15},
 		},
 		{
 			name:                  "Unlimited burst limit with service limit constraint",
@@ -796,7 +796,7 @@ func TestConciliateFillRate(t *testing.T) {
 			// Priority 2: demand 30, gets full allocation (remaining: 70)
 			// Priority 1: demand 110 > remaining 70, basic demand 70 = remaining 70, proportional allocation: 70*(30/70)=30, 70*(40/70)=40
 			expectedOverrideFillRateList:   []float64{-1, 30, 40},
-			expectedOverrideBurstLimitList: []int64{-1, 30, 40},
+			expectedOverrideBurstLimitList: []int64{100, 30, 40},
 		},
 		{
 			name:                  "Partial burst demand satisfied with unlimited burst limit",
@@ -815,8 +815,8 @@ func TestConciliateFillRate(t *testing.T) {
 			name:                  "Default group with unlimited burst limit",
 			serviceLimit:          100,
 			priorityList:          []uint32{1},
-			fillRateSettingList:   []uint64{unlimitedRate},
-			burstLimitSettingList: []int64{unlimitedBurstLimit},
+			fillRateSettingList:   []uint64{UnlimitedRate},
+			burstLimitSettingList: []int64{UnlimitedBurstLimit},
 			ruDemandList:          []float64{1000},
 			// Default group with unlimited settings, basic demand = min(1000, unlimitedRate) = 1000
 			// Basic demand 1000 > service limit 100, so gets proportional allocation: 100*(1000/1000)=100

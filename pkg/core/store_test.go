@@ -286,3 +286,113 @@ func TestPutStore(t *testing.T) {
 	storesInfo.PutStore(store, opts...)
 	re.Equal(store, storesInfo.GetStore(store.GetID()))
 }
+
+func TestStoreInfoIsTiFlash(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		name                   string
+		labels                 map[string]string
+		expectedTiFlash        bool
+		expectedTiFlashWrite   bool
+		expectedTiFlashCompute bool
+	}{
+		{
+			name:                   "TiKV node without engine label",
+			labels:                 map[string]string{},
+			expectedTiFlash:        false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiKV node with engine label",
+			labels: map[string]string{
+				EngineKey: EngineTiKV,
+			},
+			expectedTiFlash:        false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiFlash classic node or write node",
+			labels: map[string]string{
+				EngineKey: EngineTiFlash,
+			},
+			expectedTiFlash:        true,
+			expectedTiFlashWrite:   true,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiFlash compute node",
+			labels: map[string]string{
+				EngineKey: EngineTiFlashCompute,
+			},
+			expectedTiFlash:        true,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: true,
+		},
+		{
+			name: "TiFlash node with additional labels",
+			labels: map[string]string{
+				EngineKey: EngineTiFlash,
+				"zone":    "zone1",
+				"rack":    "rack1",
+				"host":    "host1",
+			},
+			expectedTiFlash:        true,
+			expectedTiFlashWrite:   true,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "TiFlash compute node with additional labels",
+			labels: map[string]string{
+				EngineKey: EngineTiFlashCompute,
+				"zone":    "zone2",
+				"rack":    "rack2",
+				"host":    "host2",
+			},
+			expectedTiFlash:        true,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: true,
+		},
+		{
+			name: "Store with wrong engine value",
+			labels: map[string]string{
+				EngineKey: "unknown_engine",
+			},
+			expectedTiFlash:        false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "Store with case sensitive engine label",
+			labels: map[string]string{
+				EngineKey: "TiFlash", // uppercase, should not match
+			},
+			expectedTiFlash:        false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+		{
+			name: "Store with empty engine value",
+			labels: map[string]string{
+				EngineKey: "",
+			},
+			expectedTiFlash:        false,
+			expectedTiFlashWrite:   false,
+			expectedTiFlashCompute: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(*testing.T) {
+			store := NewStoreInfoWithLabel(1, tc.labels)
+			result := store.IsTiFlash()
+			re.Equal(tc.expectedTiFlash, result, "Expected to return %v for test case: %s", tc.expectedTiFlash, tc.name)
+			result = store.IsTiFlashWrite()
+			re.Equal(tc.expectedTiFlashWrite, result, "Expected to return %v for test case: %s", tc.expectedTiFlashWrite, tc.name)
+			result = store.IsTiFlashCompute()
+			re.Equal(tc.expectedTiFlashCompute, result, "Expected to return %v for test case: %s", tc.expectedTiFlashCompute, tc.name)
+		})
+	}
+}

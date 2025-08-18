@@ -40,7 +40,7 @@ require (
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20250630090911-e1f8338b7285
 	github.com/prometheus/client_golang v1.20.5
-	github.com/rleungx/leakcheck v1.0.1-0.20250717084353-7ab1a59a454c
+	github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3
 	github.com/sasha-s/go-deadlock v0.3.5
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99

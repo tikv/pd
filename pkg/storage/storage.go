@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -39,15 +40,14 @@ type Storage interface {
 	endpoint.MetaStorage
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
-	endpoint.GCSafePointStorage
 	endpoint.GCStateStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.SafePointV2Storage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
+	endpoint.MaintenanceStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
@@ -222,4 +222,13 @@ func AreRegionsLoaded(s Storage) bool {
 		return ps.regionLoaded == fromLeveldb
 	}
 	return ps.regionLoaded == fromEtcd
+}
+
+// IsBootstrapped returns whether the cluster is bootstrapped.
+func IsBootstrapped(s Storage) bool {
+	data, err := s.Load(keypath.ClusterBootstrapTimePath())
+	if err != nil {
+		return false
+	}
+	return data != ""
 }

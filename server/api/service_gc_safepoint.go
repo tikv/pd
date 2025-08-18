@@ -15,13 +15,16 @@
 package api
 
 import (
+	"math"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server"
 )
 
@@ -54,18 +57,39 @@ type ListServiceGCSafepoint struct {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *http.Request) {
-	storage := h.svr.GetStorage()
-	gcSafepoint, err := storage.LoadGCSafePoint()
+	gcStateManager := h.svr.GetGCStateManager()
+	gcState, err := gcStateManager.GetGCState(constant.NullKeyspaceID)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ssps, err := storage.LoadAllServiceGCSafePoints()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+
+	ssps := make([]*endpoint.ServiceSafePoint, 0, len(gcState.GCBarriers))
+	var gcWorkerSsp *endpoint.ServiceSafePoint
+	for _, barrier := range gcState.GCBarriers {
+		equivalentSsp := barrier.ToServiceSafePoint(constant.NullKeyspaceID)
+		ssps = append(ssps, equivalentSsp)
+		if equivalentSsp.ServiceID == keypath.GCWorkerServiceSafePointID {
+			gcWorkerSsp = equivalentSsp
+		}
 	}
-	var minSSp *endpoint.ServiceSafePoint
+	if gcWorkerSsp == nil {
+		// Generate a pseudo service safe point for GC worker. While GC worker's service safe point won't exist after
+		// the new GC states API is adopted, some existing tests relies on the fact to pass: the minimal service safe
+		// point indicates the lower bound of the timestamp that is safe to read. Now, this value becomes the txn safe
+		// point. We generate a pseudo service safe point with the value of txn safe point to provide the compatibility.
+		gcWorkerSsp = &endpoint.ServiceSafePoint{
+			ServiceID:  keypath.GCWorkerServiceSafePointID,
+			ExpiredAt:  math.MaxInt64,
+			SafePoint:  gcState.TxnSafePoint,
+			KeyspaceID: constant.NullKeyspaceID,
+		}
+		ssps = append(ssps, gcWorkerSsp)
+	}
+
+	// GC worker should always be the minimum one in most cases. However, this can be violated if the cluster is just
+	// upgraded from a old version where GC states API is not yet ready.
+	minSSp := gcWorkerSsp
 	for _, ssp := range ssps {
 		if (minSSp == nil || minSSp.SafePoint > ssp.SafePoint) &&
 			ssp.ExpiredAt > time.Now().Unix() {
@@ -77,7 +101,7 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 		minServiceGcSafepoint = minSSp.SafePoint
 	}
 	list := ListServiceGCSafepoint{
-		GCSafePoint:           gcSafepoint,
+		GCSafePoint:           gcState.GCSafePoint,
 		ServiceGCSafepoints:   ssps,
 		MinServiceGcSafepoint: minServiceGcSafepoint,
 	}
@@ -94,9 +118,16 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 // @Router   /gc/safepoint/{service_id} [delete]
 // @Tags     rule
 func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
-	storage := h.svr.GetStorage()
+	// Directly write to the storage and bypassing the existing constraint checks.
+	// It's risky to do this, but when this HTTP API is used, it usually means that we are already taking risks.
+	provider := h.svr.GetStorage().GetGCStateProvider()
 	serviceID := mux.Vars(r)["service_id"]
-	err := storage.RemoveServiceGCSafePoint(serviceID)
+	err := provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		// As GC barriers and service safe points shares the same data, deleting GC barriers acts the same as deleting
+		// service safe points.
+		err := wb.DeleteGCBarrier(constant.NullKeyspaceID, serviceID)
+		return err
+	})
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

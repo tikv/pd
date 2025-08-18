@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +35,9 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	ks "github.com/tikv/pd/pkg/keyspace/constant"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -83,7 +86,15 @@ var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
-	//  disable the heartbeat async runner in test
+	// use temp dir to ensure test isolation.
+	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
+		tempDir, err := os.MkdirTemp("", "pd_tests")
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create safeguard temp data dir for test server")
+		}
+		cfg.DataDir = tempDir
+	}
+	// disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
@@ -156,15 +167,37 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResetPDLeader() {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 }
 
 // ResignLeader resigns the leader of the server.
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
+}
+
+// ResignLeaderWithRetry resigns the leader of the server with retry.
+func (s *TestServer) ResignLeaderWithRetry() (err error) {
+	if !s.IsLeader() {
+		return
+	}
+	// The default timeout of moving an etcd leader is 5 seconds,
+	// set the retry times to 3 will get a maximum of ~15 seconds of trying.
+	const retryCount = 3
+	for retry := range retryCount {
+		err = s.ResignLeader()
+		if err == nil {
+			return
+		}
+		// Do not retry if the last attempt fails.
+		if retry == retryCount-1 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return
 }
 
 // State returns the current TestServer's state.
@@ -260,7 +293,7 @@ func (s *TestServer) GetServerID() uint64 {
 func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
-	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
+	return !s.server.IsClosed() && s.server.GetMember().IsServing()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -397,7 +430,7 @@ func (s *TestServer) BootstrapCluster() error {
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
 	for range WaitLeaderRetryTimes {
-		if s.server.GetMember().IsLeader() {
+		if s.server.GetMember().IsServing() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
@@ -463,6 +496,7 @@ type TestCluster struct {
 		pool map[uint64]struct{}
 	}
 	schedulingCluster *TestSchedulingCluster
+	tsoCluster        *TestTSOCluster
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -641,7 +675,7 @@ func (c *TestCluster) GetLeader() string {
 // GetFollower returns an follower of all servers
 func (c *TestCluster) GetFollower() string {
 	for name, s := range c.servers {
-		if !s.server.IsClosed() && !s.server.GetMember().IsLeader() {
+		if !s.server.IsClosed() && !s.server.GetMember().IsServing() {
 			return name
 		}
 	}
@@ -804,6 +838,9 @@ func (c *TestCluster) Destroy() {
 	if c.schedulingCluster != nil {
 		c.schedulingCluster.Destroy()
 	}
+	if c.tsoCluster != nil {
+		c.tsoCluster.Destroy()
+	}
 }
 
 // CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.
@@ -825,9 +862,22 @@ func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
 	return c.schedulingCluster.GetPrimaryServer()
 }
 
+// GetDefaultTSOPrimaryServer returns the primary TSO server for the default keyspace.
+func (c *TestCluster) GetDefaultTSOPrimaryServer() *tso.Server {
+	if c.tsoCluster == nil {
+		return nil
+	}
+	return c.tsoCluster.GetPrimaryServer(ks.DefaultKeyspaceID, ks.DefaultKeyspaceGroupID)
+}
+
 // SetSchedulingCluster sets the scheduling cluster.
 func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
 	c.schedulingCluster = cluster
+}
+
+// SetTSOCluster sets the TSO cluster.
+func (c *TestCluster) SetTSOCluster(cluster *TestTSOCluster) {
+	c.tsoCluster = cluster
 }
 
 // WaitOp represent the wait configuration

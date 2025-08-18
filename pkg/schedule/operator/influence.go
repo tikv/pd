@@ -59,20 +59,6 @@ type StoreInfluence struct {
 	StepCost     map[storelimit.Type]int64
 }
 
-// GetStoreInfluenceByRole returns the influence of the store according to the role.
-func (s *StoreInfluence) GetStoreInfluenceByRole(r core.Rule) int64 {
-	switch r {
-	case core.LeaderScatter:
-		return s.LeaderCount
-	case core.PeerScatter:
-		return s.RegionCount
-	case core.LearnerScatter:
-		return s.RegionCount
-	default:
-		return 0
-	}
-}
-
 func (s *StoreInfluence) add(other *StoreInfluence) {
 	s.RegionCount += other.RegionCount
 	s.RegionSize += other.RegionSize
@@ -97,7 +83,13 @@ func (s *StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 			return 0
 		}
 	case constant.RegionKind:
-		return s.RegionSize
+		switch kind.Policy {
+		case constant.ByCount:
+			return s.RegionCount
+		default:
+			return s.RegionSize
+		}
+
 	case constant.WitnessKind:
 		return s.WitnessCount
 	default:

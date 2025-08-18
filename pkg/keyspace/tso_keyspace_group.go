@@ -892,6 +892,10 @@ func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, prior
 		return err
 	}
 	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	log.Info("set priority for keyspace group",
+		zap.Uint32("keyspace-group-id", id),
+		zap.String("node", node),
+		zap.Int("priority", priority))
 	return nil
 }
 
@@ -1150,7 +1154,7 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", errs.ErrKeyspaceGroupNotExists.FastGenByArgs(id)
 	}
 
-	primaryPath := keypath.LeaderPath(&keypath.MsParam{
+	primaryPath := keypath.ElectionPath(&keypath.MsParam{
 		ServiceName: mcs.TSOServiceName,
 		GroupID:     id,
 	})
@@ -1163,6 +1167,13 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", errs.ErrKeyspaceGroupPrimaryNotFound
 	}
 	// The format of leader name is address-groupID.
-	contents := strings.Split(leader.GetName(), "-")
-	return contents[0], err
+	return parsePrimaryName(leader.Name), err
+}
+
+func parsePrimaryName(name string) string {
+	idx := strings.LastIndex(name, "-")
+	if idx != -1 {
+		return name[:idx]
+	}
+	return name
 }

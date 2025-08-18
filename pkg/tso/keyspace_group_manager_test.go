@@ -85,9 +85,9 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		BackendEndpoints:          suite.backendEndpoints,
 		ListenAddr:                addr,
 		AdvertiseListenAddr:       addr,
-		LeaderLease:               mcs.DefaultLeaderLease,
+		LeaderLease:               mcs.DefaultLease,
 		TSOUpdatePhysicalInterval: 50 * time.Millisecond,
-		TSOSaveInterval:           time.Duration(mcs.DefaultLeaderLease) * time.Second,
+		TSOSaveInterval:           time.Duration(mcs.DefaultLease) * time.Second,
 		MaxResetTSGap:             time.Hour * 24,
 		TLSConfig:                 nil,
 	}
@@ -166,9 +166,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	allocator, err := kgm.GetAllocator(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, allocator.keyspaceGroupID)
-	re.Equal(mcs.DefaultLeaderLease, allocator.cfg.GetLeaderLease())
+	re.Equal(mcs.DefaultLease, allocator.cfg.GetLease())
 	re.Equal(time.Hour*24, allocator.cfg.GetMaxResetTSGap())
-	re.Equal(time.Duration(mcs.DefaultLeaderLease)*time.Second, allocator.cfg.GetTSOSaveInterval())
+	re.Equal(time.Duration(mcs.DefaultLease)*time.Second, allocator.cfg.GetTSOSaveInterval())
 	re.Equal(time.Duration(50)*time.Millisecond, allocator.cfg.GetTSOUpdatePhysicalInterval())
 }
 
@@ -629,11 +629,11 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 
 	// Wait until the keyspace group 0 is ready for serving tso requests.
 	testutil.Eventually(re, func() bool {
-		member, err := mgr.GetElectionMember(0, 0)
+		member, err := mgr.GetMember(0, 0)
 		if err != nil {
 			return false
 		}
-		return member.IsLeader()
+		return member.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Should succeed because keyspace 0 is actually in keyspace group 0, which is served
@@ -1188,7 +1188,7 @@ func waitForPrimariesServing(
 ) {
 	testutil.Eventually(re, func() bool {
 		for j, id := range ids {
-			if member, err := mgrs[j].GetElectionMember(id, id); err != nil || member == nil || !member.IsLeader() {
+			if member, err := mgrs[j].GetMember(id, id); err != nil || member == nil || !member.IsServing() {
 				return false
 			}
 			if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, 1); err != nil {

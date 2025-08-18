@@ -92,6 +92,33 @@ func newRegionTreeWithCountRef() *regionTree {
 	}
 }
 
+// GetCountByRange returns the number of regions in the range [startKey, endKey).
+func (t *regionTree) GetCountByRange(startKey, endKey []byte) int {
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	item, startIndex := t.tree.GetWithIndex(start)
+	// if item is nil, it means that the startKey is not found in the tree, we need to check the previous item, avoid
+	// to the startKey in the previous iterm.
+	// regions: [a c] [c f] [f h], startKey: b
+	// the first item is index 2 [c,f]
+	if item == nil {
+		item = t.tree.GetAt(startIndex - 1)
+		// if the item is not nil and the start key in the previous item range, the previous should be included.
+		if item != nil && bytes.Compare(item.GetEndKey(), startKey) > 0 {
+			startIndex--
+		}
+	}
+	var endIndex int
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = t.tree.Len()
+	} else {
+		_, endIndex = t.tree.GetWithIndex(end)
+	}
+	return endIndex - startIndex
+}
+
 func (t *regionTree) length() int {
 	if t == nil {
 		return 0

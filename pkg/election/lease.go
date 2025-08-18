@@ -102,7 +102,7 @@ func (l *Lease) Close() error {
 }
 
 // IsExpired checks if the lease is expired. If it returns true,
-// current leader should step down and try to re-elect again.
+// the current leader/primary should step down and try to re-elect again.
 func (l *Lease) IsExpired() bool {
 	if l == nil || l.expireTime.Load() == nil {
 		return true

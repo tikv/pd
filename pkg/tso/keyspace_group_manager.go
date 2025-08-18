@@ -281,7 +281,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 
 func (s *state) getNextPrimaryToReset(
 	groupID int, localAddress string,
-) (member member.ElectionMember, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
+) (member member.Election, kg *endpoint.KeyspaceGroup, localPriority, nextGroupID int) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -291,7 +291,7 @@ func (s *state) getNextPrimaryToReset(
 	for j := 0; j < groupSize; groupID, j = (groupID+1)%groupSize, j+1 {
 		allocator := s.allocators[groupID]
 		kg := s.kgs[groupID]
-		if allocator != nil && kg != nil && allocator.GetMember().IsLeader() {
+		if allocator != nil && kg != nil && allocator.GetMember().IsServing() {
 			maxPriority := math.MinInt32
 			localPriority := math.MaxInt32
 			for _, member := range kg.Members {
@@ -315,7 +315,7 @@ func (s *state) getNextPrimaryToReset(
 }
 
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
-// The replicas campaign for the leaders which provide the tso service for the corresponding
+// The replicas campaign for the primaries which provide the tso service for the corresponding
 // keyspace groups.
 type KeyspaceGroupManager struct {
 	// state is the in-memory state of the keyspace groups
@@ -589,18 +589,18 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					log.Warn("no alive tso node", zap.String("local-address", kgm.tsoServiceID.ServiceAddr))
 					continue
 				}
-				// If there is a alive member with higher priority, reset the leader.
-				resetLeader := false
+				// If there is a alive member with higher priority, reset the primary.
+				resetPrimary := false
 				for _, m := range kg.Members {
 					if m.Priority <= localPriority {
 						continue
 					}
 					if _, ok := aliveTSONodes[typeutil.TrimScheme(m.Address)]; ok {
-						resetLeader = true
+						resetPrimary = true
 						break
 					}
 				}
-				if resetLeader {
+				if resetPrimary {
 					select {
 					case <-ctx.Done():
 					default:
@@ -686,7 +686,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		kgm.metrics.mergeTargetGauge.Dec()
 	}
 
-	// If this host is already assigned a replica of this keyspace group, i.e., the election member
+	// If this host is already assigned a replica of this keyspace group, i.e., the member
 	// is already initialized, just update the meta.
 	if oldAM != nil {
 		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
@@ -694,7 +694,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 
 	// If the keyspace group is not initialized, initialize it.
-	// The format of leader name is address-groupID.
+	// The format of primary name is address-groupID.
 	uniqueName := fmt.Sprintf("%s-%05d", kgm.electionNamePrefix, group.ID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election",
@@ -727,7 +727,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return
 		}
 		participant.SetCampaignChecker(func(*election.Leadership) bool {
-			return splitSourceAM.GetMember().IsLeader()
+			return splitSourceAM.GetMember().IsServing()
 		})
 	}
 	// Initialize all kinds of maps.
@@ -991,10 +991,10 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, nil
 }
 
-// GetElectionMember returns the election member of the keyspace group serving the given keyspace.
-func (kgm *KeyspaceGroupManager) GetElectionMember(
+// GetMember returns the member of the keyspace group serving the given keyspace.
+func (kgm *KeyspaceGroupManager) GetMember(
 	keyspaceID, keyspaceGroupID uint32,
-) (member.ElectionMember, error) {
+) (member.Election, error) {
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
@@ -1080,10 +1080,10 @@ func (kgm *KeyspaceGroupManager) GetMinTS() (_ pdpb.Timestamp, kgAskedCount, kgT
 		// If any keyspace group hasn't elected primary, we can't know its current timestamp of
 		// the group, so as to the min ts across all keyspace groups. Return error in this case.
 		if !allocator.isPrimaryElected() {
-			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, errs.ErrGetMinTS.FastGenByArgs("leader is not elected")
+			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, errs.ErrGetMinTS.FastGenByArgs(fmt.Sprintf("keyspace group %d's primary is not elected", i))
 		}
 		// Skip the keyspace groups that are not served by this TSO Server/Pod.
-		if !allocator.isPrimary() {
+		if !allocator.isServing() {
 			continue
 		}
 		kgAskedCount++
@@ -1287,7 +1287,7 @@ mergeLoop:
 		}
 		// If the current TSO node is not the merge target TSO primary node,
 		// we still need to keep this loop running to avoid unexpected primary changes.
-		if !allocator.isPrimary() {
+		if !allocator.isServing() {
 			log.Debug("current tso node is not the merge target primary",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
@@ -1297,11 +1297,11 @@ mergeLoop:
 		// Check if the keyspace group primaries in the merge map are all gone.
 		if len(mergeMap) != 0 {
 			for id := range mergeMap {
-				leaderPath := keypath.LeaderPath(&keypath.MsParam{
+				electionPath := keypath.ElectionPath(&keypath.MsParam{
 					ServiceName: mcs.TSOServiceName,
 					GroupID:     id,
 				})
-				val, err := kgm.storage.Load(leaderPath)
+				val, err := kgm.storage.Load(electionPath)
 				if err != nil {
 					log.Error("failed to check if the keyspace group primary in the merge list has gone",
 						zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1408,7 +1408,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 		}
 		for _, groupID := range kgm.getSplittingGroups() {
 			allocator, group := kgm.getKeyspaceGroupMeta(groupID)
-			if !allocator.isPrimary() {
+			if !allocator.isServing() {
 				continue
 			}
 			if len(group.Keyspaces) == 0 {

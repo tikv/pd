@@ -16,6 +16,7 @@ package gc
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"slices"
 	"strconv"
@@ -88,7 +89,7 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	kvBase := kv.NewEtcdKVBase(client)
 
 	// Simulate a member which id.Allocator may need to check.
-	err := kvBase.Save(keypath.LeaderPath(nil), "member1")
+	err := kvBase.Save(keypath.ElectionPath(nil), "member1")
 	re.NoError(err)
 
 	s := endpoint.NewStorageEndpoint(kvBase, nil)
@@ -188,6 +189,41 @@ func (s *gcStateManagerTestSuite) deleteTiDBMinStartTS(keyspaceID uint32, instan
 	key := prefix + instance
 	err = s.storage.Remove(key)
 	re.NoError(err)
+}
+
+func (s *gcStateManagerTestSuite) putLegacyGCWorkerServiceSafePoint(keyspaceID uint32, initialValue uint64) {
+	re := s.Require()
+	redirectedKeyspaceID, err := s.manager.redirectKeyspace(keyspaceID, false)
+	re.NoError(err)
+	re.Equal(keyspaceID, redirectedKeyspaceID, "legacy service safe point is not applicable for non-null keyspaces configured in unified GC mode")
+	key := keypath.ServiceGCSafePointPath(keypath.GCWorkerServiceSafePointID)
+	if keyspaceID != constant.NullKeyspaceID {
+		key = keypath.ServiceSafePointV2Path(keyspaceID, keypath.GCWorkerServiceSafePointID)
+	}
+	ssp := &endpoint.ServiceSafePoint{
+		ServiceID:  keypath.GCWorkerServiceSafePointID,
+		ExpiredAt:  math.MaxInt64,
+		SafePoint:  initialValue,
+		KeyspaceID: keyspaceID,
+	}
+	sspStr, err := json.Marshal(ssp)
+	re.NoError(err)
+	err = s.storage.Save(key, string(sspStr))
+	re.NoError(err)
+}
+
+func (s *gcStateManagerTestSuite) getLegacyGCWorkerServiceSafePoint(keyspaceID uint32) *endpoint.ServiceSafePoint {
+	re := s.Require()
+	// Use the reading method provided in GCStateProvider instead of reading etcd directly to avoid the potential
+	// mistake to read different path from that should actually be read.
+	_, ssps, err := s.provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
+	re.NoError(err)
+	for _, ssp := range ssps {
+		if ssp.ServiceID == keypath.GCWorkerServiceSafePointID {
+			return ssp
+		}
+	}
+	return nil
 }
 
 func (s *gcStateManagerTestSuite) TestAdvanceTxnSafePointBasic() {
@@ -337,65 +373,69 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointBasic() {
 	}
 }
 
-func (s *gcStateManagerTestSuite) testGCSafePointUpdateSequentiallyImpl(loadFunc func() (uint64, error)) {
+func (s *gcStateManagerTestSuite) testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID uint32, loadFunc func(keyspaceID uint32) (uint64, error)) {
 	re := s.Require()
 	curGCSafePoint := uint64(0)
 	// Update GC safe point with asc value.
 	for id := 10; id < 20; id++ {
-		safePoint, err := loadFunc()
+		safePoint, err := loadFunc(keyspaceID)
 		re.NoError(err)
 		re.Equal(curGCSafePoint, safePoint)
 		previousGCSafePoint := curGCSafePoint
 		curGCSafePoint = uint64(id)
 		// Blocked by txn safe point.
-		_, _, err = s.manager.CompatibleUpdateGCSafePoint(curGCSafePoint)
+		_, _, err = s.manager.CompatibleUpdateGCSafePoint(keyspaceID, curGCSafePoint)
 		re.Error(err)
 		re.ErrorIs(err, errs.ErrGCSafePointExceedsTxnSafePoint)
-		_, err = s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, curGCSafePoint, time.Now())
+		_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, curGCSafePoint, time.Now())
 		re.NoError(err)
-		oldGCSafePoint, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(curGCSafePoint)
+		oldGCSafePoint, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(keyspaceID, curGCSafePoint)
 		re.NoError(err)
 		re.Equal(previousGCSafePoint, oldGCSafePoint)
 		re.Equal(curGCSafePoint, newGCSafePoint)
 	}
 
-	gcSafePoint, err := s.manager.CompatibleLoadGCSafePoint()
+	gcSafePoint, err := s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 	re.NoError(err)
 	re.Equal(curGCSafePoint, gcSafePoint)
 	// Update with smaller value should be failed.
-	oldGCSafePoint, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(gcSafePoint - 5)
+	oldGCSafePoint, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(keyspaceID, gcSafePoint-5)
 	re.NoError(err)
 	re.Equal(gcSafePoint, oldGCSafePoint)
 	re.Equal(gcSafePoint, newGCSafePoint)
-	curGCSafePoint, err = s.manager.CompatibleLoadGCSafePoint()
+	curGCSafePoint, err = s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 	re.NoError(err)
 	// Current GC safe point should not change since the update value was smaller
 	re.Equal(gcSafePoint, curGCSafePoint)
 }
 
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithLegacyLoad() {
-	s.testGCSafePointUpdateSequentiallyImpl(func() (uint64, error) {
-		return s.manager.CompatibleLoadGCSafePoint()
-	})
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		s.testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID, func(keyspaceID uint32) (uint64, error) {
+			return s.manager.CompatibleLoadGCSafePoint(keyspaceID)
+		})
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithNewLoad() {
-	s.testGCSafePointUpdateSequentiallyImpl(func() (uint64, error) {
-		state, err := s.manager.GetGCState(constant.NullKeyspaceID)
-		if err != nil {
-			return 0, err
-		}
-		return state.GCSafePoint, nil
-	})
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		s.testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID, func(keyspaceID uint32) (uint64, error) {
+			state, err := s.manager.GetGCState(keyspaceID)
+			if err != nil {
+				return 0, err
+			}
+			return state.GCSafePoint, nil
+		})
+	}
 }
 
-func (s *gcStateManagerTestSuite) TestGCSafePointUpdateConcurrently() {
+func (s *gcStateManagerTestSuite) testCompatibleGCSafePointUpdateConcurrentlyImpl(keyspaceID uint32) {
 	maxGCSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
 	re := s.Require()
 
 	// Advance txn safe point first, otherwise the GC safe point can't be advanced.
-	_, err := s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, maxGCSafePoint, time.Now())
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, maxGCSafePoint, time.Now())
 	re.NoError(err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -418,12 +458,12 @@ func (s *gcStateManagerTestSuite) TestGCSafePointUpdateConcurrently() {
 				// Mix using new and legacy API
 				var err error
 				if (gcSafePoint/step)%2 == 0 {
-					_, _, err = s.manager.AdvanceGCSafePoint(constant.NullKeyspaceID, gcSafePoint)
+					_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, gcSafePoint)
 					if err != nil && errors.ErrorEqual(err, errs.ErrDecreasingGCSafePoint) {
 						err = nil
 					}
 				} else {
-					_, _, err = s.manager.CompatibleUpdateGCSafePoint(gcSafePoint)
+					_, _, err = s.manager.CompatibleUpdateGCSafePoint(keyspaceID, gcSafePoint)
 				}
 				if err != nil {
 					errCh <- err
@@ -440,26 +480,35 @@ func (s *gcStateManagerTestSuite) TestGCSafePointUpdateConcurrently() {
 		re.NoError(err)
 	default:
 	}
-	gcSafePoint, err := s.manager.CompatibleLoadGCSafePoint()
+	gcSafePoint, err := s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 	re.NoError(err)
 	re.Equal(maxGCSafePoint, gcSafePoint)
 }
 
-func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
+func (s *gcStateManagerTestSuite) TestCompatibleGCSafePointUpdateConcurrently() {
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		s.testCompatibleGCSafePointUpdateConcurrentlyImpl(keyspaceID)
+	}
+}
+
+func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointUpdateNullKeyspace() {
+	keyspaceID := constant.NullKeyspaceID
 	re := s.Require()
 	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"
+	nativeBRServiceID := "native_br"
 	cdcServiceSafePoint := uint64(10)
 	gcWorkerSafePoint := uint64(8)
+	nativeBRSafePoint := uint64(14)
 	brSafePoint := uint64(15)
 
 	wg := sync.WaitGroup{}
-	wg.Add(5)
+	wg.Add(6)
 	// Updating the service safe point for cdc to 10 should success
 	go func() {
 		defer wg.Done()
-		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
+		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
 		re.NoError(err)
 		re.True(updated)
 		// The service will init the service safepoint to 0(<10 for cdc) for gc_worker.
@@ -469,7 +518,7 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	// Updating the service safe point for br to 15 should success
 	go func() {
 		defer wg.Done()
-		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, 10000, time.Now())
+		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, brSafePoint, 10000, time.Now())
 		re.NoError(err)
 		re.True(updated)
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
@@ -480,7 +529,7 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	go func() {
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
-		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 		re.NoError(err)
 		re.True(updated)
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
@@ -488,10 +537,21 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
+	// Updating the service safe point to 14 for native_br should succeed
+	go func() {
+		defer wg.Done()
+		// update with valid ttl for native_br should succeed
+		min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, nativeBRServiceID, nativeBRSafePoint, math.MaxInt64, time.Now())
+		re.NoError(err)
+		re.True(updated)
+		// the current min safepoint should be 8 for gc_worker(cdc 10)
+		re.Equal(gcWorkerServiceID, min.ServiceID)
+	}()
+
 	go func() {
 		defer wg.Done()
 		// Updating the service safe point of gc_worker's service with ttl not infinity should be failed.
-		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, 10000, 10, time.Now())
+		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, gcWorkerServiceID, 10000, 10, time.Now())
 		re.Error(err)
 		re.False(updated)
 	}()
@@ -500,7 +560,7 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	go func() {
 		defer wg.Done()
 		brTTL := int64(-100)
-		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(brServiceID, uint64(10000), brTTL, time.Now())
+		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, uint64(10000), brTTL, time.Now())
 		re.NoError(err)
 		re.False(updated)
 	}()
@@ -508,7 +568,7 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	wg.Wait()
 	// Updating the service safe point to 15(>10 for cdc) for gc_worker
 	gcWorkerSafePoint = uint64(15)
-	min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+	min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(cdcServiceID, min.ServiceID)
@@ -517,44 +577,46 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	// The value shouldn't be updated with current service safe point smaller than the min safe point.
 	brTTL := int64(100)
 	brSafePoint = min.SafePoint - 5
-	min, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
+	min, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, brSafePoint, brTTL, time.Now())
 	re.NoError(err)
 	re.False(updated)
 
 	brSafePoint = min.SafePoint + 10
-	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, brServiceID, brSafePoint, brTTL, time.Now())
 	re.NoError(err)
 	re.True(updated)
 }
 
-func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointRoundingTTL() {
+func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointRoundingTTL() {
 	re := s.Require()
 
 	var maxTTL int64 = 9223372036
 
-	_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 10, maxTTL, time.Now())
-	re.NoError(err)
-	re.True(updated)
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		_, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 10, maxTTL, time.Now())
+		re.NoError(err)
+		re.True(updated)
 
-	state, err := s.manager.GetGCState(constant.NullKeyspaceID)
-	re.NoError(err)
-	re.Len(state.GCBarriers, 1)
-	re.Equal("svc1", state.GCBarriers[0].BarrierID)
-	re.NotNil(state.GCBarriers[0].ExpirationTime)
-	// The given `maxTTL` is valid but super large.
-	re.True(state.GCBarriers[0].ExpirationTime.After(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0].ExpirationTime)
+		state, err := s.manager.GetGCState(keyspaceID)
+		re.NoError(err)
+		re.Len(state.GCBarriers, 1)
+		re.Equal("svc1", state.GCBarriers[0].BarrierID)
+		re.NotNil(state.GCBarriers[0].ExpirationTime)
+		// The given `maxTTL` is valid but super large.
+		re.True(state.GCBarriers[0].ExpirationTime.After(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0].ExpirationTime)
 
-	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 10, maxTTL+1, time.Now())
-	re.NoError(err)
-	re.True(updated)
+		_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 10, maxTTL+1, time.Now())
+		re.NoError(err)
+		re.True(updated)
 
-	state, err = s.manager.GetGCState(constant.NullKeyspaceID)
-	re.NoError(err)
-	re.Len(state.GCBarriers, 1)
-	re.Equal("svc1", state.GCBarriers[0].BarrierID)
-	re.Nil(state.GCBarriers[0].ExpirationTime)
-	// Nil in GCBarrier.ExpirationTime represents never expires.
-	re.False(state.GCBarriers[0].IsExpired(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0])
+		state, err = s.manager.GetGCState(keyspaceID)
+		re.NoError(err)
+		re.Len(state.GCBarriers, 1)
+		re.Equal("svc1", state.GCBarriers[0].BarrierID)
+		re.Nil(state.GCBarriers[0].ExpirationTime)
+		// Nil in GCBarrier.ExpirationTime represents never expires.
+		re.False(state.GCBarriers[0].IsExpired(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0])
+	}
 }
 
 func (s *gcStateManagerTestSuite) getGCBarrier(keyspaceID uint32, barrierID string) *endpoint.GCBarrier {
@@ -575,6 +637,20 @@ func (s *gcStateManagerTestSuite) getAllGCBarriers(keyspaceID uint32) []*endpoin
 	state, err := s.manager.GetGCState(keyspaceID)
 	re.NoError(err)
 	return state.GCBarriers
+}
+
+func (s *gcStateManagerTestSuite) getGlobalGCBarrier(barrierID string) *endpoint.GlobalGCBarrier {
+	re := s.Require()
+	barrier, err := s.manager.gcMetaStorage.LoadGlobalGCBarrier(barrierID)
+	re.NoError(err)
+	return barrier
+}
+
+func (s *gcStateManagerTestSuite) getAllGlobalGCBarriers() []*endpoint.GlobalGCBarrier {
+	re := s.Require()
+	barriers, err := s.manager.gcMetaStorage.LoadAllGlobalGCBarriers()
+	re.NoError(err)
+	return barriers
 }
 
 // ptime is a helper for getting pointer of time.
@@ -836,19 +912,21 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	}
 
-	// Rejects reserved barrier ID: rejects "gc_worker" in NullKeyspace.
-	_, err := s.manager.SetGCBarrier(constant.NullKeyspaceID, "gc_worker", 100, time.Hour, now)
-	re.Error(err)
-	re.ErrorIs(err, errs.ErrReservedGCBarrierID)
-	re.Nil(s.getGCBarrier(constant.NullKeyspaceID, "gc_worker"))
-	_, err = s.manager.DeleteGCBarrier(constant.NullKeyspaceID, "gc_worker")
-	re.Error(err)
-	re.ErrorIs(err, errs.ErrReservedGCBarrierID)
+	// Rejects reserved barrier ID: rejects "gc_worker".
+	for _, keyspaceID := range s.keyspacePresets.all {
+		_, err := s.manager.SetGCBarrier(keyspaceID, "gc_worker", 100, time.Hour, now)
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrReservedGCBarrierID)
+		re.Nil(s.getGCBarrier(keyspaceID, "gc_worker"))
+		_, err = s.manager.DeleteGCBarrier(keyspaceID, "gc_worker")
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrReservedGCBarrierID)
+	}
 
 	// Isolated between different keyspaces.
 	ks1 := s.keyspacePresets.manageable[0]
 	ks2 := s.keyspacePresets.manageable[1]
-	_, err = s.manager.SetGCBarrier(ks1, "b1", 200, time.Hour, now)
+	_, err := s.manager.SetGCBarrier(ks1, "b1", 200, time.Hour, now)
 	re.NoError(err)
 	expected := endpoint.NewGCBarrier("b1", 200, ptime(now.Add(time.Hour)))
 	re.Equal(expected, s.getGCBarrier(ks1, "b1"))
@@ -859,126 +937,432 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 	re.Empty(res.BlockerDescription)
 }
 
-func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
+func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	re := s.Require()
 
+	now := time.Date(2025, 03, 06, 11, 50, 30, 0, time.Local)
+	re.Empty(s.getAllGlobalGCBarriers())
+
+	// Set global GC barrier and read back.
+	b, err := s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
+	re.NoError(err)
+	expected := endpoint.NewGlobalGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
+	re.Equal(expected, b)
+	bs := s.getAllGlobalGCBarriers()
+	re.Len(bs, 1)
+	re.Equal(expected, bs[0])
+
+	// Empty barrierID is forbidden.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "", 10, time.Hour, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "")
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+
+	// Non-positive TTL is forbidden.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, 0, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 10, 0, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	// b1 is not changed.
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+	// b2 still doesn't exist.
+	re.Nil(s.getGlobalGCBarrier("b2"))
+
+	// Updating the value of the existing GC barrier
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour, now)
+	re.NoError(err)
+	expected = endpoint.NewGlobalGCBarrier("b1", 15, ptime(now.Add(time.Hour)))
+	re.Equal(expected, b)
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour*2, now)
+	re.NoError(err)
+	expected = endpoint.NewGlobalGCBarrier("b1", 15, ptime(now.Add(time.Hour*2)))
+	re.Equal(expected, b)
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	// Allows shrinking the barrier ts.
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
+	re.NoError(err)
+	expected = endpoint.NewGlobalGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
+	re.Equal(expected, b)
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	// Never expiring
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Duration(math.MaxInt64), now)
+	re.NoError(err)
+	expected = endpoint.NewGlobalGCBarrier("b1", 10, nil)
+	re.Equal(expected, b)
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	// global GC barriers blocks the txn safe point.
 	for _, keyspaceID := range s.keyspacePresets.manageable {
-		s.setTiDBMinStartTS(keyspaceID, "instance1", 10)
-		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 5, time.Now())
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 5, now)
 		re.NoError(err)
 		re.Equal(uint64(0), res.OldTxnSafePoint)
 		re.Equal(uint64(5), res.NewTxnSafePoint)
 		re.Empty(res.BlockerDescription)
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 10, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 10, now)
 		re.NoError(err)
 		re.Equal(uint64(5), res.OldTxnSafePoint)
 		re.Equal(uint64(10), res.NewTxnSafePoint)
 		re.Empty(res.BlockerDescription)
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 15, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 15, now)
 		re.NoError(err)
 		re.Equal(uint64(10), res.OldTxnSafePoint)
 		re.Equal(uint64(10), res.NewTxnSafePoint)
 		re.Equal(uint64(15), res.Target)
-		re.Regexp("TiDBMinStartTS.*instance1", res.BlockerDescription)
-
+		re.Contains(res.BlockerDescription, "GlobalGCBarrier { BarrierID: \"b1\"")
 		s.checkTxnSafePoint(keyspaceID, 10)
+	}
 
-		// Mixing multiple TiDB min start ts and GC barriers.
-		s.setTiDBMinStartTS(keyspaceID, "instance1", 20)
-		s.setTiDBMinStartTS(keyspaceID, "instance2", 22)
-		s.setTiDBMinStartTS(keyspaceID, "instance3", 26)
-		_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 24, time.Hour, time.Now())
-		re.NoError(err)
-		_, err = s.manager.SetGCBarrier(keyspaceID, "b2", 28, time.Hour, time.Now())
-		re.NoError(err)
-
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour, now)
+	re.NoError(err)
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		// AdvanceTxnSafePoint advances the txn safe point as much as possible.
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 20, now)
 		re.NoError(err)
 		re.Equal(uint64(10), res.OldTxnSafePoint)
+		re.Equal(uint64(15), res.NewTxnSafePoint)
+		re.Equal(uint64(20), res.Target)
+		re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+	}
+
+	// Multiple GC barriers
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 20, time.Hour, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 20, time.Hour, now)
+	re.NoError(err)
+	re.Len(s.getAllGlobalGCBarriers(), 2)
+	expected = endpoint.NewGlobalGCBarrier("b1", 20, ptime(now.Add(time.Hour)))
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+	expected = endpoint.NewGlobalGCBarrier("b2", 20, ptime(now.Add(time.Hour)))
+	re.Equal(expected, s.getGlobalGCBarrier("b2"))
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 25, now)
+		re.NoError(err)
+		re.Equal(uint64(15), res.OldTxnSafePoint)
 		re.Equal(uint64(20), res.NewTxnSafePoint)
+		re.Equal(uint64(25), res.Target)
+		re.NotEmpty(res.BlockerDescription)
+	}
+
+	// When there are different GC barriers, block with the minimum one.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 25, time.Hour, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 27, time.Hour, now)
+	re.NoError(err)
+	re.Len(s.getAllGlobalGCBarriers(), 2)
+	expected = endpoint.NewGlobalGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+	expected = endpoint.NewGlobalGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
+	re.Equal(expected, s.getGlobalGCBarrier("b2"))
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
+		re.NoError(err)
+		re.Equal(uint64(20), res.OldTxnSafePoint)
+		re.Equal(uint64(25), res.NewTxnSafePoint)
+		re.Equal(uint64(30), res.Target)
+		re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+	}
+
+	// Deleting GC barriers
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b1")
+	re.NoError(err)
+	expected = endpoint.NewGlobalGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
+	re.Equal(expected, b)
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
+		re.NoError(err)
+		re.Equal(uint64(25), res.OldTxnSafePoint)
+		re.Equal(uint64(27), res.NewTxnSafePoint)
+		re.Equal(uint64(30), res.Target)
+		re.Contains(res.BlockerDescription, "BarrierID: \"b2\"")
+	}
+
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b2")
+	re.NoError(err)
+	expected = endpoint.NewGlobalGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
+	re.Equal(expected, b)
+	re.Empty(s.getAllGlobalGCBarriers())
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
+		re.NoError(err)
+		re.Equal(uint64(27), res.OldTxnSafePoint)
+		re.Equal(uint64(30), res.NewTxnSafePoint)
+		re.Equal(uint64(30), res.Target)
+		re.Empty(res.BlockerDescription)
+	}
+
+	// Deleting non-existing GC barrier.
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b1")
+	re.NoError(err)
+	re.Nil(b)
+
+	// Test TTL
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b3", 40, time.Minute, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b4", 45, time.Minute*2, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b5", 50, time.Duration(math.MaxInt64), now)
+	re.NoError(err)
+
+	// Not expiring
+	for _, t := range []time.Time{now, now.Add(time.Second * 59), now.Add(time.Minute)} {
+		for _, keyspaceID := range s.keyspacePresets.manageable {
+			res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 60, t)
+			re.NoError(err)
+			re.Equal(uint64(40), res.NewTxnSafePoint)
+			re.Contains(res.BlockerDescription, "BarrierID: \"b3\"")
+			s.checkTxnSafePoint(keyspaceID, 40)
+		}
+	}
+	re.Len(s.getAllGlobalGCBarriers(), 3)
+
+	// b3 expires
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 60, now.Add(time.Minute*2))
+		re.NoError(err)
+		re.Equal(uint64(45), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "BarrierID: \"b4\"")
+		s.checkTxnSafePoint(keyspaceID, 45)
+	}
+	re.Len(s.getAllGlobalGCBarriers(), 2)
+
+	// b4 expires, but b5 never expires.
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 60, now.Add(time.Hour*24*365*100))
+		re.NoError(err)
+		re.Equal(uint64(50), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "BarrierID: \"b5\"")
+		s.checkTxnSafePoint(keyspaceID, 50)
+	}
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+
+	// Manually delete b5
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b5")
+	re.NoError(err)
+	re.Equal("b5", b.BarrierID)
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 60, now.Add(time.Hour*24*365*100))
+		re.NoError(err)
+		re.Equal(uint64(60), res.NewTxnSafePoint)
+		s.checkTxnSafePoint(keyspaceID, 60)
+	}
+
+	re.Empty(s.getAllGlobalGCBarriers())
+
+	// Disallows setting GC barrier before txn safe point.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b6", 50, time.Hour, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSBehindTxnSafePoint)
+	re.Empty(s.getAllGlobalGCBarriers())
+	// BarrierTS exactly equals to txn safe point is allowed.
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b6", 60, time.Hour, now)
+	re.NoError(err)
+	expected = endpoint.NewGlobalGCBarrier("b6", 60, ptime(now.Add(time.Hour)))
+	re.Equal(expected, b)
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b6"))
+
+	// Clear.
+	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b6")
+	re.NoError(err)
+
+	// Global GC barriers take effect on all keyspaces.
+	// When global GC barriers and non-global GC barriers co-exist, txn safe point blocks on the minimal one
+	ks1 := s.keyspacePresets.manageable[0]
+	ks2 := s.keyspacePresets.manageable[1]
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 200, time.Hour, time.Now())
+	re.NoError(err)
+	re.Empty(s.getAllGCBarriers(ks1))
+	re.Empty(s.getAllGCBarriers(ks2))
+	re.Len(s.getAllGlobalGCBarriers(), 1)
+	_, err = s.manager.SetGCBarrier(ks1, "b2", 210, time.Hour, time.Now())
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(ks2, "b3", 220, time.Hour, time.Now())
+	re.NoError(err)
+
+	res, err := s.manager.AdvanceTxnSafePoint(ks1, 300, time.Now())
+	re.NoError(err)
+	re.Equal(uint64(200), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+	res, err = s.manager.AdvanceTxnSafePoint(ks2, 300, now)
+	re.NoError(err)
+	re.Equal(uint64(200), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 211, time.Hour, time.Now())
+	re.NoError(err)
+	res, err = s.manager.AdvanceTxnSafePoint(ks1, 300, now)
+	re.NoError(err)
+	re.Equal(uint64(210), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b2\"")
+	res, err = s.manager.AdvanceTxnSafePoint(ks2, 300, now)
+	re.NoError(err)
+	re.Equal(uint64(211), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 221, time.Hour, time.Now())
+	re.NoError(err)
+	res, err = s.manager.AdvanceTxnSafePoint(ks1, 300, now)
+	re.NoError(err)
+	re.Equal(uint64(210), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b2\"")
+	res, err = s.manager.AdvanceTxnSafePoint(ks2, 300, now)
+	re.NoError(err)
+	re.Equal(uint64(220), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b3\"")
+}
+
+func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
+	re := s.Require()
+
+	iter := func(ith int, v uint64) uint64 {
+		return uint64(ith*100) + v
+	}
+
+	for ith, keyspaceID := range s.keyspacePresets.manageable {
+		s.setTiDBMinStartTS(keyspaceID, "instance1", iter(ith, 10))
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 5), time.Now())
+		re.NoError(err)
+		re.Equal(uint64(0), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 5), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 10), time.Now())
+		re.NoError(err)
+		re.Equal(iter(ith, 5), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 10), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 15), time.Now())
+		re.NoError(err)
+		re.Equal(iter(ith, 10), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 10), res.NewTxnSafePoint)
+		re.Equal(iter(ith, 15), res.Target)
+		re.Regexp("TiDBMinStartTS.*instance1", res.BlockerDescription)
+
+		s.checkTxnSafePoint(keyspaceID, iter(ith, 10))
+
+		// Mixing multiple TiDB min start ts and GC barriers, global GC barriers.
+		s.setTiDBMinStartTS(keyspaceID, "instance1", iter(ith, 20))
+		s.setTiDBMinStartTS(keyspaceID, "instance2", iter(ith, 22))
+		s.setTiDBMinStartTS(keyspaceID, "instance3", iter(ith, 28))
+		_, err = s.manager.SetGCBarrier(keyspaceID, "b1", iter(ith, 24), time.Hour, time.Now())
+		re.NoError(err)
+		_, err = s.manager.SetGCBarrier(keyspaceID, "b3", iter(ith, 30), time.Hour, time.Now())
+		re.NoError(err)
+		_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", iter(ith, 26), time.Hour, time.Now())
+		re.NoError(err)
+
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
+		re.NoError(err)
+		re.Equal(iter(ith, 10), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 20), res.NewTxnSafePoint)
 		re.Regexp("TiDBMinStartTS.*instance1", res.BlockerDescription)
 
 		s.deleteTiDBMinStartTS(keyspaceID, "instance1")
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
 		re.NoError(err)
-		re.Equal(uint64(20), res.OldTxnSafePoint)
-		re.Equal(uint64(22), res.NewTxnSafePoint)
+		re.Equal(iter(ith, 20), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 22), res.NewTxnSafePoint)
 		re.Regexp("TiDBMinStartTS.*instance2", res.BlockerDescription)
 
 		s.deleteTiDBMinStartTS(keyspaceID, "instance2")
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
 		re.NoError(err)
-		re.Equal(uint64(22), res.OldTxnSafePoint)
-		re.Equal(uint64(24), res.NewTxnSafePoint)
+		re.Equal(iter(ith, 22), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 24), res.NewTxnSafePoint)
 		re.Contains(res.BlockerDescription, `BarrierID: "b1"`)
 
 		_, err = s.manager.DeleteGCBarrier(keyspaceID, "b1")
 		re.NoError(err)
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
 		re.NoError(err)
-		re.Equal(uint64(24), res.OldTxnSafePoint)
-		re.Equal(uint64(26), res.NewTxnSafePoint)
+		re.Equal(iter(ith, 24), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 26), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, `BarrierID: "b2"`)
+
+		_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b2")
+		re.NoError(err)
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
+		re.NoError(err)
+		re.Equal(iter(ith, 26), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 28), res.NewTxnSafePoint)
 		re.Regexp("TiDBMinStartTS.*instance3", res.BlockerDescription)
 
 		s.deleteTiDBMinStartTS(keyspaceID, "instance3")
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
 		re.NoError(err)
-		re.Equal(uint64(26), res.OldTxnSafePoint)
-		re.Equal(uint64(28), res.NewTxnSafePoint)
-		re.Contains(res.BlockerDescription, `BarrierID: "b2"`)
+		re.Equal(iter(ith, 28), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 30), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, `BarrierID: "b3"`)
 
-		_, err = s.manager.DeleteGCBarrier(keyspaceID, "b2")
+		_, err = s.manager.DeleteGCBarrier(keyspaceID, "b3")
 		re.NoError(err)
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 32), time.Now())
 		re.NoError(err)
-		re.Equal(uint64(28), res.OldTxnSafePoint)
-		re.Equal(uint64(30), res.NewTxnSafePoint)
+		re.Equal(iter(ith, 30), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 32), res.NewTxnSafePoint)
 		re.Empty(res.BlockerDescription)
 
 		// If there's a TiDB node in old version that writes the TiDBMinStartTS, it's possible that TiDBMinStartTS become
 		// lower than txn safe point (as it writes directly to etcd instead of checking constraints in a transaction).
 		// In this case, the txn safe point should neither be pushed nor go backward.
-		s.setTiDBMinStartTS(keyspaceID, "instance1", 25)
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 35, time.Now())
+		s.setTiDBMinStartTS(keyspaceID, "instance1", iter(ith, 25))
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 35), time.Now())
 		re.NoError(err)
-		re.Equal(uint64(30), res.OldTxnSafePoint)
-		re.Equal(uint64(30), res.NewTxnSafePoint)
-		re.Equal(uint64(35), res.Target)
+		re.Equal(iter(ith, 32), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 32), res.NewTxnSafePoint)
+		re.Equal(iter(ith, 35), res.Target)
 		re.Regexp("TiDBMinStartTS.*instance1", res.BlockerDescription)
 
 		s.deleteTiDBMinStartTS(keyspaceID, "instance1")
-		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 35, time.Now())
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, iter(ith, 35), time.Now())
 		re.NoError(err)
-		re.Equal(uint64(30), res.OldTxnSafePoint)
-		re.Equal(uint64(35), res.NewTxnSafePoint)
+		re.Equal(iter(ith, 32), res.OldTxnSafePoint)
+		re.Equal(iter(ith, 35), res.NewTxnSafePoint)
 		re.Empty(res.BlockerDescription)
 	}
 }
 
-func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
+func (s *gcStateManagerTestSuite) testServiceGCSafePointCompatibilityImpl(keyspaceID uint32) {
 	re := s.Require()
 
 	var nowUnix int64 = 1741584577
 	now := time.Unix(nowUnix, 0)
 
 	// Service safe points & GC barriers shares the same data storage and are mutually convertable.
-	minSsp, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 10, math.MaxInt64, now)
+	minSsp, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 10, math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(0), minSsp.SafePoint)
 	re.Equal("gc_worker", minSsp.ServiceID)
 
-	res, err := s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 15, now)
+	res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 15, now)
 	re.NoError(err)
 	re.Equal(uint64(10), res.NewTxnSafePoint)
 
 	expected := endpoint.NewGCBarrier("svc1", 10, nil)
-	re.Equal(expected, s.getGCBarrier(constant.NullKeyspaceID, "svc1"))
+	re.Equal(expected, s.getGCBarrier(keyspaceID, "svc1"))
 
 	// SetGCBarrier can also affect service safe points.
-	_, err = s.manager.SetGCBarrier(constant.NullKeyspaceID, "svc1", 15, time.Hour, now)
+	_, err = s.manager.SetGCBarrier(keyspaceID, "svc1", 15, time.Hour, now)
 	re.NoError(err)
-	_, allSsp, err := s.provider.CompatibleLoadAllServiceGCSafePoints()
+	_, allSsp, err := s.provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
 	re.NoError(err)
 	re.Len(allSsp, 1)
 	re.Equal("svc1", allSsp[0].ServiceID)
@@ -986,84 +1370,84 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.Equal(nowUnix+3600, allSsp[0].ExpiredAt)
 
 	// Disallow decreasing behind the txn safe point. But it doesn't return error.
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 8, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 8, math.MaxInt64, now)
 	re.NoError(err)
 	re.False(updated)
 	re.Equal(uint64(10), minSsp.SafePoint)
 	expected = endpoint.NewGCBarrier("svc1", 15, ptime(now.Add(time.Hour)))
-	re.Equal(expected, s.getGCBarrier(constant.NullKeyspaceID, "svc1"))
+	re.Equal(expected, s.getGCBarrier(keyspaceID, "svc1"))
 
 	// Disallow inserting new service safe point before the txn safe point.
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc2", 8, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc2", 8, math.MaxInt64, now)
 	re.NoError(err)
 	re.False(updated)
 	re.Equal(uint64(10), minSsp.SafePoint)
-	re.Nil(s.getGCBarrier(constant.NullKeyspaceID, "svc2"))
+	re.Nil(s.getGCBarrier(keyspaceID, "svc2"))
 
 	// But decreasing a service safe point to a value larger than the current txn safe point is allowed. Note that this
 	// behavior is not completely the same as old versions.
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 12, math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(10), minSsp.SafePoint)
 	expected = endpoint.NewGCBarrier("svc1", 12, nil)
-	re.Equal(expected, s.getGCBarrier(constant.NullKeyspaceID, "svc1"))
+	re.Equal(expected, s.getGCBarrier(keyspaceID, "svc1"))
 
 	// Allows setting different TTL.
-	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 3600, now)
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 12, 3600, now)
 	re.NoError(err)
 	re.True(updated)
-	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
 	re.NoError(err)
 	re.Len(allSsp, 1)
 	re.Equal("svc1", allSsp[0].ServiceID)
 	re.Equal(uint64(12), allSsp[0].SafePoint)
 	re.Equal(nowUnix+3600, allSsp[0].ExpiredAt)
-	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 3600, now.Add(time.Hour))
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 12, 3600, now.Add(time.Hour))
 	re.NoError(err)
 	re.True(updated)
-	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
 	re.NoError(err)
 	re.Len(allSsp, 1)
 	re.Equal(nowUnix+7200, allSsp[0].ExpiredAt)
 
 	// Internally calls AdvanceTxnSafePoint when simulating updating "gc_worker".
-	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, 3600, now)
+	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "gc_worker", 20, 3600, now)
 	// Cannot use finite TTL for "gc_worker".
 	re.Error(err)
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "gc_worker", 20, math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(12), minSsp.SafePoint)
 	re.Equal("svc1", minSsp.ServiceID)
-	s.checkTxnSafePoint(constant.NullKeyspaceID, 12)
+	s.checkTxnSafePoint(keyspaceID, 12)
 
 	// Deleting service safe point by passing zero TTL
-	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 0, now)
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 12, 0, now)
 	re.NoError(err)
 	// Deleting is regarded as not-updating. This is consistent with the behavior of the old UpdateServiceGCSafePoint API.
 	re.False(updated)
 	// And add a TiDBMinStartTS. Then it should also block updating "gc_worker".
 	// This behavior doesn't exist in old UpdateServiceGCSafePoint API, and is new here. In this case, it returns a
 	// simulated service safe point which doesn't actually exist.
-	s.setTiDBMinStartTS(constant.NullKeyspaceID, "instance1", 14)
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, math.MaxInt64, now)
+	s.setTiDBMinStartTS(keyspaceID, "instance1", 14)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "gc_worker", 20, math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(14), minSsp.SafePoint)
 	re.Equal("tidb_min_start_ts_instance1", minSsp.ServiceID)
-	s.checkTxnSafePoint(constant.NullKeyspaceID, 14)
+	s.checkTxnSafePoint(keyspaceID, 14)
 
 	// Delete the TiDBMinStartTS.
-	s.deleteTiDBMinStartTS(constant.NullKeyspaceID, "instance1")
+	s.deleteTiDBMinStartTS(keyspaceID, "instance1")
 
 	// Then updating "gc_worker" won't be blocked.
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "gc_worker", 20, math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(20), minSsp.SafePoint)
 	re.Equal("gc_worker", minSsp.ServiceID)
-	s.checkTxnSafePoint(constant.NullKeyspaceID, 20)
+	s.checkTxnSafePoint(keyspaceID, 20)
 
 	// If there's already old data written by the old version, there will exist a persisted "gc_worker" service safe
 	// point, in which case AdvanceTxnSafePoint needs to update it as well for guaranteeing the safety of
@@ -1071,20 +1455,20 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	// of "gc_worker" is updated to the same value as the txn safe point.
 	// This behavior only exist in the NullKeyspace.
 	re.NoError(s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		return wb.SetGCBarrier(constant.NullKeyspaceID, endpoint.NewGCBarrier("gc_worker", 20, nil))
+		return wb.SetGCBarrier(keyspaceID, endpoint.NewGCBarrier("gc_worker", 20, nil))
 	}))
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 25, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "svc1", 25, math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(20), minSsp.SafePoint)
 	re.Equal("gc_worker", minSsp.ServiceID)
 
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 28, math.MaxInt64, now)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(keyspaceID, "gc_worker", 28, math.MaxInt64, now)
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(25), minSsp.SafePoint)
 	re.NotEqual("gc_worker", minSsp.ServiceID)
-	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
 	re.NoError(err)
 	re.Len(allSsp, 2)
 	re.Equal("gc_worker", allSsp[0].ServiceID)
@@ -1092,42 +1476,147 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.Equal("svc1", allSsp[1].ServiceID)
 	re.Equal(uint64(25), allSsp[1].SafePoint)
 
-	res, err = s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 29, now)
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 29, now)
 	re.NoError(err)
 	re.Equal(uint64(25), res.NewTxnSafePoint)
 	re.Contains(res.BlockerDescription, `BarrierID: "svc1"`)
-	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
 	re.NoError(err)
 	re.Len(allSsp, 2)
 	re.Equal("gc_worker", allSsp[0].ServiceID)
 	re.Equal(uint64(25), allSsp[0].SafePoint)
 
 	// The service safe point "gc_worker" is ignored by GetGCState.
-	allBarriers := s.getAllGCBarriers(constant.NullKeyspaceID)
+	allBarriers := s.getAllGCBarriers(keyspaceID)
 	re.Len(allBarriers, 1)
 	re.Equal("svc1", allBarriers[0].BarrierID)
 
 	// The service safe point can't be controlled by SetGCBarrier and DeleteGCBarrier.
-	_, err = s.manager.SetGCBarrier(constant.NullKeyspaceID, "gc_worker", 30, time.Duration(math.MaxInt64), now)
+	_, err = s.manager.SetGCBarrier(keyspaceID, "gc_worker", 30, time.Duration(math.MaxInt64), now)
 	re.Error(err)
 	re.ErrorIs(err, errs.ErrReservedGCBarrierID)
-	_, err = s.manager.DeleteGCBarrier(constant.NullKeyspaceID, "gc_worker")
+	_, err = s.manager.DeleteGCBarrier(keyspaceID, "gc_worker")
 	re.Error(err)
 	re.ErrorIs(err, errs.ErrReservedGCBarrierID)
 
-	// The same behavior doesn't exist in other keyspaces with keyspace-level GC enabled.
-	_, err = s.manager.SetGCBarrier(2, "gc_worker", 10, time.Hour, now)
+	// It does not affect other self-manageable keyspaces.
+	for _, anotherKeyspaceID := range s.keyspacePresets.manageable {
+		if anotherKeyspaceID == keyspaceID {
+			continue
+		}
+		re.Equal(uint64(25), s.getGCBarrier(keyspaceID, "svc1").BarrierTS)
+		res, err = s.manager.AdvanceTxnSafePoint(anotherKeyspaceID, 30, now)
+		re.NoError(err)
+		re.Equal(uint64(30), res.NewTxnSafePoint)
+		minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(anotherKeyspaceID, "gc_worker", 35, math.MaxInt64, now)
+		re.NoError(err)
+		re.True(updated)
+		re.Equal(uint64(35), minSsp.SafePoint)
+	}
+}
+
+func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNullKeyspace() {
+	s.testServiceGCSafePointCompatibilityImpl(constant.NullKeyspaceID)
+}
+
+func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNonNullKeyspace() {
+	s.testServiceGCSafePointCompatibilityImpl(2)
+}
+
+func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR() {
+	re := s.Require()
+	now := time.Now()
+
+	// CompatibleUpdateServiceGCSafePoint on native_br nullkeyspace cannot succeed if
+	// any of the keyspace has larger txn safe point than the given service safe point value
+	res, err := s.manager.AdvanceTxnSafePoint(2, 25, time.Now())
 	re.NoError(err)
-	res, err = s.manager.AdvanceTxnSafePoint(2, 15, now)
+	re.Equal(uint64(25), res.NewTxnSafePoint)
+
+	minSsp, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", 16, math.MaxInt64, now)
 	re.NoError(err)
-	re.Equal(uint64(10), res.NewTxnSafePoint)
-	re.Contains(res.BlockerDescription, `BarrierID: "gc_worker"`)
-	_, err = s.manager.DeleteGCBarrier(2, "gc_worker")
+	re.False(updated) // the call failed, but this is not an error
+	re.Equal(uint64(25), minSsp.SafePoint)
+
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", 32, math.MaxInt64, now)
 	re.NoError(err)
-	res, err = s.manager.AdvanceTxnSafePoint(2, 15, now)
+	re.True(updated)
+	re.Equal("gc_worker", minSsp.ServiceID)
+	re.Equal(uint64(25), minSsp.SafePoint)
+
+	// native_br on NullKeyspace should block all keyspaces
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 33, now)
+		re.NoError(err)
+		re.Equal(uint64(32), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, `BarrierID: "native_br"`)
+
+		// native_br is not transaformed into barrier
+		re.Nil(s.getGCBarrier(keyspaceID, "native_br"))
+		allBarriers := s.getAllGCBarriers(keyspaceID)
+		re.Empty(allBarriers)
+
+		// CompatibleLoadAllServiceGCSafePoints will not found native_br service safe point.
+		_, allSsp, err := s.provider.CompatibleLoadAllServiceGCSafePoints(keyspaceID)
+		re.NoError(err)
+		re.Empty(allSsp)
+	}
+
+	// "native_br" on NullKeyspace is transformed into global GC barrier
+	gbr := s.getGlobalGCBarrier("native_br")
+	re.Equal("native_br", gbr.BarrierID)
+	re.Equal(uint64(32), gbr.BarrierTS)
+
+	// delete it and check
+	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, "native_br", 32, -1, now)
 	re.NoError(err)
-	re.Equal(uint64(15), res.NewTxnSafePoint)
-	re.Empty(res.BlockerDescription)
+	gbrs := s.getAllGlobalGCBarriers()
+	re.Empty(gbrs)
+	_, allSsp, err := s.provider.CompatibleLoadAllServiceGCSafePoints(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Empty(allSsp)
+
+	// "native_br" on other keyspaces is transformed into GC barriers
+	// Unlike on NullKeyspace, it has different behavior
+	// txn safe point has been bump to 32, and the barrier ts cannot below it.
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(2, "native_br", 16, math.MaxInt64, now)
+	re.NoError(err)
+	re.False(updated)
+	re.Equal(uint64(32), minSsp.SafePoint)
+
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint(2, "native_br", 64, math.MaxInt64, now)
+	re.NoError(err)
+	re.True(updated)
+	re.Equal("gc_worker", minSsp.ServiceID)
+	re.Equal(uint64(32), minSsp.SafePoint)
+
+	// CompatibleLoadAllServiceGCSafePoints will found the native_br service safe point.
+	barrier := s.getGCBarrier(2, "native_br")
+	re.Equal("native_br", barrier.BarrierID)
+	re.Equal(uint64(64), barrier.BarrierTS)
+	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints(2)
+	re.NoError(err)
+	re.Len(allSsp, 1)
+	re.Equal("native_br", allSsp[0].ServiceID)
+	re.Equal(uint64(64), allSsp[0].SafePoint)
+
+	// It blocks the specified keyspace, but not all keyspaces.
+	for _, tc := range []struct {
+		keyspaceID uint32
+		block      bool
+	}{
+		{2, true},
+		{constant.NullKeyspaceID, false},
+	} {
+		res, err = s.manager.AdvanceTxnSafePoint(tc.keyspaceID, 100, now)
+		re.NoError(err)
+		if tc.block {
+			re.Equal(uint64(64), res.NewTxnSafePoint)
+			re.Contains(res.BlockerDescription, `BarrierID: "native_br"`)
+		} else {
+			re.Equal(uint64(100), res.NewTxnSafePoint)
+		}
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
@@ -1321,6 +1810,38 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	checkAllKeyspaceGCStates()
 }
 
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
+	re := s.Require()
+
+	var txnSafePoint uint64
+	var keyspaceName string
+	var keyspaceID uint32
+	err := s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		var err1 error
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
+		return err1
+	})
+	re.NoError(err)
+	re.Equal(uint64(0), txnSafePoint)
+	re.Empty(keyspaceName)
+	re.Equal(uint32(0), keyspaceID)
+
+	// change the value and check again
+	for i, keyspaceID := range s.keyspacePresets.manageable {
+		_, err = s.manager.AdvanceTxnSafePoint(keyspaceID, uint64(i+1), time.Now())
+		re.NoError(err)
+	}
+	err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		var err1 error
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
+		return err1
+	})
+	re.NoError(err)
+	re.Equal(uint64(len(s.keyspacePresets.manageable)), txnSafePoint)
+	re.Equal("ks2", keyspaceName)
+	re.Equal(uint32(2), keyspaceID)
+}
+
 func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
 	re := s.Require()
 
@@ -1355,4 +1876,60 @@ func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
 		re.Empty(res.BlockerDescription)
 		s.checkTxnSafePoint(keyspaceID, 30)
 	}
+}
+
+func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) {
+	re := s.Require()
+	now := time.Now()
+
+	// When downgrade compatible mode of AdvanceTxnSafePoint is triggerred, the "gc_worker"'s service safe point
+	// will be updated synchronized with the txn safe point.
+	s.putLegacyGCWorkerServiceSafePoint(keyspaceID, 0)
+	for _, target := range []uint64{10, 20} {
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, target, now)
+		re.NoError(err)
+		re.Equal(target-10, res.OldTxnSafePoint)
+		re.Equal(target, res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		re.Equal(target, s.getLegacyGCWorkerServiceSafePoint(keyspaceID).SafePoint)
+	}
+
+	// Allow decreasing.
+	s.putLegacyGCWorkerServiceSafePoint(keyspaceID, 30)
+	res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 25, now)
+	re.NoError(err)
+	re.Equal(uint64(20), res.OldTxnSafePoint)
+	re.Equal(uint64(25), res.NewTxnSafePoint)
+	re.Empty(res.BlockerDescription)
+	re.Equal(uint64(25), s.getLegacyGCWorkerServiceSafePoint(keyspaceID).SafePoint)
+
+	// Not visible by GetGCStates or GetAllKeyspacesGCStates.
+	gcState, err := s.manager.GetGCState(keyspaceID)
+	re.NoError(err)
+	re.Empty(gcState.GCBarriers)
+	allGCStates, err := s.manager.GetAllKeyspacesGCStates()
+	re.NoError(err)
+	re.Empty(allGCStates[keyspaceID].GCBarriers)
+
+	// And it works correctly when there are other valid GC barriers.
+	_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 40, time.Hour, now)
+	re.NoError(err)
+	gcState, err = s.manager.GetGCState(keyspaceID)
+	re.NoError(err)
+	re.Len(gcState.GCBarriers, 1)
+	re.Equal("b1", gcState.GCBarriers[0].BarrierID)
+	re.Equal(uint64(40), gcState.GCBarriers[0].BarrierTS)
+	allGCStates, err = s.manager.GetAllKeyspacesGCStates()
+	re.NoError(err)
+	re.Len(allGCStates[keyspaceID].GCBarriers, 1)
+	re.Equal("b1", allGCStates[keyspaceID].GCBarriers[0].BarrierID)
+	re.Equal(uint64(40), allGCStates[keyspaceID].GCBarriers[0].BarrierTS)
+}
+
+func (s *gcStateManagerTestSuite) TestDowngradeCompatibilityForNullKeyspace() {
+	s.testDowngradeCompatibility(constant.NullKeyspaceID)
+}
+
+func (s *gcStateManagerTestSuite) TestDowngradeCompatibilityForNonNullKeyspace() {
+	s.testDowngradeCompatibility(2)
 }
