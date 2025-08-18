@@ -438,7 +438,7 @@ func (gtb *GroupTokenBucket) inspectAnomalies(
 ) bool {
 	var errMsg string
 	// Verify whether the allocated token is invalid, such as negative values, math.Inf, or math.NaN.
-	if tb.Tokens <= 0 || math.IsInf(tb.Tokens, 0) || math.IsNaN(tb.Tokens) {
+	if tb.Tokens < 0 || math.IsInf(tb.Tokens, 0) || math.IsNaN(tb.Tokens) {
 		errMsg = "assigned token is invalid"
 	}
 	// Verify whether the state of the slot is abnormal.
