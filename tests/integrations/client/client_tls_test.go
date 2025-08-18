@@ -28,10 +28,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
-	"google.golang.org/grpc"
 
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
@@ -332,7 +330,7 @@ func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInf
 			CAPath:   tls.TrustedCAFile,
 			CertPath: tls.CertFile,
 			KeyPath:  tls.KeyFile,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		})
 	if err != nil {
 		return err
 	}
