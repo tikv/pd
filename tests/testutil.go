@@ -51,6 +51,7 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -227,6 +228,9 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		// Wait for the raft cluster on the leader to be bootstrapped.
 		return raftCluster != nil && raftCluster.IsRunning()
 	})
+	if store.LastHeartbeat == 0 {
+		store.LastHeartbeat = time.Now().UnixNano()
+	}
 	re.NoError(raftCluster.PutMetaStore(store))
 	ts := store.GetLastHeartbeat()
 	if ts == 0 {
@@ -392,7 +396,23 @@ func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestClus
 // It will reset stores, regions, rules and schedulers.
 func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 	resetFunc := func(cluster *TestCluster) {
+		urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+		leaderServer := cluster.GetLeaderServer()
+		rc := leaderServer.GetRaftCluster()
 		// replace rules with default rule
+		configURL := fmt.Sprintf("%s/config", urlPrefix)
+		reqData, e := json.Marshal(map[string]any{
+			"enable-placement-rules": "true",
+		})
+		re.NoError(e)
+		err := testutil.CheckPostJSON(TestDialClient, configURL, reqData, testutil.StatusOK(re))
+		re.NoError(err)
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			// wait for the scheduling server to update the config
+			testutil.Eventually(re, func() bool {
+				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
+			})
+		}
 		defaultRule := placement.GroupBundle{
 			ID: placement.DefaultGroupID,
 			Rules: []*placement.Rule{
@@ -401,7 +421,6 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		}
 		data, err := json.Marshal([]placement.GroupBundle{defaultRule})
 		re.NoError(err)
-		urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 		ruleURL := fmt.Sprintf("%s/config/placement-rule", urlPrefix)
 		err = testutil.CheckPostJSON(TestDialClient, ruleURL, data, testutil.StatusOK(re))
 		re.NoError(err)
@@ -414,29 +433,25 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 				respBundle[0].Rules[0].ID == placement.DefaultRuleID && respBundle[0].Rules[0].Count == 3 && respBundle[0].Rules[0].Role == placement.Voter
 		})
 		// clean region storage and cache
-		for _, server := range cluster.GetServers() {
-			pdAddr := cluster.GetConfig().GetClientURL()
-			for _, region := range server.GetRegions() {
-				url := fmt.Sprintf("%s/pd/api/v1/admin/storage/region/%d", pdAddr, region.GetID())
-				err = testutil.CheckDelete(TestDialClient, url, testutil.StatusOK(re))
-				re.NoError(err)
-			}
-			re.Empty(server.GetRegions())
+		for _, region := range leaderServer.GetRegions() {
+			url := fmt.Sprintf("%s/admin/storage/region/%d", urlPrefix, region.GetID())
+			err = testutil.CheckDelete(TestDialClient, url, testutil.StatusOK(re))
+			re.NoError(err)
 		}
+		re.Empty(leaderServer.GetRegions())
 		// clean stores
-		leader := cluster.GetLeaderServer()
-		for _, store := range leader.GetStores() {
+		for _, store := range leaderServer.GetStores() {
 			if store.NodeState == metapb.NodeState_Removed {
 				continue
 			}
-			err := cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true)
+			err := rc.RemoveStore(store.GetId(), true)
 			if err != nil {
 				re.ErrorIs(err, errs.ErrStoreRemoved)
 			}
-			re.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
+			re.NoError(rc.BuryStore(store.GetId(), true))
 		}
-		re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
-		re.Empty(leader.GetStores())
+		re.NoError(rc.RemoveTombStoneRecords())
+		re.Empty(leaderServer.GetStores())
 		testutil.Eventually(re, func() bool {
 			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 				for _, s := range sche.GetBasicCluster().GetStores() {
@@ -493,11 +508,36 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 			return false
 		})
 		// clean hot cache
-		hotStat := leader.GetRaftCluster().GetHotStat()
+		hotStat := leaderServer.GetRaftCluster().GetHotStat()
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			hotStat = sche.GetCluster().GetHotStat()
 		}
 		hotStat.CleanCache()
+		// clean operators
+		operatorURL := fmt.Sprintf("%s/operators", urlPrefix)
+		err = testutil.CheckDelete(TestDialClient, operatorURL, testutil.StatusOK(re))
+		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			var operators []*operator.Operator
+			err := testutil.CheckGetJSON(TestDialClient, operatorURL, nil,
+				testutil.StatusOK(re), testutil.ExtractJSON(re, &operators))
+			re.NoError(err)
+			return len(operators) == 0
+		})
+		rc.GetOperatorController().CleanAllOpRecords()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			sche.GetCoordinator().GetOperatorController().CleanAllOpRecords()
+		}
+		// clean pending processed regions
+		rc.GetCoordinator().GetCheckerController().ClearPendingProcessedRegions()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			sche.GetCoordinator().GetCheckerController().ClearPendingProcessedRegions()
+		}
+		// reset id allocator
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err = leaderServer.GetServer().RecoverAllocID(ctx, 0)
+		re.NoError(err)
 	}
 	s.RunFunc(resetFunc)
 }

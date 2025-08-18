@@ -873,22 +873,19 @@ func TestRemovingProgress(t *testing.T) {
 	re.Nil(resp.GetHeader().GetError())
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        1,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        2,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        3,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 	}
 
@@ -1109,35 +1106,30 @@ func TestPreparingProgress(t *testing.T) {
 			Id:             1,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Serving,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             2,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Serving,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             3,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Serving,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             4,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Preparing,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             5,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Preparing,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 	}
