@@ -91,6 +91,16 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 	}
 }
 
+// GetServiceLimit return the service limit value of this keyspace.
+func (krl *serviceLimiter) GetServiceLimit() float64 {
+	if krl == nil {
+		return 0.0
+	}
+	krl.RLock()
+	defer krl.RUnlock()
+	return krl.ServiceLimit
+}
+
 func (krl *serviceLimiter) refillTokensLocked(now time.Time) {
 	// No limit configured, do nothing.
 	if krl.ServiceLimit <= 0 {
@@ -142,8 +152,8 @@ func (krl *serviceLimiter) applyServiceLimit(
 	}
 
 	// If the requested tokens is greater than the available tokens, grant all available tokens.
-	if krl.AvailableTokens > 0 && requestedTokens > krl.AvailableTokens {
-		limitedTokens = krl.AvailableTokens
+	if requestedTokens > krl.AvailableTokens {
+		limitedTokens = math.Max(0, krl.AvailableTokens)
 		// TODO: allow the loan to decrease the allocation at a smooth rate.
 		krl.AvailableTokens = 0
 	}
