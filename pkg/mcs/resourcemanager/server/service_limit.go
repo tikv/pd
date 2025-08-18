@@ -24,6 +24,7 @@ import (
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 // serviceLimiterBurstFactor defines how many seconds worth of tokens can be accumulated at most.
@@ -40,8 +41,10 @@ type serviceLimiter struct {
 	LastUpdate time.Time `json:"last_update"`
 	// Theoretical arrival time of the next point where the service limit tokens can be granted.
 	TAT time.Time `json:"tat"`
+	// Slack is the current slack of the service limit.
+	Slack typeutil.Duration `json:"slack"`
 	// BurstWindow is the current window of time that the service limit tokens can be bursted.
-	BurstWindow time.Duration `json:"burst_window"`
+	BurstWindow typeutil.Duration `json:"burst_window"`
 	// KeyspaceID is the keyspace ID of the keyspace that this limiter belongs to.
 	keyspaceID uint32
 	// storage is used to persist the service limit.
@@ -56,7 +59,8 @@ func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint
 		ServiceLimit: serviceLimit,
 		LastUpdate:   now,
 		TAT:          now,
-		BurstWindow:  serviceLimiterBurstFactor * time.Second,
+		Slack:        typeutil.NewDuration(0),
+		BurstWindow:  typeutil.NewDuration(serviceLimiterBurstFactor * time.Second),
 		keyspaceID:   keyspaceID,
 		storage:      storage,
 	}
@@ -92,10 +96,12 @@ func (krl *serviceLimiter) setServiceLimit(now time.Time, newServiceLimit float6
 	if krl.storage != nil {
 		if err := krl.storage.SaveServiceLimit(krl.keyspaceID, newServiceLimit); err != nil {
 			log.Error("failed to persist service limit",
-				zap.Time("last-update", krl.LastUpdate),
-				zap.Time("tat", krl.TAT),
 				zap.Uint32("keyspace-id", krl.keyspaceID),
 				zap.Float64("service-limit", newServiceLimit),
+				zap.Time("last-update", krl.LastUpdate),
+				zap.Time("tat", krl.TAT),
+				zap.Duration("slack", krl.Slack.Duration),
+				zap.Duration("burst-window", krl.BurstWindow.Duration),
 				zap.Error(err))
 		}
 	}
@@ -137,29 +143,31 @@ func (krl *serviceLimiter) applyServiceLimit(
 	if now.After(krl.TAT) {
 		base = now
 	}
-	slack := now.Add(krl.BurstWindow).Sub(base)
-	if slack <= 0 {
+	krl.Slack.Duration = now.Add(krl.BurstWindow.Duration).Sub(base)
+	if krl.Slack.Duration <= 0 {
 		return 0
 	}
 	perTokenInterval := krl.perTokenIntervalInNanosLocked()
-	maxGrant := float64(slack) / perTokenInterval
-	grant := math.Min(requestedTokens, maxGrant)
-	if grant <= 0 {
+	maxGrant := float64(krl.Slack.Duration) / perTokenInterval
+	limitedTokens = math.Min(requestedTokens, maxGrant)
+	if limitedTokens <= 0 {
 		return 0
 	}
-	krl.TAT = base.Add(time.Duration(grant * perTokenInterval))
+	krl.TAT = base.Add(time.Duration(limitedTokens * perTokenInterval))
+	krl.LastUpdate = now
 
-	return grant
+	return limitedTokens
 }
 
-// Clone returns a copy of the service limiter.
-func (krl *serviceLimiter) Clone() *serviceLimiter {
+// clone returns a copy of the service limiter.
+func (krl *serviceLimiter) clone() *serviceLimiter {
 	krl.RLock()
 	defer krl.RUnlock()
 	return &serviceLimiter{
 		ServiceLimit: krl.ServiceLimit,
 		LastUpdate:   krl.LastUpdate,
 		TAT:          krl.TAT,
+		Slack:        krl.Slack,
 		BurstWindow:  krl.BurstWindow,
 		keyspaceID:   krl.keyspaceID,
 	}

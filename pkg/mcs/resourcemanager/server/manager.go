@@ -127,7 +127,7 @@ func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
 	if krgm == nil {
 		return nil
 	}
-	return krgm.getServiceLimiter().Clone()
+	return krgm.getServiceLimiter().clone()
 }
 
 // SetKeyspaceServiceLimit sets the service limit of the keyspace.

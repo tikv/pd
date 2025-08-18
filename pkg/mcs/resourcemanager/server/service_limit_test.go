@@ -37,7 +37,7 @@ func TestNewServiceLimiter(t *testing.T) {
 			re.Equal(0.0, limiter.ServiceLimit)
 		}
 		re.Equal(constant.NullKeyspaceID, limiter.keyspaceID)
-		re.Equal(serviceLimiterBurstFactor*time.Second, limiter.BurstWindow)
+		re.Equal(serviceLimiterBurstFactor*time.Second, limiter.BurstWindow.Duration)
 		// TAT should be initialized to now
 		re.GreaterOrEqual(limiter.TAT.Sub(now), time.Duration(0))
 		re.Less(limiter.TAT.Sub(now), time.Second) // Should be very close to now
@@ -367,7 +367,7 @@ func TestServiceLimiterClone(t *testing.T) {
 	// Modify the original state
 	original.applyServiceLimit(now, 50.0)
 
-	clone := original.Clone()
+	clone := original.clone()
 
 	// Verify all fields are copied correctly
 	re.Equal(original.ServiceLimit, clone.ServiceLimit)
