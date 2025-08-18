@@ -323,8 +323,8 @@ func TestSetServiceLimitTATScaling(t *testing.T) {
 	// Halve the service limit to 100 tokens/second
 	limiter.setServiceLimit(now, 100.0)
 
-	// TAT should be scaled up: 1s * (200/100) = 2s in the future
-	expectedScaledTAT = now.Add(2 * time.Second)
+	// TAT should remain the same since the service limit is not increased
+	expectedScaledTAT = now.Add(1 * time.Second)
 	re.Equal(expectedScaledTAT, limiter.TAT)
 
 	// Test TAT scaling with zero old service limit (should reset TAT)
@@ -347,15 +347,15 @@ func TestSetServiceLimitTATScaling(t *testing.T) {
 	// TAT should be reset to current time
 	re.Equal(now, limiter.TAT)
 
-	// Test TAT scaling when TAT is in the past (should reset to now)
+	// Test TAT scaling when TAT is in the past
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	now = limiter.TAT
 	pastTime := now.Add(-5 * time.Second)
 	limiter.TAT = pastTime // Set TAT to past
 
 	limiter.setServiceLimit(now, 200.0)
-	// TAT should be reset to current time since it was in the past
-	re.Equal(now, limiter.TAT)
+	// TAT should remain the same since scaling only happens when the service limit is increased and the TAT is in the future.
+	re.Equal(pastTime, limiter.TAT)
 }
 
 func TestServiceLimiterClone(t *testing.T) {

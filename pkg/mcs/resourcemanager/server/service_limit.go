@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-// serviceLimiterBurstFactor defines how many seconds worth of tokens can be accumulated.
+// serviceLimiterBurstFactor defines how many seconds worth of tokens can be accumulated at most.
 // This allows the limiter to handle batch requests from clients that request tokens periodically.
 // Since the client will request tokens with a 5-second period by default, the burst factor is 5.0 here.
 const serviceLimiterBurstFactor = 5.0
@@ -40,7 +40,7 @@ type serviceLimiter struct {
 	LastUpdate time.Time `json:"last_update"`
 	// Theoretical arrival time of the next point where the service limit tokens can be granted.
 	TAT time.Time `json:"tat"`
-	// BurstWindow is the window of time that the service limit tokens can be granted.
+	// BurstWindow is the current window of time that the service limit tokens can be bursted.
 	BurstWindow time.Duration `json:"burst_window"`
 	// KeyspaceID is the keyspace ID of the keyspace that this limiter belongs to.
 	keyspaceID uint32
@@ -70,16 +70,19 @@ func (krl *serviceLimiter) setServiceLimit(now time.Time, newServiceLimit float6
 	if newServiceLimit == krl.ServiceLimit {
 		return
 	}
-	// Scale the TAT according to the new service limit, this helps to keep the TAT consistent with the service limit.
-	if krl.TAT.After(now) && krl.ServiceLimit > 0 && newServiceLimit > 0 {
-		krl.TAT = now.Add(
-			time.Duration(
-				// NewDebt = RemainingDebt * ScaleRatio
-				float64(krl.TAT.Sub(now)) * krl.ServiceLimit / newServiceLimit,
-			),
-		)
-	} else {
+	// If the old or new service limit is 0, reset the TAT to now directly.
+	if krl.ServiceLimit <= 0 || newServiceLimit <= 0 {
 		krl.TAT = now
+	} else if krl.ServiceLimit < newServiceLimit {
+		// Scale the TAT if the new service limit is larger to ensure the workload can catch up smoothly.
+		if krl.TAT.After(now) {
+			krl.TAT = now.Add(
+				time.Duration(
+					// NewDebt = RemainingDebt * ScaleRatio
+					float64(krl.TAT.Sub(now)) * krl.ServiceLimit / newServiceLimit,
+				),
+			)
+		}
 	}
 	// Update the service limit and last update time.
 	krl.ServiceLimit = newServiceLimit
