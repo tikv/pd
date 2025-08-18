@@ -88,6 +88,8 @@ const (
 	resetBaseAllocIDName                    = "ResetBaseAllocID"
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
+	setPitrRecoveringMarkName               = "SetPitrRecoveringMark"
+	deletePitrRecoveringMarkName            = "DeletePitrRecoveringMark"
 	createOperators                         = "CreateOperators"
 	deleteOperators                         = "DeleteOperators"
 	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"

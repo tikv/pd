@@ -864,6 +864,12 @@ func (suite *httpClientTestSuite) TestAdmin() {
 	re.NoError(err)
 	err = client.DeleteSnapshotRecoveringMark(ctx)
 	re.NoError(err)
+	
+	// Test PiTR recovering mark APIs
+	err = client.SetPitrRecoveringMark(ctx)
+	re.NoError(err)
+	err = client.DeletePitrRecoveringMark(ctx)
+	re.NoError(err)
 }
 
 func (suite *httpClientTestSuite) TestWithBackoffer() {
