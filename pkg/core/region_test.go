@@ -1350,6 +1350,45 @@ func TestCodecRule(t *testing.T) {
 	}
 }
 
+func TestStatsRegions(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	count := 10000
+	for i := range count {
+		endKey := []byte(fmt.Sprintf("%20d", i+1))
+		if i == count-1 {
+			endKey = nil
+		}
+		regions.CheckAndPutRegion(NewTestRegionInfo(uint64(i), 1, []byte(fmt.Sprintf("%20d", i)), endKey))
+	}
+	startKey := []byte(fmt.Sprintf("%20d", 0))
+	for _, l := range []int{-1, maxScanRegionLimit - 1, maxScanRegionLimit, maxScanRegionLimit + 1, count} {
+		rs := regions.ScanRegions(startKey, nil, l)
+		limit := l
+		if limit <= 0 {
+			limit = count
+		}
+		re.Len(rs, limit)
+		endKey := []byte(fmt.Sprintf("%20d", limit))
+		if limit == count {
+			endKey = nil
+		}
+		re.Equal(endKey, rs[len(rs)-1].GetEndKey())
+		re.Equal(startKey, rs[0].GetStartKey())
+	}
+
+	for _, startIdx := range []int{count - maxScanRegionLimit - 1, count - maxScanRegionLimit, count - maxScanRegionLimit + 1} {
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		startKey = []byte(fmt.Sprintf("%20d", startIdx))
+		expectLen := count - startIdx
+		rs := regions.ScanRegions(startKey, []byte(""), -1)
+		re.Len(rs, expectLen)
+		re.Equal(startKey, rs[0].GetStartKey())
+	}
+}
+
 func TestRegionCount(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()

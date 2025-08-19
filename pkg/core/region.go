@@ -47,8 +47,9 @@ import (
 
 const (
 	randomRegionMaxRetry = 10
-	scanRegionLimit      = 1000
-	batchSearchSize      = 16
+	// maxScanRegionLimit is the maximum number of regions to scan in one lock.
+	maxScanRegionLimit = 1000
+	batchSearchSize    = 16
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
@@ -2017,22 +2018,48 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	return r.tree.GetCountByRange(startKey, endKey)
 }
 
-// ScanRegions scans regions intersecting [start key, end key), returns at most
-// `limit` regions. limit <= 0 means no limit.
-func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
+func (r *RegionsInfo) scanRegionsInner(startKey, endKey []byte, limit int) []*RegionInfo {
+	scanLimit := limit
+	// limit <= 0 means no limit.
+	if limit > maxScanRegionLimit || limit <= 0 {
+		scanLimit = maxScanRegionLimit
+	}
+	regions := make([]*RegionInfo, 0)
 	r.t.RLock()
 	defer r.t.RUnlock()
-	var res []*RegionInfo
 	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
 		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
 			return false
 		}
-		if limit > 0 && len(res) >= limit {
+		if len(regions) >= scanLimit {
 			return false
 		}
-		res = append(res, region)
+		regions = append(regions, region)
 		return true
 	})
+	return regions
+}
+
+// ScanRegions scans regions intersecting [start key, end key), returns at most
+// `limit` regions. limit <= 0 means no limit.
+func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
+	var res []*RegionInfo
+	for {
+		scanLimit := limit - len(res)
+		regions := r.scanRegionsInner(startKey, endKey, scanLimit)
+		res = append(res, regions...)
+		if limit >= 0 && len(res) >= limit {
+			break
+		}
+		if len(regions) == 0 {
+			break
+		}
+		startKey = regions[len(regions)-1].GetEndKey()
+		// if startKey is empty, it means there is no more region to scan.
+		if len(startKey) == 0 {
+			break
+		}
+	}
 	return res
 }
 
@@ -2148,7 +2175,7 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
 				return false
 			}
-			if cnt >= scanRegionLimit {
+			if cnt >= maxScanRegionLimit {
 				return false
 			}
 			cnt++
