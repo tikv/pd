@@ -119,9 +119,6 @@ const (
 	miscTaskRunner       = "misc-async"
 	logTaskRunner        = "log-async"
 	syncRegionTaskRunner = "sync-region-async"
-
-	// defaultScanRegionsLimit is the default limit for scanning regions.
-	defaultScanRegionsLimit = 100
 )
 
 // Server is the interface for cluster.
@@ -2165,6 +2162,27 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
 
+func (c *RaftCluster) getRegionStats(startKey, endKey []byte, useHot bool, opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
+	stats := statistics.NewRegionStats()
+	for {
+		regions := c.ScanRegions(startKey, endKey, core.ScanRegionLimit)
+
+		for _, region := range regions {
+			if useHot {
+				stats.Observe(region, c, opts...)
+			} else {
+				stats.Observe(region, nil, opts...)
+			}
+		}
+		if len(regions) < core.ScanRegionLimit {
+			break
+		}
+
+		startKey = regions[len(regions)-1].GetEndKey()
+	}
+	return stats
+}
+
 // GetHotRegionStatusByRange return region statistics from cluster with hot statistics.
 func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine string) *statistics.RegionStats {
 	stores := c.GetStores()
@@ -2183,19 +2201,7 @@ func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine 
 		storeMap[store.GetID()] = store.GetLabelValue(core.EngineKey)
 	}
 	opt := statistics.WithStoreMapOption(storeMap)
-	stats := statistics.NewRegionStats()
-	for {
-		regions := c.ScanRegions(startKey, endKey, defaultScanRegionsLimit)
-
-		for _, region := range regions {
-			stats.Observe(region, c, opt)
-		}
-		if len(regions) < defaultScanRegionsLimit {
-			break
-		}
-
-		startKey = regions[len(regions)-1].GetEndKey()
-	}
+	stats := c.getRegionStats(startKey, endKey, true, opt)
 	// Fill in the hot write region statistics.
 	for storeID, label := range storeMap {
 		if _, ok := stats.StoreLeaderCount[storeID]; !ok {
@@ -2239,18 +2245,7 @@ func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine 
 // if useHotFlow is true, the hot region statistics will be returned.
 func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte,
 	opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
-	stats := statistics.NewRegionStats()
-	for {
-		regions := c.ScanRegions(startKey, endKey, defaultScanRegionsLimit)
-		for _, region := range regions {
-			stats.Observe(region, nil, opts...)
-		}
-		if len(regions) < defaultScanRegionsLimit {
-			break
-		}
-		startKey = regions[len(regions)-1].GetEndKey()
-	}
-	return stats
+	return c.getRegionStats(startKey, endKey, false, opts...)
 }
 
 // GetRegionStatsCount returns the number of regions in the range.
