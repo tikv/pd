@@ -222,10 +222,14 @@ func NewGlobalGCBarrierInfo(barrierID string, barrierTS uint64, ttl time.Duratio
 
 // IsExpired checks whether the barrier is expired.
 func (b *GlobalGCBarrierInfo) IsExpired() bool {
+	return b.isExpiredImpl(time.Now())
+}
+
+func (b *GlobalGCBarrierInfo) isExpiredImpl(now time.Time) bool {
 	if b.TTL == TTLNeverExpire {
 		return false
 	}
-	return time.Since(b.getReqStartTime) > b.TTL
+	return now.Sub(b.getReqStartTime) > b.TTL
 }
 
 // GCState represents the information of the GC state.
