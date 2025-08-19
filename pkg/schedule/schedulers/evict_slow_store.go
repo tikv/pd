@@ -541,6 +541,8 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 		}
 
 		for storeID, score := range networkSlowScores {
+			// There is a network problem, but we don't know which side of the network has the problem.
+			// To avoid misjudgment, filter it.
 			if _, ok := problematicNetwork[store.GetID()][storeID]; ok {
 				continue
 			}
