@@ -73,12 +73,35 @@ type GCStatesClient interface {
 	// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 	// the NullKeyspace.
 	GetGCState(ctx context.Context) (GCState, error)
-	// SetGlobalGCBarrier sets (creates or updates) a global GC barrier.
+	// Sets a global GC barrier, which is a GC barrier that is effective among all keyspaces, blocking the GC procedure of
+	// all keyspaces. This API is designed for some special needs to block GC of all keyspaces.
+	//
+	// The usage is the same as SetGCBarrier. Note that normal GC barriers and global GC barriers are separated.
+	// One can not use SetGCBarrier and DeleteGCBarrier to operate a global GC barrier set by SetGlobalGCBarrier, and vice versa.
+	//
+
+	// Once a global GC barrier is set, it will block the txn safe point from being advanced over the barrierTS,
+	// until the global GC barrier is expired (defined by ttl) or manually deleted (by calling DeleteGlobalGCBarrier).
+	//
+	// When this method is called on an existing global GC barrier, it updates the barrierTS and ttl of the existing global
+	// GC barrier and the expiration time will become the current time plus the ttl.
+	// This means that calling this method on an existing global GC barrier can extend its lifetime arbitrarily.
+	//
+	// Passing non-positive value to ttl is not allowed. Passing `time.Duration(math.MaxInt64)` to ttl indicates that the
+	// GC barrier should never expire. The ttl might be rounded up, and the actual ttl is guaranteed no less than the
+	// specified duration.
+	//
+	// The barrierID must be non-empty.
+	//
+	// The given barrierTS must be greater than or equal to the current txn safe point of all keyspaces,
+	// otherwise an error will be returned.
+	//
+	// When this function executes successfully, its result is never nil.
 	SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*GlobalGCBarrierInfo, error)
 	// DeleteGlobalGCBarrier deletes a global GC barrier.
 	DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*GlobalGCBarrierInfo, error)
 	// Get the GC states from all keyspaces.
-	GetAllKeyspacesGCStates(ctx context.Context) (GCStates, error)
+	GetAllKeyspacesGCStates(ctx context.Context) (ClusterGCStates, error)
 }
 
 // InternalController is the interface for controlling GC execution.
@@ -216,10 +239,10 @@ type GCState struct {
 	GCBarriers   []*GCBarrierInfo
 }
 
-// GCStates represents the information of the GC state for all keyspaces.
+// ClusterGCStates represents the information of the GC state for all keyspaces.
 //
 //nolint:revive
-type GCStates struct {
+type ClusterGCStates struct {
 	// Maps from keyspace id to GC state of that keyspace.
 	GCStates map[uint32]GCState
 	// All existing global GC barriers.

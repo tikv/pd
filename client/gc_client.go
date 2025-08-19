@@ -322,19 +322,19 @@ func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCState, error) {
 	return pbToGCState(gcState, start), nil
 }
 
-func pbToGCState(from *pdpb.GCState, reqStartTime time.Time) gc.GCState {
+func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time) gc.GCState {
 	keyspaceID := constants.NullKeyspaceID
-	if from.KeyspaceScope != nil {
-		keyspaceID = from.KeyspaceScope.KeyspaceId
+	if pb.KeyspaceScope != nil {
+		keyspaceID = pb.KeyspaceScope.KeyspaceId
 	}
-	gcBarriers := make([]*gc.GCBarrierInfo, 0, len(from.GetGcBarriers()))
-	for _, b := range from.GetGcBarriers() {
+	gcBarriers := make([]*gc.GCBarrierInfo, 0, len(pb.GetGcBarriers()))
+	for _, b := range pb.GetGcBarriers() {
 		gcBarriers = append(gcBarriers, pbToGCBarrierInfo(b, reqStartTime))
 	}
 	return gc.GCState{
 		KeyspaceID:   keyspaceID,
-		TxnSafePoint: from.GetTxnSafePoint(),
-		GCSafePoint:  from.GetGcSafePoint(),
+		TxnSafePoint: pb.GetTxnSafePoint(),
+		GCSafePoint:  pb.GetGcSafePoint(),
 		GCBarriers:   gcBarriers,
 	}
 }
@@ -394,7 +394,7 @@ func (c gcStatesClient) DeleteGlobalGCBarrier(ctx context.Context, barrierID str
 }
 
 // GetAllKeyspacesGCStates gets the GC states from all keyspaces.
-func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.GCStates, error) {
+func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.ClusterGCStates, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetAllKeyspacesGCState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -409,15 +409,15 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.GCState
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
-		return gc.GCStates{}, errs.ErrClientGetProtoClient
+		return gc.ClusterGCStates{}, errs.ErrClientGetProtoClient
 	}
 
 	resp, err := protoClient.GetAllKeyspacesGCStates(ctx, req)
 	if err = c.client.respForErr(metrics.CmdFailedDurationGetAllKeyspacesGCStates, start, err, resp.GetHeader()); err != nil {
-		return gc.GCStates{}, err
+		return gc.ClusterGCStates{}, err
 	}
 
-	var ret gc.GCStates
+	var ret gc.ClusterGCStates
 	ret.GCStates = make(map[uint32]gc.GCState, len(resp.GetGcStates()))
 	for _, state := range resp.GetGcStates() {
 		ret.GCStates[state.KeyspaceScope.KeyspaceId] = pbToGCState(state, start)
