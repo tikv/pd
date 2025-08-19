@@ -107,13 +107,13 @@ func (krl *serviceLimiter) setServiceLimit(now time.Time, newServiceLimit float6
 	}
 }
 
-func (krl *serviceLimiter) getServiceLimit() float64 {
+func (krl *serviceLimiter) getStates() (serviceLimit float64, tat time.Time, slack typeutil.Duration) {
 	if krl == nil {
-		return 0.0
+		return 0.0, time.Time{}, typeutil.Duration{}
 	}
 	krl.RLock()
 	defer krl.RUnlock()
-	return krl.ServiceLimit
+	return krl.ServiceLimit, krl.TAT, krl.Slack
 }
 
 func (krl *serviceLimiter) perTokenIntervalInNanosLocked() float64 {
@@ -143,6 +143,7 @@ func (krl *serviceLimiter) applyServiceLimit(
 	if now.After(krl.TAT) {
 		base = now
 	}
+	// TODO: smooth the burst window in a cold start scenario.
 	krl.Slack.Duration = now.Add(krl.BurstWindow.Duration).Sub(base)
 	if krl.Slack.Duration <= 0 {
 		return 0

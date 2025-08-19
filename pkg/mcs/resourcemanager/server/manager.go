@@ -530,8 +530,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
-
+				// Record the service limit metrics.
+				setServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter())
+				// Record the resource group metrics.
 				for _, group := range krgm.getResourceGroupList(true, true) {
 					groupName := group.Name
 					// Record the sum of RRU and WRU every second.

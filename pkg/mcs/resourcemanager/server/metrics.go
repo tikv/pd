@@ -39,6 +39,9 @@ const (
 	keyspaceNameLabel         = "keyspace_name"
 	fillRateLabel             = "fill_rate"
 	burstLimitLabel           = "burst_limit"
+	serviceLimitLabel         = "service_limit"
+	tatLabel                  = "tat"
+	slackLabel                = "slack"
 
 	// Labels for the config.
 	ruPerSecLabel   = "ru_per_sec"
@@ -169,7 +172,7 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "service_limit",
 			Help:      "Gauge of the total RU limit of specific keyspace.",
-		}, []string{keyspaceNameLabel})
+		}, []string{keyspaceNameLabel, typeLabel})
 )
 
 type metrics struct {
@@ -423,11 +426,16 @@ func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
 	m.sampledRequestUnitPerSecGauge.Set(ruPerSec)
 }
 
-func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
+func setServiceLimitMetrics(keyspaceName string, sl *serviceLimiter) {
+	limit, tat, slack := sl.getStates()
 	if limit > 0 {
-		serviceLimit.WithLabelValues(keyspaceName).Set(limit)
+		serviceLimit.WithLabelValues(keyspaceName, serviceLimitLabel).Set(limit)
+		serviceLimit.WithLabelValues(keyspaceName, tatLabel).Set(float64(tat.UnixMilli()))
+		serviceLimit.WithLabelValues(keyspaceName, slackLabel).Set(float64(slack.Milliseconds()))
 	} else {
-		serviceLimit.DeleteLabelValues(keyspaceName)
+		serviceLimit.DeleteLabelValues(keyspaceName, serviceLimitLabel)
+		serviceLimit.DeleteLabelValues(keyspaceName, tatLabel)
+		serviceLimit.DeleteLabelValues(keyspaceName, slackLabel)
 	}
 }
 

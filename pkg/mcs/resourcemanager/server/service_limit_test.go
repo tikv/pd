@@ -86,18 +86,28 @@ func TestGetServiceLimit(t *testing.T) {
 
 	// Test with nil limiter
 	var limiter *serviceLimiter
-	limit := limiter.getServiceLimit()
-	re.Equal(0.0, limit)
+	limit, tat, slack := limiter.getStates()
+	re.Zero(limit)
+	re.Zero(tat)
+	re.Zero(slack)
 
 	// Test with valid limiter
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
-	limit = limiter.getServiceLimit()
+	now := time.Now()
+	limit, tat, slack = limiter.getStates()
 	re.Equal(100.0, limit)
+	re.GreaterOrEqual(now.Sub(tat), time.Duration(0))
+	re.Less(now.Sub(tat), time.Second)
+	re.Zero(slack)
 
 	// Test after updating service limit
-	limiter.setServiceLimit(time.Now(), 200.0)
-	limit = limiter.getServiceLimit()
+	now = time.Now()
+	limiter.setServiceLimit(now, 200.0)
+	limit, tat, slack = limiter.getStates()
 	re.Equal(200.0, limit)
+	re.GreaterOrEqual(now.Sub(tat), time.Duration(0))
+	re.Less(now.Sub(tat), time.Second)
+	re.Zero(slack)
 }
 
 func TestPerTokenIntervalLocked(t *testing.T) {
