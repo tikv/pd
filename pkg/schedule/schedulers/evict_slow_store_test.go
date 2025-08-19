@@ -517,7 +517,7 @@ func TestRecoveryTime(t *testing.T) {
 
 	var recoveryTimeInSec uint64 = 1
 	recoveryTime := 1 * time.Second
-	es.(*evictSlowStoreScheduler).conf.RecoveryDurationGap = recoveryTimeInSec
+	es.(*evictSlowStoreScheduler).conf.RecoverySec = recoveryTimeInSec
 
 	// Mark store 1 as slow
 	storeInfo := tc.GetStore(1)

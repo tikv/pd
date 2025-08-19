@@ -70,7 +70,7 @@ type evictSlowStoreSchedulerConfig struct {
 	isRecovered                bool
 	networkSlowStoreCaptureTSs map[uint64]time.Time
 	// Duration gap for recovering the candidate, unit: s.
-	RecoveryDurationGap     uint64   `json:"recovery-duration"`
+	RecoverySec             uint64   `json:"recovery-duration"`
 	EvictedStores           []uint64 `json:"evict-stores"`
 	EnableNetworkSlowStore  bool     `json:"enable-network-slow-store"`
 	PausedNetworkSlowStores []uint64 `json:"network-slow-stores"`
@@ -83,7 +83,7 @@ func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
 		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		lastSlowStoreCaptureTS:     time.Time{},
-		RecoveryDurationGap:        defaultRecoveryDurationGap,
+		RecoverySec:                defaultRecoverySec,
 		EvictedStores:              make([]uint64, 0),
 		Batch:                      EvictLeaderBatchSize,
 		EnableNetworkSlowStore:     true,
@@ -96,8 +96,8 @@ func (conf *evictSlowStoreSchedulerConfig) clone() *evictSlowStoreSchedulerConfi
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowStoreSchedulerConfig{
-		RecoveryDurationGap: conf.RecoveryDurationGap,
-		Batch:               conf.Batch,
+		RecoverySec: conf.RecoverySec,
+		Batch:       conf.Batch,
 	}
 }
 
@@ -195,24 +195,24 @@ func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStore(storeID uint64, c
 	evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Set(1)
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getRecoveryDurationGap() uint64 {
+func (conf *evictSlowStoreSchedulerConfig) getRecoverySec() uint64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	failpoint.Inject("transientRecoveryGap", func() {
 		failpoint.Return(0)
 	})
-	return conf.RecoveryDurationGap
+	return conf.RecoverySec
 }
 
 // readyForRecovery checks whether the last captured candidate is ready for recovery.
 func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
-	recoveryDurationGap := conf.RecoveryDurationGap
+	recoverySec := conf.RecoverySec
 	failpoint.Inject("transientRecoveryGap", func() {
-		recoveryDurationGap = 0
+		recoverySec = 0
 	})
-	return uint64(time.Since(conf.lastSlowStoreCaptureTS).Seconds()) >= recoveryDurationGap
+	return uint64(time.Since(conf.lastSlowStoreCaptureTS).Seconds()) >= recoverySec
 }
 
 func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
@@ -293,18 +293,18 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 
 	handler.config.Lock()
 	defer handler.config.Unlock()
-	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
+	prevRecoverySec := handler.config.RecoverySec
 	prevBatch := handler.config.Batch
-	recoveryDurationGap := uint64(recoveryDurationGapFloat)
-	handler.config.RecoveryDurationGap = recoveryDurationGap
+	recoverySec := uint64(recoveryDurationGapFloat)
+	handler.config.RecoverySec = recoverySec
 	handler.config.Batch = batch
 	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		handler.config.RecoverySec = prevRecoverySec
 		handler.config.Batch = prevBatch
 		return
 	}
-	log.Info("evict-slow-store-scheduler update config", zap.Uint64("prev-recovery-duration", prevRecoveryDurationGap), zap.Uint64("cur-recovery-duration", recoveryDurationGap), zap.Int("prev-batch", prevBatch), zap.Int("cur-batch", batch))
+	log.Info("evict-slow-store-scheduler update config", zap.Uint64("prev-recovery-duration", prevRecoverySec), zap.Uint64("cur-recovery-duration", recoverySec), zap.Int("prev-batch", prevBatch), zap.Int("cur-batch", batch))
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
@@ -356,7 +356,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 		new[id] = struct{}{}
 	}
 	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
-	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
+	s.conf.RecoverySec = newCfg.RecoverySec
 	s.conf.EvictedStores = newCfg.EvictedStores
 	s.conf.PausedNetworkSlowStores = newCfg.PausedNetworkSlowStores
 	s.conf.Batch = newCfg.Batch
@@ -434,7 +434,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.SchedulerCluster) {
 	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
-	recoveryGap := s.conf.getRecoveryDurationGap()
+	recoveryGap := s.conf.getRecoverySec()
 	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
 
 	// try to recover the network slow store if it is normal.
