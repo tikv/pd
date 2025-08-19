@@ -461,7 +461,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{caller_id=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 1")
 
 	// resign to test persist config
 	oldLeaderName := leader.GetServer().Name()
@@ -491,7 +491,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	output = string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{caller_id=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 2")
 
 	input = map[string]any{
 		"enable-audit": "false",
@@ -873,22 +873,19 @@ func TestRemovingProgress(t *testing.T) {
 	re.Nil(resp.GetHeader().GetError())
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        1,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        2,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        3,
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		},
 	}
 
@@ -1109,35 +1106,30 @@ func TestPreparingProgress(t *testing.T) {
 			Id:             1,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Serving,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             2,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Serving,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             3,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Serving,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             4,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Preparing,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 		{
 			Id:             5,
 			State:          metapb.StoreState_Up,
 			NodeState:      metapb.NodeState_Preparing,
-			LastHeartbeat:  time.Now().UnixNano(),
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 	}

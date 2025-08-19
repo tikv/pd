@@ -68,6 +68,8 @@ func TestStoreStatistics(t *testing.T) {
 		UsedSize:  0,
 	}))
 	stores[5] = store5
+	stores[8] = stores[8].Clone(core.SetLeaderCount(100))
+
 	storeStats := NewStoreStatisticsMap(opt)
 	for _, store := range stores {
 		storeStats.Observe(store)
@@ -98,6 +100,7 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal([]uint64{1, 3, 5, 7}, stats.LabelCounter["host:h1"])
 	re.Len(stats.LabelCounter["host:h2"], 4)
 	re.Len(stats.LabelCounter["zone:unknown"], 2)
+	re.Equal(0, stats.LeaderCount)
 }
 
 func TestSummaryStoreInfos(t *testing.T) {

@@ -58,7 +58,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -68,6 +67,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -1270,13 +1270,15 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		tracer.OnUpdateSubTreeFinished()
 
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-			ctx.MiscRunner.RunTask(
-				regionID,
-				ratelimit.HandleOverlaps,
-				func(ctx context.Context) {
-					cluster.HandleOverlaps(ctx, c, overlaps)
-				},
-			)
+			if len(overlaps) > 0 {
+				ctx.MiscRunner.RunTask(
+					regionID,
+					ratelimit.HandleOverlaps,
+					func(ctx context.Context) {
+						cluster.HandleOverlaps(ctx, c, overlaps)
+					},
+				)
+			}
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
@@ -1823,7 +1825,8 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 		readyToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
-			threshold = c.getThreshold(stores, store)
+			kr := keyutil.NewKeyRange("", "")
+			threshold = c.getThreshold(stores, store, &kr)
 			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
 				zap.Float64("threshold", threshold),
 				zap.Float64("region-size", regionSize))
@@ -1872,28 +1875,28 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 	return
 }
 
-func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
+func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		regionSize := c.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
-		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
+		regionSize := c.GetRegionSizeByRange(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
+		weight := core.GetStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
 		return float64(regionSize) * weight * 0.9
 	}
 
-	keys := c.ruleManager.GetSplitKeys([]byte(""), []byte(""))
+	keys := c.ruleManager.GetSplitKeys(kr.StartKey, kr.EndKey)
 	if len(keys) == 0 {
-		return c.calculateRange(stores, store, []byte(""), []byte("")) * 0.9
+		return c.calculateRange(stores, store, kr.StartKey, kr.EndKey) * 0.9
 	}
 
 	storeSize := 0.0
-	startKey := []byte("")
+	startKey := kr.StartKey
 	for _, key := range keys {
 		endKey := key
 		storeSize += c.calculateRange(stores, store, startKey, endKey)
 		startKey = endKey
 	}
 	// the range from the last split key to the last key
-	storeSize += c.calculateRange(stores, store, startKey, []byte(""))
+	storeSize += c.calculateRange(stores, store, startKey, kr.EndKey)
 	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
 	return storeSize * 0.9
 }
@@ -1916,7 +1919,7 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 			}
 		}
 		regionSize := c.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
-		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+		weight := core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
 		storeSize += float64(regionSize) * weight
 		log.Debug("calculate range result",
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
@@ -1929,103 +1932,6 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 		)
 	}
 	return storeSize
-}
-
-func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) float64 {
-	topology, validLabels, sameLocationStoreNum, isMatch := buildTopology(store, stores, locationLabels, count)
-	weight := 1.0
-	topo := topology
-	if isMatch {
-		return weight / float64(count) / sameLocationStoreNum
-	}
-
-	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
-	for _, label := range storeLabels {
-		if _, ok := topo[label.Value]; ok {
-			if slice.Contains(validLabels, label.Key) {
-				weight /= float64(len(topo))
-			}
-			topo = topo[label.Value].(map[string]any)
-		} else {
-			break
-		}
-	}
-
-	return weight / sameLocationStoreNum
-}
-
-func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]any, []string, float64, bool) {
-	topology := make(map[string]any)
-	sameLocationStoreNum := 1.0
-	totalLabelCount := make([]int, len(locationLabels))
-	for _, store := range stores {
-		if store.IsServing() || store.IsPreparing() {
-			labelCount := updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
-			for i, c := range labelCount {
-				totalLabelCount[i] += c
-			}
-		}
-	}
-
-	validLabels := locationLabels
-	var isMatch bool
-	for i, c := range totalLabelCount {
-		if count/c == 0 {
-			validLabels = validLabels[:i]
-			break
-		}
-		if count/c == 1 && count%c == 0 {
-			validLabels = validLabels[:i+1]
-			isMatch = true
-			break
-		}
-	}
-	for _, store := range stores {
-		if store.GetID() == s.GetID() {
-			continue
-		}
-		if s.CompareLocation(store, validLabels) == -1 {
-			sameLocationStoreNum++
-		}
-	}
-
-	return topology, validLabels, sameLocationStoreNum, isMatch
-}
-
-func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
-	var sortedLabels []*metapb.StoreLabel
-	for _, ll := range locationLabels {
-		find := false
-		for _, sl := range storeLabels {
-			if ll == sl.Key {
-				sortedLabels = append(sortedLabels, sl)
-				find = true
-				break
-			}
-		}
-		// TODO: we need to improve this logic to make the label calculation more accurate if the user has the wrong label settings.
-		if !find {
-			sortedLabels = append(sortedLabels, &metapb.StoreLabel{Key: ll, Value: ""})
-		}
-	}
-	return sortedLabels
-}
-
-// updateTopology records stores' topology in the `topology` variable.
-func updateTopology(topology map[string]any, sortedLabels []*metapb.StoreLabel) []int {
-	labelCount := make([]int, len(sortedLabels))
-	if len(sortedLabels) == 0 {
-		return labelCount
-	}
-	topo := topology
-	for i, l := range sortedLabels {
-		if _, exist := topo[l.Value]; !exist {
-			topo[l.Value] = make(map[string]any)
-			labelCount[i] += 1
-		}
-		topo = topo[l.Value].(map[string]any)
-	}
-	return labelCount
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.

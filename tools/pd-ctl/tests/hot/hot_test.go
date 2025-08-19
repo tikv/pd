@@ -80,15 +80,13 @@ func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 	cmd := ctl.GetRootCmd()
 
 	store1 := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	store2 := &metapb.Store{
-		Id:            2,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
-		Labels:        []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
+		Id:     2,
+		State:  metapb.StoreState_Up,
+		Labels: []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
 	}
 
 	pdTests.MustPutStore(re, cluster, store1)
@@ -251,14 +249,12 @@ func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 
@@ -317,14 +313,12 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) 
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 
@@ -412,19 +406,16 @@ func TestHistoryHotRegions(t *testing.T) {
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    3,
+			State: metapb.StoreState_Up,
 		},
 	}
 
@@ -529,14 +520,12 @@ func TestBuckets(t *testing.T) {
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 

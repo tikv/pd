@@ -289,6 +289,16 @@ func TestStoreStateFilter(t *testing.T) {
 		{3, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
+
+	// Removed
+	store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	testCases = []testCase{
+		{0, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{1, plan.StatusStoreBusy, plan.StatusStoreRemoved},
+		{2, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{3, plan.StatusOK, plan.StatusStoreRemoved},
+	}
+	check(store, testCases)
 }
 
 func TestStoreStateFilterReason(t *testing.T) {
