@@ -1699,6 +1699,32 @@ func TestCalculateStoreSize1(t *testing.T) {
 	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr))
 }
 
+func TestStatsRegions(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	count := 10000
+	regions := newTestRegions(uint64(count), 3, 3)
+	for _, region := range regions {
+		err = tc.putRegion(region)
+		re.NoError(err)
+	}
+
+	stats := tc.GetRegionStatsByRange([]byte(""), []byte(""))
+	re.Equal(count, stats.Count)
+	stats = tc.GetHotRegionStatusByRange([]byte(""), []byte(""), "tikv")
+	re.Equal(count, stats.Count)
+
+	midKey := regions[count/2].GetStartKey()
+	stats = tc.GetRegionStatsByRange(midKey, []byte(""))
+	re.Equal(count/2, stats.Count)
+	stats = tc.GetHotRegionStatusByRange(midKey, []byte(""), "tikv")
+	re.Equal(count/2, stats.Count)
+}
+
 func TestCalculateStoreSize2(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
