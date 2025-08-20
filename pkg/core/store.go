@@ -188,13 +188,13 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 // AllowLeaderTransferIn returns if the store is allowed to be selected
 // as target of transfer leader.
 func (s *StoreInfo) AllowLeaderTransferIn() bool {
-	return s.pauseLeaderTransferIn.Load() > 0
+	return s.pauseLeaderTransferIn.Load() == 0
 }
 
 // AllowLeaderTransferOut returns if the store is allowed to be selected
 // as source of transfer leader.
 func (s *StoreInfo) AllowLeaderTransferOut() bool {
-	return s.pauseLeaderTransferOut.Load() > 0
+	return s.pauseLeaderTransferOut.Load() == 0
 }
 
 // EvictedAsSlowStore returns if the store should be evicted as a slow store.
