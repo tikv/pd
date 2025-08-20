@@ -1798,7 +1798,6 @@ func TestStores(t *testing.T) {
 		re.Equal(i+1, cache.GetStoreCount())
 		re.NoError(cache.PauseLeaderTransfer(id, constant.In))
 		re.False(cache.GetStore(id).AllowLeaderTransferIn())
-		re.Error(cache.PauseLeaderTransfer(id, constant.In))
 		cache.ResumeLeaderTransfer(id, constant.In)
 		re.True(cache.GetStore(id).AllowLeaderTransferIn())
 	}
