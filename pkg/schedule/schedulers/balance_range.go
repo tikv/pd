@@ -393,16 +393,6 @@ func (s *balanceRangeScheduler) report() {
 	s.lastReportTime = now
 }
 
-func (s *balanceRangeScheduler) cleanMetrics() {
-	for storeID := range s.scoreMap {
-		storeStr := strconv.FormatUint(storeID, 10)
-		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(0)
-		if _, ok := s.expectScoreMap[storeID]; ok {
-			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
-		}
-	}
-}
-
 // ServeHTTP implements the http.Handler interface.
 func (s *balanceRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
@@ -525,13 +515,6 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 	}
 	defer s.filterCounter.Flush()
 
-	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
-
-	err := s.prepare(cluster, opInfluence, job)
-	if err != nil {
-		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
-		return nil, nil
-	}
 	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	sources := filter.SelectSourceStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	solver := s.solver

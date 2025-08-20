@@ -158,16 +158,16 @@ var (
 	balanceRangeGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "balance_range",
+			Subsystem: "balance_range",
+			Name:      "store",
 			Help:      "Store status for balance range schedule",
 		}, []string{"store", "type"})
 	balanceRangeJobGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "balance_range",
-			Help:      "Store status for balance range schedule",
+			Subsystem: "balance_range",
+			Name:      "job",
+			Help:      "job status for balance range schedule",
 		}, []string{})
 )
 

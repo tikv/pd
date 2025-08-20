@@ -186,6 +186,7 @@ func TestTIKVEngine(t *testing.T) {
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
 	// no any stores
 	re.False(scheduler.IsScheduleAllowed(tc))
 	km := tc.GetKeyRangeManager()
@@ -212,6 +213,11 @@ func TestTIKVEngine(t *testing.T) {
 	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
 	// case1: transfer leader from store 1 to store 3
+	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
@@ -222,6 +228,7 @@ func TestTIKVEngine(t *testing.T) {
 	// case2: move leader from store 1 to store 4
 	tc.AddLeaderRegionWithRange(6, "160", "180", 3, 1, 3)
 	tc.AddLeaderStore(4, 0)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
@@ -281,6 +288,7 @@ func TestLocationLabel(t *testing.T) {
 			1, uint64(follower1), uint64(follower2))
 	}
 	// case1: store 1 has 100 peers, the others has 50 peer, it suiter for the location label setting.
+	re.False(scheduler.IsScheduleAllowed(tc))
 	op, _ := scheduler.Schedule(tc, true)
 	re.Empty(op)
 
@@ -290,6 +298,11 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(100+i), strconv.Itoa(200+i), strconv.Itoa(200+i+1),
 			1, 2, 4)
 	}
+	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"peer-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ := scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	re.Len(ops, 1)
@@ -301,6 +314,7 @@ func TestLocationLabel(t *testing.T) {
 		opt := core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 24 * 10))
 		tc.PutStore(store.Clone(opt))
 	}
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	re.Len(ops, 1)
@@ -342,6 +356,7 @@ func TestTIFLASHEngine(t *testing.T) {
 			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
 	re.NoError(err)
 	// tiflash-4 only has 1 region, so it doesn't need to balance
+	re.False(scheduler.IsScheduleAllowed(tc))
 	ops, _ := scheduler.Schedule(tc, false)
 	re.Empty(ops)
 
@@ -349,6 +364,11 @@ func TestTIFLASHEngine(t *testing.T) {
 	for i := 2; i <= 3; i++ {
 		tc.AddRegionWithLearner(uint64(i), 1, []uint64{2, 3}, []uint64{4})
 	}
+	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
