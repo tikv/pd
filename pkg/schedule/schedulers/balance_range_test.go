@@ -110,7 +110,34 @@ func TestPlacementRule(t *testing.T) {
 	re.Error(err)
 }
 
-func TestBalanceRangePlan(t *testing.T) {
+func TestIsBalanced(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	sc := newBalanceRangeScheduler(oc, &balanceRangeSchedulerConfig{}).(*balanceRangeScheduler)
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 1)
+	}
+	tc.AddLeaderRegionWithRange(1, fmt.Sprintf("%20d", 1), fmt.Sprintf("%20d", 2), 1, 2, 3)
+	job := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.LeaderScatter,
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("", "")},
+	}
+	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.NoError(err)
+	// only one region, so it is balanced
+	re.True(sc.isBalanced())
+	// add more regions
+	for i := range 10 {
+		tc.AddLeaderRegionWithRange(uint64(i+2), fmt.Sprintf("%20d", i), fmt.Sprintf("%20d", i+1), 1, 2, 3)
+	}
+	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.NoError(err)
+	re.False(sc.isBalanced())
+}
+
+func TestPrepareBalanceRange(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -139,7 +166,8 @@ func TestTIKVEngine(t *testing.T) {
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
-	re.True(scheduler.IsScheduleAllowed(tc))
+	// no any stores
+	re.False(scheduler.IsScheduleAllowed(tc))
 	km := tc.GetKeyRangeManager()
 	kr := keyutil.NewKeyRange("", "")
 	ranges := km.GetNonOverlappingKeyRanges(&kr)

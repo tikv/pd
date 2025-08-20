@@ -372,11 +372,53 @@ type balanceRangeScheduler struct {
 	expectScoreMap map[uint64]float64
 	job            *balanceRangeSchedulerJob
 	solver         *solver
+	lastReportTime time.Time
+}
+
+func (s *balanceRangeScheduler) report() {
+	now := time.Now()
+	if now.Sub(s.lastReportTime) < 10*time.Second {
+		return
+	}
+	for storeID, score := range s.scoreMap {
+		storeStr := strconv.FormatUint(storeID, 10)
+		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(score)
+		if expect, ok := s.expectScoreMap[storeID]; ok {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(expect)
+		} else {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
+		}
+	}
+	s.lastReportTime = now
+}
+
+func (s *balanceRangeScheduler) cleanMetrics() {
+	for storeID := range s.scoreMap {
+		storeStr := strconv.FormatUint(storeID, 10)
+		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(0)
+		if _, ok := s.expectScoreMap[storeID]; ok {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
+		}
+	}
 }
 
 // ServeHTTP implements the http.Handler interface.
 func (s *balanceRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
+}
+
+func (s *balanceRangeScheduler) isBalanced() bool {
+	diff := 0
+	for storeID, score := range s.scoreMap {
+		if expect, ok := s.expectScoreMap[storeID]; ok {
+			if expect > score {
+				diff += int(expect - score)
+			} else {
+				diff += int(score - expect)
+			}
+		}
+	}
+	return diff <= 1
 }
 
 // IsScheduleAllowed checks if the scheduler is allowed to schedule new operators.
@@ -398,14 +440,33 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 			km := cluster.GetKeyRangeManager()
 			km.Append(job.Ranges)
 		}
-		// todo: add other conditions such as the diff of the score between the source and target store.
 		if time.Since(*job.Start) > job.Timeout {
 			if err := s.conf.finish(index); err != nil {
+				balancePersistFailedCounter.Inc()
 				return false
 			}
 			km := cluster.GetKeyRangeManager()
 			km.Delete(job.Ranges)
 			balanceRangeExpiredCounter.Inc()
+			log.Info("balance key range job finished due to timeout", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+		}
+
+		opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+		err := s.prepare(cluster, opInfluence, job)
+		if err != nil {
+			log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
+			return false
+		}
+		if s.isBalanced() {
+			if err = s.conf.finish(index); err != nil {
+				balancePersistFailedCounter.Inc()
+				return false
+			}
+			km := cluster.GetKeyRangeManager()
+			km.Delete(job.Ranges)
+			balanceRangeBalancedCounter.Inc()
+			log.Info("balance key range job finished due to balanced", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+			return false
 		}
 	}
 	return allowed
@@ -658,6 +719,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	s.expectScoreMap = expectScoreMap
 	s.solver = solver
 	s.job = job
+	s.report()
 	return nil
 }
 
