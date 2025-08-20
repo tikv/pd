@@ -851,15 +851,16 @@ func (s *StoresInfo) ResetStores() {
 func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Direction) error {
 	s.Lock()
 	defer s.Unlock()
-	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID),
-		zap.String("direction", direction.String()),
-		zap.Int64("pause-in-time", s.stores[storeID].pauseLeaderTransferIn.Load()),
-		zap.Int64("pause-out-time", s.stores[storeID].pauseLeaderTransferOut.Load()),
-	)
+
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
+	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID),
+		zap.String("direction", direction.String()),
+		zap.Int64("pause-in-time", store.pauseLeaderTransferIn.Load()),
+		zap.Int64("pause-out-time", store.pauseLeaderTransferOut.Load()),
+	)
 	s.stores[storeID] = store.Clone(PauseLeaderTransfer(direction))
 	return nil
 }
