@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -40,26 +41,45 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
-func TestStoreLimitV2(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+type storeTestSuite struct {
+	suite.Suite
+	env *pdTests.SchedulingTestEnvironment
+}
+
+func TestStoreTestSuite(t *testing.T) {
+	suite.Run(t, new(storeTestSuite))
+}
+
+func (s *storeTestSuite) SetupSuite() {
+	s.env = pdTests.NewSchedulingTestEnvironment(s.T())
+}
+
+func (s *storeTestSuite) TearDownSuite() {
+	s.env.Cleanup()
+}
+
+func (s *storeTestSuite) TearDownTest() {
+	re := s.Require()
+	s.env.Reset(re)
+}
+
+func (s *storeTestSuite) TestStoreLimitV2() {
+	s.env.RunTest(s.checkStoreLimitV2)
+}
+func (s *storeTestSuite) checkStoreLimitV2(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
 	// store command
 	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	_, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	defer func() {
+		// reset to v1 to avoid affecting other tests
+		args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v1"}
+		_, err = tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+	}()
 
 	args = []string{"-u", pdAddr, "store", "limit"}
 	output, err := tests.ExecuteCommand(cmd, args...)
@@ -72,16 +92,13 @@ func TestStoreLimitV2(t *testing.T) {
 	re.Contains(string(output), "not support set limit")
 }
 
-func TestStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (s *storeTestSuite) TestStore() {
+	// TODO: enable this test in microservice mode
+	s.env.RunTestInNonMicroserviceEnv(s.checkStore)
+}
+
+func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -119,12 +136,10 @@ func TestStore(t *testing.T) {
 	}
 
 	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store.Store.Store)
 	}
-	defer cluster.Destroy()
 
 	// store command
 	args := []string{"-u", pdAddr, "store"}
@@ -490,16 +505,11 @@ func TestStore(t *testing.T) {
 }
 
 // https://github.com/tikv/pd/issues/5024
-func TestTombstoneStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (s *storeTestSuite) TestTombstoneStore() {
+	s.env.RunTest(s.checkTombstoneStore)
+}
+func (s *storeTestSuite) checkTombstoneStore(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -536,13 +546,9 @@ func TestTombstoneStore(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store.Store.Store)
 	}
-	defer cluster.Destroy()
 	pdTests.MustPutRegion(re, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	pdTests.MustPutRegion(re, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	// store remove-tombstone
@@ -554,6 +560,8 @@ func TestTombstoneStore(t *testing.T) {
 	re.Contains(message, "3")
 }
 
+// TestStoreTLS tests the store command with TLS enabled.
+// So it requires another PD cluster.
 func TestStoreTLS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
