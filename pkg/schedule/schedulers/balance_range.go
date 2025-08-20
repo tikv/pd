@@ -389,6 +389,7 @@ func (s *balanceRangeScheduler) report() {
 			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
 		}
 	}
+	balanceRangeJobGauge.WithLabelValues().Set(float64(s.job.JobID))
 	s.lastReportTime = now
 }
 
@@ -426,50 +427,69 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 	allowed := s.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
+		return false
 	}
 	if err := s.conf.gc(); err != nil {
 		log.Error("balance range jobs gc failed", errs.ZapError(err))
 		return false
 	}
-	index, job := s.conf.peek()
-	if job != nil {
-		if job.Status == pending {
-			if err := s.conf.begin(index); err != nil {
-				return false
-			}
-			km := cluster.GetKeyRangeManager()
-			km.Append(job.Ranges)
-		}
-		if time.Since(*job.Start) > job.Timeout {
-			if err := s.conf.finish(index); err != nil {
-				balancePersistFailedCounter.Inc()
-				return false
-			}
-			km := cluster.GetKeyRangeManager()
-			km.Delete(job.Ranges)
-			balanceRangeExpiredCounter.Inc()
-			log.Info("balance key range job finished due to timeout", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
-		}
+	// If the running job has been cancelled, it needs to stop the job.
+	if s.job != nil && s.job.Status == cancelled {
+		s.cleanJobStatus(cluster, s.job)
+	}
 
-		opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
-		err := s.prepare(cluster, opInfluence, job)
-		if err != nil {
-			log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
+	index, job := s.conf.peek()
+	// all jobs are completed
+	if job == nil {
+		return false
+	}
+
+	if job.Status == pending {
+		if err := s.conf.begin(index); err != nil {
 			return false
 		}
-		if s.isBalanced() {
-			if err = s.conf.finish(index); err != nil {
-				balancePersistFailedCounter.Inc()
-				return false
-			}
-			km := cluster.GetKeyRangeManager()
-			km.Delete(job.Ranges)
-			balanceRangeBalancedCounter.Inc()
-			log.Info("balance key range job finished due to balanced", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+		km := cluster.GetKeyRangeManager()
+		km.Append(job.Ranges)
+	}
+	if time.Since(*job.Start) > job.Timeout {
+		if err := s.conf.finish(index); err != nil {
+			balancePersistFailedCounter.Inc()
 			return false
+		}
+		s.cleanJobStatus(cluster, job)
+		balanceRangeExpiredCounter.Inc()
+		log.Info("balance key range job finished due to timeout", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+	}
+
+	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+	err := s.prepare(cluster, opInfluence, job)
+	if err != nil {
+		log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
+		return false
+	}
+	if s.isBalanced() {
+		if err = s.conf.finish(index); err != nil {
+			balancePersistFailedCounter.Inc()
+			return false
+		}
+		s.cleanJobStatus(cluster, job)
+		balanceRangeBalancedCounter.Inc()
+		log.Info("balance key range job finished due to balanced", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+		return false
+	}
+	return true
+}
+
+func (s *balanceRangeScheduler) cleanJobStatus(cluster sche.SchedulerCluster, job *balanceRangeSchedulerJob) {
+	km := cluster.GetKeyRangeManager()
+	km.Delete(job.Ranges)
+	for storeID := range s.scoreMap {
+		storeStr := strconv.FormatUint(storeID, 10)
+		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(0)
+		if _, ok := s.expectScoreMap[storeID]; ok {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
 		}
 	}
-	return allowed
 }
 
 // BalanceRangeCreateOption is used to create a scheduler with an option.

@@ -114,27 +114,47 @@ func TestIsBalanced(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sc := newBalanceRangeScheduler(oc, &balanceRangeSchedulerConfig{}).(*balanceRangeScheduler)
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "", ""}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
 	for i := 1; i <= 3; i++ {
 		tc.AddLeaderStore(uint64(i), 1)
 	}
 	tc.AddLeaderRegionWithRange(1, fmt.Sprintf("%20d", 1), fmt.Sprintf("%20d", 2), 1, 2, 3)
-	job := &balanceRangeSchedulerJob{
-		Engine: core.EngineTiKV,
-		Rule:   core.LeaderScatter,
-		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("", "")},
-	}
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
-	re.NoError(err)
+
 	// only one region, so it is balanced
+	re.False(sc.IsScheduleAllowed(tc))
 	re.True(sc.isBalanced())
+	re.Equal(finished, sc.job.Status)
 	// add more regions
 	for i := range 10 {
 		tc.AddLeaderRegionWithRange(uint64(i+2), fmt.Sprintf("%20d", i), fmt.Sprintf("%20d", i+1), 1, 2, 3)
 	}
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
-	re.NoError(err)
+	now := time.Now()
+	re.NoError(sc.conf.addJob(&balanceRangeSchedulerJob{
+		Engine:  core.EngineTiKV,
+		Rule:    core.LeaderScatter,
+		Ranges:  []keyutil.KeyRange{keyutil.NewKeyRange("", "")},
+		Start:   &now,
+		Timeout: 10 * time.Minute,
+	}))
+	km := tc.GetKeyRangeManager()
+	re.True(km.IsEmpty())
+	re.True(sc.IsScheduleAllowed(tc))
 	re.False(sc.isBalanced())
+	re.Equal(running, sc.job.Status)
+	re.False(km.IsEmpty())
+
+	// cancel this job
+	re.NoError(sc.conf.deleteJob(1))
+	re.Equal(cancelled, sc.job.Status)
+	re.False(km.IsEmpty())
+	// no any pending jobs
+	re.False(sc.IsScheduleAllowed(tc))
+	// must clean the job status
+	re.True(km.IsEmpty())
 }
 
 func TestPrepareBalanceRange(t *testing.T) {

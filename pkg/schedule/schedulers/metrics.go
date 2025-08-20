@@ -160,8 +160,15 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "balance_range",
-			Help:      "Store status for schedule",
+			Help:      "Store status for balance range schedule",
 		}, []string{"store", "type"})
+	balanceRangeJobGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "balance_range",
+			Help:      "Store status for balance range schedule",
+		}, []string{})
 )
 
 func init() {
@@ -182,6 +189,7 @@ func init() {
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
 	prometheus.MustRegister(HotPendingSum)
 	prometheus.MustRegister(balanceRangeGauge)
+	prometheus.MustRegister(balanceRangeJobGauge)
 }
 
 func balanceLeaderCounterWithEvent(event string) prometheus.Counter {
