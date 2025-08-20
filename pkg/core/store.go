@@ -17,6 +17,7 @@ package core
 import (
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/go-units"
@@ -57,10 +58,10 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransferIn  bool // not allow to be used as target of transfer leader
-	pauseLeaderTransferOut bool // not allow to be used as source of transfer leader
-	slowStoreEvicted       bool // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted       bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	pauseLeaderTransferIn  atomic.Int64 // not allow to be used as target of transfer leader
+	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
+	slowStoreEvicted       bool         // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted       bool         // this store has been evicted as a slow store by trend, should not transfer leader to it
 	leaderCount            int
 	regionCount            int
 	learnerCount           int
@@ -112,14 +113,33 @@ func NewStoreInfoWithLabel(id uint64, labels map[string]string) *StoreInfo {
 
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	store := *s
-	store.meta = typeutil.DeepClone(s.meta, StoreFactory)
+	store := &StoreInfo{
+		meta:             typeutil.DeepClone(s.meta, StoreFactory),
+		storeStats:       s.storeStats,
+		slowStoreEvicted: s.slowStoreEvicted,
+		slowTrendEvicted: s.slowTrendEvicted,
+		leaderCount:      s.leaderCount,
+		regionCount:      s.regionCount,
+		learnerCount:     s.learnerCount,
+		witnessCount:     s.witnessCount,
+		leaderSize:       s.leaderSize,
+		regionSize:       s.regionSize,
+		pendingPeerCount: s.pendingPeerCount,
+		lastPersistTime:  s.lastPersistTime,
+		leaderWeight:     s.leaderWeight,
+		regionWeight:     s.regionWeight,
+		limiter:          s.limiter,
+		minResolvedTS:    s.minResolvedTS,
+		lastAwakenTime:   s.lastAwakenTime,
+	}
+	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
+	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&store)
+			opt(store)
 		}
 	}
-	return &store
+	return store
 }
 
 // LimitVersion returns the limit version of the store.
@@ -138,23 +158,43 @@ func (s *StoreInfo) Feedback(e float64) {
 
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
-	store := *s
-	for _, opt := range opts {
-		opt(&store)
+	store := &StoreInfo{
+		meta:             s.meta,
+		storeStats:       s.storeStats,
+		slowStoreEvicted: s.slowStoreEvicted,
+		slowTrendEvicted: s.slowTrendEvicted,
+		leaderCount:      s.leaderCount,
+		regionCount:      s.regionCount,
+		learnerCount:     s.learnerCount,
+		witnessCount:     s.witnessCount,
+		leaderSize:       s.leaderSize,
+		regionSize:       s.regionSize,
+		pendingPeerCount: s.pendingPeerCount,
+		lastPersistTime:  s.lastPersistTime,
+		leaderWeight:     s.leaderWeight,
+		regionWeight:     s.regionWeight,
+		limiter:          s.limiter,
+		minResolvedTS:    s.minResolvedTS,
+		lastAwakenTime:   s.lastAwakenTime,
 	}
-	return &store
+	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
+	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
+	for _, opt := range opts {
+		opt(store)
+	}
+	return store
 }
 
 // AllowLeaderTransferIn returns if the store is allowed to be selected
 // as target of transfer leader.
 func (s *StoreInfo) AllowLeaderTransferIn() bool {
-	return !s.pauseLeaderTransferIn
+	return s.pauseLeaderTransferIn.Load() > 0
 }
 
 // AllowLeaderTransferOut returns if the store is allowed to be selected
 // as source of transfer leader.
 func (s *StoreInfo) AllowLeaderTransferOut() bool {
-	return !s.pauseLeaderTransferOut
+	return s.pauseLeaderTransferOut.Load() > 0
 }
 
 // EvictedAsSlowStore returns if the store should be evicted as a slow store.
@@ -811,20 +851,14 @@ func (s *StoresInfo) ResetStores() {
 func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Direction) error {
 	s.Lock()
 	defer s.Unlock()
-	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
+	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID),
+		zap.String("direction", direction.String()),
+		zap.Int64("pause-in-time", s.stores[storeID].pauseLeaderTransferIn.Load()),
+		zap.Int64("pause-out-time", s.stores[storeID].pauseLeaderTransferOut.Load()),
+	)
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-	switch direction {
-	case constant.In:
-		if !store.AllowLeaderTransferIn() {
-			return errs.ErrPauseLeaderTransferIn.FastGenByArgs(storeID)
-		}
-	case constant.Out:
-		if !store.AllowLeaderTransferOut() {
-			return errs.ErrPauseLeaderTransferOut.FastGenByArgs(storeID)
-		}
 	}
 	s.stores[storeID] = store.Clone(PauseLeaderTransfer(direction))
 	return nil
