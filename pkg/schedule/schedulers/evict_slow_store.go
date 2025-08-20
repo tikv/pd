@@ -70,7 +70,8 @@ type evictSlowStoreSchedulerConfig struct {
 	isRecovered                bool
 	networkSlowStoreCaptureTSs map[uint64]time.Time
 	// Duration gap for recovering the candidate, unit: s.
-	RecoverySec             uint64   `json:"recovery-duration"`
+	RecoverySec uint64 `json:"recovery-duration"`
+	// EvictedStores is only used by disk slow store scheduler
 	EvictedStores           []uint64 `json:"evict-stores"`
 	EnableNetworkSlowStore  bool     `json:"enable-network-slow-store"`
 	PausedNetworkSlowStores []uint64 `json:"network-slow-stores"`
@@ -383,7 +384,6 @@ func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	for _, storeID := range networkSlowStores {
 		s.conf.deleteNetworkSlowStore(storeID, cluster)
 	}
-	s.conf.networkSlowStoreCaptureTSs = make(map[uint64]time.Time)
 }
 
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
