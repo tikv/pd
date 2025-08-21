@@ -772,6 +772,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 		result := make(map[string]any)
 		testutil.Eventually(re, func() bool {
 			mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+			suite.T().Log(result)
 			return len(result) != 0 && expectedStatus == result["status"] && expectedSummary == result["summary"]
 		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
