@@ -51,6 +51,7 @@ type SlowTrend struct {
 
 // StoreStatus contains status about a store.
 type StoreStatus struct {
+<<<<<<< HEAD
 	Capacity           typeutil.ByteSize  `json:"capacity"`
 	Available          typeutil.ByteSize  `json:"available"`
 	UsedSize           typeutil.ByteSize  `json:"used_size"`
@@ -72,6 +73,32 @@ type StoreStatus struct {
 	StartTS            *time.Time         `json:"start_ts,omitempty"`
 	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
 	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
+=======
+	Capacity               typeutil.ByteSize  `json:"capacity"`
+	Available              typeutil.ByteSize  `json:"available"`
+	UsedSize               typeutil.ByteSize  `json:"used_size"`
+	LeaderCount            int                `json:"leader_count"`
+	LeaderWeight           float64            `json:"leader_weight"`
+	LeaderScore            float64            `json:"leader_score"`
+	LeaderSize             int64              `json:"leader_size"`
+	RegionCount            int                `json:"region_count"`
+	RegionWeight           float64            `json:"region_weight"`
+	RegionScore            float64            `json:"region_score"`
+	RegionSize             int64              `json:"region_size"`
+	LearnerCount           int                `json:"learner_count,omitempty"`
+	WitnessCount           int                `json:"witness_count,omitempty"`
+	PendingPeerCount       int                `json:"pending_peer_count,omitempty"`
+	SlowScore              uint64             `json:"slow_score,omitempty"`
+	SlowTrend              *SlowTrend         `json:"slow_trend,omitempty"`
+	SendingSnapCount       uint32             `json:"sending_snap_count,omitempty"`
+	ReceivingSnapCount     uint32             `json:"receiving_snap_count,omitempty"`
+	IsBusy                 bool               `json:"is_busy,omitempty"`
+	StartTS                *time.Time         `json:"start_ts,omitempty"`
+	LastHeartbeatTS        *time.Time         `json:"last_heartbeat_ts,omitempty"`
+	Uptime                 *typeutil.Duration `json:"uptime,omitempty"`
+	PauseLeaderTransferIn  bool               `json:"pause_leader_transfer_in,omitempty"`
+	PauseLeaderTransferOut bool               `json:"pause_leader_transfer_out,omitempty"`
+>>>>>>> 9e6b31d4a (api: show store pause status (#9679))
 }
 
 // StoreInfo contains information about a store.
@@ -100,6 +127,7 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			StateName: store.GetState().String(),
 		},
 		Status: &StoreStatus{
+<<<<<<< HEAD
 			Capacity:           typeutil.ByteSize(store.GetCapacity()),
 			Available:          typeutil.ByteSize(store.GetAvailable()),
 			UsedSize:           typeutil.ByteSize(store.GetUsedSize()),
@@ -118,6 +146,29 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			IsBusy:             store.IsBusy(),
+=======
+			Capacity:               typeutil.ByteSize(store.GetCapacity()),
+			Available:              typeutil.ByteSize(store.GetAvailable()),
+			UsedSize:               typeutil.ByteSize(store.GetUsedSize()),
+			LeaderCount:            store.GetLeaderCount(),
+			LeaderWeight:           store.GetLeaderWeight(),
+			LeaderScore:            store.LeaderScore(constant.StringToSchedulePolicy(opt.LeaderSchedulePolicy), 0),
+			LeaderSize:             store.GetLeaderSize(),
+			RegionCount:            store.GetRegionCount(),
+			RegionWeight:           store.GetRegionWeight(),
+			RegionScore:            store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
+			RegionSize:             store.GetRegionSize(),
+			LearnerCount:           store.GetLearnerCount(),
+			WitnessCount:           store.GetWitnessCount(),
+			SlowScore:              store.GetSlowScore(),
+			SlowTrend:              slowTrend,
+			SendingSnapCount:       store.GetSendingSnapCount(),
+			ReceivingSnapCount:     store.GetReceivingSnapCount(),
+			PendingPeerCount:       store.GetPendingPeerCount(),
+			IsBusy:                 store.IsBusy(),
+			PauseLeaderTransferIn:  !store.AllowLeaderTransferIn(),
+			PauseLeaderTransferOut: !store.AllowLeaderTransferOut(),
+>>>>>>> 9e6b31d4a (api: show store pause status (#9679))
 		},
 	}
 

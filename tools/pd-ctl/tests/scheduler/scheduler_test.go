@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -766,11 +767,33 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr", "return(true)")
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
+<<<<<<< HEAD
 	re.Contains(string(output), "fail to build with args")
 	failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr")
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+=======
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
+	re.NoError(err)
+	storeInfo := new(response.StoreInfo)
+	re.NoError(json.Unmarshal(output, &storeInfo))
+	re.True(storeInfo.Status.PauseLeaderTransferIn)
+	re.False(storeInfo.Status.PauseLeaderTransferOut)
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
+	re.NoError(err)
+	storeInfo1 := new(response.StoreInfo)
+	re.NoError(json.Unmarshal(output, &storeInfo1))
+	re.False(storeInfo1.Status.PauseLeaderTransferIn)
+	re.False(storeInfo.Status.PauseLeaderTransferOut)
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+>>>>>>> 9e6b31d4a (api: show store pause status (#9679))
 	testutil.Eventually(re, func() bool {
 		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 		return err == nil && strings.Contains(string(output), "Success!")
