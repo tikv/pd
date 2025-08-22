@@ -457,20 +457,20 @@ func (s *evictSlowStoreScheduler) tryRecoverNetworkSlowStores(cluster sche.Sched
 			continue
 		}
 
-		if s.shouldRecoverNetworkSlowStore(store, startTime, networkSlowStoreCaptureTSs, recoveryGap) {
+		if shouldRecoverNetworkSlowStore(store, startTime, networkSlowStoreCaptureTSs, recoveryGap) {
 			s.conf.deleteNetworkSlowStore(storeID, cluster)
 		}
 	}
 }
 
 // shouldRecoverNetworkSlowStore checks if a network slow store should be recovered
-func (s *evictSlowStoreScheduler) shouldRecoverNetworkSlowStore(
+func shouldRecoverNetworkSlowStore(
 	store *core.StoreInfo,
 	startTime time.Time,
 	networkSlowStoreCaptureTSs map[uint64]time.Time,
 	recoveryGap uint64,
 ) bool {
-	networkSlowScores := s.filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
+	networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
 	return calculateAvgScore(networkSlowScores) <= slowStoreRecoverThreshold &&
 		uint64(time.Since(startTime).Seconds()) >= recoveryGap
 }
@@ -497,7 +497,7 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
 
 	// Build problematic network map
-	problematicNetwork := s.buildProblematicNetworkMap(stores, networkSlowStoreCaptureTSs)
+	problematicNetwork := buildProblematicNetworkMap(stores, networkSlowStoreCaptureTSs)
 
 	// Evaluate each store for network slowness
 	for _, store := range stores {
@@ -505,7 +505,7 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 			continue
 		}
 
-		if s.isNetworkSlowStore(store, stores, problematicNetwork, networkSlowStoreCaptureTSs) {
+		if isNetworkSlowStore(store, stores, problematicNetwork, networkSlowStoreCaptureTSs) {
 			storeID := store.GetID()
 
 			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
@@ -521,7 +521,7 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 }
 
 // buildProblematicNetworkMap builds a map of stores with problematic network connections
-func (s *evictSlowStoreScheduler) buildProblematicNetworkMap(
+func buildProblematicNetworkMap(
 	stores []*core.StoreInfo,
 	networkSlowStoreCaptureTSs map[uint64]time.Time,
 ) map[uint64]map[uint64]struct{} {
@@ -533,7 +533,7 @@ func (s *evictSlowStoreScheduler) buildProblematicNetworkMap(
 			continue
 		}
 
-		networkSlowScores := s.filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
+		networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
 		if len(networkSlowScores) < 2 {
 			continue
 		}
@@ -572,14 +572,14 @@ func shouldSkipStoreEvaluation(
 }
 
 // isNetworkSlowStore determines if a store should be considered a network slow store
-func (s *evictSlowStoreScheduler) isNetworkSlowStore(
+func isNetworkSlowStore(
 	store *core.StoreInfo,
 	allStores []*core.StoreInfo,
 	problematicNetwork map[uint64]map[uint64]struct{},
 	networkSlowStoreCaptureTSs map[uint64]time.Time,
 ) bool {
 	storeID := store.GetID()
-	networkSlowScores := s.filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
+	networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
 
 	// Can not detect slow stores with less than 3 scores
 	if len(networkSlowScores) <= 2 {
@@ -610,7 +610,7 @@ func (s *evictSlowStoreScheduler) isNetworkSlowStore(
 }
 
 // filterNetworkSlowScores removes already slow stores from network slow scores to avoid duplicate detection
-func (s *evictSlowStoreScheduler) filterNetworkSlowScores(
+func filterNetworkSlowScores(
 	scores map[uint64]uint64,
 	networkSlowStoreCaptureTSs map[uint64]time.Time,
 ) map[uint64]uint64 {
