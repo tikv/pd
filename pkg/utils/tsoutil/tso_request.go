@@ -48,17 +48,15 @@ type PDProtoRequest struct {
 	forwardedHost string
 	clientConn    *grpc.ClientConn
 	request       *pdpb.TsoRequest
-	stream        pdpb.PD_TsoServer
 	tsoRespCh     chan *pdpb.TsoResponse
 }
 
 // NewPDProtoRequest creates a PDProtoRequest and returns as a Request
-func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer, tsoRespCh chan *pdpb.TsoResponse) Request {
+func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, tsoRespCh chan *pdpb.TsoResponse) Request {
 	tsoRequest := &PDProtoRequest{
 		forwardedHost: forwardedHost,
 		clientConn:    clientConn,
 		request:       request,
-		stream:        stream,
 		tsoRespCh:     tsoRespCh,
 	}
 	return tsoRequest
