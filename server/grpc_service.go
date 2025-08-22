@@ -563,11 +563,14 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return errors.WithStack(err)
 			}
 
+			start := time.Now()
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream, tsoRespCh)
 			// don't pass a stream context here as dispatcher serves multiple streams
 			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			select {
 			case response := <-tsoRespCh:
+				// Record the latency of receiving TSO response from the channel
+				tsoProxyChannelLatency.Observe(time.Since(start).Seconds())
 				if err = stream.Send(response); err != nil {
 					return errors.WithStack(err)
 				}
