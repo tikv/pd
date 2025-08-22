@@ -15,6 +15,8 @@
 package tsoutil
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -38,7 +40,7 @@ type Request interface {
 	// count defines the count of timestamps to retrieve.
 	process(forwardStream stream, count uint32) (tsoResp, error)
 	// postProcess sends the response back to the sender of the request
-	postProcess(countSum, physical, firstLogical int64) (int64, error)
+	postProcess(ctx context.Context, countSum, physical, firstLogical int64) (int64, error)
 }
 
 // PDProtoRequest wraps the request and stream channel in the PD grpc service
@@ -86,7 +88,7 @@ func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, e
 }
 
 // postProcess sends the response back to the sender of the request
-func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64) (int64, error) {
+func (r *PDProtoRequest) postProcess(ctx context.Context, countSum, physical, firstLogical int64) (int64, error) {
 	count := r.request.GetCount()
 	countSum += int64(count)
 	response := &pdpb.TsoResponse{
@@ -98,10 +100,10 @@ func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64) (in
 		},
 	}
 	select {
+	case <-ctx.Done():
+		// If the ctx is done, we drop the response to avoid blocking. and return nil error
+		log.Warn("tso dispatch ctx is done", zap.Uint32("count", count), zap.Int64("physical", physical), zap.Int64("firstLogical", firstLogical))
 	case r.tsoRespCh <- response:
-	default:
-		// If the channel is full, we drop the response to avoid blocking. and return nil error
-		log.Warn("tso response channel is full, drop the response", zap.Uint32("count", count), zap.Int64("physical", physical), zap.Int64("firstLogical", firstLogical))
 	}
 	return countSum, nil
 }
