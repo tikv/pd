@@ -433,36 +433,53 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 }
 
 func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.SchedulerCluster) {
+	// Try to recover network slow stores that have become normal
+	s.tryRecoverNetworkSlowStores(cluster)
+
+	// Activate paused network slow stores if capacity allows
+	s.activatePausedNetworkSlowStores(cluster)
+
+	// Detect and handle new network slow stores
+	s.detectAndHandleNetworkSlowStores(cluster)
+}
+
+// tryRecoverNetworkSlowStores attempts to recover network slow stores that have returned to normal
+func (s *evictSlowStoreScheduler) tryRecoverNetworkSlowStores(cluster sche.SchedulerCluster) {
 	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
 	recoveryGap := s.conf.getRecoverySec()
-	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
 
-	// try to recover the network slow store if it is normal.
 	for storeID, startTime := range networkSlowStoreCaptureTSs {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsRemoved() || store.IsRemoving() {
-			// Previous slow store had been removed, remove the scheduler and check
-			// slow node next time.
 			log.Info("network slow store has been removed",
 				zap.Uint64("store-id", storeID))
-
 			s.conf.deleteNetworkSlowStore(storeID, cluster)
 			continue
 		}
 
-		networkSlowScores := store.GetNetworkSlowScores()
-
-		// Remove already slow stores from the scores map to avoid duplicate detection
-		for storeID := range networkSlowStoreCaptureTSs {
-			delete(networkSlowScores, storeID)
-		}
-
-		if calculateAvgScore(networkSlowScores) <= slowStoreRecoverThreshold && uint64(time.Since(startTime).Seconds()) >= recoveryGap {
+		if s.shouldRecoverNetworkSlowStore(store, startTime, networkSlowStoreCaptureTSs, recoveryGap) {
 			s.conf.deleteNetworkSlowStore(storeID, cluster)
 		}
 	}
+}
 
-	// If there are some slow stores recovery, we can pause leader transfer from existing slow stores.
+// shouldRecoverNetworkSlowStore checks if a network slow store should be recovered
+func (s *evictSlowStoreScheduler) shouldRecoverNetworkSlowStore(
+	store *core.StoreInfo,
+	startTime time.Time,
+	networkSlowStoreCaptureTSs map[uint64]time.Time,
+	recoveryGap uint64,
+) bool {
+	networkSlowScores := s.filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
+	return calculateAvgScore(networkSlowScores) <= slowStoreRecoverThreshold &&
+		uint64(time.Since(startTime).Seconds()) >= recoveryGap
+}
+
+// activatePausedNetworkSlowStores activates paused network slow stores if capacity allows
+func (s *evictSlowStoreScheduler) activatePausedNetworkSlowStores(cluster sche.SchedulerCluster) {
+	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
+	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
+
 	if len(pausedNetworkSlowStores) < defaultMaxNetworkSlowStore && len(networkSlowStoreCaptureTSs) > 0 {
 		var slowStoreID uint64
 		for storeID := range networkSlowStoreCaptureTSs {
@@ -471,24 +488,52 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 		}
 		s.conf.addNetworkSlowStore(slowStoreID, cluster)
 	}
+}
 
+// detectAndHandleNetworkSlowStores detects new network slow stores and handles them
+func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.SchedulerCluster) {
 	stores := cluster.GetStores()
+	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
+	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
 
-	// Find potential slow stores
-	problematicNetwork := make(map[uint64]map[uint64]struct{})
+	// Build problematic network map
+	problematicNetwork := s.buildProblematicNetworkMap(stores, networkSlowStoreCaptureTSs)
+
+	// Evaluate each store for network slowness
 	for _, store := range stores {
-		if _, exist := networkSlowStoreCaptureTSs[store.GetID()]; exist {
+		if shouldSkipStoreEvaluation(store, problematicNetwork, networkSlowStoreCaptureTSs) {
 			continue
 		}
 
-		networkSlowScores := store.GetNetworkSlowScores()
+		if s.isNetworkSlowStore(store, stores, problematicNetwork, networkSlowStoreCaptureTSs) {
+			storeID := store.GetID()
 
-		// Remove already slow stores from the scores map to avoid duplicate detection
-		for storeID := range networkSlowStoreCaptureTSs {
-			delete(networkSlowScores, storeID)
+			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
+				failpoint.InjectCall("evictSlowStoreTriggerLimit")
+				slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Inc()
+				s.conf.networkSlowStoreCaptureTSs[storeID] = time.Now()
+				continue
+			}
+
+			s.conf.addNetworkSlowStore(storeID, cluster)
+		}
+	}
+}
+
+// buildProblematicNetworkMap builds a map of stores with problematic network connections
+func (s *evictSlowStoreScheduler) buildProblematicNetworkMap(
+	stores []*core.StoreInfo,
+	networkSlowStoreCaptureTSs map[uint64]time.Time,
+) map[uint64]map[uint64]struct{} {
+	problematicNetwork := make(map[uint64]map[uint64]struct{})
+
+	for _, store := range stores {
+		storeID := store.GetID()
+		if _, exist := networkSlowStoreCaptureTSs[storeID]; exist {
+			continue
 		}
 
-		// Can not detect slow stores with less than 2 scores
+		networkSlowScores := s.filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
 		if len(networkSlowScores) < 2 {
 			continue
 		}
@@ -502,74 +547,80 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 			if _, ok := problematicNetwork[potentialSlowStore]; !ok {
 				problematicNetwork[potentialSlowStore] = make(map[uint64]struct{})
 			}
-			if _, ok := problematicNetwork[store.GetID()]; !ok {
-				problematicNetwork[store.GetID()] = make(map[uint64]struct{})
+			if _, ok := problematicNetwork[storeID]; !ok {
+				problematicNetwork[storeID] = make(map[uint64]struct{})
 			}
-			problematicNetwork[potentialSlowStore][store.GetID()] = struct{}{}
-			problematicNetwork[store.GetID()][potentialSlowStore] = struct{}{}
+			problematicNetwork[potentialSlowStore][storeID] = struct{}{}
+			problematicNetwork[storeID][potentialSlowStore] = struct{}{}
 		}
 	}
 
-	for _, store := range stores {
-		if _, exist := problematicNetwork[store.GetID()]; !exist {
-			continue
-		}
+	return problematicNetwork
+}
 
-		if _, exist := networkSlowStoreCaptureTSs[store.GetID()]; exist {
-			continue
-		}
+// shouldSkipStoreEvaluation checks if a store should be skipped for network slowness evaluation
+func shouldSkipStoreEvaluation(
+	store *core.StoreInfo,
+	problematicNetwork map[uint64]map[uint64]struct{},
+	networkSlowStoreCaptureTSs map[uint64]time.Time,
+) bool {
+	storeID := store.GetID()
+	_, hasProblematicNetwork := problematicNetwork[storeID]
+	_, alreadySlowStore := networkSlowStoreCaptureTSs[storeID]
 
-		networkSlowScores := store.GetNetworkSlowScores()
+	return !hasProblematicNetwork || alreadySlowStore
+}
 
-		// Remove already slow stores from the scores map to avoid duplicate detection
-		for storeID := range s.conf.networkSlowStoreCaptureTSs {
-			delete(networkSlowScores, storeID)
-		}
+// isNetworkSlowStore determines if a store should be considered a network slow store
+func (s *evictSlowStoreScheduler) isNetworkSlowStore(
+	store *core.StoreInfo,
+	allStores []*core.StoreInfo,
+	problematicNetwork map[uint64]map[uint64]struct{},
+	networkSlowStoreCaptureTSs map[uint64]time.Time,
+) bool {
+	storeID := store.GetID()
+	networkSlowScores := s.filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
 
-		// Can not detect slow stores with less than 3 scores
-		if len(networkSlowScores) <= 2 {
-			continue
-		}
-
-		var (
-			fluctuationCount int
-			isSlowStore      bool
-		)
-		// If the store's network from all other stores are problematic, it must be a slow store.
-		if len(problematicNetwork[store.GetID()]) >= len(stores)-1-len(networkSlowStoreCaptureTSs) {
-			isSlowStore = true
-		}
-
-		for storeID, score := range networkSlowScores {
-			// There is a network problem, but we don't know which side of the network has the problem.
-			// To avoid misjudgment, filter it.
-			if _, ok := problematicNetwork[store.GetID()][storeID]; ok {
-				continue
-			}
-			if score >= networkSlowStoreFluctuationThreshold {
-				fluctuationCount++
-			}
-		}
-
-		// At least 2 scores >= networkSlowStoreFluctuationThreshold (10) after removing
-		// problematic network. This confirms the store has network fluctuations with other peers
-		if fluctuationCount >= 2 {
-			isSlowStore = true
-		}
-		if !isSlowStore {
-			continue
-		}
-
-		if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
-			failpoint.InjectCall("evictSlowStoreTriggerLimit")
-			slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(store.GetID(), 10), string(networkSlowStore)).Inc()
-
-			s.conf.networkSlowStoreCaptureTSs[store.GetID()] = time.Now()
-			continue
-		}
-
-		s.conf.addNetworkSlowStore(store.GetID(), cluster)
+	// Can not detect slow stores with less than 3 scores
+	if len(networkSlowScores) <= 2 {
+		return false
 	}
+
+	// Check if all other stores report problems with this store
+	if len(problematicNetwork[storeID]) >= len(allStores)-1-len(networkSlowStoreCaptureTSs) {
+		return true
+	}
+
+	// Check for network fluctuations with other peers
+	fluctuationCount := 0
+	problematicStores := problematicNetwork[storeID]
+	for storeID, score := range networkSlowScores {
+		// There is a network problem, but we don't know which side of the network has the problem.
+		// To avoid misjudgment, filter it.
+		if _, isProblematic := problematicStores[storeID]; isProblematic {
+			continue
+		}
+		if score >= networkSlowStoreFluctuationThreshold {
+			fluctuationCount++
+		}
+	}
+	// At least 2 scores >= networkSlowStoreFluctuationThreshold (10) after removing
+	// problematic network. This confirms the store has network fluctuations with other peers
+	return fluctuationCount >= 2
+}
+
+// filterNetworkSlowScores removes already slow stores from network slow scores to avoid duplicate detection
+func (s *evictSlowStoreScheduler) filterNetworkSlowScores(
+	scores map[uint64]uint64,
+	networkSlowStoreCaptureTSs map[uint64]time.Time,
+) map[uint64]uint64 {
+	filteredScores := make(map[uint64]uint64)
+	for storeID, score := range scores {
+		if _, isSlowStore := networkSlowStoreCaptureTSs[storeID]; !isSlowStore {
+			filteredScores[storeID] = score
+		}
+	}
+	return filteredScores
 }
 
 func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCluster) []*operator.Operator {
