@@ -47,8 +47,9 @@ import (
 
 const (
 	randomRegionMaxRetry = 10
-	scanRegionLimit      = 1000
-	batchSearchSize      = 16
+	// ScanRegionLimit is the default limit for the number of regions to scan in a region scan request.
+	ScanRegionLimit = 1000
+	batchSearchSize = 16
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
@@ -2148,7 +2149,7 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
 				return false
 			}
-			if cnt >= scanRegionLimit {
+			if cnt >= ScanRegionLimit {
 				return false
 			}
 			cnt++

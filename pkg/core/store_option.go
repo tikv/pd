@@ -115,9 +115,9 @@ func PauseLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
 		switch d {
 		case constant.In:
-			store.pauseLeaderTransferIn = true
+			store.pauseLeaderTransferIn.Add(1)
 		case constant.Out:
-			store.pauseLeaderTransferOut = true
+			store.pauseLeaderTransferOut.Add(1)
 		}
 	}
 }
@@ -127,9 +127,9 @@ func ResumeLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
 		switch d {
 		case constant.In:
-			store.pauseLeaderTransferIn = false
+			store.pauseLeaderTransferIn.Add(-1)
 		case constant.Out:
-			store.pauseLeaderTransferOut = false
+			store.pauseLeaderTransferOut.Add(-1)
 		}
 	}
 }
