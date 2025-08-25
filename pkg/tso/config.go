@@ -46,4 +46,6 @@ type Config interface {
 	GetMaxResetTSGap() time.Duration
 	// GetTLSConfig returns the TLS config.
 	GetTLSConfig() *grpcutil.TLSConfig
+
+	GetTSOIndex() (int64, int64)
 }
