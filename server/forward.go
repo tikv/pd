@@ -179,7 +179,7 @@ func (s *GrpcServer) handleTSOForwarding(
 		// Cancel the old forwarder.
 		forwarder.cancel()
 		// Build a new forward stream.
-		clientConn, err := s.getDelegateClient(s.ctx, targetHost)
+		clientConn, err := s.getDelegateClient(targetHost)
 		if err != nil {
 			return errors.WithStack(err), nil
 		}
@@ -382,7 +382,7 @@ func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (
 	return forwardStream, cancel, err
 }
 
-func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
+func (s *GrpcServer) getDelegateClient(forwardedHost string) (*grpc.ClientConn, error) {
 	client, ok := s.clientConns.Load(forwardedHost)
 	if ok {
 		// Mostly, the connection is already established, and return it directly.
@@ -393,9 +393,7 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	if err != nil {
 		return nil, err
 	}
-	ctxTimeout, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
-	defer cancel()
-	newConn, err := grpcutil.GetClientConn(ctxTimeout, forwardedHost, tlsConfig)
+	newConn, err := grpcutil.GetClientConn(forwardedHost, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +526,7 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (*streamWrapper, 
 	}
 
 	// Now let's create the client connection and the forward stream
-	client, err := s.getDelegateClient(s.ctx, forwardedHost)
+	client, err := s.getDelegateClient(forwardedHost)
 	if err != nil {
 		return nil, err
 	}

@@ -84,7 +84,7 @@ type server interface {
 	Context() context.Context
 	GetTLSConfig() *grpcutil.TLSConfig
 	GetClientConns() *sync.Map
-	GetDelegateClient(ctx context.Context, tlsCfg *grpcutil.TLSConfig, forwardedHost string) (*grpc.ClientConn, error)
+	GetDelegateClient(tlsCfg *grpcutil.TLSConfig, forwardedHost string) (*grpc.ClientConn, error)
 	ServerLoopWgDone()
 	ServerLoopWgAdd(int)
 	IsClosed() bool

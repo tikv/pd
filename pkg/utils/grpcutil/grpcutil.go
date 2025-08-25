@@ -148,7 +148,7 @@ func (s TLSConfig) ToServerTLSConfig() (*tls.Config, error) {
 // connection. Once this function returns, the cancellation and expiration of
 // ctx will be noop. Users should call ClientConn.Close to terminate all the
 // pending operations after this function returns.
-func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...grpc.DialOption) (*grpc.ClientConn, error) {
+func GetClientConn(addr string, tlsCfg *tls.Config, do ...grpc.DialOption) (*grpc.ClientConn, error) {
 	opt := grpc.WithTransportCredentials(insecure.NewCredentials())
 	if tlsCfg != nil {
 		creds := credentials.NewTLS(tlsCfg)
@@ -169,7 +169,7 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		},
 	})
 	do = append(do, opt, backoffOpts)
-	cc, err := grpc.DialContext(ctx, u.Host, do...)
+	cc, err := grpc.NewClient(u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
 	}
@@ -213,13 +213,12 @@ func IsFollowerHandleEnabled(ctx context.Context) bool {
 	return ok
 }
 
-func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
+func establish(addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
 	tlsCfg, err := tlsConfig.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
 	cc, err := GetClientConn(
-		ctx,
 		addr,
 		tlsCfg,
 		do...,
@@ -242,7 +241,7 @@ func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig, do
 			return nil
 		default:
 		}
-		conn, err = establish(ctx, addr, tlsConfig, do...)
+		conn, err = establish(addr, tlsConfig, do...)
 		if err != nil {
 			log.Warn("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
 			continue

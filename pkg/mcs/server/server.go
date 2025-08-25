@@ -65,14 +65,14 @@ func (bs *BaseServer) Context() context.Context {
 }
 
 // GetDelegateClient returns grpc client connection talking to the forwarded host.
-func (bs *BaseServer) GetDelegateClient(ctx context.Context, tlsCfg *grpcutil.TLSConfig, forwardedHost string) (*grpc.ClientConn, error) {
+func (bs *BaseServer) GetDelegateClient(tlsCfg *grpcutil.TLSConfig, forwardedHost string) (*grpc.ClientConn, error) {
 	client, ok := bs.clientConns.Load(forwardedHost)
 	if !ok {
 		tlsConfig, err := tlsCfg.ToClientTLSConfig()
 		if err != nil {
 			return nil, err
 		}
-		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
+		cc, err := grpcutil.GetClientConn(forwardedHost, tlsConfig)
 		if err != nil {
 			return nil, err
 		}
