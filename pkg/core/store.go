@@ -15,6 +15,7 @@
 package core
 
 import (
+	"maps"
 	"math"
 	"strings"
 	"time"
@@ -195,6 +196,16 @@ func (s *StoreInfo) GetSlowScore() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rawStats.GetSlowScore()
+}
+
+// GetNetworkSlowScores returns the network slow score of the store.
+func (s *StoreInfo) GetNetworkSlowScores() map[uint64]uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[uint64]uint64)
+	maps.Copy(result, s.rawStats.GetNetworkSlowScores())
+	return result
 }
 
 // WitnessScore returns the store's witness score.
