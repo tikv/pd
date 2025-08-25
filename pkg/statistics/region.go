@@ -59,14 +59,15 @@ func WithStoreMapOption(storeMap map[uint64]string) GetRegionStatsOption {
 
 // GetRegionStats sums regions' statistics.
 func GetRegionStats(regions []*core.RegionInfo, cluster RegionStatInformer, opts ...GetRegionStatsOption) *RegionStats {
-	stats := newRegionStats()
+	stats := NewRegionStats()
 	for _, region := range regions {
 		stats.Observe(region, cluster, opts...)
 	}
 	return stats
 }
 
-func newRegionStats() *RegionStats {
+// NewRegionStats creates a new RegionStats instance.
+func NewRegionStats() *RegionStats {
 	return &RegionStats{
 		StoreLeaderCount:     make(map[uint64]int),
 		StorePeerCount:       make(map[uint64]int),
