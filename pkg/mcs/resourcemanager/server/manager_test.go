@@ -53,8 +53,10 @@ func prepareManager() *Manager {
 }
 
 func TestInitManager(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	m := prepareManager()
+	defer m.close()
 
 	re.Empty(m.getKeyspaceResourceGroupManagers())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -106,8 +108,10 @@ func TestInitManager(t *testing.T) {
 }
 
 func TestBackgroundMetricsFlush(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	m := prepareManager()
+	defer m.close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -180,11 +184,13 @@ func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *M
 }
 
 func TestAddAndModifyResourceGroup(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
+	defer m.close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -231,8 +237,10 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 }
 
 func TestCleanUpTicker(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	m := prepareManager()
+	defer m.close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -257,8 +265,19 @@ func TestCleanUpTicker(t *testing.T) {
 	}()
 	err := m.Init(ctx)
 	re.NoError(err)
-	// Ensure the cleanup ticker is triggered.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the cleanup ticker to run and remove expired items.
+	expectedLen := 1
+	deadline := time.Now().Add(time.Second)
+	for {
+		cmap := m.metrics.consumptionRecordMap
+		if len(cmap) == expectedLen {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for cleanup, map: %+v", cmap)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	// Close the manager to avoid the data race.
 	m.close()
 
@@ -274,11 +293,13 @@ func TestCleanUpTicker(t *testing.T) {
 }
 
 func TestKeyspaceServiceLimit(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
+	defer m.close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -332,8 +353,10 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 }
 
 func TestKeyspaceNameLookup(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	m := prepareManager()
+	defer m.close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -377,8 +400,10 @@ func TestKeyspaceNameLookup(t *testing.T) {
 }
 
 func TestResourceGroupPersistence(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	m := prepareManager()
+	defer m.close()
 
 	// Prepare the resource group and service limit.
 	group := &rmpb.ResourceGroup{

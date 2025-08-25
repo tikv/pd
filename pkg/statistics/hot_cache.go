@@ -36,14 +36,17 @@ var (
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
+	cancel     context.CancelFunc
 	writeCache *HotPeerCache
 	readCache  *HotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
+	ctx, cancel := context.WithCancel(ctx)
 	w := &HotCache{
 		ctx:        ctx,
+		cancel:     cancel,
 		writeCache: NewHotPeerCache(ctx, cluster, utils.Write),
 		readCache:  NewHotPeerCache(ctx, cluster, utils.Read),
 	}
@@ -251,4 +254,11 @@ func (w *HotCache) GetThresholds(kind utils.RWType, storeID uint64) []float64 {
 func (w *HotCache) CleanCache() {
 	w.writeCache.removeAllItem()
 	w.readCache.removeAllItem()
+}
+
+// Close cancels the context to stop background goroutines.
+func (w *HotCache) Close() {
+	if w.cancel != nil {
+		w.cancel()
+	}
 }
