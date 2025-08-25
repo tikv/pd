@@ -46,6 +46,7 @@ import (
 var (
 	defaultJobTimeout = 30 * time.Minute
 	reserveDuration   = 7 * 24 * time.Hour
+	reportInterval    = 10 * time.Second
 )
 
 type balanceRangeSchedulerHandler struct {
@@ -377,7 +378,7 @@ type balanceRangeScheduler struct {
 
 func (s *balanceRangeScheduler) report() {
 	now := time.Now()
-	if now.Sub(s.lastReportTime) < 10*time.Second {
+	if now.Sub(s.lastReportTime) < reportInterval {
 		return
 	}
 	for storeID, score := range s.scoreMap {
