@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -92,6 +93,7 @@ type Controller struct {
 	// patrolRegionScanLimit is the limit of regions to scan.
 	// It is calculated by the number of regions.
 	patrolRegionScanLimit int
+	metrics               *checkerControllerMetrics
 }
 
 // NewController create a new Controller.
@@ -114,6 +116,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		patrolRegionContext:     &PatrolRegionContext{},
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
+		metrics:                 newCheckerControllerMetrics(),
 	}
 	c.duration.Store(time.Duration(0))
 	return c
@@ -135,6 +138,7 @@ func (c *Controller) PatrolRegions() {
 	for {
 		select {
 		case <-ticker.C:
+			loopStart := time.Now()
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
 			if c.cluster.IsSchedulingHalted() {
@@ -147,20 +151,29 @@ func (c *Controller) PatrolRegions() {
 
 			// wait for the regionChan to be drained
 			if len(c.patrolRegionContext.regionChan) > 0 {
+				c.metrics.patrolPhaseHistograms[phaseWaitForChannel].Observe(time.Since(loopStart).Seconds())
 				continue
 			}
 
-			// Check priority regions first.
-			c.checkPriorityRegions()
-			// Check pending processed regions first.
-			c.checkPendingProcessedRegions()
+			// Check priority regions and pending processed regions first.
+			measure(c.metrics.patrolPhaseHistograms[phaseCheckPriority], func() {
+				c.checkPriorityRegions()
+			})
 
-			key, regions = c.checkRegions(key)
+			measure(c.metrics.patrolPhaseHistograms[phaseCheckPending], func() {
+				c.checkPendingProcessedRegions()
+			})
+
+			measure(c.metrics.patrolPhaseHistograms[phaseScanRegions], func() {
+				key, regions = c.checkRegions(key)
+			})
 			if len(regions) == 0 {
 				continue
 			}
 			// Updates the label level isolation statistics.
-			c.cluster.UpdateRegionsLabelLevelStats(regions)
+			measure(c.metrics.patrolPhaseHistograms[phaseUpdateLabel], func() {
+				c.cluster.UpdateRegionsLabelLevelStats(regions)
+			})
 			// When the key is nil, it means that the scan is finished.
 			if len(key) == 0 {
 				// update the scan limit.
@@ -276,46 +289,74 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
-	if op := c.jointStateChecker.Check(region); op != nil {
-		return []*operator.Operator{op}
+	var ops []*operator.Operator
+	measure(c.metrics.checkRegionHistograms[jointStateChecker], func() {
+		if op := c.jointStateChecker.Check(region); op != nil {
+			ops = []*operator.Operator{op}
+		}
+	})
+	if ops != nil {
+		return ops
 	}
 
-	if op := c.splitChecker.Check(region); op != nil {
-		return []*operator.Operator{op}
+	measure(c.metrics.checkRegionHistograms[splitChecker], func() {
+		if op := c.splitChecker.Check(region); op != nil {
+			ops = []*operator.Operator{op}
+		}
+	})
+	if ops != nil {
+		return ops
 	}
 
 	if c.conf.IsPlacementRulesEnabled() {
-		skipRuleCheck := c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() &&
-			c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
-		if skipRuleCheck {
-			// If the fit is fetched from cache, it seems that the region doesn't need check
-			failpoint.Inject("assertShouldNotCache", func() {
-				panic("cached shouldn't be used")
-			})
-			ruleCheckerGetCacheCounter.Inc()
-		} else {
-			failpoint.Inject("assertShouldCache", func() {
-				panic("cached should be used")
-			})
-			fit := c.priorityInspector.Inspect(region)
-			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-					return []*operator.Operator{op}
+		measure(c.metrics.checkRegionHistograms[ruleChecker], func() {
+			skipRuleCheck := c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() &&
+				c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
+			if skipRuleCheck {
+				// If the fit is fetched from cache, it seems that the region doesn't need check
+				failpoint.Inject("assertShouldNotCache", func() {
+					panic("cached shouldn't be used")
+				})
+				ruleCheckerGetCacheCounter.Inc()
+			} else {
+				failpoint.Inject("assertShouldCache", func() {
+					panic("cached should be used")
+				})
+				fit := c.priorityInspector.Inspect(region)
+				if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
+					if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
+						ops = []*operator.Operator{op}
+					} else {
+						operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
+						c.pendingProcessedRegions.Put(region.GetID(), nil)
+					}
 				}
-				operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
-				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
+		})
+		if ops != nil {
+			return ops
 		}
 	} else {
-		if op := c.learnerChecker.Check(region); op != nil {
-			return []*operator.Operator{op}
-		}
-		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
+		measure(c.metrics.checkRegionHistograms[learnerChecker], func() {
+			if op := c.learnerChecker.Check(region); op != nil {
+				ops = []*operator.Operator{op}
 			}
-			operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
-			c.pendingProcessedRegions.Put(region.GetID(), nil)
+		})
+		if ops != nil {
+			return ops
+		}
+		measure(c.metrics.checkRegionHistograms[replicaChecker], func() {
+			if op := c.replicaChecker.Check(region); op != nil {
+				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
+					ops = []*operator.Operator{op}
+				} else {
+					operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
+					c.pendingProcessedRegions.Put(region.GetID(), nil)
+				}
+			}
+		})
+		if ops != nil {
+			return ops
 		}
 	}
 	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
@@ -327,15 +368,19 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			return nil
 		}
 	}
-
 	if c.mergeChecker != nil {
-		allowed := opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit()
-		if !allowed {
-			operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
-		} else if ops := c.mergeChecker.Check(region); ops != nil {
-			// It makes sure that two operators can be added successfully altogether.
-			return ops
-		}
+		measure(c.metrics.checkRegionHistograms[mergeChecker], func() {
+			allowed := opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit()
+			if !allowed {
+				operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
+			} else if mergeOps := c.mergeChecker.Check(region); mergeOps != nil {
+				// It makes sure that two operators can be added successfully altogether.
+				ops = mergeOps
+			}
+		})
+	}
+	if ops != nil {
+		return ops
 	}
 	return nil
 }
@@ -565,4 +610,11 @@ func calculateScanLimit(cluster sche.CheckerCluster) int {
 	})
 	scanlimit := max(MinPatrolRegionScanLimit, regionCount/patrolRegionPartition)
 	return min(scanlimit, MaxPatrolScanRegionLimit)
+}
+
+// measure runs the action and observes the duration using a pre-created histogram.
+func measure(histogram prometheus.Observer, action func()) {
+	start := time.Now()
+	action()
+	histogram.Observe(time.Since(start).Seconds())
 }
