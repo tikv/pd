@@ -44,9 +44,10 @@ const (
 	storeLeaderWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/leader" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/leader"
 	storeRegionWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/region" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/region"
 
-	serviceMiddlewarePathFormat = "/pd/%d/service_middleware"                  // "/pd/{cluster_id}/service_middleware"
-	replicationModePathFormat   = "/pd/%d/replication_mode/%s"                 // "/pd/{cluster_id}/replication_mode/{mode}"
-	recoveringMarkPathFormat    = "/pd/%d/cluster/markers/snapshot-recovering" // "/pd/{cluster_id}/cluster/markers/snapshot-recovering"
+	serviceMiddlewarePathFormat  = "/pd/%d/service_middleware"                  // "/pd/{cluster_id}/service_middleware"
+	replicationModePathFormat    = "/pd/%d/replication_mode/%s"                 // "/pd/{cluster_id}/replication_mode/{mode}"
+	recoveringMarkPathFormat     = "/pd/%d/cluster/markers/snapshot-recovering" // "/pd/{cluster_id}/cluster/markers/snapshot-recovering"
+	pitrRecoveringMarkPathFormat = "/pd/%d/cluster/markers/pitr-recovering"     // "/pd/{cluster_id}/cluster/markers/pitr-recovering"
 
 	memberBinaryDeployPathFormat   = "/pd/%d/member/%d/deploy_path"     // "/pd/{cluster_id}/member/{member_id}/deploy_path"
 	memberGitHashPath              = "/pd/%d/member/%d/git_hash"        // "/pd/{cluster_id}/member/{member_id}/git_hash"
@@ -201,6 +202,11 @@ func ExternalTimestampPath() string {
 // RecoveringMarkPath returns the path to save the recovering mark.
 func RecoveringMarkPath() string {
 	return fmt.Sprintf(recoveringMarkPathFormat, ClusterID())
+}
+
+// PitrRecoveringMarkPath returns the path to save the pitr recovering mark.
+func PitrRecoveringMarkPath() string {
+	return fmt.Sprintf(pitrRecoveringMarkPathFormat, ClusterID())
 }
 
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
