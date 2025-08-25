@@ -73,6 +73,9 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+
+	uniqueIndex int64
+	maxIndex    int64
 }
 
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
@@ -108,10 +111,10 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physica
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
-		return 0, 0
+		return 0, t.uniqueIndex - 1
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
-	t.tsoMux.logical += count
+	t.tsoMux.logical += count*t.maxIndex + t.uniqueIndex
 	logical = t.tsoMux.logical
 	return physical, logical
 }

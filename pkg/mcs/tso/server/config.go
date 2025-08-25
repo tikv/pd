@@ -67,6 +67,10 @@ type Config struct {
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
+	TSOUniqueIndex int64 `toml:"tso-unique-index" json:"tso-unique-index"`
+
+	TSOMaxIndex int64 `toml:"tso-max-index" json:"tso-max-index"`
+
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
 	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
 	// more TSOs provided, and at the same time consuming more CPU time.
@@ -124,6 +128,14 @@ func (c *Config) GetLease() int64 {
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
 	return c.TSOUpdatePhysicalInterval.Duration
+}
+
+// GetTSOIndex returns TSO index info<maxIndex, uniqueIndex>.
+func (c *Config) GetTSOIndex() (int64, int64) {
+	if c.TSOMaxIndex <= 0 {
+		return 1, 0
+	}
+	return c.TSOMaxIndex, c.TSOUniqueIndex
 }
 
 // GetTSOSaveInterval returns TSO save interval.
@@ -201,6 +213,12 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if c.TSOUpdatePhysicalInterval.Duration != defaultTSOUpdatePhysicalInterval {
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
+	}
+
+	if c.TSOMaxIndex <= c.TSOUniqueIndex {
+		log.Warn("tso max index is less than unique index", zap.Int64("max-index", c.TSOMaxIndex),
+			zap.Int64("unique-index", c.TSOUniqueIndex))
+		return fmt.Errorf("tso max index is less than unique index")
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
