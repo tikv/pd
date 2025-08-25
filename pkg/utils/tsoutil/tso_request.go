@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -38,66 +37,6 @@ type Request interface {
 	process(forwardStream stream, count uint32) (tsoResp, error)
 	// postProcess sends the response back to the sender of the request
 	postProcess(countSum, physical, firstLogical int64) (int64, error)
-}
-
-// TSOProtoRequest wraps the request and stream channel in the TSO grpc service
-type TSOProtoRequest struct {
-	forwardedHost string
-	clientConn    *grpc.ClientConn
-	request       *tsopb.TsoRequest
-	stream        tsopb.TSO_TsoServer
-}
-
-// NewTSOProtoRequest creates a TSOProtoRequest and returns as a Request
-func NewTSOProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *tsopb.TsoRequest, stream tsopb.TSO_TsoServer) Request {
-	tsoRequest := &TSOProtoRequest{
-		forwardedHost: forwardedHost,
-		clientConn:    clientConn,
-		request:       request,
-		stream:        stream,
-	}
-	return tsoRequest
-}
-
-// getForwardedHost returns the forwarded host
-func (r *TSOProtoRequest) getForwardedHost() string {
-	return r.forwardedHost
-}
-
-// getClientConn returns the grpc client connection
-func (r *TSOProtoRequest) getClientConn() *grpc.ClientConn {
-	return r.clientConn
-}
-
-// getCount returns the count of timestamps to retrieve
-func (r *TSOProtoRequest) getCount() uint32 {
-	return r.request.GetCount()
-}
-
-// process sends request and receive response via stream.
-// count defines the count of timestamps to retrieve.
-func (r *TSOProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
-	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
-		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId())
-}
-
-// postProcess sends the response back to the sender of the request
-func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64) (int64, error) {
-	count := r.request.GetCount()
-	countSum += int64(count)
-	response := &tsopb.TsoResponse{
-		Header: &tsopb.ResponseHeader{ClusterId: r.request.GetHeader().GetClusterId()},
-		Count:  count,
-		Timestamp: &pdpb.Timestamp{
-			Physical: physical,
-			Logical:  firstLogical + countSum,
-		},
-	}
-	// Send back to the client.
-	if err := r.stream.Send(response); err != nil {
-		return countSum, err
-	}
-	return countSum, nil
 }
 
 // PDProtoRequest wraps the request and stream channel in the PD grpc service
