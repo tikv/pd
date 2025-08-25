@@ -111,7 +111,15 @@ var (
 			Subsystem: "scheduler",
 			Name:      "evicted_slow_store_status",
 			Help:      "Store evicted status due to slow",
-		}, []string{"type", "store"})
+		}, []string{"store", "slow_type"})
+
+	slowStoreTriggerLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "slow_store_trigger_limit",
+			Help:      "slow store trigger limit",
+		}, []string{"store", "slow_type"})
 
 	storeSlowTrendEvictedStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -182,6 +190,7 @@ func init() {
 	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
 	prometheus.MustRegister(evictedSlowStoreStatusGauge)
+	prometheus.MustRegister(slowStoreTriggerLimitGauge)
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
