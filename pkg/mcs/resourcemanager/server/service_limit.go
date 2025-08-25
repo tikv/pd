@@ -24,9 +24,10 @@ import (
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
-// serviceLimiterBurstFactor defines how many seconds worth of tokens can be accumulated.
+// serviceLimiterBurstFactor defines how many seconds worth of tokens can be accumulated at most.
 // This allows the limiter to handle batch requests from clients that request tokens periodically.
 // Since the client will request tokens with a 5-second period by default, the burst factor is 5.0 here.
 const serviceLimiterBurstFactor = 5.0
@@ -36,10 +37,14 @@ type serviceLimiter struct {
 	// ServiceLimit is the configured service limit for this limiter.
 	// It's an unburstable RU per second rate limit.
 	ServiceLimit float64 `json:"service_limit"`
-	// AvailableTokens tracks the available RU tokens for this limiter.
-	AvailableTokens float64 `json:"available_tokens"`
 	// LastUpdate records the last time the limiter was updated.
 	LastUpdate time.Time `json:"last_update"`
+	// Theoretical arrival time of the next point where the service limit tokens can be granted.
+	TAT time.Time `json:"tat"`
+	// Slack is the current slack of the service limit.
+	Slack typeutil.Duration `json:"slack"`
+	// BurstWindow is the current window of time that the service limit tokens can be bursted.
+	BurstWindow typeutil.Duration `json:"burst_window"`
 	// KeyspaceID is the keyspace ID of the keyspace that this limiter belongs to.
 	keyspaceID uint32
 	// storage is used to persist the service limit.
@@ -49,15 +54,19 @@ type serviceLimiter struct {
 func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint.ResourceGroupStorage) *serviceLimiter {
 	// The service limit should be non-negative.
 	serviceLimit = math.Max(0, serviceLimit)
+	now := time.Now()
 	return &serviceLimiter{
 		ServiceLimit: serviceLimit,
-		LastUpdate:   time.Now(),
+		LastUpdate:   now,
+		TAT:          now,
+		Slack:        typeutil.NewDuration(0),
+		BurstWindow:  typeutil.NewDuration(serviceLimiterBurstFactor * time.Second),
 		keyspaceID:   keyspaceID,
 		storage:      storage,
 	}
 }
 
-func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
+func (krl *serviceLimiter) setServiceLimit(now time.Time, newServiceLimit float64) {
 	// The service limit should be non-negative.
 	newServiceLimit = math.Max(0, newServiceLimit)
 	krl.Lock()
@@ -65,20 +74,23 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 	if newServiceLimit == krl.ServiceLimit {
 		return
 	}
-	oldServiceLimit := krl.ServiceLimit
-	krl.ServiceLimit = newServiceLimit
-	now := time.Now()
-	// If the old service limit was 0 (no limit) or the new service limit is 0,
-	// initialize the available tokens or clear the available tokens.
-	if oldServiceLimit == 0 || newServiceLimit == 0 {
-		krl.AvailableTokens = 0
-		krl.LastUpdate = now
-	} else {
-		// Trigger the refill of the available tokens to ensure that the previous
-		// service limit setting was not too high, so that many available tokens
-		// are not left unused, causing the new service limit to become invalid.
-		krl.refillTokensLocked(now)
+	// If the old or new service limit is 0, reset the TAT to now directly.
+	if krl.ServiceLimit <= 0 || newServiceLimit <= 0 {
+		krl.TAT = now
+	} else if krl.ServiceLimit < newServiceLimit {
+		// Scale the TAT if the new service limit is larger to ensure the workload can catch up smoothly.
+		if krl.TAT.After(now) {
+			krl.TAT = now.Add(
+				time.Duration(
+					// NewDebt = RemainingDebt * ScaleRatio
+					float64(krl.TAT.Sub(now)) * krl.ServiceLimit / newServiceLimit,
+				),
+			)
+		}
 	}
+	// Update the service limit and last update time.
+	krl.ServiceLimit = newServiceLimit
+	krl.LastUpdate = now
 
 	// Persist the service limit to storage
 	if krl.storage != nil {
@@ -86,44 +98,29 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 			log.Error("failed to persist service limit",
 				zap.Uint32("keyspace-id", krl.keyspaceID),
 				zap.Float64("service-limit", newServiceLimit),
+				zap.Time("last-update", krl.LastUpdate),
+				zap.Time("tat", krl.TAT),
+				zap.Duration("slack", krl.Slack.Duration),
+				zap.Duration("burst-window", krl.BurstWindow.Duration),
 				zap.Error(err))
 		}
 	}
 }
 
-// GetServiceLimit return the service limit value of this keyspace.
-func (krl *serviceLimiter) GetServiceLimit() float64 {
+func (krl *serviceLimiter) getStates() (serviceLimit float64, tat time.Time, slack typeutil.Duration) {
 	if krl == nil {
-		return 0.0
+		return 0.0, time.Time{}, typeutil.Duration{}
 	}
 	krl.RLock()
 	defer krl.RUnlock()
-	return krl.ServiceLimit
+	return krl.ServiceLimit, krl.TAT, krl.Slack
 }
 
-func (krl *serviceLimiter) refillTokensLocked(now time.Time) {
-	// No limit configured, do nothing.
+func (krl *serviceLimiter) perTokenIntervalInNanosLocked() float64 {
 	if krl.ServiceLimit <= 0 {
-		return
+		return 0.0
 	}
-	// Calculate the elapsed time since the last update.
-	elapsed := now.Sub(krl.LastUpdate).Seconds()
-	if elapsed < 0 {
-		log.Warn("refill service limit tokens with negative elapsed time",
-			zap.Uint32("keyspace-id", krl.keyspaceID),
-			zap.Float64("service_limit", krl.ServiceLimit),
-			zap.Float64("available_tokens", krl.AvailableTokens),
-			zap.Float64("elapsed", elapsed),
-		)
-		return
-	}
-	// Add tokens based on the configured rate and the burst limit.
-	krl.AvailableTokens = math.Min(
-		krl.AvailableTokens+krl.ServiceLimit*elapsed,
-		krl.ServiceLimit*serviceLimiterBurstFactor,
-	)
-	// Update the last update time.
-	krl.LastUpdate = now
+	return 1e9 / krl.ServiceLimit
 }
 
 // applyServiceLimit applies the service limit to the requested tokens and returns the limited tokens.
@@ -134,41 +131,45 @@ func (krl *serviceLimiter) applyServiceLimit(
 	if krl == nil {
 		return requestedTokens
 	}
+
 	krl.Lock()
 	defer krl.Unlock()
-
-	// No limit configured, allow all tokens.
+	// If the service limit is less than or equal to 0, it means no limit.
 	if krl.ServiceLimit <= 0 {
 		return requestedTokens
 	}
-
-	// Refill first to ensure the available tokens is up to date.
-	krl.refillTokensLocked(now)
-
-	// If the requested tokens is less than the available tokens, grant all tokens.
-	if requestedTokens <= krl.AvailableTokens {
-		krl.AvailableTokens -= requestedTokens
-		return requestedTokens
+	// Use GCRA(Generic Cell Rate Algorithm) to grant the tokens.
+	base := krl.TAT
+	if now.After(krl.TAT) {
+		base = now
 	}
-
-	// If the requested tokens is greater than the available tokens, grant all available tokens.
-	if requestedTokens > krl.AvailableTokens {
-		limitedTokens = math.Max(0, krl.AvailableTokens)
-		// TODO: allow the loan to decrease the allocation at a smooth rate.
-		krl.AvailableTokens = 0
+	// TODO: smooth the burst window in a cold start scenario.
+	krl.Slack.Duration = now.Add(krl.BurstWindow.Duration).Sub(base)
+	if krl.Slack.Duration <= 0 {
+		return 0
 	}
+	perTokenInterval := krl.perTokenIntervalInNanosLocked()
+	maxGrant := float64(krl.Slack.Duration) / perTokenInterval
+	limitedTokens = math.Min(requestedTokens, maxGrant)
+	if limitedTokens <= 0 {
+		return 0
+	}
+	krl.TAT = base.Add(time.Duration(limitedTokens * perTokenInterval))
+	krl.LastUpdate = now
 
 	return limitedTokens
 }
 
-// Clone returns a copy of the service limiter.
-func (krl *serviceLimiter) Clone() *serviceLimiter {
+// clone returns a copy of the service limiter.
+func (krl *serviceLimiter) clone() *serviceLimiter {
 	krl.RLock()
 	defer krl.RUnlock()
 	return &serviceLimiter{
-		ServiceLimit:    krl.ServiceLimit,
-		AvailableTokens: krl.AvailableTokens,
-		LastUpdate:      krl.LastUpdate,
-		keyspaceID:      krl.keyspaceID,
+		ServiceLimit: krl.ServiceLimit,
+		LastUpdate:   krl.LastUpdate,
+		TAT:          krl.TAT,
+		Slack:        krl.Slack,
+		BurstWindow:  krl.BurstWindow,
+		keyspaceID:   krl.keyspaceID,
 	}
 }

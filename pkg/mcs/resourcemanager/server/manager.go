@@ -127,7 +127,7 @@ func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
 	if krgm == nil {
 		return nil
 	}
-	return krgm.getServiceLimiter().Clone()
+	return krgm.getServiceLimiter().clone()
 }
 
 // SetKeyspaceServiceLimit sets the service limit of the keyspace.
@@ -530,8 +530,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().GetServiceLimit())
-
+				// Record the service limit metrics.
+				setServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter())
+				// Record the resource group metrics.
 				for _, group := range krgm.getResourceGroupList(true, true) {
 					groupName := group.Name
 					// Record the sum of RRU and WRU every second.
