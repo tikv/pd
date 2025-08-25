@@ -156,10 +156,6 @@ func (conf *evictSlowStoreSchedulerConfig) pauseNetworkSlowStore(storeID uint64)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStore(storeID uint64, cluster sche.SchedulerCluster) {
-	cluster.ResumeLeaderTransfer(storeID, constant.In)
-	evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore))
-	delete(conf.networkSlowStoreCaptureTSs, storeID)
-
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -172,8 +168,11 @@ func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStore(storeID uint64
 			zap.Uint64("store-id", storeID),
 			zap.Error(err))
 		conf.PausedNetworkSlowStores = oldPausedNetworkSlowStores
-		// If failed to persist, we still need to remove the store from the networkSlowStoreCaptureTSs.
+		return
 	}
+	cluster.ResumeLeaderTransfer(storeID, constant.In)
+	evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore))
+	delete(conf.networkSlowStoreCaptureTSs, storeID)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStore(storeID uint64, cluster sche.SchedulerCluster) {
