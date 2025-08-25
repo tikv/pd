@@ -40,13 +40,16 @@ import (
 
 const (
 	slowStoreEvictThreshold = 100
-	// For network slow store, its slow scores include the scores from each tikv.
-	// These scores should meet the following conditions and then will be
-	// considered as a slow store:
-	// 1. One network slow score is greater than networkSlowStoreIssueThreshold.
-	// 2. After removing the maximum value, if the number of stores with a score
-	//    greater than networkSlowStoreFluctuationThreshold is greater than or equal
-	//    to 2, it is considered a slow store.
+	// For network slow store, its slow scores include the scores from each tikv(If the score
+	// is equal to 1, it will not report to PD). These scores should meet the following
+	// conditions and then will be considered as a slow store:
+	// 1. At least one network slow score is greater than networkSlowStoreIssueThreshold.
+	// 2. A network with a slow score exceeding networkSlowStoreIssueThreshold is considered
+	//    a problem network. Since it is impossible to directly identify which side of the
+	//    network has a problem, the score is removed from the stores on both sides.
+	// 3. After removing the problem network slow score, if the number of scores are greater
+	//    than or equal to networkSlowStoreFluctuationThreshold is greater than or equal
+	//    to 2 in one store, it is considered a slow store.
 	networkSlowStoreIssueThreshold       = 95 // Threshold for detecting network issues with a specific store
 	networkSlowStoreFluctuationThreshold = 10 // Threshold for detecting network fluctuations with other stores
 	slowStoreRecoverThreshold            = 1
