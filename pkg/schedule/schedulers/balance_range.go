@@ -419,6 +419,10 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
 		return false
 	}
+	return s.checkJob(cluster)
+}
+
+func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 	if err := s.conf.gc(); err != nil {
 		log.Error("balance range jobs gc failed", errs.ZapError(err))
 		return false
