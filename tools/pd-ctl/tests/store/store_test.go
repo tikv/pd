@@ -561,7 +561,7 @@ func (s *storeTestSuite) checkTombstoneStore(cluster *pdTests.TestCluster) {
 }
 
 // TestStoreTLS tests the store command with TLS enabled.
-// So it requires another PD cluster.
+// So we need another cluster to run this test.
 func TestStoreTLS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
