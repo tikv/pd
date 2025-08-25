@@ -102,6 +102,25 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
 		}, []string{"type", "rw", "dim"})
 
+<<<<<<< HEAD
+=======
+	evictedSlowStoreStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "evicted_slow_store_status",
+			Help:      "Store evicted status due to slow",
+		}, []string{"store", "slow_type"})
+
+	slowStoreTriggerLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "slow_store_trigger_limit",
+			Help:      "slow store trigger limit",
+		}, []string{"store", "slow_type"})
+
+>>>>>>> 14eb01623 (scheduler: implement network slow store scheduler (#9451))
 	storeSlowTrendEvictedStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -156,6 +175,11 @@ func init() {
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
+<<<<<<< HEAD
+=======
+	prometheus.MustRegister(evictedSlowStoreStatusGauge)
+	prometheus.MustRegister(slowStoreTriggerLimitGauge)
+>>>>>>> 14eb01623 (scheduler: implement network slow store scheduler (#9451))
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
