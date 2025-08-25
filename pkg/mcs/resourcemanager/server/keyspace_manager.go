@@ -585,17 +585,17 @@ func (di *demandInfo) allocateBasicRUDemand(
 	})
 	for _, gi := range groupInfos {
 		fillRateSetting := gi.group.getFillRate(true)
-		proportionalFillRate := remainingServiceLimit * fillRateSetting / di.totalFillRate
-		// Allocate the remaining service limit proportionally based on basic demand.
-		overrideFillRate := math.Min(
-			gi.basicRUDemand,
-			proportionalFillRate,
-		)
+		// Set the override fill rate to the remaining service limit proportionally based on the fill rate setting.
+		overrideFillRate := remainingServiceLimit * fillRateSetting / di.totalFillRate
 		// Do not allow the resource group to consume extra tokens in this case,
 		// so the override burst limit is set to the same as the override fill rate.
 		gi.group.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
-		// Deduct the basic RU demand from the remaining service limit.
-		remainingServiceLimit -= overrideFillRate
+		// Deduct the basic RU demand from the remaining service limit. The reason for choosing
+		// to deduct the minimum value between `gi.basicRUDemand` and `overrideFillRate`
+		// (i.e., using `overrideFillRate` as the upper limit) is to allow the resource group
+		// to have sufficient room for growth when RU demand increases, without being overly
+		// restricted, thereby fully releasing the demand by a less strict fill rate deduction.
+		remainingServiceLimit -= math.Min(gi.basicRUDemand, overrideFillRate)
 		di.totalFillRate -= fillRateSetting
 	}
 	return remainingServiceLimit
