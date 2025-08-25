@@ -530,7 +530,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().GetServiceLimit())
+				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
 
 				for _, group := range krgm.getResourceGroupList(true, true) {
 					groupName := group.Name
