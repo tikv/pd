@@ -135,38 +135,47 @@ func TestApplyServiceLimit(t *testing.T) {
 
 	// Test with nil limiter
 	var limiter *serviceLimiter
-	tokens := limiter.applyServiceLimit(time.Now(), 50.0)
+	now := time.Now()
+	tokens, minTrickleTimeMs := limiter.applyServiceLimit(now, 50.0)
 	re.Equal(50.0, tokens)
+	re.Zero(minTrickleTimeMs)
 
 	// Test with zero service limit (no limit)
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 0.0, nil)
-	now := time.Now()
-	tokens = limiter.applyServiceLimit(now, 50.0)
+	now = time.Now()
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 50.0)
 	re.Equal(50.0, tokens)
+	re.Zero(minTrickleTimeMs)
 
 	// Test request within available tokens (need to set available tokens first)
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+	now = time.Now()
 	limiter.AvailableTokens = 100.0 // Manually set available tokens
 	limiter.LastUpdate = now
-	tokens = limiter.applyServiceLimit(now, 50.0)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 50.0)
 	re.Equal(50.0, tokens)
 	re.Equal(50.0, limiter.AvailableTokens) // 100 - 50 = 50
+	re.Equal(int64(500), minTrickleTimeMs)  // 50/100 * 1000 = 500ms
 
 	// Test request exactly equal to available tokens
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+	now = time.Now()
 	limiter.AvailableTokens = 100.0 // Manually set available tokens
 	limiter.LastUpdate = now
-	tokens = limiter.applyServiceLimit(now, 100.0)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 100.0)
 	re.Equal(100.0, tokens)
 	re.Equal(0.0, limiter.AvailableTokens)
+	re.Equal(int64(1000), minTrickleTimeMs) // 100/100 * 1000 = 1000ms
 
 	// Test request exceeding available tokens
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
+	now = time.Now()
 	limiter.LastUpdate = now
 	limiter.AvailableTokens = 30.0
-	tokens = limiter.applyServiceLimit(now, 80.0)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 80.0)
 	re.Equal(30.0, tokens) // Only available tokens granted
 	re.Equal(0.0, limiter.AvailableTokens)
+	re.Equal(int64(300), minTrickleTimeMs) // 30/100 * 1000 = 300ms
 }
 
 func TestApplyServiceLimitWithRefill(t *testing.T) {
@@ -180,10 +189,11 @@ func TestApplyServiceLimitWithRefill(t *testing.T) {
 
 	// Request after 1 second should trigger refill first
 	futureTime := baseTime.Add(time.Second)
-	tokens := limiter.applyServiceLimit(futureTime, 50.0)
+	tokens, minTrickleTimeMs := limiter.applyServiceLimit(futureTime, 50.0)
 	re.Equal(50.0, tokens)
 	re.Equal(70.0, limiter.AvailableTokens) // 20 + 100 - 50 = 70
 	re.Equal(futureTime, limiter.LastUpdate)
+	re.Equal(int64(500), minTrickleTimeMs) // 50/100 * 1000 = 500ms
 
 	// Test partial refill scenario
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
@@ -191,10 +201,11 @@ func TestApplyServiceLimitWithRefill(t *testing.T) {
 	limiter.AvailableTokens = 10.0
 
 	halfSecondLater := baseTime.Add(500 * time.Millisecond)
-	tokens = limiter.applyServiceLimit(halfSecondLater, 80.0)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(halfSecondLater, 80.0)
 	// After refill: 10 + 100*0.5 = 60 tokens available
 	re.Equal(60.0, tokens)
 	re.Equal(0.0, limiter.AvailableTokens)
+	re.Equal(int64(600), minTrickleTimeMs) // 60/100 * 1000 = 600ms
 }
 
 func TestServiceLimiterEdgeCases(t *testing.T) {
@@ -205,32 +216,37 @@ func TestServiceLimiterEdgeCases(t *testing.T) {
 	limiter.AvailableTokens = 0.1   // Manually set available tokens
 	limiter.LastUpdate = time.Now() // Set LastUpdate to current time to avoid refill
 	now := time.Now()
-	tokens := limiter.applyServiceLimit(now, 1.0)
-	re.InDelta(0.1, tokens, 0.001) // Use InDelta to handle floating point precision
+	tokens, minTrickleTimeMs := limiter.applyServiceLimit(now, 1.0)
+	re.InDelta(0.1, tokens, 0.001)          // Use InDelta to handle floating point precision
+	re.Equal(int64(1000), minTrickleTimeMs) // 0.1/0.1 * 1000 = 1000ms
 
 	// Test with very large service limit
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 1000000.0, nil)
 	limiter.AvailableTokens = 1000000.0 // Manually set available tokens
-	tokens = limiter.applyServiceLimit(now, 500000.0)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 500000.0)
 	re.Equal(500000.0, tokens)
+	re.Equal(int64(500), minTrickleTimeMs) // 500000/1000000 * 1000 = 500ms
 
 	// Test with zero requested tokens
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 100.0, nil)
 	limiter.AvailableTokens = 100.0 // Manually set available tokens
-	tokens = limiter.applyServiceLimit(now, 0.0)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 0.0)
 	re.Equal(0.0, tokens)
 	re.Equal(100.0, limiter.AvailableTokens) // Should remain unchanged
+	re.Zero(minTrickleTimeMs)
 
 	// Test with fractional tokens
 	limiter = newServiceLimiter(constant.NullKeyspaceID, 10.5, nil)
 	limiter.LastUpdate = now
 	limiter.AvailableTokens = 5.25
-	tokens = limiter.applyServiceLimit(now, 7.75)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 7.75)
 	re.Equal(5.25, tokens)
+	re.Equal(int64(500), minTrickleTimeMs) // 5.25/10.5 * 1000 = 500ms
 	// Test apply with 0 available ru
-	tokens = limiter.applyServiceLimit(now, 5)
+	tokens, minTrickleTimeMs = limiter.applyServiceLimit(now, 5)
 	re.Equal(0.0, tokens)
 	re.Equal(0.0, limiter.AvailableTokens)
+	re.Zero(minTrickleTimeMs)
 }
 
 func TestSetServiceLimit(t *testing.T) {
