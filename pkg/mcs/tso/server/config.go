@@ -15,6 +15,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -66,9 +67,9 @@ type Config struct {
 
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
-
+	// TSOUniqueIndex is the current TSO unique index.
 	TSOUniqueIndex int64 `toml:"tso-unique-index" json:"tso-unique-index"`
-
+	// TSOMaxIndex is the current TSO max index, which should be same if these clusters needs to write.
 	TSOMaxIndex int64 `toml:"tso-max-index" json:"tso-max-index"`
 
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
@@ -130,14 +131,6 @@ func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
 	return c.TSOUpdatePhysicalInterval.Duration
 }
 
-// GetTSOIndex returns TSO index info<maxIndex, uniqueIndex>.
-func (c *Config) GetTSOIndex() (int64, int64) {
-	if c.TSOMaxIndex <= 0 {
-		return 1, 0
-	}
-	return c.TSOMaxIndex, c.TSOUniqueIndex
-}
-
 // GetTSOSaveInterval returns TSO save interval.
 func (c *Config) GetTSOSaveInterval() time.Duration {
 	return c.TSOSaveInterval.Duration
@@ -151,6 +144,14 @@ func (c *Config) GetMaxResetTSGap() time.Duration {
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
+}
+
+// GetTSOIndex returns the current cluster tso index configuration.
+func (c *Config) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
+	if c.TSOMaxIndex <= 0 {
+		return 1, 0
+	}
+	return c.TSOMaxIndex, c.TSOUniqueIndex
 }
 
 // Parse parses flag definitions from the argument list.
@@ -215,10 +216,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
 	}
 
-	if c.TSOMaxIndex <= c.TSOUniqueIndex {
+	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
 		log.Warn("tso max index is less than unique index", zap.Int64("max-index", c.TSOMaxIndex),
 			zap.Int64("unique-index", c.TSOUniqueIndex))
-		return fmt.Errorf("tso max index is less than unique index")
+		return errors.New("tso max index is less than unique index")
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
