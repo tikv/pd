@@ -548,7 +548,7 @@ func (c *Cli) tryCreateTSODispatcher() {
 func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 	if c.getDispatcher() == nil {
 		err := errs.ErrClientGetTSO.FastGenByArgs("tso dispatcher is not ready")
-		log.Error("[tso] dispatch tso request error", errs.ZapError(err))
+		log.Warn("[tso] dispatch tso request error", errs.ZapError(err))
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		// New dispatcher could be created in the meantime, which is retryable.
 		return true, err
