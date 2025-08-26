@@ -262,7 +262,7 @@ func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) 
 	sl := krgm.sl
 	krgm.RUnlock()
 	// Set the new service limit to the limiter.
-	sl.setServiceLimit(serviceLimit)
+	sl.setServiceLimit(time.Now(), serviceLimit)
 	// Cleanup the overrides if the service limit is set to 0.
 	if serviceLimit <= 0 {
 		krgm.cleanupOverrides()
