@@ -159,7 +159,7 @@ func (krl *serviceLimiter) applyServiceLimit(
 	}
 
 	// Calculate a minimum trickle time to ensure the granted tokens' rate in client won't exceed the service limit.
-	minTrickleTimeMs = int64(limitedTokens * 1000.0 / krl.getServiceLimitLocked())
+	minTrickleTimeMs = int64(math.Round(limitedTokens * 1000.0 / krl.getServiceLimitLocked()))
 
 	return limitedTokens, minTrickleTimeMs
 }
