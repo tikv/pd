@@ -50,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -2187,14 +2188,93 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 }
 
 // GetRegionStatsByRange returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte) *statistics.RegionStats {
-	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1))
+func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte, opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
+	return c.getRegionStats(startKey, endKey, false, opts...)
 }
 
 // GetRegionStatsCount returns the number of regions in the range.
 func (c *RaftCluster) GetRegionStatsCount(startKey, endKey []byte) *statistics.RegionStats {
 	stats := &statistics.RegionStats{}
 	stats.Count = c.GetRegionCount(startKey, endKey)
+	return stats
+}
+
+func (c *RaftCluster) getRegionStats(startKey, endKey []byte, useHot bool, opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
+	stats := statistics.NewRegionStats()
+	for {
+		regions := c.ScanRegions(startKey, endKey, core.ScanRegionLimit)
+
+		for _, region := range regions {
+			if useHot {
+				stats.Observe(region, c, opts...)
+			} else {
+				stats.Observe(region, nil, opts...)
+			}
+		}
+		if len(regions) < core.ScanRegionLimit {
+			break
+		}
+
+		startKey = regions[len(regions)-1].GetEndKey()
+	}
+	return stats
+}
+
+// GetHotRegionStatusByRange return region statistics from cluster with hot statistics.
+func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine string) *statistics.RegionStats {
+	stores := c.GetStores()
+	switch engine {
+	case core.EngineTiKV:
+		f := filter.NewEngineFilter("user", filter.NotSpecialEngines)
+		stores = filter.SelectSourceStores(stores, []filter.Filter{f}, c.GetSchedulerConfig(), nil, nil)
+	case core.EngineTiFlash:
+		f := filter.NewEngineFilter("user", filter.SpecialEngines)
+		stores = filter.SelectSourceStores(stores, []filter.Filter{f}, c.GetSchedulerConfig(), nil, nil)
+	default:
+	}
+
+	storeMap := make(map[uint64]string, len(stores))
+	for _, store := range stores {
+		storeMap[store.GetID()] = store.GetLabelValue(core.EngineKey)
+	}
+	opt := statistics.WithStoreMapOption(storeMap)
+	stats := c.getRegionStats(startKey, endKey, true, opt)
+	// Fill in the hot write region statistics.
+	for storeID, label := range storeMap {
+		if _, ok := stats.StoreLeaderCount[storeID]; !ok {
+			stats.StoreLeaderCount[storeID] = 0
+			stats.StoreLeaderKeys[storeID] = 0
+			stats.StoreLeaderSize[storeID] = 0
+		}
+		if _, ok := stats.StorePeerCount[storeID]; !ok {
+			stats.StorePeerCount[storeID] = 0
+			stats.StorePeerKeys[storeID] = 0
+			stats.StorePeerSize[storeID] = 0
+		}
+
+		if _, ok := stats.StoreWriteQuery[storeID]; !ok {
+			stats.StoreWriteBytes[storeID] = 0
+			stats.StoreWriteKeys[storeID] = 0
+			stats.StoreWriteQuery[storeID] = 0
+		}
+
+		if _, ok := stats.StoreLeaderReadQuery[storeID]; !ok {
+			stats.StoreLeaderReadKeys[storeID] = 0
+			stats.StoreLeaderReadBytes[storeID] = 0
+			stats.StoreLeaderReadQuery[storeID] = 0
+		}
+
+		if _, ok := stats.StorePeerReadQuery[storeID]; !ok {
+			stats.StorePeerReadKeys[storeID] = 0
+			stats.StorePeerReadBytes[storeID] = 0
+			stats.StorePeerReadQuery[storeID] = 0
+		}
+		if label == "" {
+			storeMap[storeID] = core.EngineTiKV
+		}
+	}
+
+	stats.StoreEngine = storeMap
 	return stats
 }
 
