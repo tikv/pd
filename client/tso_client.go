@@ -659,7 +659,7 @@ func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
 	dispatcher, ok := c.getTSODispatcher(request.dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", request.dcLocation))
-		log.Error("[tso] dispatch tso request error", zap.String("dc-location", request.dcLocation), errs.ZapError(err))
+		log.Warn("[tso] dispatch tso request error", zap.String("dc-location", request.dcLocation), errs.ZapError(err))
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		// New dispatcher could be created in the meantime, which is retryable.
 		return true, err
