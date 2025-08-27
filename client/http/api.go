@@ -88,6 +88,7 @@ const (
 	// Keyspace
 	KeyspaceConfig        = "/pd/api/v2/keyspaces/%s/config"
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
+	GetKeyspaceMetaByID   = "/pd/api/v2/keyspaces/id/%d"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -241,6 +242,11 @@ func GetUpdateKeyspaceConfigURL(keyspaceName string) string {
 // GetKeyspaceMetaByNameURL returns the path of PD HTTP API to get keyspace meta by keyspace name.
 func GetKeyspaceMetaByNameURL(keyspaceName string) string {
 	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
+}
+
+// GetKeyspaceMetaByIDURL returns the path of PD HTTP API to get keyspace meta by keyspace id.
+func GetKeyspaceMetaByIDURL(id uint32) string {
+	return fmt.Sprintf(GetKeyspaceMetaByID, id)
 }
 
 // GetDeleteSafePointURI returns the URI for delete safepoint service

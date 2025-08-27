@@ -122,6 +122,7 @@ type Client interface {
 	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
 	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
+	GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -1112,6 +1113,38 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByNameName).
 		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
+		WithMethod(http.MethodGet).
+		WithResp(&tempKeyspaceMeta))
+
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
+		Name:           tempKeyspaceMeta.Name,
+		Id:             tempKeyspaceMeta.ID,
+		Config:         tempKeyspaceMeta.Config,
+		CreatedAt:      tempKeyspaceMeta.CreatedAt,
+		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
+		State:          keyspaceState,
+	}
+	return &keyspaceMetaPB, nil
+}
+
+// GetKeyspaceMetaByID get the given keyspace meta.
+func (c *client) GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+	var (
+		tempKeyspaceMeta tempKeyspaceMeta
+		keyspaceMetaPB   keyspacepb.KeyspaceMeta
+	)
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetKeyspaceMetaByIDName).
+		WithURI(GetKeyspaceMetaByIDURL(keyspaceID)).
 		WithMethod(http.MethodGet).
 		WithResp(&tempKeyspaceMeta))
 

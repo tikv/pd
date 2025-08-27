@@ -92,6 +92,7 @@ const (
 	deleteOperators                         = "DeleteOperators"
 	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
 	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
+	GetKeyspaceMetaByIDName                 = "GetKeyspaceMetaByID"
 	GetGCSafePointName                      = "GetGCSafePoint"
 	DeleteGCSafePointName                   = "DeleteGCSafePoint"
 )
