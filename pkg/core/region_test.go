@@ -1163,20 +1163,21 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 func TestScanRegion(t *testing.T) {
 	var (
 		re                   = require.New(t)
-		tree                 = newRegionTree()
+		r                    = NewRegionsInfo()
 		needContainAllRanges = true
 		regions              []*RegionInfo
 		err                  error
 	)
 	scanError := func(startKey, endKey []byte, limit int) {
-		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = r.scanRegion(&keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = r.scanRegion(&keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
+	tree := r.tree
 	// region1
 	// [a, b)
 	updateNewItem(tree, NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
