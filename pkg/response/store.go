@@ -122,8 +122,8 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			ReceivingSnapCount:     store.GetReceivingSnapCount(),
 			PendingPeerCount:       store.GetPendingPeerCount(),
 			IsBusy:                 store.IsBusy(),
-			PauseLeaderTransferIn:  !store.AllowLeaderTransferIn(),
-			PauseLeaderTransferOut: !store.AllowLeaderTransferOut(),
+			PauseLeaderTransferIn:  !store.AllowLeaderTransfer(),
+			PauseLeaderTransferOut: !store.AllowLeaderTransfer(),
 		},
 	}
 
