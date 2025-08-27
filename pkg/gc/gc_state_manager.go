@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -290,6 +291,12 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 		blockingMinStartTSOwner *string
 	)
 
+	type barrierExpiredType struct {
+		keyspaceID uint32
+		barrierID  string
+	}
+	var barrierExpiredData [1]barrierExpiredType
+	barrierExpired := barrierExpiredData[:0]
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
@@ -324,6 +331,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 				if err1 != nil {
 					return err1
 				}
+				barrierExpired = append(barrierExpired, barrierExpiredType{keyspaceID, barrier.BarrierID})
 				// Do not block GC with expired barriers.
 				continue
 			}
@@ -381,6 +389,11 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	})
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
+	}
+	if len(barrierExpired) > 0 {
+		for _, barrier := range barrierExpired {
+			gcBarrierGauge.DeleteLabelValues(strconv.Itoa(int(barrier.keyspaceID)), barrier.barrierID)
+		}
 	}
 
 	blockerDesc := ""
@@ -524,6 +537,9 @@ func (m *GCStateManager) setGCBarrierImpl(keyspaceID uint32, barrierID string, b
 		zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl),
 		zap.Stringer("new-gc-barrier", newBarrier))
 
+	barrierTSMilliSec := newBarrier.BarrierTS >> 18
+	gcBarrierGauge.WithLabelValues(strconv.Itoa(int(keyspaceID)), barrierID).Set(float64(barrierTSMilliSec))
+
 	return newBarrier, nil
 }
 
@@ -575,6 +591,7 @@ func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string
 		log.Info("deleting a not-existing GC barrier",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("barrier-id", barrierID))
+		gcBarrierGauge.DeleteLabelValues(strconv.Itoa(int(keyspaceID)), barrierID)
 	} else {
 		log.Info("GC barrier deleted",
 			zap.Uint32("keyspace-id", keyspaceID),
