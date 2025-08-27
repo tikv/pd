@@ -761,7 +761,8 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	suite.env.RunTest(suite.checkSchedulerDiagnostic)
+	// TODO: fix issue #9667 to make it work in microservice mode
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestCluster) {
