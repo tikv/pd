@@ -47,7 +47,7 @@ const (
 	serviceMiddlewarePathFormat  = "/pd/%d/service_middleware"                  // "/pd/{cluster_id}/service_middleware"
 	replicationModePathFormat    = "/pd/%d/replication_mode/%s"                 // "/pd/{cluster_id}/replication_mode/{mode}"
 	recoveringMarkPathFormat     = "/pd/%d/cluster/markers/snapshot-recovering" // "/pd/{cluster_id}/cluster/markers/snapshot-recovering"
-	pitrRecoveringMarkPathFormat = "/pd/%d/cluster/markers/pitr-recovering"     // "/pd/{cluster_id}/cluster/markers/pitr-recovering"
+	pitrRestoreModeMarkPathFormat = "/pd/%d/cluster/markers/pitr-restore-mode"     // "/pd/{cluster_id}/cluster/markers/pitr-restore-mode"
 
 	memberBinaryDeployPathFormat   = "/pd/%d/member/%d/deploy_path"     // "/pd/{cluster_id}/member/{member_id}/deploy_path"
 	memberGitHashPath              = "/pd/%d/member/%d/git_hash"        // "/pd/{cluster_id}/member/{member_id}/git_hash"
@@ -204,9 +204,9 @@ func RecoveringMarkPath() string {
 	return fmt.Sprintf(recoveringMarkPathFormat, ClusterID())
 }
 
-// PitrRecoveringMarkPath returns the path to save the pitr recovering mark.
-func PitrRecoveringMarkPath() string {
-	return fmt.Sprintf(pitrRecoveringMarkPathFormat, ClusterID())
+// PitrRestoreModeMarkPath returns the path to save the pitr restore mode mark.
+func PitrRestoreModeMarkPath() string {
+	return fmt.Sprintf(pitrRestoreModeMarkPathFormat, ClusterID())
 }
 
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.

@@ -865,10 +865,10 @@ func (suite *httpClientTestSuite) TestAdmin() {
 	err = client.DeleteSnapshotRecoveringMark(ctx)
 	re.NoError(err)
 	
-	// Test PiTR recovering mark APIs
-	err = client.SetPitrRecoveringMark(ctx)
+	// Test PiTR restore mode mark APIs
+	err = client.SetPitrRestoreModeMark(ctx)
 	re.NoError(err)
-	err = client.DeletePitrRecoveringMark(ctx)
+	err = client.DeletePitrRestoreModeMark(ctx)
 	re.NoError(err)
 }
 

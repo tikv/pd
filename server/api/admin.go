@@ -39,6 +39,11 @@ type adminHandler struct {
 	rd  *render.Render
 }
 
+// RecoveryStatusResponse represents the response structure for recovery status endpoints
+type RecoveryStatusResponse struct {
+	Marked bool `json:"marked"`
+}
+
 func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 	return &adminHandler{
 		svr: svr,
@@ -179,10 +184,7 @@ func (h *adminHandler) isSnapshotRecovering(w http.ResponseWriter, r *http.Reque
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	type resStruct struct {
-		Marked bool `json:"marked"`
-	}
-	h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
+	h.rd.JSON(w, http.StatusOK, &RecoveryStatusResponse{Marked: marked})
 }
 
 func (h *adminHandler) unmarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
@@ -193,28 +195,25 @@ func (h *adminHandler) unmarkSnapshotRecovering(w http.ResponseWriter, r *http.R
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) markPitrRecovering(w http.ResponseWriter, _ *http.Request) {
-	if err := h.svr.MarkPitrRecovering(); err != nil {
+func (h *adminHandler) markPitrRestoreMode(w http.ResponseWriter, _ *http.Request) {
+	if err := h.svr.MarkPitrRestoreMode(); err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) isPitrRecovering(w http.ResponseWriter, r *http.Request) {
-	marked, err := h.svr.IsPitrRecovering(r.Context())
+func (h *adminHandler) isPitrRestoreMode(w http.ResponseWriter, r *http.Request) {
+	marked, err := h.svr.IsPitrRestoreMode(r.Context())
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	type resStruct struct {
-		Marked bool `json:"marked"`
-	}
-	h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
+	h.rd.JSON(w, http.StatusOK, &RecoveryStatusResponse{Marked: marked})
 }
 
-func (h *adminHandler) unmarkPitrRecovering(w http.ResponseWriter, r *http.Request) {
-	if err := h.svr.UnmarkPitrRecovering(r.Context()); err != nil {
+func (h *adminHandler) unmarkPitrRestoreMode(w http.ResponseWriter, r *http.Request) {
+	if err := h.svr.UnmarkPitrRestoreMode(r.Context()); err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}

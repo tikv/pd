@@ -301,8 +301,8 @@ func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
 	suite.env.RunTest(suite.checkMarkSnapshotRecovering)
 }
 
-func (suite *adminTestSuite) TestMarkPitrRecovering() {
-	suite.env.RunTest(suite.checkMarkPitrRecovering)
+func (suite *adminTestSuite) TestMarkPitrRestoreMode() {
+	suite.env.RunTest(suite.checkMarkPitrRestoreMode)
 }
 
 func (suite *adminTestSuite) checkMarkSnapshotRecovering(cluster *tests.TestCluster) {
@@ -331,11 +331,11 @@ func (suite *adminTestSuite) checkMarkSnapshotRecovering(cluster *tests.TestClus
 		testutil.StatusOK(re), testutil.StringContain(re, "false")))
 }
 
-func (suite *adminTestSuite) checkMarkPitrRecovering(cluster *tests.TestCluster) {
+func (suite *adminTestSuite) checkMarkPitrRestoreMode(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
-	url := fmt.Sprintf("%s/admin/cluster/markers/pitr-recovering", urlPrefix)
+	url := fmt.Sprintf("%s/admin/cluster/markers/pitr-restore-mode", urlPrefix)
 	// default to false
 	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
 		testutil.StatusOK(re), testutil.StringContain(re, "false")))

@@ -1954,10 +1954,10 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	return err
 }
 
-// MarkPitrRecovering mark pd that we're pitr recovering
-func (s *Server) MarkPitrRecovering() error {
-	log.Info("mark pitr recovering")
-	markPath := keypath.PitrRecoveringMarkPath()
+// MarkPitrRestoreMode mark pd that we're pitr restore mode
+func (s *Server) MarkPitrRestoreMode() error {
+	log.Info("mark pitr restore mode")
+	markPath := keypath.PitrRestoreModeMarkPath()
 	// the value doesn't matter, set to a static string
 	_, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
@@ -1967,19 +1967,19 @@ func (s *Server) MarkPitrRecovering() error {
 	return err
 }
 
-// IsPitrRecovering check whether pitr-recovering-mark marked
-func (s *Server) IsPitrRecovering(ctx context.Context) (bool, error) {
-	resp, err := s.client.Get(ctx, keypath.PitrRecoveringMarkPath())
+// IsPitrRestoreMode check whether pitr-restore-mode-mark marked
+func (s *Server) IsPitrRestoreMode(ctx context.Context) (bool, error) {
+	resp, err := s.client.Get(ctx, keypath.PitrRestoreModeMarkPath())
 	if err != nil {
 		return false, err
 	}
 	return len(resp.Kvs) > 0, nil
 }
 
-// UnmarkPitrRecovering unmark pitr recovering mark
-func (s *Server) UnmarkPitrRecovering(ctx context.Context) error {
-	log.Info("unmark pitr recovering")
-	_, err := s.client.Delete(ctx, keypath.PitrRecoveringMarkPath())
+// UnmarkPitrRestoreMode unmark pitr restore mode mark
+func (s *Server) UnmarkPitrRestoreMode(ctx context.Context) error {
+	log.Info("unmark pitr restore mode")
+	_, err := s.client.Delete(ctx, keypath.PitrRestoreModeMarkPath())
 	// if other client already unmarked, return success too
 	return err
 }
