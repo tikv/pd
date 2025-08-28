@@ -711,7 +711,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 	cfg.PeerTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
 	cfg.ForceNewCluster = c.ForceNewCluster
-	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
+	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(c.Logger)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.Logger = "zap"
 	var err error
