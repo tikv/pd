@@ -158,7 +158,7 @@ func CreateScheduler(
 ) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
-		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
+		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs()
 	}
 
 	return fn(oc, storage, dec, removeSchedulerCb...)
