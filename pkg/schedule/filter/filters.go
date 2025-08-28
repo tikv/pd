@@ -40,11 +40,11 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, conf config.
 			status := filters[i].Source(conf, s)
 			if !status.IsOK() {
 				if counter != nil {
-					counter.inc(source, filters[i].Type(), s.GetID(), 0)
+					counter.inc(source, filters[i].Type(), s.GetID())
 				} else {
 					sourceID := strconv.FormatUint(s.GetID(), 10)
 					// TODO: pre-allocate gauge metrics
-					filterCounter.WithLabelValues(source.String(), filters[i].Scope(), filters[i].Type().String(), sourceID, "").Inc()
+					filterSourceCounter.WithLabelValues(filters[i].Scope(), filters[i].Type().String(), sourceID).Inc()
 				}
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
@@ -64,16 +64,10 @@ func SelectUnavailableTargetStores(stores []*core.StoreInfo, filters []Filter, c
 		return slice.AnyOf(filters, func(i int) bool {
 			status := filters[i].Target(conf, s)
 			if !status.IsOK() {
-				cfilter, ok := filters[i].(comparingFilter)
-				sourceID := uint64(0)
-				if ok {
-					sourceID = cfilter.getSourceStoreID()
-				}
 				if counter != nil {
-					counter.inc(target, filters[i].Type(), sourceID, s.GetID())
+					counter.inc(target, filters[i].Type(), s.GetID())
 				} else {
-					filterCounter.WithLabelValues(target.String(), filters[i].Scope(), filters[i].Type().String(),
-						strconv.FormatUint(sourceID, 10), targetID).Inc()
+					filterTargetCounter.WithLabelValues(filters[i].Scope(), filters[i].Type().String(), targetID).Inc()
 				}
 
 				if collector != nil {
@@ -98,17 +92,11 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, conf config.
 			filter := filters[i]
 			status := filter.Target(conf, s)
 			if !status.IsOK() {
-				cfilter, ok := filter.(comparingFilter)
-				sourceID := uint64(0)
-				if ok {
-					sourceID = cfilter.getSourceStoreID()
-				}
 				if counter != nil {
-					counter.inc(target, filter.Type(), sourceID, s.GetID())
+					counter.inc(target, filter.Type(), s.GetID())
 				} else {
 					targetIDStr := strconv.FormatUint(s.GetID(), 10)
-					sourceIDStr := strconv.FormatUint(sourceID, 10)
-					filterCounter.WithLabelValues(target.String(), filter.Scope(), filter.Type().String(), sourceIDStr, targetIDStr).Inc()
+					filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), targetIDStr).Inc()
 				}
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
@@ -140,13 +128,6 @@ type Filter interface {
 	Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status
 }
 
-// comparingFilter is an interface to filter target store by comparing source and target stores
-type comparingFilter interface {
-	Filter
-	// getSourceStoreID returns the source store when comparing.
-	getSourceStoreID() uint64
-}
-
 // Target checks if store can pass all Filters as target store.
 func Target(conf config.SharedConfigProvider, store *core.StoreInfo, filters []Filter) bool {
 	storeID := strconv.FormatUint(store.GetID(), 10)
@@ -154,13 +135,8 @@ func Target(conf config.SharedConfigProvider, store *core.StoreInfo, filters []F
 		status := filter.Target(conf, store)
 		if !status.IsOK() {
 			if status != statusStoreRemoved {
-				cfilter, ok := filter.(comparingFilter)
 				targetID := storeID
-				sourceID := ""
-				if ok {
-					sourceID = strconv.FormatUint(cfilter.getSourceStoreID(), 10)
-				}
-				filterCounter.WithLabelValues(target.String(), filter.Scope(), filter.Type().String(), sourceID, targetID).Inc()
+				filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), targetID).Inc()
 			}
 			return false
 		}
@@ -319,11 +295,6 @@ func (f *distinctScoreFilter) Target(_ config.SharedConfigProvider, store *core.
 	default:
 	}
 	return statusStoreNotMatchIsolation
-}
-
-// getSourceStoreID implements the ComparingFilter
-func (f *distinctScoreFilter) getSourceStoreID() uint64 {
-	return f.srcStore
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
@@ -680,11 +651,6 @@ func (f *ruleFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreI
 	return statusStoreNotMatchRule
 }
 
-// getSourceStoreID implements the ComparingFilter
-func (f *ruleFitFilter) getSourceStoreID() uint64 {
-	return f.srcStore
-}
-
 type ruleLeaderFitFilter struct {
 	scope            string
 	cluster          *core.BasicCluster
@@ -739,10 +705,6 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 		return statusOK
 	}
 	return statusStoreNotMatchRule
-}
-
-func (f *ruleLeaderFitFilter) getSourceStoreID() uint64 {
-	return f.srcLeaderStoreID
 }
 
 type ruleWitnessFitFilter struct {
