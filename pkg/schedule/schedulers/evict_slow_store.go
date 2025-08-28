@@ -141,6 +141,8 @@ func (conf *evictSlowStoreSchedulerConfig) getPausedNetworkSlowStores() []uint64
 }
 
 func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStoreLocked(storeID uint64, cluster sche.SchedulerCluster) {
+	log.Info("deleting network slow store",
+		zap.Uint64("store-id", storeID))
 	oldPausedNetworkSlowStores := conf.PausedNetworkSlowStores
 	conf.PausedNetworkSlowStores = slices.DeleteFunc(conf.PausedNetworkSlowStores, func(val uint64) bool {
 		return val == storeID
