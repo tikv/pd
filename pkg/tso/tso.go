@@ -111,7 +111,7 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physica
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
-		return 0, t.uniqueIndex - 1
+		return 0, t.uniqueIndex
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.logical += count*t.maxIndex + t.uniqueIndex
