@@ -355,11 +355,11 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 		failed sync.Map
 		wg     sync.WaitGroup
 	)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	for name, sender := range s.mu.streams {
 		select {
 		case <-ctx.Done():
+			s.mu.RUnlock()
 			return
 		default:
 		}
@@ -374,15 +374,18 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 			}
 		}(name, sender)
 	}
+	s.mu.RUnlock()
 
 	go func() {
 		wg.Wait()
+		s.mu.Lock()
 		failed.Range(func(key, _ any) bool {
 			name := key.(string)
 			delete(s.mu.streams, name)
 			log.Info("region syncer delete the stream", zap.String("stream", name))
 			return true
 		})
+		s.mu.Unlock()
 		close(broadcastDone)
 	}()
 
