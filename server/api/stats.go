@@ -48,6 +48,9 @@ func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	var stats *statistics.RegionStats
 	if r.URL.Query().Has("count") {
 		stats = rc.GetRegionStatsCount([]byte(startKey), []byte(endKey))
+	} else if r.URL.Query().Has("use_hot") {
+		engine := r.URL.Query().Get("engine")
+		stats = rc.GetHotRegionStatusByRange([]byte(startKey), []byte(endKey), engine)
 	} else {
 		stats = rc.GetRegionStatsByRange([]byte(startKey), []byte(endKey))
 	}

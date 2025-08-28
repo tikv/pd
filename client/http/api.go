@@ -17,6 +17,7 @@ package http
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"time"
 )
 
@@ -61,6 +62,7 @@ const (
 	// Scheduler
 	Schedulers            = "/pd/api/v1/schedulers"
 	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-scheduler-"
+	SchedulerConfig       = "/pd/api/v1/scheduler-config"
 	// Admin
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
 	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
@@ -127,6 +129,13 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 		StatsRegion, startKeyStr, endKeyStr)
 }
 
+// RegionDistributionsByKeyRange returns the path of PD HTTP API to get region distribution by start key and end key.
+func RegionDistributionsByKeyRange(keyRange *KeyRange, engine string) string {
+	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
+	return fmt.Sprintf("%s?use_hot&start_key=%s&end_key=%s&engine=%s",
+		StatsRegion, startKeyStr, endKeyStr, engine)
+}
+
 // StoreByID returns the store API with store ID parameter.
 func StoreByID(id uint64) string {
 	return fmt.Sprintf("%s/%d", store, id)
@@ -180,6 +189,16 @@ func PlacementRuleGroupByID(id string) string {
 // SchedulerByName returns the scheduler API with the given scheduler name.
 func SchedulerByName(name string) string {
 	return fmt.Sprintf("%s/%s", Schedulers, name)
+}
+
+// GetSchedulerConfigURIByName returns the path of PD HTTP API to get configuration of the given scheduler
+func GetSchedulerConfigURIByName(name string) string {
+	return path.Join(SchedulerConfig, name, "list")
+}
+
+// GetCancelSchedulerJobURIByNameAndJobID returns the path of PD HTTP API to cancel the job of the given scheduler
+func GetCancelSchedulerJobURIByNameAndJobID(name string, jobID uint64) string {
+	return fmt.Sprintf("%s/%s/job?job-id=%d", SchedulerConfig, name, jobID)
 }
 
 // ScatterRangeSchedulerWithName returns the scatter range scheduler API with name parameter.

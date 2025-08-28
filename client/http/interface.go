@@ -40,6 +40,7 @@ type Client interface {
 	GetRegionByKey(context.Context, []byte) (*RegionInfo, error)
 	GetRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsByKeyRange(context.Context, *KeyRange, int) (*RegionsInfo, error)
+	GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error)
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetEmptyRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
@@ -66,8 +67,11 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
+	CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
+	GetSchedulerConfig(ctx context.Context, name string) (any, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -316,6 +320,44 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 		return nil, err
 	}
 	return &historyHotRegions, nil
+}
+
+// GetRegionDistributionByKeyRange gets the region distribution by key range.
+func (c *client) GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
+	var regionStats RegionStats
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionDistributionsByKeyRangeName).
+		WithURI(RegionDistributionsByKeyRange(keyRange, engine)).
+		WithMethod(http.MethodGet).
+		WithResp(&regionStats))
+	if err != nil {
+		return nil, err
+	}
+	distributions := make([]*RegionDistribution, 0, len(regionStats.StorePeerCount))
+	for storeID, region := range regionStats.StorePeerCount {
+		distribution := &RegionDistribution{
+			StoreID:               storeID,
+			EngineType:            regionStats.StoreEngine[storeID],
+			RegionLeaderCount:     regionStats.StoreLeaderCount[storeID],
+			RegionPeerCount:       region,
+			ApproximateSize:       regionStats.StorePeerSize[storeID],
+			ApproximateKeys:       regionStats.StorePeerKeys[storeID],
+			RegionWriteBytes:      regionStats.StoreWriteBytes[storeID],
+			RegionWriteKeys:       regionStats.StoreWriteKeys[storeID],
+			RegionWriteQuery:      regionStats.StoreWriteQuery[storeID],
+			RegionLeaderReadBytes: regionStats.StoreLeaderReadBytes[storeID],
+			RegionLeaderReadKeys:  regionStats.StoreLeaderReadKeys[storeID],
+			RegionLeaderReadQuery: regionStats.StoreLeaderReadQuery[storeID],
+			RegionPeerReadBytes:   regionStats.StorePeerReadBytes[storeID],
+			RegionPeerReadKeys:    regionStats.StorePeerReadKeys[storeID],
+			RegionPeerReadQuery:   regionStats.StorePeerReadQuery[storeID],
+		}
+		distributions = append(distributions, distribution)
+	}
+	regionDistributions := &RegionDistributions{
+		RegionDistributions: distributions,
+	}
+	return regionDistributions, nil
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
@@ -781,6 +823,42 @@ func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint6
 		WithURI(Schedulers).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
+}
+
+// CreateSchedulerWithInput creates a scheduler with the specified input.
+func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error {
+	input["name"] = name
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createSchedulerNameWithInput).
+		WithURI(Schedulers).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
+// CancelSchedulerJob cancels the specified scheduler job.
+func (c *client) CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(cancelSchedulerJobName).
+		WithURI(GetCancelSchedulerJobURIByNameAndJobID(name, jobID)).
+		WithMethod(http.MethodDelete))
+}
+
+// GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
+func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, error) {
+	var config any
+	err := c.request(ctx, newRequestInfo().
+		WithName(getSchedulerConfig).
+		WithURI(GetSchedulerConfigURIByName(name)).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
 }
 
 // DeleteScheduler deletes a scheduler from PD cluster.
