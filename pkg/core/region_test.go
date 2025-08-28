@@ -1363,7 +1363,7 @@ func TestStatsRegions(t *testing.T) {
 		regions.CheckAndPutRegion(NewTestRegionInfo(uint64(i), 1, []byte(fmt.Sprintf("%20d", i)), endKey))
 	}
 	startKey := []byte(fmt.Sprintf("%20d", 0))
-	for _, l := range []int{-1, maxScanRegionLimit - 1, maxScanRegionLimit, maxScanRegionLimit + 1, count} {
+	for _, l := range []int{-1, MaxScanRegionLimit - 1, MaxScanRegionLimit, MaxScanRegionLimit + 1, count} {
 		rs := regions.ScanRegions(startKey, nil, l)
 		limit := l
 		if limit <= 0 {
@@ -1378,7 +1378,7 @@ func TestStatsRegions(t *testing.T) {
 		re.Equal(startKey, rs[0].GetStartKey())
 	}
 
-	for _, startIdx := range []int{count - maxScanRegionLimit - 1, count - maxScanRegionLimit, count - maxScanRegionLimit + 1} {
+	for _, startIdx := range []int{count - MaxScanRegionLimit - 1, count - MaxScanRegionLimit, count - MaxScanRegionLimit + 1} {
 		if startIdx < 0 {
 			startIdx = 0
 		}
