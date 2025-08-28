@@ -145,6 +145,20 @@ var (
 			Name:      "status",
 			Help:      "Status of the rule.",
 		}, []string{"type"})
+	balanceRangeGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "balance_range",
+			Name:      "store",
+			Help:      "Store status for balance range schedule",
+		}, []string{"store", "type"})
+	balanceRangeJobGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "balance_range",
+			Name:      "job",
+			Help:      "job status for balance range schedule",
+		}, []string{})
 )
 
 func init() {
@@ -163,6 +177,8 @@ func init() {
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
 	prometheus.MustRegister(HotPendingSum)
+	prometheus.MustRegister(balanceRangeGauge)
+	prometheus.MustRegister(balanceRangeJobGauge)
 }
 
 func balanceLeaderCounterWithEvent(event string) prometheus.Counter {
@@ -219,6 +235,10 @@ func splitBucketCounterWithEvent(event string) prometheus.Counter {
 
 func transferWitnessLeaderCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.TransferWitnessLeaderScheduler.String(), event)
+}
+
+func balanceRangeCounterWithEvent(event string) prometheus.Counter {
+	return schedulerCounter.WithLabelValues(types.BalanceRangeScheduler.String(), event)
 }
 
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
@@ -340,4 +360,16 @@ var (
 	transferWitnessLeaderCounter              = transferWitnessLeaderCounterWithEvent("schedule")
 	transferWitnessLeaderNewOperatorCounter   = transferWitnessLeaderCounterWithEvent("new-operator")
 	transferWitnessLeaderNoTargetStoreCounter = transferWitnessLeaderCounterWithEvent("no-target-store")
+
+	balanceRangeCounter              = balanceRangeCounterWithEvent("schedule")
+	balanceRangeNewOperatorCounter   = balanceRangeCounterWithEvent("new-operator")
+	balanceRangeExpiredCounter       = balanceRangeCounterWithEvent("expired")
+	balanceRangeNoRegionCounter      = balanceRangeCounterWithEvent("no-region")
+	balanceRangeHotCounter           = balanceRangeCounterWithEvent("region-hot")
+	balanceRangeNoLeaderCounter      = balanceRangeCounterWithEvent("no-leader")
+	balanceRangeCreateOpFailCounter  = balanceRangeCounterWithEvent("create-operator-fail")
+	balanceRangeNoReplacementCounter = balanceRangeCounterWithEvent("no-replacement")
+	balanceRangeNoJobCounter         = balanceRangeCounterWithEvent("no-job")
+	balanceRangeBalancedCounter      = balanceRangeCounterWithEvent("balanced")
+	balancePersistFailedCounter      = balanceRangeCounterWithEvent("persist-failed")
 )

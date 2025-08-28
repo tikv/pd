@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -39,7 +40,7 @@ type grantLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
 
-	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+	StoreIDWithRanges map[uint64][]keyutil.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(name string) error
 }
@@ -66,7 +67,7 @@ func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
 func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
-	newStoreIDWithRanges := make(map[uint64][]core.KeyRange)
+	newStoreIDWithRanges := make(map[uint64][]keyutil.KeyRange)
 	for k, v := range conf.StoreIDWithRanges {
 		newStoreIDWithRanges[k] = v
 	}
@@ -106,7 +107,7 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 	return succ, last
 }
 
-func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
+func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []keyutil.KeyRange) {
 	conf.Lock()
 	defer conf.Unlock()
 	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
@@ -115,7 +116,7 @@ func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.Ke
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
-func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
 	if ranges, exist := conf.StoreIDWithRanges[id]; exist {
@@ -124,10 +125,10 @@ func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRa
 	return nil
 }
 
-func (conf *grantLeaderSchedulerConfig) getStoreIDWithRanges() map[uint64][]core.KeyRange {
+func (conf *grantLeaderSchedulerConfig) getStoreIDWithRanges() map[uint64][]keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	storeIDWithRanges := make(map[uint64][]core.KeyRange)
+	storeIDWithRanges := make(map[uint64][]keyutil.KeyRange)
 	for id, ranges := range conf.StoreIDWithRanges {
 		storeIDWithRanges[id] = ranges
 	}
