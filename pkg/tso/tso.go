@@ -371,6 +371,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 		}
 		// Get a new TSO result with the given count
 		resp.Physical, resp.Logical = t.generateTSO(ctx, int64(count))
+		resp.SuffixBits = uint32(t.maxIndex)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
