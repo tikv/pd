@@ -2061,8 +2061,6 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...Bat
 		opt(scanOptions)
 	}
 
-	r.t.RLock()
-	defer r.t.RUnlock()
 	for _, keyRange := range krs {
 		regions, err := r.scanRegion(keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
 		if err != nil {
