@@ -41,6 +41,20 @@ func TestGCBarrierInfoExpiration(t *testing.T) {
 	re.True(b.isExpiredImpl(now.Add(time.Hour * 24 * 365 * 10)))
 
 	b = NewGCBarrierInfo("b", 1, TTLNeverExpire, now)
+	re.False(b.IsExpired())
 	re.False(b.isExpiredImpl(now))
 	re.False(b.isExpiredImpl(now.Add(time.Hour * 24 * 365 * 10)))
+
+	b1 := NewGlobalGCBarrierInfo("b", 1, time.Second, now)
+	re.False(b1.IsExpired())
+	re.False(b1.isExpiredImpl(now.Add(-time.Second)))
+	re.False(b1.isExpiredImpl(now))
+	re.False(b1.isExpiredImpl(now.Add(time.Millisecond * 999)))
+	re.False(b1.isExpiredImpl(now.Add(time.Second)))
+	re.True(b1.isExpiredImpl(now.Add(time.Second + time.Millisecond)))
+	re.True(b1.isExpiredImpl(now.Add(time.Hour * 24 * 365 * 10)))
+
+	b1 = NewGlobalGCBarrierInfo("b", 1, TTLNeverExpire, now)
+	re.False(b1.isExpiredImpl(now))
+	re.False(b1.isExpiredImpl(now.Add(time.Hour * 24 * 365 * 10)))
 }

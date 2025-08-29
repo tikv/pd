@@ -701,6 +701,14 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	return results, nil
 }
 
+// LoadAllGlobalGCBarriers returns global GC barriers.
+func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.gcMetaStorage.LoadAllGlobalGCBarriers()
+}
+
 // CompatibleUpdateServiceGCSafePoint updates the service safe point of the given serviceID. Service safe points are
 // being deprecated, and this method provides compatibility for components that are still using service safe point API.
 // This method simulates the behavior of the service safe points in old versions, by internally using txn safe points
