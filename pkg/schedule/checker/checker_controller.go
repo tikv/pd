@@ -148,6 +148,7 @@ func (c *Controller) PatrolRegions() {
 				log.Debug("skip patrol regions due to scheduling is halted")
 				continue
 			}
+			c.metrics.patrolRegionChannelSize.Set(float64(len(c.patrolRegionContext.regionChan)))
 
 			// wait for the regionChan to be drained
 			if len(c.patrolRegionContext.regionChan) > 0 {
@@ -289,27 +290,20 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
-	var ops []*operator.Operator
-	measure(c.metrics.checkRegionHistograms[jointStateChecker], func() {
-		if op := c.jointStateChecker.Check(region); op != nil {
-			ops = []*operator.Operator{op}
-		}
-	})
-	if ops != nil {
+	if ops := measureChecker(c.metrics.checkRegionHistograms[jointStateChecker], func() []*operator.Operator {
+		return []*operator.Operator{c.jointStateChecker.Check(region)}
+	}); len(ops) > 0 {
 		return ops
 	}
 
-	measure(c.metrics.checkRegionHistograms[splitChecker], func() {
-		if op := c.splitChecker.Check(region); op != nil {
-			ops = []*operator.Operator{op}
-		}
-	})
-	if ops != nil {
+	if ops := measureChecker(c.metrics.checkRegionHistograms[splitChecker], func() []*operator.Operator {
+		return []*operator.Operator{c.splitChecker.Check(region)}
+	}); len(ops) > 0 {
 		return ops
 	}
 
 	if c.conf.IsPlacementRulesEnabled() {
-		measure(c.metrics.checkRegionHistograms[ruleChecker], func() {
+		if ops := measureChecker(c.metrics.checkRegionHistograms[ruleChecker], func() []*operator.Operator {
 			skipRuleCheck := c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() &&
 				c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
 			if skipRuleCheck {
@@ -323,39 +317,31 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 					panic("cached should be used")
 				})
 				fit := c.priorityInspector.Inspect(region)
-				if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-					if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-						ops = []*operator.Operator{op}
-					} else {
-						operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
-						c.pendingProcessedRegions.Put(region.GetID(), nil)
-					}
+				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
+					return []*operator.Operator{c.ruleChecker.CheckWithFit(region, fit)}
 				}
+				operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
+				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
-		})
-		if ops != nil {
+			return nil
+		}); len(ops) > 0 {
 			return ops
 		}
 	} else {
-		measure(c.metrics.checkRegionHistograms[learnerChecker], func() {
-			if op := c.learnerChecker.Check(region); op != nil {
-				ops = []*operator.Operator{op}
-			}
-		})
-		if ops != nil {
+		if ops := measureChecker(c.metrics.checkRegionHistograms[learnerChecker], func() []*operator.Operator {
+			return []*operator.Operator{c.learnerChecker.Check(region)}
+		}); len(ops) > 0 {
 			return ops
 		}
-		measure(c.metrics.checkRegionHistograms[replicaChecker], func() {
-			if op := c.replicaChecker.Check(region); op != nil {
-				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-					ops = []*operator.Operator{op}
-				} else {
-					operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
-					c.pendingProcessedRegions.Put(region.GetID(), nil)
-				}
+
+		if ops := measureChecker(c.metrics.checkRegionHistograms[replicaChecker], func() []*operator.Operator {
+			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
+				return []*operator.Operator{c.replicaChecker.Check(region)}
 			}
-		})
-		if ops != nil {
+			operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
+			c.pendingProcessedRegions.Put(region.GetID(), nil)
+			return nil
+		}); len(ops) > 0 {
 			return ops
 		}
 	}
@@ -369,18 +355,16 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		}
 	}
 	if c.mergeChecker != nil {
-		measure(c.metrics.checkRegionHistograms[mergeChecker], func() {
-			allowed := opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit()
-			if !allowed {
-				operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
-			} else if mergeOps := c.mergeChecker.Check(region); mergeOps != nil {
+		if ops := measureChecker(c.metrics.checkRegionHistograms[mergeChecker], func() []*operator.Operator {
+			if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
 				// It makes sure that two operators can be added successfully altogether.
-				ops = mergeOps
+				return c.mergeChecker.Check(region)
 			}
-		})
-	}
-	if ops != nil {
-		return ops
+			operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
+			return nil
+		}); len(ops) > 0 {
+			return ops
+		}
 	}
 	return nil
 }
@@ -613,8 +597,25 @@ func calculateScanLimit(cluster sche.CheckerCluster) int {
 }
 
 // measure runs the action and observes the duration using a pre-created histogram.
-func measure(histogram prometheus.Observer, action func()) {
+func measure(observer prometheus.Observer, action func()) {
 	start := time.Now()
 	action()
-	histogram.Observe(time.Since(start).Seconds())
+	observer.Observe(time.Since(start).Seconds())
+}
+
+func measureChecker(observer prometheus.Observer, action func() []*operator.Operator) []*operator.Operator {
+	var rawOps []*operator.Operator
+	measure(observer, func() {
+		rawOps = action()
+	})
+	if rawOps == nil {
+		return nil
+	}
+	var ops []*operator.Operator
+	for _, op := range rawOps {
+		if op != nil {
+			ops = append(ops, op)
+		}
+	}
+	return ops
 }
