@@ -90,6 +90,12 @@ type Config struct {
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
+	// TSOUniqueIndex is the current TSO unique index.
+	TSOUniqueIndex int64 `toml:"tso-unique-index" json:"tso-unique-index"`
+
+	// TSOMaxIndex is the current TSO max index, which should be same if these clusters needs to write.
+	TSOMaxIndex int64 `toml:"tso-max-index" json:"tso-max-index"`
+
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
 	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
 	// more TSOs provided, and at the same time consuming more CPU time.
@@ -437,6 +443,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
+	}
+
+	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
+		return errors.New("tso max index is less than unique index")
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
