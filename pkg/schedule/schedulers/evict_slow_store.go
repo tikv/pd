@@ -181,7 +181,7 @@ func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStore(storeID uint64
 	delete(conf.networkSlowStoreCaptureTSs, storeID)
 }
 
-func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStore(storeID uint64, cluster sche.SchedulerCluster) {
+func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStore(storeID uint64) {
 	log.Info("detected network slow store, start to pause scheduler",
 		zap.Uint64("store-id", storeID))
 	conf.networkSlowStoreCaptureTSs[storeID] = time.Now()
@@ -443,7 +443,7 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 	s.tryRecoverNetworkSlowStores(cluster)
 
 	// Activate paused network slow stores if capacity allows
-	s.activatePausedNetworkSlowStores(cluster)
+	s.activatePausedNetworkSlowStores()
 
 	// Detect and handle new network slow stores
 	s.detectAndHandleNetworkSlowStores(cluster)
@@ -482,7 +482,7 @@ func shouldRecoverNetworkSlowStore(
 }
 
 // activatePausedNetworkSlowStores activates paused network slow stores if capacity allows
-func (s *evictSlowStoreScheduler) activatePausedNetworkSlowStores(cluster sche.SchedulerCluster) {
+func (s *evictSlowStoreScheduler) activatePausedNetworkSlowStores() {
 	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
 	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
 
@@ -492,7 +492,7 @@ func (s *evictSlowStoreScheduler) activatePausedNetworkSlowStores(cluster sche.S
 			slowStoreID = storeID
 			break
 		}
-		s.conf.addNetworkSlowStore(slowStoreID, cluster)
+		s.conf.addNetworkSlowStore(slowStoreID)
 	}
 }
 
@@ -521,7 +521,7 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 				continue
 			}
 
-			s.conf.addNetworkSlowStore(storeID, cluster)
+			s.conf.addNetworkSlowStore(storeID)
 		}
 	}
 }
@@ -698,7 +698,6 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 	// Record the slow store evicted status.
 	storeIDStr := strconv.FormatUint(slowStore.GetID(), 10)
 	evictedSlowStoreStatusGauge.WithLabelValues(storeIDStr, string(diskSlowStore)).Set(1)
-	return
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
