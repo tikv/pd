@@ -113,9 +113,6 @@ func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
-	if conf.evictStore() != id {
-		return nil
-	}
 	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
