@@ -284,22 +284,20 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 
 	handler.config.Lock()
 	defer handler.config.Unlock()
-	if !inputRecoveryDuration {
-		recoveryDurationGapFloat = float64(handler.config.RecoverySec)
-	}
-	if !inputBatch {
-		batchFloat = float64(handler.config.Batch)
-	}
-	if !inputEnableNetworkSlowStore {
-		enableNetworkSlowStore = handler.config.EnableNetworkSlowStore
-	}
 	prevRecoverySec := handler.config.RecoverySec
 	prevBatch := handler.config.Batch
 	prevEnableNetworkSlowStore := handler.config.EnableNetworkSlowStore
 	recoverySec := uint64(recoveryDurationGapFloat)
-	handler.config.RecoverySec = recoverySec
-	handler.config.Batch = int(batchFloat)
-	handler.config.EnableNetworkSlowStore = enableNetworkSlowStore
+
+	if inputRecoveryDuration {
+		handler.config.RecoverySec = recoverySec
+	}
+	if inputBatch {
+		handler.config.Batch = int(batchFloat)
+	}
+	if inputEnableNetworkSlowStore {
+		handler.config.EnableNetworkSlowStore = enableNetworkSlowStore
+	}
 	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoverySec = prevRecoverySec
