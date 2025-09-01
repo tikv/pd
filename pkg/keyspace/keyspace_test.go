@@ -187,7 +187,7 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 			cfg[GCManagementType] = tc.gcManagementType
 		}
 		req := &CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("test_gc_management_type_%d", idx),
+			Name:       fmt.Sprintf("gc_mgmt_type_%d", idx),
 			CreateTime: now,
 			Config:     cfg,
 		}
