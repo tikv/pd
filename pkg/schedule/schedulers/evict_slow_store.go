@@ -176,7 +176,8 @@ func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStore(storeID uint64
 		conf.PausedNetworkSlowStores = oldPausedNetworkSlowStores
 		return
 	}
-	cluster.ResumeLeaderTransfer(storeID, constant.In)
+	// cluster.ResumeLeaderTransfer(storeID, constant.In)
+	cluster.SlowStoreRecovered(storeID)
 	evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore))
 	delete(conf.networkSlowStoreCaptureTSs, storeID)
 }
@@ -196,6 +197,12 @@ func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStore(storeID uint64, c
 			zap.Uint64("store-id", storeID),
 			zap.Error(err))
 		// cluster.ResumeLeaderTransfer(storeID, constant.In)
+		return
+	}
+	if err := cluster.SlowStoreEvicted(storeID); err != nil {
+		log.Warn("failed to evict slow store",
+			zap.Uint64("store-id", storeID),
+			zap.Error(err))
 		return
 	}
 	evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Set(1)
