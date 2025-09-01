@@ -15,8 +15,12 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -28,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -97,6 +102,56 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	switch tp {
+	case types.BalanceRangeScheduler:
+		exist, _ := h.IsSchedulerExisted(name)
+		if exist {
+			handler, err := h.GetSchedulerConfigHandler()
+			if err == nil && handler != nil {
+				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
+				r.Method = http.MethodPut
+				data, err := json.Marshal(input)
+				if err != nil {
+					h.r.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+
+				r.Body = io.NopCloser(bytes.NewBuffer(data))
+				handler.ServeHTTP(w, r)
+				return
+			}
+			h.r.JSON(w, http.StatusNotAcceptable, err.Error())
+			return
+		}
+		if err := apiutil.CollectStringOption("rule", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := apiutil.CollectStringOption("engine", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		defaultTimeout := "30m"
+		if err := apiutil.CollectStringOption("timeout", input, collector); err != nil {
+			if errors.ErrorEqual(err, errs.ErrOptionNotExist) {
+				collector(defaultTimeout)
+			} else {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+
+		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		keys, err := keyutil.DecodeHTTPKeyRanges(input)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		args = append(args, keys...)
 	case types.ScatterRangeScheduler:
 		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
