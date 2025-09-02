@@ -45,7 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -1883,9 +1882,8 @@ func TestExternalTimestamp(t *testing.T) {
 		ts = resp.GetTimestamp()
 		// get global ts
 		req2 := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      1,
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  1,
 		}
 		re.NoError(tsoClient.Send(req2))
 		resp2, err := tsoClient.Recv()
@@ -1907,9 +1905,8 @@ func TestExternalTimestamp(t *testing.T) {
 		re.NoError(err)
 		// get global ts again
 		req5 := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      1,
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  1,
 		}
 		re.NoError(tsoClient.Send(req5))
 		resp5, err := tsoClient.Recv()

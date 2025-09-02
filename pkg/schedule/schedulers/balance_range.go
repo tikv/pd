@@ -638,10 +638,13 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 			balanceRangeCreateOpFailCounter.Inc()
 			return nil
 		}
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(solver.targetStoreID(), 10)
 		op.FinishedCounters = append(op.FinishedCounters,
+<<<<<<< HEAD
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+=======
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
+>>>>>>> 7fa31c663 (metrics: clean up metrics (#9535))
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(s.score(sourceID), 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(s.score(targetID), 'f', 2, 64))

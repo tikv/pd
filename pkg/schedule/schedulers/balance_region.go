@@ -259,10 +259,13 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			collector.Collect()
 		}
 		solver.Step--
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
+<<<<<<< HEAD
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+=======
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
+>>>>>>> 7fa31c663 (metrics: clean up metrics (#9535))
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
