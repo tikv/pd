@@ -833,6 +833,37 @@ func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
 	return stores
 }
 
+// GetAvgNetworkSlowScore returns the average network slow score of a store.
+func (s *StoresInfo) GetAvgNetworkSlowScore(storeID uint64) uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		return 0
+	}
+	var (
+		total             uint64
+		count             uint64
+		networkSlowScores = store.GetNetworkSlowScores()
+	)
+	for id := range s.stores {
+		if id == storeID {
+			continue
+		}
+		if score, ok := networkSlowScores[id]; ok {
+			total += score
+		} else {
+			// If the score is 1, its score will not report to PD.
+			total += 1
+		}
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return total / count
+}
+
 /* Stores write operations */
 
 // PutStore sets a StoreInfo with storeID.

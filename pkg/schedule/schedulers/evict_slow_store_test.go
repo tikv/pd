@@ -425,18 +425,18 @@ func checkNetworkSlowStore(
 	recovery bool,
 ) {
 	if recovery {
-		ts, ok := es.conf.networkSlowStoreRecoverStartAts[storeID]
+		status, ok := es.conf.networkSlowStoreStatuses[storeID]
 		re.True(ok)
-		re.Nil(ts)
+		re.Nil(status.recoverStartAt)
 		es.Schedule(tc, false)
-		ts, ok = es.conf.networkSlowStoreRecoverStartAts[storeID]
+		status, ok = es.conf.networkSlowStoreStatuses[storeID]
 		re.True(ok)
-		re.NotNil(ts)
+		re.NotNil(status.recoverStartAt)
 	}
 
 	es.Schedule(tc, false)
 
-	_, ok := es.conf.networkSlowStoreRecoverStartAts[storeID]
+	_, ok := es.conf.networkSlowStoreStatuses[storeID]
 	re.Equal(expectedSlow, ok)
 	if expectedPausedTransfer {
 		re.Contains(es.conf.PausedNetworkSlowStores, storeID)
@@ -448,7 +448,7 @@ func checkNetworkSlowStore(
 	// check the value from storage.
 	var persistValue evictSlowStoreSchedulerConfig
 	_ = es.conf.load(&persistValue)
-	_, ok = persistValue.networkSlowStoreRecoverStartAts[storeID]
+	_, ok = persistValue.networkSlowStoreStatuses[storeID]
 	re.False(ok)
 	if expectedPausedTransfer {
 		re.Contains(persistValue.PausedNetworkSlowStores, storeID)

@@ -396,3 +396,84 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 		})
 	}
 }
+
+func TestGetAvgNetworkSlowScore(t *testing.T) {
+	re := require.New(t)
+
+	type args struct {
+		scores map[uint64]map[uint64]uint64 // storeID -> networkSlowScores
+	}
+	type want struct {
+		storeID uint64
+		avg     uint64
+	}
+	testCases := []struct {
+		name string
+		args args
+		want []want // Support multiple storeID checks in one test case
+	}{
+		{
+			name: "Store not found",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{},
+			},
+			want: []want{
+				{storeID: 1, avg: 0},
+				{storeID: 123, avg: 0},
+			},
+		},
+		{
+			name: "Store exists, but no network slow scores",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{
+					1: {},
+				},
+			},
+			want: []want{
+				{storeID: 1, avg: 0}, // Only one store, no other stores to calculate avg with
+			},
+		},
+		{
+			name: "Multiple stores with various scores",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{
+					1: {2: 7}, // store1's scores to other stores (excluding itself)
+					2: {1: 5}, // store2's scores to other stores (excluding itself)
+				},
+			},
+			want: []want{
+				{storeID: 1, avg: 7}, // store1 excludes itself, only counts store2, networkSlowScores[2]=7
+				{storeID: 2, avg: 5}, // store2 excludes itself, only counts store1, networkSlowScores[1]=5
+			},
+		},
+		{
+			name: "Multiple stores with missing scores (should default to 1)",
+			args: args{
+				scores: map[uint64]map[uint64]uint64{
+					1: {2: 7},  // store1's scores (excluding itself)
+					2: {1: 5},  // store2's scores (excluding itself)
+					3: {1: 10}, // store3's scores, only has score for store1 (excluding itself)
+				},
+			},
+			want: []want{
+				{storeID: 1, avg: 4}, // store1 excludes itself, counts store2(7) and store3(default 1), avg=(7+1)/2=4
+				{storeID: 2, avg: 3}, // store2 excludes itself, counts store1(5) and store3(default 1), avg=(5+1)/2=3
+				{storeID: 3, avg: 5}, // store3 excludes itself, counts store1(10) and store2(default 1), avg=(10+1)/2=5
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			storesInfo := NewStoresInfo()
+			for id, scores := range tc.args.scores {
+				store := NewStoreInfo(&metapb.Store{Id: id})
+				store.rawStats.NetworkSlowScores = scores
+				storesInfo.PutStore(store)
+			}
+			for _, w := range tc.want {
+				re.Equal(w.avg, storesInfo.GetAvgNetworkSlowScore(w.storeID))
+			}
+		})
+	}
+}
