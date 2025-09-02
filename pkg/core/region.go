@@ -2018,13 +2018,13 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	return r.tree.GetCountByRange(startKey, endKey)
 }
 
-func (r *RegionsInfo) scanRegionsInner(startKey, endKey []byte, limit int, fns ...scanRegionFunc) []*RegionInfo {
+func (r *RegionsInfo) scanRegionsInner(startKey, endKey []byte, limit int, fns ...scanRegionFunc) ([]*RegionInfo, error) {
 	var res []*RegionInfo
 	for {
 		scanLimit := limit - len(res)
 		regions, err := r.scanRegionsOnce(startKey, endKey, scanLimit, fns...)
 		if err != nil {
-			break
+			return nil, err
 		}
 		res = append(res, regions...)
 		if limit >= 0 && len(res) >= limit {
@@ -2039,13 +2039,14 @@ func (r *RegionsInfo) scanRegionsInner(startKey, endKey []byte, limit int, fns .
 			break
 		}
 	}
-	return res
+	return res, nil
 }
 
 // ScanRegions scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
-	return r.scanRegionsInner(startKey, endKey, limit)
+	res, _ := r.scanRegionsInner(startKey, endKey, limit)
+	return res
 }
 
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
@@ -2116,12 +2117,11 @@ func (r *RegionsInfo) scanRegion(keyRange *keyutil.KeyRange, limit int, outputMu
 			meta: &metapb.Region{EndKey: keyRange.StartKey},
 		}
 		exceedLimit = func() bool { return limit > 0 && len(res) >= limit }
-		err         error
 	)
 	fn := func(region *RegionInfo) error {
 		if len(lastRegion.GetEndKey()) > 0 && len(region.GetStartKey()) > 0 &&
 			bytes.Compare(region.GetStartKey(), lastRegion.GetEndKey()) > 0 {
-			err = errs.ErrRegionNotAdjacent.FastGen(
+			err := errs.ErrRegionNotAdjacent.FastGen(
 				"key range[%x, %x) found a hole region between region[%x, %x) and region[%x, %x)",
 				keyRange.StartKey, keyRange.EndKey,
 				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
@@ -2135,8 +2135,10 @@ func (r *RegionsInfo) scanRegion(keyRange *keyutil.KeyRange, limit int, outputMu
 		lastRegion = region
 		return nil
 	}
-	rs := r.scanRegionsInner(keyRange.StartKey, keyRange.EndKey, limit, fn)
-	res = append(res, rs...)
+	res, err := r.scanRegionsInner(keyRange.StartKey, keyRange.EndKey, limit, fn)
+	if outputMustContainAllKeyRange && err != nil {
+		return nil, err
+	}
 	if !(exceedLimit()) && len(keyRange.EndKey) > 0 &&
 		len(lastRegion.GetEndKey()) > 0 &&
 		bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) < 0 {
