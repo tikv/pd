@@ -896,6 +896,11 @@ error = '''
 unknown interval growth type error
 '''
 
+["PD:scheduler:ErrNoStoreToBeSelected"]
+error = '''
+no store to be selected
+'''
+
 ["PD:scheduler:ErrScheduleConfigNotExist"]
 error = '''
 the config does not exist
