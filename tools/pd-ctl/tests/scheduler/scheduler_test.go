@@ -840,7 +840,7 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	storeInfo1 := new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo1))
 	re.False(storeInfo1.Status.PauseLeaderTransferIn)
-	re.False(storeInfo.Status.PauseLeaderTransferOut)
+	re.False(storeInfo1.Status.PauseLeaderTransferOut)
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")

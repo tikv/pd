@@ -693,7 +693,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		}
 	}
 	if len(sources) <= 1 {
-		return errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
+		return errs.ErrNoStoreToBeSelected.FastGenByArgs()
 	}
 	// storeID <--> score mapping
 	scoreMap := make(map[uint64]float64, len(sources))
