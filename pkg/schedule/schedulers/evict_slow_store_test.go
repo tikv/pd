@@ -124,6 +124,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 	testCases := []struct {
 		networkSlowScoresFunc func(store *core.StoreInfo)
 		expectedSlow          bool
+		recovery              bool
 	}{
 		// Note: The test cases are sequential.
 		// There will be a causal relationship between before and after
@@ -179,6 +180,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 				}
 			},
 			expectedSlow: false,
+			recovery:     true,
 		},
 		{
 			// Test large cluster with many stores
@@ -206,9 +208,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		storeInfo := suite.tc.GetStore(storeID1)
 		suite.tc.PutStore(storeInfo.Clone(tc.networkSlowScoresFunc))
 
-		suite.es.Schedule(suite.tc, false)
-
-		checkNetworkSlowStore(re, es.conf, suite.tc.BasicCluster, storeID1, tc.expectedSlow, tc.expectedSlow)
+		checkNetworkSlowStore(re, es, suite.tc, storeID1, tc.expectedSlow, tc.expectedSlow, tc.recovery)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
@@ -234,6 +234,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		expectedSlow           bool
 		expectedPausedTransfer bool
 		expectedReachedLimit   bool
+		recovery               bool
 	}{
 		// Note: The test cases are sequential.
 		// There will be a causal relationship between before and after
@@ -319,6 +320,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 			},
 			expectedSlow:           false,
 			expectedPausedTransfer: false,
+			recovery:               true,
 		},
 		{
 			// Store 2 is still slow, but does not reach the limit
@@ -367,8 +369,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 			suite.tc.PutStore(storeInfo.Clone(fn))
 		}
 
-		suite.es.Schedule(suite.tc, false)
-		checkNetworkSlowStore(re, es.conf, suite.tc.BasicCluster, tc.scheduleStore, tc.expectedSlow, tc.expectedPausedTransfer)
+		checkNetworkSlowStore(re, es, suite.tc, tc.scheduleStore, tc.expectedSlow, tc.expectedPausedTransfer, tc.recovery)
 
 		re.Equal(tc.expectedReachedLimit, reachedLimit)
 		if reachedLimit {
@@ -400,37 +401,50 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSwitchEnableToDisable(
 	}))
 
 	suite.es.Schedule(suite.tc, false)
-	checkNetworkSlowStore(re, es.conf, suite.tc.BasicCluster, storeID1, true, true)
+	checkNetworkSlowStore(re, es, suite.tc, storeID1, true, true, false)
 
 	es.conf.EnableNetworkSlowStore = false
 	suite.es.Schedule(suite.tc, false)
 	re.NotContains(es.conf.PausedNetworkSlowStores, storeID1)
-	checkNetworkSlowStore(re, es.conf, suite.tc.BasicCluster, storeID1, false, false)
+	checkNetworkSlowStore(re, es, suite.tc, storeID1, false, false, false)
 	re.True(suite.tc.BasicCluster.GetStore(storeID2).AllowLeaderTransfer())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
 func checkNetworkSlowStore(
 	re *require.Assertions,
-	conf *evictSlowStoreSchedulerConfig,
-	cluster *core.BasicCluster,
+	es *evictSlowStoreScheduler,
+	tc *mockcluster.Cluster,
 	storeID uint64,
 	expectedSlow bool,
 	expectedPausedTransfer bool,
+	recovery bool,
 ) {
-	_, ok := conf.networkSlowStoreCaptureTSs[storeID]
+	if recovery {
+		ts, ok := es.conf.networkSlowStoreRecoverStartAts[storeID]
+		re.True(ok)
+		re.Nil(ts)
+		es.Schedule(tc, false)
+		ts, ok = es.conf.networkSlowStoreRecoverStartAts[storeID]
+		re.True(ok)
+		re.NotNil(ts)
+	}
+
+	es.Schedule(tc, false)
+
+	_, ok := es.conf.networkSlowStoreRecoverStartAts[storeID]
 	re.Equal(expectedSlow, ok)
 	if expectedPausedTransfer {
-		re.Contains(conf.PausedNetworkSlowStores, storeID)
+		re.Contains(es.conf.PausedNetworkSlowStores, storeID)
 	} else {
-		re.NotContains(conf.PausedNetworkSlowStores, storeID)
+		re.NotContains(es.conf.PausedNetworkSlowStores, storeID)
 	}
-	re.Equal(expectedPausedTransfer, !cluster.GetStore(storeID).AllowLeaderTransfer())
+	re.Equal(expectedPausedTransfer, !tc.GetStore(storeID).AllowLeaderTransfer())
 
 	// check the value from storage.
 	var persistValue evictSlowStoreSchedulerConfig
-	_ = conf.load(&persistValue)
-	_, ok = persistValue.networkSlowStoreCaptureTSs[storeID]
+	_ = es.conf.load(&persistValue)
+	_, ok = persistValue.networkSlowStoreRecoverStartAts[storeID]
 	re.False(ok)
 	if expectedPausedTransfer {
 		re.Contains(persistValue.PausedNetworkSlowStores, storeID)
