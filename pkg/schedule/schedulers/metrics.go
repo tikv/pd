@@ -78,7 +78,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "balance_direction",
 			Help:      "Counter of direction of balance related schedulers.",
-		}, []string{"type", "source", "target"})
+		}, []string{"type", "store", "direction"})
 
 	// TODO: pre-allocate gauge metrics
 	hotDirectionCounter = prometheus.NewCounterVec(
@@ -88,14 +88,6 @@ var (
 			Name:      "hot_region_direction",
 			Help:      "Counter of hot region scheduler.",
 		}, []string{"type", "rw", "store", "direction", "dim"})
-
-	hotPendingStatus = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "hot_pending",
-			Help:      "Pending influence status in hot region scheduler.",
-		}, []string{"type", "source", "target"})
 
 	hotPeerHist = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -189,7 +181,6 @@ func init() {
 	prometheus.MustRegister(balanceDirectionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
-	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
 	prometheus.MustRegister(evictedSlowStoreStatusGauge)
 	prometheus.MustRegister(slowStoreTriggerLimitGauge)
