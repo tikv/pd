@@ -193,18 +193,18 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	}
 	// Split the response
 	ts := resp.GetTimestamp()
-	physical, logical := ts.GetPhysical(), ts.GetLogical()
+	physical, logical, suffix := ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
-	firstLogical := logical - int64(count)
-	return s.finishRequest(requests, physical, firstLogical)
+	firstLogical := logical - int64(count*suffix)
+	return s.finishRequest(requests, physical, firstLogical, suffix)
 }
 
-func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) error {
+func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64, suffix uint32) error {
 	countSum := int64(0)
 	for i := range requests {
-		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
+		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical, suffix)
 		if err != nil {
 			return err
 		}
