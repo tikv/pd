@@ -296,6 +296,26 @@ func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 }
 
+func (suite *adminTestSuite) TestMarkPitrRestore() {
+	re := suite.Require()
+	url := fmt.Sprintf("%s/admin/cluster/markers/pitr-restore-mode", suite.urlPrefix)
+	// default to false
+	re.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+		tu.StatusOK(re), tu.StringContain(re, "false")))
+
+	// mark
+	re.NoError(tu.CheckPostJSON(testDialClient, url, nil,
+		tu.StatusOK(re)))
+	re.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+		tu.StatusOK(re), tu.StringContain(re, "true")))
+
+	// unmark
+	err := tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
+	re.NoError(err)
+	re.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+		tu.StatusOK(re), tu.StringContain(re, "false")))
+}
+
 func (suite *adminTestSuite) TestRecoverAllocID() {
 	re := suite.Require()
 	url := fmt.Sprintf("%s/admin/base-alloc-id", suite.urlPrefix)

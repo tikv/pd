@@ -187,6 +187,34 @@ func (h *adminHandler) unmarkSnapshotRecovering(w http.ResponseWriter, r *http.R
 	h.rd.Text(w, http.StatusOK, "")
 }
 
+func (h *adminHandler) markPitrRestore(w http.ResponseWriter, _ *http.Request) {
+	if err := h.svr.MarkPitrRestore(); err != nil {
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "")
+}
+
+func (h *adminHandler) isPitrRestore(w http.ResponseWriter, r *http.Request) {
+	marked, err := h.svr.IsPitrRestore(r.Context())
+	if err != nil {
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type resStruct struct {
+		Marked bool `json:"marked"`
+	}
+	h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
+}
+
+func (h *adminHandler) unmarkPitrRestore(w http.ResponseWriter, r *http.Request) {
+	if err := h.svr.UnmarkPitrRestore(r.Context()); err != nil {
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "")
+}
+
 // RecoverAllocID recover base alloc id
 // body should be in {"id": "123"} format
 func (h *adminHandler) recoverAllocID(w http.ResponseWriter, r *http.Request) {
