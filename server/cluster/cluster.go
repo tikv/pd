@@ -1151,6 +1151,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
 	}
+	c.adjustNetworkSlowStore(storeID)
 	return nil
 }
 
@@ -2525,4 +2526,19 @@ func (c *RaftCluster) SetServiceIndependent(name string) {
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
 	c.independentServices.Delete(name)
+}
+
+// Why 99? If the network is normal within the 10-second store heartbeat, the
+// score will drop from 100 to: 100 - (100/10(min)/(60s/10s)) = 100 - (10/6) < 99. In
+// other words, if the network is completely normal within 10 seconds, the score will
+// be less than 99.
+const networkSlowStoreEvictThreshold = 99
+
+func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
+	if c.GetAvgNetworkSlowScore(storeID) >= networkSlowStoreEvictThreshold {
+		c.TriggerNetworkSlowEvict(storeID)
+	}
+	if c.GetAvgNetworkSlowScore(storeID) <= 1 {
+		c.ResetTriggerNetworkSlowEvict(storeID)
+	}
 }

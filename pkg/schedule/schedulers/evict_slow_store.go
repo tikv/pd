@@ -53,17 +53,10 @@ const (
 	networkSlowStoreIssueThreshold       = 95 // Threshold for detecting network issues with a specific store
 	networkSlowStoreFluctuationThreshold = 10 // Threshold for detecting network fluctuations with other stores
 
-	// Why 99? If the network is normal within the 10-second store heartbeat, the
-	// score will drop from 100 to: 100 - (100/10(min)/(60s/10s)) = 100 - (10/6) < 99. In
-	// other words, if the network is completely normal within 10 seconds, the score will
-	// be less than 99.
-	networkSlowStoreEvictThreshold = 99
-
-	// Why 20? The scheduler triggers every 3 seconds, and store heartbeat reports a score
-	// every 10 seconds. So 20 times scheduler.Schedule = 60 seconds = 6 times store heartbeat.
-	// Therefore, if the average score of all six store heartbeats is above 99, it indicates
-	// that network jitter has occurred within all six 10-second intervals.
-	maxNetworkEvictThresholdTriggerCount = 20
+	// Why 6? Store heartbeat reports a score every 10 seconds. Therefore, if the average
+	// score of all six store heartbeats is above 99, it indicates that network jitter has
+	// occurred within all six 10-second intervals.
+	maxNetworkEvictThresholdTriggerCount = 6
 	slowStoreRecoverThreshold            = 1
 	// Currently only support one network slow store
 	defaultMaxNetworkSlowStore = 1
@@ -80,8 +73,7 @@ type networkSlowStoreStatus struct {
 	// The value should be nil when store is slow. Once the store's
 	// score becomes 1, the store prepares to recover and record the
 	// timestamp.
-	recoverStartAt           *time.Time
-	evictThresholdTriggerCnt int
+	recoverStartAt *time.Time
 }
 
 type evictSlowStoreSchedulerConfig struct {
@@ -518,15 +510,16 @@ func (s *evictSlowStoreScheduler) tryEvictLeaderFromNetworkSlowStores(cluster sc
 			continue
 		}
 
-		avgScore := cluster.GetAvgNetworkSlowScore(storeID)
-		if avgScore > networkSlowStoreEvictThreshold {
-			status.evictThresholdTriggerCnt++
-			s.conf.networkSlowStoreStatuses[storeID] = status
-		}
 		if slices.Contains(s.conf.EvictedNetworkSlowStores, storeID) {
 			continue
 		}
-		if status.evictThresholdTriggerCnt >= maxNetworkEvictThresholdTriggerCount {
+
+		store := cluster.GetStore(storeID)
+		if store == nil {
+			continue
+		}
+
+		if store.GetTriggeredNetworkSlowEvictCount() >= maxNetworkEvictThresholdTriggerCount {
 			if err := cluster.SlowStoreEvicted(storeID); err != nil {
 				log.Info("failed to evict slow store",
 					zap.Uint64("store-id", storeID),

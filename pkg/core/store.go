@@ -59,23 +59,24 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransferIn  atomic.Int64 // not allow to be used as target of transfer leader
-	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
-	slowStoreEvicted       bool         // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted       bool         // this store has been evicted as a slow store by trend, should not transfer leader to it
-	leaderCount            int
-	regionCount            int
-	learnerCount           int
-	witnessCount           int
-	leaderSize             int64
-	regionSize             int64
-	pendingPeerCount       int
-	lastPersistTime        time.Time
-	leaderWeight           float64
-	regionWeight           float64
-	limiter                storelimit.StoreLimit
-	minResolvedTS          uint64
-	lastAwakenTime         time.Time
+	pauseLeaderTransferIn          atomic.Int64 // not allow to be used as target of transfer leader
+	pauseLeaderTransferOut         atomic.Int64 // not allow to be used as source of transfer leader
+	slowStoreEvicted               bool         // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted               bool         // this store has been evicted as a slow store by trend, should not transfer leader to it
+	leaderCount                    int
+	regionCount                    int
+	learnerCount                   int
+	witnessCount                   int
+	leaderSize                     int64
+	regionSize                     int64
+	pendingPeerCount               int
+	lastPersistTime                time.Time
+	leaderWeight                   float64
+	regionWeight                   float64
+	limiter                        storelimit.StoreLimit
+	minResolvedTS                  uint64
+	lastAwakenTime                 time.Time
+	triggeredNetworkSlowEvictCount uint64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -270,6 +271,14 @@ func (s *StoreInfo) GetNetworkSlowScores() map[uint64]uint64 {
 	result := make(map[uint64]uint64)
 	maps.Copy(result, s.rawStats.GetNetworkSlowScores())
 	return result
+}
+
+// GetTriggeredNetworkSlowEvictCount returns the triggered network slow eviction count of the store.
+func (s *StoreInfo) GetTriggeredNetworkSlowEvictCount() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.triggeredNetworkSlowEvictCount
 }
 
 // WitnessScore returns the store's witness score.
@@ -1008,6 +1017,30 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount,
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))
+		s.putStoreLocked(newStore)
+	}
+}
+
+// TriggerNetworkSlowEvict triggers a network slow eviction threshold for the store.
+func (s *StoresInfo) TriggerNetworkSlowEvict(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	if store, ok := s.stores[storeID]; ok {
+		newStore := store.ShallowClone(
+			SetTriggeredNetworkSlowEvictCount(store.triggeredNetworkSlowEvictCount + 1),
+		)
+		s.putStoreLocked(newStore)
+	}
+}
+
+// ResetTriggerNetworkSlowEvict resets the trigger network slow eviction count for the store.
+func (s *StoresInfo) ResetTriggerNetworkSlowEvict(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	if store, ok := s.stores[storeID]; ok {
+		newStore := store.ShallowClone(
+			SetTriggeredNetworkSlowEvictCount(0),
+		)
 		s.putStoreLocked(newStore)
 	}
 }
