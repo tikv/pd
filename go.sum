@@ -1420,8 +1420,8 @@ github.com/prometheus/procfs v0.15.1 h1:YagwOFzUgYfKKHX6Dr+sHT7km/hxC76UB0leargg
 github.com/prometheus/procfs v0.15.1/go.mod h1:fB45yRUv8NstnjriLhBQLuOUt+WW4BsoGhij/e3PBqk=
 github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/rleungx/kvproto v0.0.0-20250825073949-b107f666eaa4 h1:rxsOnk4oAB3b//Gc18rHniMVUvMGLMWE5xVqR6xsE1w=
-github.com/rleungx/kvproto v0.0.0-20250825073949-b107f666eaa4/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
+github.com/rleungx/kvproto v0.0.0-20250903071853-3e1ad0803eff h1:/aGUaeoE+xsqHUlnIUUPAFATWEy2OcIvjDiP8pOytv0=
+github.com/rleungx/kvproto v0.0.0-20250903071853-3e1ad0803eff/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
 github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3 h1:ancdy92KVH1IGYpBYUj/QsI2MIf06goCv2OWGuVJbwE=
 github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3/go.mod h1:wT/XWGnHH9zRLy/3D6xDAkMQVUDrRLxcJDa/YwN3w98=
 github.com/rogpeppe/fastuuid v1.2.0/go.mod h1:jVj6XXZzXRy/MSR5jhDC/2q6DgLz+nrA6LYCDYWNEvQ=

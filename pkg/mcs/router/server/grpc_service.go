@@ -20,6 +20,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
 
@@ -72,38 +73,38 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 }
 
 // BatchScanRegions implements the BatchScanRegions RPC method.
-func (*Service) BatchScanRegions(context.Context, *routerpb.BatchScanRegionsRequest) (*routerpb.BatchScanRegionsResponse, error) {
-	return &routerpb.BatchScanRegionsResponse{}, nil
+func (*Service) BatchScanRegions(context.Context, *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
+	return &pdpb.BatchScanRegionsResponse{}, nil
 }
 
 // ScanRegions implements the ScanRegions RPC method.
-func (*Service) ScanRegions(context.Context, *routerpb.ScanRegionsRequest) (*routerpb.ScanRegionsResponse, error) {
-	return &routerpb.ScanRegionsResponse{}, nil
+func (*Service) ScanRegions(context.Context, *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+	return &pdpb.ScanRegionsResponse{}, nil
 }
 
 // GetRegion implements the GetRegion RPC method.
-func (*Service) GetRegion(context.Context, *routerpb.GetRegionRequest) (*routerpb.GetRegionResponse, error) {
-	return &routerpb.GetRegionResponse{}, nil
+func (*Service) GetRegion(context.Context, *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	return &pdpb.GetRegionResponse{}, nil
 }
 
 // GetAllStores implements the GetAllStores RPC method.
-func (*Service) GetAllStores(context.Context, *routerpb.GetAllStoresRequest) (*routerpb.GetAllStoresResponse, error) {
-	return &routerpb.GetAllStoresResponse{}, nil
+func (*Service) GetAllStores(context.Context, *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+	return &pdpb.GetAllStoresResponse{}, nil
 }
 
 // GetStore implements the GetStore RPC method.
-func (*Service) GetStore(context.Context, *routerpb.GetStoreRequest) (*routerpb.GetStoreResponse, error) {
-	return &routerpb.GetStoreResponse{}, nil
+func (*Service) GetStore(context.Context, *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
+	return &pdpb.GetStoreResponse{}, nil
 }
 
 // GetPrevRegion implements the GetPrevRegion RPC method.
-func (*Service) GetPrevRegion(context.Context, *routerpb.GetRegionRequest) (*routerpb.GetRegionResponse, error) {
-	return &routerpb.GetRegionResponse{}, nil
+func (*Service) GetPrevRegion(context.Context, *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	return &pdpb.GetRegionResponse{}, nil
 }
 
 // GetRegionByID implements the GetRegionByID RPC method.
-func (*Service) GetRegionByID(context.Context, *routerpb.GetRegionByIDRequest) (*routerpb.GetRegionResponse, error) {
-	return &routerpb.GetRegionResponse{}, nil
+func (*Service) GetRegionByID(context.Context, *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
+	return &pdpb.GetRegionResponse{}, nil
 }
 
 // QueryRegion implements the QueryRegion RPC method.

@@ -223,4 +223,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20250825073949-b107f666eaa4
+replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20250903071853-3e1ad0803eff
