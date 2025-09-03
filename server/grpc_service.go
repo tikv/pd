@@ -234,7 +234,7 @@ func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, f
 	})
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
+		client, err := s.getDelegateClient(forwardedHost)
 		if err != nil {
 			return nil, err
 		}
@@ -395,7 +395,7 @@ func (s *GrpcServer) GetMinTSFromTSOService() (*pdpb.Timestamp, error) {
 func (s *GrpcServer) getMinTSFromSingleServer(
 	ctx context.Context, tsoSrvAddr string,
 ) (*tsopb.GetMinTSResponse, error) {
-	cc, err := s.getDelegateClient(s.ctx, tsoSrvAddr)
+	cc, err := s.getDelegateClient(tsoSrvAddr)
 	if err != nil {
 		return nil, errs.ErrClientGetMinTSO.FastGenByArgs(
 			fmt.Sprintf("can't connect to tso server %s", tsoSrvAddr))
@@ -556,7 +556,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
-			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
+			clientConn, err := s.getDelegateClient(forwardedHost)
 			if err != nil {
 				return errors.WithStack(err)
 			}
@@ -990,7 +990,7 @@ func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (*schedulingCli
 		return pre.(*schedulingClient), nil
 	}
 
-	client, err := s.getDelegateClient(ctx, forwardedHost)
+	client, err := s.getDelegateClient(forwardedHost)
 	if err != nil {
 		log.Error("get delegate client failed", zap.Error(err))
 		return nil, err
@@ -1094,7 +1094,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 				if cancel != nil {
 					cancel()
 				}
-				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				client, err := s.getDelegateClient(forwardedHost)
 				if err != nil {
 					return err
 				}
@@ -1204,7 +1204,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				if cancel != nil {
 					cancel()
 				}
-				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				client, err := s.getDelegateClient(forwardedHost)
 				if err != nil {
 					return err
 				}
@@ -1323,7 +1323,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					cancel()
 				}
 
-				client, err := s.getDelegateClient(s.ctx, forwardedSchedulingHost)
+				client, err := s.getDelegateClient(forwardedSchedulingHost)
 				if err != nil {
 					errRegionHeartbeatClient.Inc()
 					log.Error("failed to get client", zap.Error(err))

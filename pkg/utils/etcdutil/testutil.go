@@ -123,7 +123,7 @@ func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client
 	// Start the new etcd member.
 	etcd2, err := embed.StartEtcd(cfg2)
 	re.NoError(err)
-	re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
+	re.Equal(uint64(etcd2.Server.MemberID()), addResp.Member.ID)
 	<-etcd2.Server.ReadyNotify()
 	return etcd2
 }
@@ -140,7 +140,7 @@ func checkMembers(re *require.Assertions, client *clientv3.Client, etcds []*embe
 		}
 		inList := func(m *etcdserverpb.Member) bool {
 			for _, etcd := range etcds {
-				if m.ID == uint64(etcd.Server.ID()) {
+				if m.ID == uint64(etcd.Server.MemberID()) {
 					return true
 				}
 			}

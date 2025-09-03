@@ -211,7 +211,7 @@ func (s *Server) updatePDMemberLoop() {
 				continue
 			}
 			if status.Leader == ep.ID {
-				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
+				cc, err := s.GetDelegateClient(s.GetTLSConfig(), ep.ClientURLs[0])
 				if err != nil {
 					log.Info("failed to get delegate client", errs.ZapError(err))
 					continue
