@@ -155,7 +155,7 @@ func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 	return append(conf.EvictedStores, conf.EvictedNetworkSlowStores...)
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
+func (*evictSlowStoreSchedulerConfig) getKeyRangesByID(uint64) []keyutil.KeyRange {
 	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 

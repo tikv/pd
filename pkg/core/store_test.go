@@ -464,7 +464,7 @@ func TestGetAvgNetworkSlowScore(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name, func(*testing.T) {
 			storesInfo := NewStoresInfo()
 			for id, scores := range tc.args.scores {
 				store := NewStoreInfo(&metapb.Store{Id: id})
