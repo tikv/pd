@@ -17,11 +17,13 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path"
 	"runtime"
 	"runtime/trace"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +47,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -925,6 +929,57 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("store %v not found", storeID)),
 		}, nil
+	}
+
+	log.Info("store heartbeat", zap.Bool("is_stopping", request.GetStats().GetIsStopping()))
+
+	// Dedicate evict-leader scheduler for graceful shutdown.
+	// When the store is stopping, manage a dedicated instance named "graceful-shutdown-scheduler".
+	// When it is not stopping, try to remove the dedicated instance if it exists.
+	{
+		isStopping := request.GetStats().GetIsStopping()
+		h := s.GetHandler()
+		gracefulName := "graceful-shutdown-scheduler"
+		if isStopping {
+			if exist, err := h.IsSchedulerExisted(gracefulName); err == nil && exist {
+				if err := h.RedirectSchedulerUpdate(gracefulName, float64(storeID)); err != nil {
+					log.Error("redirect scheduler update failed", zap.Error(err))
+				}
+			} else {
+				payload := map[string]any{
+					"name":           types.EvictLeaderScheduler.String(),
+					"scheduler_name": gracefulName,
+				}
+				if body, err := json.Marshal(payload); err == nil {
+					if err := h.AddSchedulerWithDecoder(types.EvictLeaderScheduler, schedulers.ConfigJSONDecoder(body)); err == nil {
+						if err := h.RedirectSchedulerUpdate(gracefulName, float64(storeID)); err != nil {
+							log.Error("redirect scheduler update failed", zap.Error(err))
+						}
+					}
+				}
+			}
+		} else {
+			// try to remove the dedicated scheduler every time when the state is not stopping.
+			// avoid the case that the last StoreHeartbeat of graceful shutdown process failed and can't remove the dedicated scheduler
+			if exist, err := h.IsSchedulerExisted(gracefulName); err == nil && exist {
+				if ids, err := h.GetEvictLeaderStoreIDs(gracefulName); err == nil {
+					log.Info("get evict leader store ids", zap.Any("ids", ids))
+					hasCurrent := slices.Contains(ids, storeID)
+					if hasCurrent {
+						err = h.RemoveStoreFromEvictScheduler(gracefulName, storeID)
+						if err != nil {
+							log.Error("remove store from evict scheduler failed", zap.Error(err))
+						}
+						if ids2, err2 := h.GetEvictLeaderStoreIDs(gracefulName); err2 == nil && len(ids2) == 0 {
+							err = h.RemoveScheduler(gracefulName)
+							if err != nil {
+								log.Error("remove scheduler failed", zap.Error(err))
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	resp := &pdpb.StoreHeartbeatResponse{Header: wrapHeader()}

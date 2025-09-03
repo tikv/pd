@@ -52,7 +52,9 @@ type evictLeaderSchedulerConfig struct {
 
 	StoreIDWithRanges map[uint64][]keyutil.KeyRange `json:"store-id-ranges"`
 	// Batch is used to generate multiple operators by one scheduling
-	Batch             int `json:"batch"`
+	Batch int `json:"batch"`
+	// SchedulerName allows a dedicated scheduler instance name while keeping the type as evict-leader-scheduler.
+	SchedulerName     string `json:"scheduler_name"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(string) error
 }
@@ -243,11 +245,15 @@ type evictLeaderScheduler struct {
 // out of a store.
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) Scheduler {
 	handler := newEvictLeaderHandler(conf)
-	return &evictLeaderScheduler{
+	s := &evictLeaderScheduler{
 		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
+	if conf.SchedulerName != "" {
+		s.BaseScheduler.name = conf.SchedulerName
+	}
+	return s
 }
 
 // EvictStoreIDs returns the IDs of the evict-stores.
