@@ -43,6 +43,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -1404,20 +1405,12 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	}
 	failpoint.Inject("delayProcess", nil)
 	var (
-		rc     *cluster.RaftCluster
-		region *core.RegionInfo
+		rc *cluster.RaftCluster
 	)
-	defer func() {
-		incRegionRequestCounter("GetRegion", request.Header, resp.Header.Error)
-	}()
+
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
-		}
-		region = rc.GetRegionByKey(request.GetRegionKey())
-		if region == nil {
-			log.Warn("follower get region nil", zap.String("key", string(request.GetRegionKey())))
 			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
 	} else {
@@ -1425,26 +1418,10 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		if rc == nil {
 			return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
 		}
-		region = rc.GetRegionByKey(request.GetRegionKey())
-		if region == nil {
-			log.Warn("leader get region nil", zap.String("key", string(request.GetRegionKey())))
-			return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
-		}
 	}
-
-	var buckets *metapb.Buckets
-	// FIXME: If the bucket is disabled dynamically, the bucket information is returned unexpectedly
-	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
-		buckets = region.GetBuckets()
-	}
-	return &pdpb.GetRegionResponse{
-		Header:       wrapHeader(),
-		Region:       region.GetMeta(),
-		Leader:       region.GetLeader(),
-		DownPeers:    region.GetDownPeers(),
-		PendingPeers: region.GetPendingPeers(),
-		Buckets:      buckets,
-	}, nil
+	allowBuckets := !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+	request.NeedBuckets = allowBuckets
+	return gh.GetRegion(rc.GetBasicCluster(), request)
 }
 
 // GetPrevRegion implements gRPC PDServer
