@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -24,7 +25,7 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
@@ -65,8 +66,9 @@ const (
 type slowStoreType string
 
 const (
-	diskSlowStore    slowStoreType = "disk"
-	networkSlowStore slowStoreType = "network"
+	diskSlowStore       slowStoreType = "disk"
+	networkSlowStore    slowStoreType = "network"
+	networkEvictedStore slowStoreType = "network-evicted"
 )
 
 type evictSlowStoreSchedulerConfig struct {
@@ -168,6 +170,12 @@ func (conf *evictSlowStoreSchedulerConfig) getPausedNetworkSlowStores() []uint64
 	return conf.PausedNetworkSlowStores
 }
 
+func (conf *evictSlowStoreSchedulerConfig) getEvictNetworkSlowStores() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.EvictedNetworkSlowStores
+}
+
 func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStoreLocked(storeID uint64, cluster sche.SchedulerCluster) {
 	log.Info("deleting network slow store",
 		zap.Uint64("store-id", storeID))
@@ -189,6 +197,7 @@ func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStoreLocked(storeID 
 	cluster.ResumeLeaderTransfer(storeID, constant.In)
 	if needRecoverEvict {
 		cluster.SlowStoreRecovered(storeID)
+		evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkEvictedStore))
 	}
 
 	evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore))
@@ -290,13 +299,13 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 	}
 	recoveryDurationGapFloat, inputRecoveryDuration := input["recovery-duration"].(float64)
 	if input["recovery-duration"] != nil && !inputRecoveryDuration {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, perrors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 
 	batchFloat, inputBatch := input["batch"].(float64)
 	if input["batch"] != nil && !inputBatch {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'batch'").Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, perrors.New("invalid argument for 'batch'").Error())
 		return
 	}
 	if inputBatch {
@@ -308,7 +317,7 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 
 	enableNetworkSlowStore, inputEnableNetworkSlowStore := input["enable-network-slow-store"].(bool)
 	if input["enable-network-slow-store"] != nil && !inputEnableNetworkSlowStore {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'enable-network-slow-store'").Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, perrors.New("invalid argument for 'enable-network-slow-store'").Error())
 		return
 	}
 
@@ -406,16 +415,20 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 
 // PrepareConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
+	errs := make([]error, 0)
+
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
-		return cluster.SlowStoreEvicted(evictStore)
+		errs = append(errs, cluster.SlowStoreEvicted(evictStore))
 	}
 	for _, storeID := range s.conf.getPausedNetworkSlowStores() {
-		// only support one network slow store now
 		s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
-		return cluster.PauseLeaderTransfer(storeID, constant.In)
+		errs = append(errs, cluster.PauseLeaderTransfer(storeID, constant.In))
 	}
-	return nil
+	for _, storeID := range s.conf.getEvictNetworkSlowStores() {
+		errs = append(errs, cluster.SlowStoreEvicted(storeID))
+	}
+	return errors.Join(errs...)
 }
 
 // CleanConfig implements the Scheduler interface.
@@ -501,6 +514,10 @@ func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.Schedule
 
 func (s *evictSlowStoreScheduler) tryEvictLeaderFromNetworkSlowStores(cluster sche.SchedulerCluster) {
 	for storeID, startTime := range s.conf.networkSlowStoreRecoverStartAts {
+		if !slices.Contains(s.conf.PausedNetworkSlowStores, storeID) {
+			continue
+		}
+
 		if startTime != nil {
 			// Already recovering
 			continue
@@ -530,6 +547,7 @@ func (s *evictSlowStoreScheduler) tryEvictLeaderFromNetworkSlowStores(cluster sc
 					zap.Error(err))
 				cluster.SlowStoreRecovered(storeID)
 			}
+			evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkEvictedStore)).Set(1)
 		}
 	}
 }
