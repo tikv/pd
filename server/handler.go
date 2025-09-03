@@ -227,6 +227,41 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 	return nil
 }
 
+// AddSchedulerWithDecoder adds a scheduler using a custom decoder.
+func (h *Handler) AddSchedulerWithName(tp types.CheckerSchedulerType, name string) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	var removeSchedulerCb func(string) error
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
+		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
+	} else {
+		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
+	}
+	s := schedulers.NewEvictLeaderSchedulerWithName(c.GetOperatorController(), h.s.storage, removeSchedulerCb, name)
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
+		if err = c.AddSchedulerHandler(s); err != nil {
+			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+			return err
+		}
+		log.Info("add scheduler handler successfully", zap.String("scheduler-name", s.GetName()))
+	} else {
+		if err = c.AddScheduler(s); err != nil {
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+			return err
+		}
+		log.Info("add scheduler successfully", zap.String("scheduler-name", s.GetName()))
+	}
+	if err = h.opt.Persist(c.GetStorage()); err != nil {
+		log.Error("can not persist scheduler config", errs.ZapError(err))
+		return err
+	}
+	log.Info("persist scheduler config successfully", zap.String("scheduler-name", s.GetName()))
+	return nil
+}
+
 // RemoveScheduler removes a scheduler by name.
 func (h *Handler) RemoveScheduler(name string) error {
 	c, err := h.GetRaftCluster()

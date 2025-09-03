@@ -6,6 +6,7 @@ replace (
 	github.com/tikv/pd => ../../
 	github.com/tikv/pd/client => ../../client
 	github.com/tikv/pd/tests/integrations/mcs => ./mcs
+	github.com/pingcap/kvproto => github.com/hujiatao0/kvproto v0.0.0-20250916030714-d3ebdf0e8fa9
 )
 
 require (

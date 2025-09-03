@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -55,6 +56,12 @@ type evictLeaderSchedulerConfig struct {
 	Batch             int `json:"batch"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(string) error
+}
+
+func (conf *evictLeaderSchedulerConfig) getName() string {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.schedulerConfig.(*baseSchedulerConfig).name
 }
 
 func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
@@ -223,7 +230,7 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 		return resp, nil
 	}
 	conf.Unlock()
-	if err := conf.removeSchedulerCb(types.EvictLeaderScheduler.String()); err != nil {
+	if err := conf.removeSchedulerCb(conf.getName()); err != nil {
 		if !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			conf.resetStore(id, keyRanges)
 		}
@@ -241,13 +248,58 @@ type evictLeaderScheduler struct {
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) Scheduler {
+func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig, options ...EvictLeaderCreateOption) Scheduler {
 	handler := newEvictLeaderHandler(conf)
-	return &evictLeaderScheduler{
+	s := &evictLeaderScheduler{
 		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
+	for _, option := range options {
+		option(s)
+	}
+	return s
+}
+
+func NewEvictLeaderSchedulerWithName(opController *operator.Controller, storage endpoint.ConfigStorage, removeSchedulerCb func(string) error, name string) Scheduler {
+	conf := &evictLeaderSchedulerConfig{
+		schedulerConfig:   &baseSchedulerConfig{},
+		StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange),
+	}
+	if conf.Batch == 0 {
+		conf.Batch = EvictLeaderBatchSize
+	}
+	conf.cluster = opController.GetCluster()
+	conf.removeSchedulerCb = removeSchedulerCb
+	sche := newEvictLeaderScheduler(opController, conf, WithEvictLeaderName(name))
+	conf.init(sche.GetName(), storage, conf)
+	return sche
+}
+
+// EvictLeaderCreateOption is used to create a scheduler with an option.
+type EvictLeaderCreateOption func(s *evictLeaderScheduler)
+
+// WithEvictLeaderName sets the name for the scheduler.
+func WithEvictLeaderName(name string) EvictLeaderCreateOption {
+	return func(s *evictLeaderScheduler) {
+		s.name = name
+	}
+}
+
+// AddStore adds a store to the scheduler, evicting all leaders from it.
+func (s *evictLeaderScheduler) AddStore(storeID uint64) error {
+	_, err := s.conf.pauseLeaderTransferIfStoreNotExist(storeID)
+	if err != nil {
+		return err
+	}
+	// An empty key range means the whole store.
+	return s.conf.update(storeID, []keyutil.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, s.conf.getBatch())
+}
+
+// RemoveStore removes a store from the scheduler.
+func (s *evictLeaderScheduler) RemoveStore(storeID uint64) error {
+	_, err := s.conf.delete(storeID)
+	return err
 }
 
 // EvictStoreIDs returns the IDs of the evict-stores.
