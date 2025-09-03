@@ -141,7 +141,6 @@ error = '''
 invalid argument for %s: %v
 '''
 
-
 ["PD:core:ErrNoStoreForRegionLeader"]
 error = '''
 can not remove store %d since there are no extra up store to store the leader
