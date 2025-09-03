@@ -15,7 +15,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -29,7 +28,6 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -43,12 +41,12 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -1403,48 +1401,29 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
 	failpoint.Inject("delayProcess", nil)
-	var (
-		rc     *cluster.RaftCluster
-		region *core.RegionInfo
-	)
-	defer func() {
-		incRegionRequestCounter("GetRegion", request.Header, resp.Header.Error)
-	}()
-	if *followerHandle {
+	rc, header := s.getRaftCluster(*followerHandle)
+	if header != nil {
+		return &pdpb.GetRegionResponse{Header: header}, nil
+	}
+	allowBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+	request.NeedBuckets = allowBuckets
+	return gh.GetRegion(rc.GetBasicCluster(), request)
+}
+
+func (s *GrpcServer) getRaftCluster(isFollower bool) (*cluster.RaftCluster, *pdpb.ResponseHeader) {
+	var rc *cluster.RaftCluster
+	if isFollower {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
-		}
-		region = rc.GetRegionByKey(request.GetRegionKey())
-		if region == nil {
-			log.Warn("follower get region nil", zap.String("key", string(request.GetRegionKey())))
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
+			return nil, regionNotFound()
 		}
 	} else {
 		rc = s.GetRaftCluster()
 		if rc == nil {
-			return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
-		}
-		region = rc.GetRegionByKey(request.GetRegionKey())
-		if region == nil {
-			log.Warn("leader get region nil", zap.String("key", string(request.GetRegionKey())))
-			return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
+			return nil, notBootstrappedHeader()
 		}
 	}
-
-	var buckets *metapb.Buckets
-	// FIXME: If the bucket is disabled dynamically, the bucket information is returned unexpectedly
-	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
-		buckets = region.GetBuckets()
-	}
-	return &pdpb.GetRegionResponse{
-		Header:       wrapHeader(),
-		Region:       region.GetMeta(),
-		Leader:       region.GetLeader(),
-		DownPeers:    region.GetDownPeers(),
-		PendingPeers: region.GetPendingPeers(),
-		Buckets:      buckets,
-	}, nil
+	return rc, nil
 }
 
 // GetPrevRegion implements gRPC PDServer
@@ -1469,40 +1448,13 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	defer func() {
 		incRegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error)
 	}()
-	var rc *cluster.RaftCluster
-	if *followerHandle {
-		// no need to check running status
-		rc = s.cluster
-		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
-		}
-	} else {
-		rc = s.GetRaftCluster()
-		if rc == nil {
-			return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
-		}
+	rc, header := s.getRaftCluster(*followerHandle)
+	if header != nil {
+		return &pdpb.GetRegionResponse{Header: header}, nil
 	}
-
-	region := rc.GetPrevRegionByKey(request.GetRegionKey())
-	if region == nil {
-		if *followerHandle {
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
-		}
-		return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
-	}
-	var buckets *metapb.Buckets
-	// FIXME: If the bucket is disabled dynamically, the bucket information is returned unexpectedly
-	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
-		buckets = region.GetBuckets()
-	}
-	return &pdpb.GetRegionResponse{
-		Header:       wrapHeader(),
-		Region:       region.GetMeta(),
-		Leader:       region.GetLeader(),
-		DownPeers:    region.GetDownPeers(),
-		PendingPeers: region.GetPendingPeers(),
-		Buckets:      buckets,
-	}, nil
+	allowBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+	request.NeedBuckets = allowBuckets
+	return gh.GetPrevRegion(rc.GetBasicCluster(), request)
 }
 
 // GetRegionByID implements gRPC PDServer.
@@ -1527,42 +1479,13 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	defer func() {
 		incRegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error)
 	}()
-	var rc *cluster.RaftCluster
-	if *followerHandle {
-		rc = s.cluster
-		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
-		}
-	} else {
-		rc = s.GetRaftCluster()
-		if rc == nil {
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
-		}
+	rc, header := s.getRaftCluster(*followerHandle)
+	if header != nil {
+		return &pdpb.GetRegionResponse{Header: header}, nil
 	}
-	region := rc.GetRegion(request.GetRegionId())
-	failpoint.Inject("followerHandleError", func() {
-		if *followerHandle {
-			region = nil
-		}
-	})
-	if region == nil {
-		if *followerHandle {
-			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
-		}
-		return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
-	}
-	var buckets *metapb.Buckets
-	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
-		buckets = region.GetBuckets()
-	}
-	return &pdpb.GetRegionResponse{
-		Header:       wrapHeader(),
-		Region:       region.GetMeta(),
-		Leader:       region.GetLeader(),
-		DownPeers:    region.GetDownPeers(),
-		PendingPeers: region.GetPendingPeers(),
-		Buckets:      buckets,
-	}, nil
+	allowBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+	request.NeedBuckets = allowBuckets
+	return gh.GetRegionByID(rc.GetBasicCluster(), request)
 }
 
 // QueryRegion provides a stream processing of the region query.
@@ -1574,7 +1497,6 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 	if done != nil {
 		defer done()
 	}
-
 	for {
 		request, err := stream.Recv()
 		if err == io.EOF {
@@ -1589,10 +1511,9 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
-		var (
-			rc          *cluster.RaftCluster
-			needBuckets bool
-		)
+
+		var rc *cluster.RaftCluster
+
 		if s.member.IsServing() {
 			rc = s.GetRaftCluster()
 			if rc == nil {
@@ -1604,7 +1525,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				}
 				continue
 			}
-			needBuckets = rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+
 		} else {
 			rc = s.cluster
 			if !rc.GetRegionSyncer().IsRunning() {
@@ -1617,27 +1538,11 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				continue
 			}
 		}
+		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		request.NeedBuckets = needBuckets
+		resp := gh.QueryRegion(rc.GetBasicCluster(), request)
 
-		start := time.Now()
-		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
-			request.GetKeys(),
-			request.GetPrevKeys(),
-			request.GetIds(),
-			needBuckets,
-		)
-		queryRegionDuration.Observe(time.Since(start).Seconds())
-		// Build the response and send it to the client.
-		response := &pdpb.QueryRegionResponse{
-			Header:       wrapHeader(),
-			KeyIdMap:     keyIDMap,
-			PrevKeyIdMap: prevKeyIDMap,
-			RegionsById:  regionsByID,
-		}
-		incRegionRequestCounter("QueryRegion", request.Header, response.Header.Error)
-
-		regionRequestCounter.WithLabelValues("QueryRegion", request.Header.CallerId,
-			request.Header.CallerComponent, "").Inc()
-		if err := stream.Send(response); err != nil {
+		if err := stream.Send(resp); err != nil {
 			return errors.WithStack(err)
 		}
 	}
@@ -1666,39 +1571,11 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	defer func() {
 		incRegionRequestCounter("ScanRegions", request.Header, resp.Header.Error)
 	}()
-	var rc *cluster.RaftCluster
-	if *followerHandle {
-		rc = s.cluster
-		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.ScanRegionsResponse{Header: regionNotFound()}, nil
-		}
-	} else {
-		rc = s.GetRaftCluster()
-		if rc == nil {
-			return &pdpb.ScanRegionsResponse{Header: notBootstrappedHeader()}, nil
-		}
+	rc, header := s.getRaftCluster(*followerHandle)
+	if header != nil {
+		return &pdpb.ScanRegionsResponse{Header: header}, nil
 	}
-	regions := rc.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
-	if *followerHandle && len(regions) == 0 {
-		return &pdpb.ScanRegionsResponse{Header: regionNotFound()}, nil
-	}
-	resp = &pdpb.ScanRegionsResponse{Header: wrapHeader()}
-	for _, r := range regions {
-		leader := r.GetLeader()
-		if leader == nil {
-			leader = &metapb.Peer{}
-		}
-		// Set RegionMetas and Leaders to make it compatible with old client.
-		resp.RegionMetas = append(resp.RegionMetas, r.GetMeta())
-		resp.Leaders = append(resp.Leaders, leader)
-		resp.Regions = append(resp.Regions, &pdpb.Region{
-			Region:       r.GetMeta(),
-			Leader:       leader,
-			DownPeers:    r.GetDownPeers(),
-			PendingPeers: r.GetPendingPeers(),
-		})
-	}
-	return resp, nil
+	return gh.ScanRegions(rc.GetBasicCluster(), request)
 }
 
 // BatchScanRegions implements gRPC PDServer.
@@ -1723,74 +1600,13 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	defer func() {
 		incRegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error)
 	}()
-
-	var rc *cluster.RaftCluster
-	if *followerHandle {
-		rc = s.cluster
-		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.BatchScanRegionsResponse{Header: regionNotFound()}, nil
-		}
-	} else {
-		rc = s.GetRaftCluster()
-		if rc == nil {
-			return &pdpb.BatchScanRegionsResponse{Header: notBootstrappedHeader()}, nil
-		}
+	rc, header := s.getRaftCluster(*followerHandle)
+	if header != nil {
+		return &pdpb.BatchScanRegionsResponse{Header: header}, nil
 	}
-	needBucket := request.GetNeedBuckets() && !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket()
-	limit := request.GetLimit()
-	// cast to keyutil.KeyRanges and check the validation.
-	keyRanges := keyutil.NewKeyRangesWithSize(len(request.GetRanges()))
-	reqRanges := request.GetRanges()
-	for i, reqRange := range reqRanges {
-		if i > 0 {
-			if bytes.Compare(reqRange.StartKey, reqRanges[i-1].EndKey) < 0 {
-				return &pdpb.BatchScanRegionsResponse{Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, ranges overlapped")}, nil
-			}
-		}
-		if len(reqRange.EndKey) > 0 && bytes.Compare(reqRange.StartKey, reqRange.EndKey) > 0 {
-			return &pdpb.BatchScanRegionsResponse{Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, start key > end key")}, nil
-		}
-		keyRanges.Append(reqRange.StartKey, reqRange.EndKey)
-	}
-
-	scanOptions := []core.BatchScanRegionsOptionFunc{core.WithLimit(int(limit))}
-	if request.ContainAllKeyRange {
-		scanOptions = append(scanOptions, core.WithOutputMustContainAllKeyRange())
-	}
-	res, err := rc.BatchScanRegions(keyRanges, scanOptions...)
-	if err != nil {
-		if errs.ErrRegionNotAdjacent.Equal(multierr.Errors(err)[0]) {
-			return &pdpb.BatchScanRegionsResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error()),
-			}, nil
-		}
-		return &pdpb.BatchScanRegionsResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	regions := make([]*pdpb.Region, 0, len(res))
-	for _, r := range res {
-		leader := r.GetLeader()
-		if leader == nil {
-			leader = &metapb.Peer{}
-		}
-		var buckets *metapb.Buckets
-		if needBucket {
-			buckets = r.GetBuckets()
-		}
-		regions = append(regions, &pdpb.Region{
-			Region:       r.GetMeta(),
-			Leader:       leader,
-			DownPeers:    r.GetDownPeers(),
-			PendingPeers: r.GetPendingPeers(),
-			Buckets:      buckets,
-		})
-	}
-	if *followerHandle && len(regions) == 0 {
-		return &pdpb.BatchScanRegionsResponse{Header: regionNotFound()}, nil
-	}
-	resp = &pdpb.BatchScanRegionsResponse{Header: wrapHeader(), Regions: regions}
-	return resp, nil
+	needBucket := request.GetNeedBuckets() && rc.GetStoreConfig().IsEnableRegionBucket() && request.NeedBuckets
+	request.NeedBuckets = needBucket
+	return gh.BatchScanRegions(rc.GetBasicCluster(), request)
 }
 
 // AskSplit implements gRPC PDServer.

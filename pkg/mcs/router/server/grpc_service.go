@@ -18,13 +18,13 @@ import (
 	"context"
 	"net/http"
 
-	"google.golang.org/grpc"
-
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
+	"google.golang.org/grpc"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 )
@@ -73,38 +73,38 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 }
 
 // BatchScanRegions implements the BatchScanRegions RPC method.
-func (*Service) BatchScanRegions(context.Context, *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
-	return &pdpb.BatchScanRegionsResponse{}, nil
+func (s *Service) BatchScanRegions(_ctx context.Context, request *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
+	return gh.BatchScanRegions(s.GetBasicCluster(), request)
 }
 
 // ScanRegions implements the ScanRegions RPC method.
-func (*Service) ScanRegions(context.Context, *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
-	return &pdpb.ScanRegionsResponse{}, nil
+func (s *Service) ScanRegions(_ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+	return gh.ScanRegions(s.GetBasicCluster(), request)
 }
 
 // GetRegion implements the GetRegion RPC method.
-func (*Service) GetRegion(context.Context, *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	return &pdpb.GetRegionResponse{}, nil
+func (s *Service) GetRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	return gh.GetRegion(s.GetBasicCluster(), request)
 }
 
 // GetAllStores implements the GetAllStores RPC method.
-func (*Service) GetAllStores(context.Context, *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
-	return &pdpb.GetAllStoresResponse{}, nil
+func (s *Service) GetAllStores(_ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+	return gh.GetAllStores(s.GetBasicCluster(), request)
 }
 
 // GetStore implements the GetStore RPC method.
-func (*Service) GetStore(context.Context, *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
-	return &pdpb.GetStoreResponse{}, nil
+func (s *Service) GetStore(_ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
+	return gh.GetStore(s.GetBasicCluster(), request)
 }
 
 // GetPrevRegion implements the GetPrevRegion RPC method.
-func (*Service) GetPrevRegion(context.Context, *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	return &pdpb.GetRegionResponse{}, nil
+func (s *Service) GetPrevRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	return gh.GetPrevRegion(s.GetBasicCluster(), request)
 }
 
 // GetRegionByID implements the GetRegionByID RPC method.
-func (*Service) GetRegionByID(context.Context, *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
-	return &pdpb.GetRegionResponse{}, nil
+func (s *Service) GetRegionByID(_ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
+	return gh.GetRegionByID(s.GetBasicCluster(), request)
 }
 
 // QueryRegion implements the QueryRegion RPC method.
