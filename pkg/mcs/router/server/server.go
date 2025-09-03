@@ -256,10 +256,7 @@ func (s *Server) startCluster(context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	s.cluster, err = NewCluster(s.Context(), s.basicCluster)
-	if err != nil {
-		return err
-	}
+	s.cluster = NewCluster(s.Context(), s.basicCluster)
 	return nil
 }
 
