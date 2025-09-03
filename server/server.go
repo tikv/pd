@@ -296,9 +296,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	failpoint.Inject("useGlobalRegistry", func() {
-		s.registry = registry.ServerServiceRegistry
-	})
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the microservices REST path.
