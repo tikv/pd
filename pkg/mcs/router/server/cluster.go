@@ -31,14 +31,13 @@ type Cluster struct {
 func NewCluster(
 	parentCtx context.Context,
 	basicCluster *core.BasicCluster,
-) (*Cluster, error) {
+) *Cluster {
 	ctx, cancel := context.WithCancel(parentCtx)
-	c := &Cluster{
+	return &Cluster{
 		ctx:          ctx,
 		cancel:       cancel,
 		BasicCluster: basicCluster,
 	}
-	return c, nil
 }
 
 // GetBasicCluster returns the basic cluster.
