@@ -97,7 +97,8 @@ const (
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
 
-	recoveringMarkPath = "cluster/markers/snapshot-recovering"
+	recoveringMarkPath  = "cluster/markers/snapshot-recovering"
+	pitrRestoreMarkPath = "cluster/markers/pitr-restore-mode"
 
 	// PDMode represents that server is in PD mode.
 	PDMode = "PD"
@@ -1972,6 +1973,38 @@ func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
 func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	log.Info("unmark snapshot recovering")
 	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	_, err := s.client.Delete(ctx, markPath)
+	// if other client already unmarked, return success too
+	return err
+}
+
+// MarkPitrRestore mark pd that we're pitr recovering
+func (s *Server) MarkPitrRestore() error {
+	log.Info("mark pitr recovering")
+	markPath := keypath.AppendToRootPath(s.rootPath, pitrRestoreMarkPath)
+	// the value doesn't matter, set to a static string
+	_, err := kv.NewSlowLogTxn(s.client).
+		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
+		Then(clientv3.OpPut(markPath, "on")).
+		Commit()
+	// if other client already marked, return success too
+	return err
+}
+
+// IsPitrRestore check whether pitr-recovering-mark marked
+func (s *Server) IsPitrRestore(ctx context.Context) (bool, error) {
+	markPath := keypath.AppendToRootPath(s.rootPath, pitrRestoreMarkPath)
+	resp, err := s.client.Get(ctx, markPath)
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
+}
+
+// UnmarkPitrRestore unmark pitr recovering mark
+func (s *Server) UnmarkPitrRestore(ctx context.Context) error {
+	log.Info("unmark pitr recovering")
+	markPath := keypath.AppendToRootPath(s.rootPath, pitrRestoreMarkPath)
 	_, err := s.client.Delete(ctx, markPath)
 	// if other client already unmarked, return success too
 	return err
