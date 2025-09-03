@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/cache"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -208,7 +208,7 @@ func assertEvictLeaderStoreIDs(
 	re *require.Assertions, storage *endpoint.StorageEndpoint, storeIDs []uint64,
 ) {
 	var evictLeaderCfg struct {
-		StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+		StoreIDWithRanges map[uint64][]keyutil.KeyRange `json:"store-id-ranges"`
 	}
 	testutil.Eventually(re, func() bool {
 		cfg, err := storage.LoadSchedulerConfig(types.EvictLeaderScheduler.String())
