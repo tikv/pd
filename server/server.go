@@ -65,6 +65,7 @@ import (
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -172,6 +173,8 @@ type Server struct {
 	keyspaceManager *keyspace.Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
+	// metering writer
+	meteringWriter *metering.Writer
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -478,6 +481,11 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
+	if err != nil {
+		return err
+	}
+	s.meteringWriter.Start()
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
@@ -910,6 +918,11 @@ func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 // Note: it is only used for test.
 func (s *Server) SetKeyspaceGroupManager(keyspaceGroupManager *keyspace.GroupManager) {
 	s.keyspaceGroupManager = keyspaceGroupManager
+}
+
+// GetMeteringWriter returns the metering writer.
+func (s *Server) GetMeteringWriter() *metering.Writer {
+	return s.meteringWriter
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.

@@ -279,11 +279,11 @@ func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruTy
 
 func (m *metrics) recordConsumption(
 	consumptionInfo *consumptionItem,
-	keyspaceName string,
 	controllerConfig *ControllerConfig,
 	now time.Time,
 ) {
 	keyspaceID := consumptionInfo.keyspaceID
+	keyspaceName := consumptionInfo.keyspaceName
 	groupName := consumptionInfo.resourceGroupName
 	ruLabelType := defaultTypeLabel
 	if consumptionInfo.isBackground {
