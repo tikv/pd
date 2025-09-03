@@ -295,6 +295,13 @@ func (s *StoreInfo) IsSlow() bool {
 	return s.IsEvictedAsSlowTrend() || s.rawStats.GetSlowScore() >= slowStoreThreshold
 }
 
+// IsStopping checks if the store is in stopping state.
+func (s *StoreInfo) IsStopping() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetIsStopping()
+}
+
 // GetSlowTrend returns the slow trend information of the store.
 func (s *StoreInfo) GetSlowTrend() *pdpb.SlowTrend {
 	s.mu.RLock()
@@ -933,7 +940,7 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, direction constant.Dir
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer(direction))
 }
 
-// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// SlowStoreEvicted marks a store as a slow/stopping store and prevents transferring
 // leader to the store
 func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 	s.Lock()
