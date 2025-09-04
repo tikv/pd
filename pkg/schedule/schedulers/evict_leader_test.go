@@ -170,3 +170,66 @@ func TestEvictLeaderSchedulerCompatibility(t *testing.T) {
 	re.Equal(3, es.(*evictLeaderScheduler).conf.Batch)
 	re.NotEmpty(es.(*evictLeaderScheduler).conf.StoreIDWithRanges[1])
 }
+
+func TestEvictLeaderSchedulerWithCustomName(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Test custom scheduler name functionality (mimicking graceful shutdown)
+	customName := "graceful-shutdown-scheduler"
+	payload := map[string]any{
+		"name":           types.EvictLeaderScheduler.String(),
+		"scheduler_name": customName,
+	}
+
+	configJSON, err := json.Marshal(payload)
+	re.NoError(err)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder(configJSON), func(string) error { return nil })
+	re.NoError(err)
+	re.Equal(customName, sl.GetName())
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	re.True(sl.IsScheduleAllowed(tc))
+
+	ops, _ := sl.Schedule(tc, false)
+	re.Empty(ops, "should have no operations initially - no store_id specified")
+
+	// Simulate adding store_id via RedirectSchedulerUpdate (like graceful shutdown does)
+	if evictScheduler, ok := sl.(*evictLeaderScheduler); ok {
+		// Add store 1 to the evict list (simulating the graceful shutdown process)
+		evictScheduler.conf.StoreIDWithRanges[1] = []keyutil.KeyRange{
+			{StartKey: []byte(""), EndKey: []byte("")}, // Evict all leaders from store 1
+		}
+	}
+
+	ops, _ = sl.Schedule(tc, false)
+	re.NotEmpty(ops, "should have operations after adding store_id")
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
+}
+
+func TestEvictLeaderSchedulerDefaultName(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Test default scheduler name (without custom name)
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	re.Equal(types.EvictLeaderScheduler.String(), sl.GetName())
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	// Test that the scheduler works correctly with default name
+	re.True(sl.IsScheduleAllowed(tc))
+	ops, _ := sl.Schedule(tc, false)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
+}

@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -224,6 +225,45 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 		return err
 	}
 	log.Info("persist scheduler config successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
+	return nil
+}
+
+// AddSchedulerWithDecoder adds a scheduler using a custom decoder.
+func (h *Handler) AddSchedulerWithDecoder(tp types.CheckerSchedulerType, dec schedulers.ConfigDecoder) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+
+	var removeSchedulerCb func(string) error
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
+		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
+	} else {
+		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
+	}
+	s, err := schedulers.CreateScheduler(tp, c.GetOperatorController(), h.s.storage, dec, removeSchedulerCb)
+	if err != nil {
+		return err
+	}
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
+		if err = c.AddSchedulerHandler(s /* no args for JSON decoder */); err != nil {
+			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+			return err
+		}
+		log.Info("add scheduler handler successfully", zap.String("scheduler-name", s.GetName()))
+	} else {
+		if err = c.AddScheduler(s /* no args for JSON decoder */); err != nil {
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
+			return err
+		}
+		log.Info("add scheduler successfully", zap.String("scheduler-name", s.GetName()))
+	}
+	if err = h.opt.Persist(c.GetStorage()); err != nil {
+		log.Error("can not persist scheduler config", errs.ZapError(err))
+		return err
+	}
+	log.Info("persist scheduler config successfully", zap.String("scheduler-name", s.GetName()))
 	return nil
 }
 
@@ -467,4 +507,53 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 		return err
 	}
 	return apiutil.PostJSONIgnoreResp(h.s.GetHTTPClient(), updateURL, body)
+}
+
+// GetEvictLeaderStoreIDs lists the store IDs configured in the specified evict-leader scheduler instance.
+func (h *Handler) GetEvictLeaderStoreIDs(name string) ([]uint64, error) {
+	listURL, err := url.JoinPath(h.GetAddr(), SchedulerConfigHandlerPath, name, "list")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := apiutil.GetJSON(h.s.GetHTTPClient(), listURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if resp.StatusCode != http.StatusOK {
+		// Not found or other error: treat as empty for caller logic simplicity.
+		return nil, nil
+	}
+	var payload map[string]any
+	if err := apiutil.ReadJSON(resp.Body, &payload); err != nil {
+		return nil, err
+	}
+	raw, ok := payload["store-id-ranges"]
+	if !ok {
+		return nil, nil
+	}
+	ids := make([]uint64, 0)
+	if stores, ok := raw.(map[string]any); ok {
+		for k := range stores {
+			if id, err := strconv.ParseUint(k, 10, 64); err == nil {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids, nil
+}
+
+// RemoveStoreFromEvictScheduler removes a store entry from the specified evict-leader scheduler instance.
+func (h *Handler) RemoveStoreFromEvictScheduler(schedulerName string, storeID uint64) error {
+	deleteURL, err := url.JoinPath(h.GetAddr(), SchedulerConfigHandlerPath, schedulerName, "delete", strconv.FormatUint(storeID, 10))
+	if err != nil {
+		return err
+	}
+	resp, err := apiutil.DoDelete(h.s.GetHTTPClient(), deleteURL)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	return err
 }
