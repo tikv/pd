@@ -483,7 +483,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
 	if err != nil {
-		return err
+		log.Warn("failed to initialize the metering writer", errs.ZapError(err))
 	}
 	s.meteringWriter.Start()
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
