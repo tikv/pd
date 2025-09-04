@@ -420,14 +420,20 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
-		errs = append(errs, cluster.SlowStoreEvicted(evictStore))
+		if err := cluster.SlowStoreEvicted(evictStore); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	for _, storeID := range s.conf.getPausedNetworkSlowStores() {
 		s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
-		errs = append(errs, cluster.PauseLeaderTransfer(storeID, constant.In))
+		if err := cluster.PauseLeaderTransfer(storeID, constant.In); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	for _, storeID := range s.conf.getEvictNetworkSlowStores() {
-		errs = append(errs, cluster.SlowStoreEvicted(storeID))
+		if err := cluster.SlowStoreEvicted(storeID); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }
