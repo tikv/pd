@@ -945,3 +945,8 @@ func (mc *Cluster) ObserveRegionsStats() {
 	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
 	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }
+
+// GetAvgNetworkSlowScore returns the average network slow score of a store.
+func (mc *Cluster) GetAvgNetworkSlowScore(storeID uint64) uint64 {
+	return 0
+}

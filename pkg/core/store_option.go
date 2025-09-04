@@ -274,3 +274,10 @@ func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 		store.lastAwakenTime = lastAwaken
 	}
 }
+
+// SetNetworkSlowTriggers sets triggered network slow evict count for the store.
+func SetNetworkSlowTriggers(networkSlowTriggers uint64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.networkSlowTriggers = networkSlowTriggers
+	}
+}

@@ -60,6 +60,9 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 	var err error
 	suite.es, err = CreateScheduler(EvictSlowStoreType, suite.oc, storage, ConfigSliceDecoder(EvictSlowStoreType, []string{}), nil)
 	re.NoError(err)
+	es, ok := suite.es.(*evictSlowStoreScheduler)
+	re.True(ok)
+	es.conf.EnableNetworkSlowStore = true
 	suite.bs, err = CreateScheduler(BalanceLeaderType, suite.oc, storage, ConfigSliceDecoder(BalanceLeaderType, []string{}), nil)
 	re.NoError(err)
 }

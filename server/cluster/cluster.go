@@ -1074,6 +1074,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 		c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	}
+	c.adjustNetworkSlowStore(storeID)
 	return nil
 }
 
@@ -2794,4 +2795,30 @@ func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
 // GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
 func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	return c.coordinator.GetSchedulersController().GetPausedSchedulerDelayUntil(name)
+}
+
+// Why 99? If the network is normal within the 10-second store heartbeat, the
+// score will drop from 100 to: 100 - (100/10(min)/(60s/10s)) = 100 - (10/6) < 99. In
+// other words, if the network is completely normal within 10 seconds, the score will
+// be less than 99.
+const networkSlowStoreEvictThreshold = 99
+
+func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
+	if c.GetAvgNetworkSlowScore(storeID) >= networkSlowStoreEvictThreshold {
+		c.core.Stores.TriggerNetworkSlowEvict(storeID)
+		storeTriggerNetworkSlowEvict.WithLabelValues(strconv.FormatUint(storeID, 10)).Inc()
+	}
+	// Note: Currently, only one network slow store needs to be considered.
+	// If multiple network slow stores need to be considered, the scores
+	// of the existing network slow stores need to be eliminated.
+	if c.GetAvgNetworkSlowScore(storeID) <= 1 {
+		// If the node remains normal, it takes 10 minutes to go from 100 to 1
+		c.core.Stores.ResetTriggerNetworkSlowEvict(storeID)
+		storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(storeID, 10))
+	}
+}
+
+// GetAvgNetworkSlowScore returns the average network slow score.
+func (r *RaftCluster) GetAvgNetworkSlowScore(id uint64) uint64 {
+	return r.core.Stores.GetAvgNetworkSlowScore(id)
 }
