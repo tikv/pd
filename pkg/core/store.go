@@ -76,6 +76,7 @@ type StoreInfo struct {
 	limiter                storelimit.StoreLimit
 	minResolvedTS          uint64
 	lastAwakenTime         time.Time
+	networkSlowTriggers    uint64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -115,23 +116,24 @@ func NewStoreInfoWithLabel(id uint64, labels map[string]string) *StoreInfo {
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:             typeutil.DeepClone(s.meta, StoreFactory),
-		storeStats:       s.storeStats,
-		slowStoreEvicted: s.slowStoreEvicted,
-		slowTrendEvicted: s.slowTrendEvicted,
-		leaderCount:      s.leaderCount,
-		regionCount:      s.regionCount,
-		learnerCount:     s.learnerCount,
-		witnessCount:     s.witnessCount,
-		leaderSize:       s.leaderSize,
-		regionSize:       s.regionSize,
-		pendingPeerCount: s.pendingPeerCount,
-		lastPersistTime:  s.lastPersistTime,
-		leaderWeight:     s.leaderWeight,
-		regionWeight:     s.regionWeight,
-		limiter:          s.limiter,
-		minResolvedTS:    s.minResolvedTS,
-		lastAwakenTime:   s.lastAwakenTime,
+		meta:                typeutil.DeepClone(s.meta, StoreFactory),
+		storeStats:          s.storeStats,
+		slowStoreEvicted:    s.slowStoreEvicted,
+		slowTrendEvicted:    s.slowTrendEvicted,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		learnerCount:        s.learnerCount,
+		witnessCount:        s.witnessCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
+		lastAwakenTime:      s.lastAwakenTime,
+		networkSlowTriggers: s.networkSlowTriggers,
 	}
 	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
@@ -160,23 +162,24 @@ func (s *StoreInfo) Feedback(e float64) {
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:             s.meta,
-		storeStats:       s.storeStats,
-		slowStoreEvicted: s.slowStoreEvicted,
-		slowTrendEvicted: s.slowTrendEvicted,
-		leaderCount:      s.leaderCount,
-		regionCount:      s.regionCount,
-		learnerCount:     s.learnerCount,
-		witnessCount:     s.witnessCount,
-		leaderSize:       s.leaderSize,
-		regionSize:       s.regionSize,
-		pendingPeerCount: s.pendingPeerCount,
-		lastPersistTime:  s.lastPersistTime,
-		leaderWeight:     s.leaderWeight,
-		regionWeight:     s.regionWeight,
-		limiter:          s.limiter,
-		minResolvedTS:    s.minResolvedTS,
-		lastAwakenTime:   s.lastAwakenTime,
+		meta:                s.meta,
+		storeStats:          s.storeStats,
+		slowStoreEvicted:    s.slowStoreEvicted,
+		slowTrendEvicted:    s.slowTrendEvicted,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		learnerCount:        s.learnerCount,
+		witnessCount:        s.witnessCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
+		lastAwakenTime:      s.lastAwakenTime,
+		networkSlowTriggers: s.networkSlowTriggers,
 	}
 	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
@@ -270,6 +273,14 @@ func (s *StoreInfo) GetNetworkSlowScores() map[uint64]uint64 {
 	result := make(map[uint64]uint64)
 	maps.Copy(result, s.rawStats.GetNetworkSlowScores())
 	return result
+}
+
+// GetNetworkSlowTriggers returns the triggered network slow eviction count of the store.
+func (s *StoreInfo) GetNetworkSlowTriggers() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.networkSlowTriggers
 }
 
 // WitnessScore returns the store's witness score.
@@ -833,6 +844,37 @@ func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
 	return stores
 }
 
+// GetAvgNetworkSlowScore returns the average network slow score of a store.
+func (s *StoresInfo) GetAvgNetworkSlowScore(storeID uint64) uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		return 0
+	}
+	var (
+		total             uint64
+		count             uint64
+		networkSlowScores = store.GetNetworkSlowScores()
+	)
+	for id := range s.stores {
+		if id == storeID {
+			continue
+		}
+		if score, ok := networkSlowScores[id]; ok {
+			total += score
+		} else {
+			// If the score is 1, its score will not report to PD.
+			total += 1
+		}
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return total / count
+}
+
 /* Stores write operations */
 
 // PutStore sets a StoreInfo with storeID.
@@ -977,6 +1019,30 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount,
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))
+		s.putStoreLocked(newStore)
+	}
+}
+
+// TriggerNetworkSlowEvict triggers a network slow eviction threshold for the store.
+func (s *StoresInfo) TriggerNetworkSlowEvict(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	if store, ok := s.stores[storeID]; ok {
+		newStore := store.ShallowClone(
+			SetNetworkSlowTriggers(store.networkSlowTriggers + 1),
+		)
+		s.putStoreLocked(newStore)
+	}
+}
+
+// ResetTriggerNetworkSlowEvict resets the trigger network slow eviction count for the store.
+func (s *StoresInfo) ResetTriggerNetworkSlowEvict(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	if store, ok := s.stores[storeID]; ok {
+		newStore := store.ShallowClone(
+			SetNetworkSlowTriggers(0),
+		)
 		s.putStoreLocked(newStore)
 	}
 }
