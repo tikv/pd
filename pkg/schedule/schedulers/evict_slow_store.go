@@ -352,11 +352,12 @@ func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.
 	handler.config.RLock()
 	defer handler.config.RUnlock()
 	conf := &evictSlowStoreSchedulerConfig{
-		RecoverySec:             handler.config.RecoverySec,
-		Batch:                   handler.config.Batch,
-		EvictedStores:           handler.config.EvictedStores,
-		EnableNetworkSlowStore:  handler.config.EnableNetworkSlowStore,
-		PausedNetworkSlowStores: handler.config.PausedNetworkSlowStores,
+		RecoverySec:              handler.config.RecoverySec,
+		Batch:                    handler.config.Batch,
+		EvictedStores:            handler.config.EvictedStores,
+		EnableNetworkSlowStore:   handler.config.EnableNetworkSlowStore,
+		PausedNetworkSlowStores:  handler.config.PausedNetworkSlowStores,
+		EvictedNetworkSlowStores: handler.config.EvictedNetworkSlowStores,
 	}
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
