@@ -34,6 +34,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
@@ -264,10 +265,11 @@ func changeLogLevel(c *gin.Context) {
 // @Success  200  {object}  config.Config
 // @Router   /config [get]
 func getConfig(c *gin.Context) {
+	var config *config.Config
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	cfg := svr.GetConfig()
-	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, cfg)
+	config = svr.GetConfig()
+	config.Schedule.MaxMergeRegionKeys = config.Schedule.GetMaxMergeRegionKeys()
+	c.IndentedJSON(http.StatusOK, config)
 }
 
 // @Tags     admin
