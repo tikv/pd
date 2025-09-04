@@ -59,24 +59,24 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransferIn          atomic.Int64 // not allow to be used as target of transfer leader
-	pauseLeaderTransferOut         atomic.Int64 // not allow to be used as source of transfer leader
-	slowStoreEvicted               bool         // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted               bool         // this store has been evicted as a slow store by trend, should not transfer leader to it
-	leaderCount                    int
-	regionCount                    int
-	learnerCount                   int
-	witnessCount                   int
-	leaderSize                     int64
-	regionSize                     int64
-	pendingPeerCount               int
-	lastPersistTime                time.Time
-	leaderWeight                   float64
-	regionWeight                   float64
-	limiter                        storelimit.StoreLimit
-	minResolvedTS                  uint64
-	lastAwakenTime                 time.Time
-	triggeredNetworkSlowEvictCount uint64
+	pauseLeaderTransferIn  atomic.Int64 // not allow to be used as target of transfer leader
+	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
+	slowStoreEvicted       bool         // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted       bool         // this store has been evicted as a slow store by trend, should not transfer leader to it
+	leaderCount            int
+	regionCount            int
+	learnerCount           int
+	witnessCount           int
+	leaderSize             int64
+	regionSize             int64
+	pendingPeerCount       int
+	lastPersistTime        time.Time
+	leaderWeight           float64
+	regionWeight           float64
+	limiter                storelimit.StoreLimit
+	minResolvedTS          uint64
+	lastAwakenTime         time.Time
+	networkSlowTriggers    uint64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -116,24 +116,24 @@ func NewStoreInfoWithLabel(id uint64, labels map[string]string) *StoreInfo {
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:                           typeutil.DeepClone(s.meta, StoreFactory),
-		storeStats:                     s.storeStats,
-		slowStoreEvicted:               s.slowStoreEvicted,
-		slowTrendEvicted:               s.slowTrendEvicted,
-		leaderCount:                    s.leaderCount,
-		regionCount:                    s.regionCount,
-		learnerCount:                   s.learnerCount,
-		witnessCount:                   s.witnessCount,
-		leaderSize:                     s.leaderSize,
-		regionSize:                     s.regionSize,
-		pendingPeerCount:               s.pendingPeerCount,
-		lastPersistTime:                s.lastPersistTime,
-		leaderWeight:                   s.leaderWeight,
-		regionWeight:                   s.regionWeight,
-		limiter:                        s.limiter,
-		minResolvedTS:                  s.minResolvedTS,
-		lastAwakenTime:                 s.lastAwakenTime,
-		triggeredNetworkSlowEvictCount: s.triggeredNetworkSlowEvictCount,
+		meta:                typeutil.DeepClone(s.meta, StoreFactory),
+		storeStats:          s.storeStats,
+		slowStoreEvicted:    s.slowStoreEvicted,
+		slowTrendEvicted:    s.slowTrendEvicted,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		learnerCount:        s.learnerCount,
+		witnessCount:        s.witnessCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
+		lastAwakenTime:      s.lastAwakenTime,
+		networkSlowTriggers: s.networkSlowTriggers,
 	}
 	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
@@ -162,24 +162,24 @@ func (s *StoreInfo) Feedback(e float64) {
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:                           s.meta,
-		storeStats:                     s.storeStats,
-		slowStoreEvicted:               s.slowStoreEvicted,
-		slowTrendEvicted:               s.slowTrendEvicted,
-		leaderCount:                    s.leaderCount,
-		regionCount:                    s.regionCount,
-		learnerCount:                   s.learnerCount,
-		witnessCount:                   s.witnessCount,
-		leaderSize:                     s.leaderSize,
-		regionSize:                     s.regionSize,
-		pendingPeerCount:               s.pendingPeerCount,
-		lastPersistTime:                s.lastPersistTime,
-		leaderWeight:                   s.leaderWeight,
-		regionWeight:                   s.regionWeight,
-		limiter:                        s.limiter,
-		minResolvedTS:                  s.minResolvedTS,
-		lastAwakenTime:                 s.lastAwakenTime,
-		triggeredNetworkSlowEvictCount: s.triggeredNetworkSlowEvictCount,
+		meta:                s.meta,
+		storeStats:          s.storeStats,
+		slowStoreEvicted:    s.slowStoreEvicted,
+		slowTrendEvicted:    s.slowTrendEvicted,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		learnerCount:        s.learnerCount,
+		witnessCount:        s.witnessCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
+		lastAwakenTime:      s.lastAwakenTime,
+		networkSlowTriggers: s.networkSlowTriggers,
 	}
 	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
@@ -275,12 +275,12 @@ func (s *StoreInfo) GetNetworkSlowScores() map[uint64]uint64 {
 	return result
 }
 
-// GetTriggeredNetworkSlowEvictCount returns the triggered network slow eviction count of the store.
-func (s *StoreInfo) GetTriggeredNetworkSlowEvictCount() uint64 {
+// GetNetworkSlowTriggers returns the triggered network slow eviction count of the store.
+func (s *StoreInfo) GetNetworkSlowTriggers() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return s.triggeredNetworkSlowEvictCount
+	return s.networkSlowTriggers
 }
 
 // WitnessScore returns the store's witness score.
@@ -1029,7 +1029,7 @@ func (s *StoresInfo) TriggerNetworkSlowEvict(storeID uint64) {
 	defer s.Unlock()
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(
-			SetTriggeredNetworkSlowEvictCount(store.triggeredNetworkSlowEvictCount + 1),
+			SetNetworkSlowTriggers(store.networkSlowTriggers + 1),
 		)
 		s.putStoreLocked(newStore)
 	}
@@ -1041,7 +1041,7 @@ func (s *StoresInfo) ResetTriggerNetworkSlowEvict(storeID uint64) {
 	defer s.Unlock()
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(
-			SetTriggeredNetworkSlowEvictCount(0),
+			SetNetworkSlowTriggers(0),
 		)
 		s.putStoreLocked(newStore)
 	}

@@ -533,7 +533,7 @@ func (s *evictSlowStoreScheduler) tryEvictLeaderFromNetworkSlowStores(cluster sc
 			continue
 		}
 
-		if store.GetTriggeredNetworkSlowEvictCount() >= maxNetworkEvictThresholdTriggerCount {
+		if store.GetNetworkSlowTriggers() >= maxNetworkEvictThresholdTriggerCount {
 			if err := cluster.SlowStoreEvicted(storeID); err != nil {
 				log.Info("failed to evict slow store",
 					zap.Uint64("store-id", storeID),
