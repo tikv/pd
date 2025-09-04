@@ -157,14 +157,15 @@ func (mw *Writer) flushMeteringData() {
 		if len(records) == 0 {
 			continue
 		}
+		// This should never happen in the real world, it's used to avoid panic during testing.
+		if mw.inner == nil {
+			return
+		}
 		meteringData := &common.MeteringData{
 			SelfID:    mw.id,
 			Timestamp: ts,
 			Category:  category,
 			Data:      records,
-		}
-		if mw.inner == nil {
-			continue
 		}
 		if err := mw.inner.Write(mw.ctx, meteringData); err != nil {
 			log.Error("failed to write metering data to underlying storage",
