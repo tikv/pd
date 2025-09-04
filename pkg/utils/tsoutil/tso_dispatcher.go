@@ -21,14 +21,7 @@ import (
 	"sync"
 	"time"
 
-<<<<<<< HEAD
-=======
-	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
 	"github.com/pingcap/failpoint"
->>>>>>> ff346b5b4 (tso: fix tso proxy error propagation and add test (#9268))
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
