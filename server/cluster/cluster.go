@@ -2537,9 +2537,14 @@ const networkSlowStoreEvictThreshold = 99
 func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 	if c.GetAvgNetworkSlowScore(storeID) >= networkSlowStoreEvictThreshold {
 		c.TriggerNetworkSlowEvict(storeID)
+		storeTriggerNetworkSlowEvict.WithLabelValues(strconv.FormatUint(storeID, 10)).Inc()
 	}
+	// Note: Currently, only one network slow store needs to be considered.
+	// If multiple network slow stores need to be considered, the scores
+	// of the existing network slow stores need to be eliminated.
 	if c.GetAvgNetworkSlowScore(storeID) <= 1 {
 		// If the node remains normal, it takes 10 minutes to go from 100 to 1
 		c.ResetTriggerNetworkSlowEvict(storeID)
+		storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(storeID, 10))
 	}
 }
