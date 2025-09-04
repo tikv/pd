@@ -2539,6 +2539,7 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 		c.TriggerNetworkSlowEvict(storeID)
 	}
 	if c.GetAvgNetworkSlowScore(storeID) <= 1 {
+		// If the node remains normal, it takes 10 minutes to go from 100 to 1
 		c.ResetTriggerNetworkSlowEvict(storeID)
 	}
 }
