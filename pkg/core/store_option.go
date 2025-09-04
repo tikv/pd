@@ -275,6 +275,13 @@ func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 	}
 }
 
+// SetNetworkSlowTriggers sets triggered network slow evict count for the store.
+func SetNetworkSlowTriggers(networkSlowTriggers uint64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.networkSlowTriggers = networkSlowTriggers
+	}
+}
+
 // SetStoreMeta sets the meta for the store.
 // NOTICE: LastHeartbeat is not persisted each time, so it is not set by this function. Please use SetLastHeartbeatTS instead.
 func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
