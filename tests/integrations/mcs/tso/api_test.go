@@ -200,6 +200,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 
 func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
@@ -207,12 +208,16 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re.NoError(err)
 	err = tc.RunInitialServers()
 	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
-	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
+	conf := leaderServer.GetServer().GetMicroserviceConfig().Clone()
+	conf.EnableSchedulingFallback = true
+	err = leaderServer.GetServer().SetMicroserviceConfig(*conf)
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
+	re.NoError(err)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
 
@@ -234,6 +239,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))
 	re.NoError(err)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func (suite *tsoAPITestSuite) TestMetrics() {
