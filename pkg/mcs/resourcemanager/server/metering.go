@@ -26,9 +26,17 @@ const (
 	resourceManagerCategory = "resource-manager"
 	ruMeteringVersion       = "1"
 	sourceName              = "pd"
-)
 
-var _ metering.Collector = (*ruCollector)(nil)
+	meteringUnitRU    = "RU"
+	meteringUnitBytes = "Bytes"
+
+	meteringDataVersionField             = "version"
+	meteringDataClusterIDField           = "cluster_id"
+	meteringDataSourceNameField          = "source_name"
+	meteringDataOltpRUField              = "oltp_ru"
+	meteringDataOlapRUField              = "olap_ru"
+	meteringDataCrossAZTrafficBytesField = "cross_az_traffic_bytes"
+)
 
 type ruMetering struct {
 	// TODO: distinguish the DML and DDL RU consumption from the OLTP RU.
@@ -48,16 +56,26 @@ func (rm *ruMetering) add(consumption *consumptionItem) {
 }
 
 func (rm *ruMetering) oltpMeteringValue() common.MeteringValue {
-	return common.MeteringValue{Value: uint64(rm.oltpRU), Unit: "RU"}
+	return newMeteringRUValue(rm.oltpRU)
 }
 
 func (rm *ruMetering) olapMeteringValue() common.MeteringValue {
-	return common.MeteringValue{Value: uint64(rm.olapRU), Unit: "RU"}
+	return newMeteringRUValue(rm.olapRU)
+}
+
+func newMeteringRUValue(value float64) common.MeteringValue {
+	return common.MeteringValue{Value: uint64(value), Unit: meteringUnitRU}
 }
 
 func (rm *ruMetering) crossAZTrafficBytesMeteringValue() common.MeteringValue {
-	return common.MeteringValue{Value: rm.crossAZTrafficBytes, Unit: "Bytes"}
+	return newMeteringBytesValue(rm.crossAZTrafficBytes)
 }
+
+func newMeteringBytesValue(value uint64) common.MeteringValue {
+	return common.MeteringValue{Value: value, Unit: meteringUnitBytes}
+}
+
+var _ metering.Collector = (*ruCollector)(nil)
 
 type ruCollector struct {
 	sync.RWMutex
@@ -95,12 +113,12 @@ func (c *ruCollector) Flush() []map[string]any {
 	for keyspaceName, ruMetering := range c.keyspaceRUMetering {
 		// Convert the ruMetering to the map[string]any.
 		records = append(records, map[string]any{
-			"version":                ruMeteringVersion,
-			"cluster_id":             keyspaceName, // keyspaceName is the logical cluster ID in the metering data.
-			"source_name":            sourceName,
-			"oltp_ru":                ruMetering.oltpMeteringValue(),
-			"olap_ru":                ruMetering.olapMeteringValue(),
-			"cross_az_traffic_bytes": ruMetering.crossAZTrafficBytesMeteringValue(),
+			meteringDataVersionField:             ruMeteringVersion,
+			meteringDataClusterIDField:           keyspaceName, // keyspaceName is the logical cluster ID in the metering data.
+			meteringDataSourceNameField:          sourceName,
+			meteringDataOltpRUField:              ruMetering.oltpMeteringValue(),
+			meteringDataOlapRUField:              ruMetering.olapMeteringValue(),
+			meteringDataCrossAZTrafficBytesField: ruMetering.crossAZTrafficBytesMeteringValue(),
 		})
 	}
 	c.RUnlock()

@@ -20,7 +20,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/pingcap/metering_sdk/common"
+)
+
+const (
+	testKeyspaceName  = "test"
+	testKeyspaceName1 = "keyspace-1"
+	testKeyspaceName2 = "keyspace-2"
 )
 
 func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
@@ -28,7 +33,7 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	collector := newRUCollector()
 
 	tidbConsumption := &consumptionItem{
-		keyspaceName: "test",
+		keyspaceName: testKeyspaceName,
 		Consumption: &rmpb.Consumption{
 			RRU:                      100.0,
 			WRU:                      50.0,
@@ -47,12 +52,12 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	records := collector.Flush()
 	re.Len(records, 1)
 	record := records[0]
-	re.Equal(ruMeteringVersion, record["version"])
-	re.Equal("test", record["cluster_id"])
-	re.Equal(sourceName, record["source_name"])
-	re.Equal(common.MeteringValue{Value: uint64(150.0), Unit: "RU"}, record["oltp_ru"])
-	re.Equal(common.MeteringValue{Value: uint64(150.0), Unit: "RU"}, record["olap_ru"])
-	re.Equal(common.MeteringValue{Value: uint64(6144), Unit: "Bytes"}, record["cross_az_traffic_bytes"])
+	re.Equal(ruMeteringVersion, record[meteringDataVersionField])
+	re.Equal(testKeyspaceName, record[meteringDataClusterIDField])
+	re.Equal(sourceName, record[meteringDataSourceNameField])
+	re.Equal(newMeteringRUValue(150.0), record[meteringDataOltpRUField])
+	re.Equal(newMeteringRUValue(150.0), record[meteringDataOlapRUField])
+	re.Equal(newMeteringBytesValue(6144), record[meteringDataCrossAZTrafficBytesField])
 }
 
 func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
@@ -60,7 +65,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 	collector := newRUCollector()
 
 	consumption1 := &consumptionItem{
-		keyspaceName: "keyspace-1",
+		keyspaceName: testKeyspaceName1,
 		Consumption: &rmpb.Consumption{
 			RRU:                      50.0,
 			WRU:                      30.0,
@@ -72,7 +77,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 	}
 
 	consumption2 := &consumptionItem{
-		keyspaceName: "keyspace-2",
+		keyspaceName: testKeyspaceName2,
 		Consumption: &rmpb.Consumption{
 			RRU:                      75.0,
 			WRU:                      25.0,
@@ -90,20 +95,20 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 	re.Len(records, 2)
 
 	for _, record := range records {
-		keyspaceName := record["cluster_id"]
+		keyspaceName := record[meteringDataClusterIDField]
 		switch keyspaceName {
-		case "keyspace-1":
-			re.Equal("keyspace-1", keyspaceName)
-			re.Equal(sourceName, record["source_name"])
-			re.Equal(common.MeteringValue{Value: uint64(80.0), Unit: "RU"}, record["oltp_ru"])
-			re.Equal(common.MeteringValue{Value: uint64(0.0), Unit: "RU"}, record["olap_ru"])
-			re.Equal(common.MeteringValue{Value: uint64(300), Unit: "Bytes"}, record["cross_az_traffic_bytes"])
-		case "keyspace-2":
-			re.Equal("keyspace-2", keyspaceName)
-			re.Equal(sourceName, record["source_name"])
-			re.Equal(common.MeteringValue{Value: uint64(0.0), Unit: "RU"}, record["oltp_ru"])
-			re.Equal(common.MeteringValue{Value: uint64(100.0), Unit: "RU"}, record["olap_ru"])
-			re.Equal(common.MeteringValue{Value: uint64(700), Unit: "Bytes"}, record["cross_az_traffic_bytes"])
+		case testKeyspaceName1:
+			re.Equal(testKeyspaceName1, keyspaceName)
+			re.Equal(sourceName, record[meteringDataSourceNameField])
+			re.Equal(newMeteringRUValue(80.0), record[meteringDataOltpRUField])
+			re.Equal(newMeteringRUValue(0.0), record[meteringDataOlapRUField])
+			re.Equal(newMeteringBytesValue(300), record[meteringDataCrossAZTrafficBytesField])
+		case testKeyspaceName2:
+			re.Equal(testKeyspaceName2, keyspaceName)
+			re.Equal(sourceName, record[meteringDataSourceNameField])
+			re.Equal(newMeteringRUValue(0.0), record[meteringDataOltpRUField])
+			re.Equal(newMeteringRUValue(100.0), record[meteringDataOlapRUField])
+			re.Equal(newMeteringBytesValue(700), record[meteringDataCrossAZTrafficBytesField])
 		default:
 			re.Fail("unexpected keyspace", keyspaceName)
 		}
