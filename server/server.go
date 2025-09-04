@@ -484,8 +484,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
 	if err != nil {
 		log.Warn("failed to initialize the metering writer", errs.ZapError(err))
+	} else {
+		s.meteringWriter.Start()
 	}
-	s.meteringWriter.Start()
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.

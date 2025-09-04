@@ -140,7 +140,7 @@ func TestRegisterCollector(t *testing.T) {
 	re.Len(collectors, 2)
 	re.Equal("category1", collectors["category1"].Category())
 	// Verify it's a different instance by checking if it's not the original.
-	re.NotContains(collector1, collectors["category1"])
+	re.NotSame(collector1, collectors["category1"])
 }
 
 func TestFlushMeteringDataWithCollectors(t *testing.T) {

@@ -89,6 +89,9 @@ func NewWriter(ctx context.Context, meteringConfig *Config, id string) (*Writer,
 
 // Start starts the metering writer background loop
 func (mw *Writer) Start() {
+	if mw == nil {
+		return
+	}
 	mw.wg.Add(1)
 	go mw.meteringLoop()
 	log.Info("metering writer started")
@@ -96,6 +99,9 @@ func (mw *Writer) Start() {
 
 // Stop stops the metering writer
 func (mw *Writer) Stop() {
+	if mw == nil {
+		return
+	}
 	if mw.cancel != nil {
 		mw.cancel()
 	}
