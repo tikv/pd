@@ -272,11 +272,13 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 // @Tags     config
 // @Summary  Get full config.
 // @Produce  json
-// @Success  200  {object}  config.Config
+// @Success  200  {object}  tsoserver.Config
 // @Router   /config [get]
 func getConfig(c *gin.Context) {
+	var config *tsoserver.Config
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
-	c.IndentedJSON(http.StatusOK, svr.GetConfig())
+	config = svr.GetConfig()
+	c.IndentedJSON(http.StatusOK, config)
 }
 
 // TransferPrimary transfers the primary member to `new_primary`.

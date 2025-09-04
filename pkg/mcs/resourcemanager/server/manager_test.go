@@ -28,6 +28,7 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -40,6 +41,8 @@ func TestMain(m *testing.M) {
 type mockConfigProvider struct{ bs.Server }
 
 func (*mockConfigProvider) GetControllerConfig() *ControllerConfig { return &ControllerConfig{} }
+
+func (*mockConfigProvider) GetMeteringWriter() *metering.Writer { return nil }
 
 func (*mockConfigProvider) AddStartCallback(...func()) {}
 
