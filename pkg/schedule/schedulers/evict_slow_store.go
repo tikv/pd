@@ -299,13 +299,13 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 	}
 	recoveryDurationGapFloat, inputRecoveryDuration := input["recovery-duration"].(float64)
 	if input["recovery-duration"] != nil && !inputRecoveryDuration {
-		handler.rd.JSON(w, http.StatusInternalServerError, perrors.New("invalid argument for 'recovery-duration'").Error())
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 
 	batchFloat, inputBatch := input["batch"].(float64)
 	if input["batch"] != nil && !inputBatch {
-		handler.rd.JSON(w, http.StatusInternalServerError, perrors.New("invalid argument for 'batch'").Error())
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'batch'").Error())
 		return
 	}
 	if inputBatch {
@@ -317,7 +317,7 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 
 	enableNetworkSlowStore, inputEnableNetworkSlowStore := input["enable-network-slow-store"].(bool)
 	if input["enable-network-slow-store"] != nil && !inputEnableNetworkSlowStore {
-		handler.rd.JSON(w, http.StatusInternalServerError, perrors.New("invalid argument for 'enable-network-slow-store'").Error())
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'enable-network-slow-store'").Error())
 		return
 	}
 
