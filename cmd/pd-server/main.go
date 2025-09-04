@@ -43,11 +43,6 @@ import (
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-
-	// register microservice API
-	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
-	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/install"
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/install"
 )
 
 const (
