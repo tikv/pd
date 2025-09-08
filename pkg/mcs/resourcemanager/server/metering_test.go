@@ -51,6 +51,7 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 
 	records := collector.Flush()
 	re.Len(records, 1)
+	re.Empty(collector.keyspaceRUMetering)
 	record := records[0]
 	re.Equal(ruMeteringVersion, record[meteringDataVersionField])
 	re.Equal(testKeyspaceName, record[meteringDataClusterIDField])
@@ -93,6 +94,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 
 	records := collector.Flush()
 	re.Len(records, 2)
+	re.Empty(collector.keyspaceRUMetering)
 
 	for _, record := range records {
 		keyspaceName := record[meteringDataClusterIDField]

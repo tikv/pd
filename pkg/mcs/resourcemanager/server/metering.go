@@ -107,10 +107,12 @@ func (c *ruCollector) Collect(data any) {
 
 // Flush flushes the RU metering data.
 func (c *ruCollector) Flush() []map[string]any {
-	// Read the data first.
-	c.RLock()
-	records := make([]map[string]any, 0, len(c.keyspaceRUMetering))
-	for keyspaceName, ruMetering := range c.keyspaceRUMetering {
+	c.Lock()
+	keyspaceRUMetering := c.keyspaceRUMetering
+	c.keyspaceRUMetering = make(map[string]*ruMetering)
+	c.Unlock()
+	records := make([]map[string]any, 0, len(keyspaceRUMetering))
+	for keyspaceName, ruMetering := range keyspaceRUMetering {
 		// Convert the ruMetering to the map[string]any.
 		records = append(records, map[string]any{
 			meteringDataVersionField:             ruMeteringVersion,
@@ -121,10 +123,5 @@ func (c *ruCollector) Flush() []map[string]any {
 			meteringDataCrossAZTrafficBytesField: ruMetering.crossAZTrafficBytesMeteringValue(),
 		})
 	}
-	c.RUnlock()
-	// Clear the data after reading.
-	c.Lock()
-	c.keyspaceRUMetering = make(map[string]*ruMetering)
-	c.Unlock()
 	return records
 }
