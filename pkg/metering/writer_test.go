@@ -18,11 +18,16 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
+	mconfig "github.com/pingcap/metering_sdk/config"
+	meteringreader "github.com/pingcap/metering_sdk/reader/metering"
 	"github.com/pingcap/metering_sdk/storage"
+	meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -91,14 +96,24 @@ func TestConfigAdjust(t *testing.T) {
 
 	// Test config without Type field - should set default to S3.
 	config := &Config{
-		Bucket: "test-bucket",
-		Prefix: "test-prefix",
-		Region: "us-west-2",
+		Bucket:  "test-bucket",
+		Prefix:  "test-prefix",
+		Region:  "us-west-2",
+		RoleARN: "test-role-arn",
 	}
 
 	err := config.adjust()
 	re.NoError(err)
 	re.Equal(storage.ProviderTypeS3, config.Type)
+
+	// Test config without RoleARN field - should return error.
+	config = &Config{
+		Bucket: "test-bucket",
+		Prefix: "test-prefix",
+		Region: "us-west-2",
+	}
+	err = config.adjust()
+	re.Error(err)
 }
 
 func TestRegisterCollector(t *testing.T) {
@@ -156,8 +171,9 @@ func TestFlushMeteringDataWithCollectors(t *testing.T) {
 	}
 	defer writer.Stop()
 
+	ts := time.Now().Unix()
 	// Noop if no registered collectors.
-	writer.flushMeteringData()
+	writer.flushMeteringData(ts)
 
 	// Add collectors with data.
 	collector1 := newMockCollector("category1")
@@ -180,7 +196,7 @@ func TestFlushMeteringDataWithCollectors(t *testing.T) {
 	re.Empty(collector3.getCollectedData())
 
 	// Call flush.
-	writer.flushMeteringData()
+	writer.flushMeteringData(ts)
 
 	// Verify collectors were flushed (data cleared).
 	re.Empty(collector1.getCollectedData())
@@ -191,4 +207,200 @@ func TestFlushMeteringDataWithCollectors(t *testing.T) {
 	re.Len(collector1.getFlushedData(), 2)
 	re.Len(collector2.getFlushedData(), 1)
 	re.Empty(collector3.getFlushedData())
+}
+
+func newLocalWriter(ctx context.Context, re *require.Assertions, dir string) (*Writer, *meteringreader.MeteringReader) {
+	config := &Config{
+		Bucket:  "bucket",
+		Region:  "region",
+		RoleARN: "role-arn",
+	}
+	writer, err := NewWriter(ctx, config, "testlocalwriter")
+	re.NoError(err)
+
+	// Replace the S3 writer with the local writer for testing.
+	localConfig := &storage.ProviderConfig{
+		Type:   storage.ProviderTypeLocalFS,
+		Bucket: config.Bucket,
+		Region: config.Region,
+		LocalFS: &storage.LocalFSConfig{
+			BasePath:   dir,
+			CreateDirs: true,
+		},
+	}
+	provider, err := storage.NewObjectStorageProvider(localConfig)
+	re.NoError(err)
+	meteringConfig := mconfig.DefaultConfig().WithLogger(zap.L())
+	writer.inner = meteringwriter.NewMeteringWriter(provider, meteringConfig)
+	reader := meteringreader.NewMeteringReader(provider, meteringConfig)
+	return writer, reader
+}
+
+func readMeteringData(
+	ctx context.Context, re *require.Assertions,
+	reader *meteringreader.MeteringReader,
+	category string, ts int64,
+) []map[string]any {
+	_, err := reader.ListFilesByTimestamp(ctx, ts)
+	re.NoError(err)
+
+	categories, err := reader.GetCategories(ctx, ts)
+	re.NoError(err)
+
+	var data []map[string]any
+	for _, c := range categories {
+		if c != category {
+			continue
+		}
+		categoryFiles, err := reader.GetFilesByCategory(ctx, ts, c)
+		re.NoError(err)
+		if len(categoryFiles) == 0 {
+			return nil
+		}
+		data = make([]map[string]any, 0, len(categoryFiles))
+		for _, filePath := range categoryFiles {
+			meteringData, err := reader.ReadFile(ctx, filePath)
+			re.NoError(err)
+			data = append(data, meteringData.Data...)
+		}
+	}
+	return data
+}
+
+func TestMeteringDataReadWriteSingleCategory(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create writer and reader using helper function.
+	writer, reader := newLocalWriter(ctx, re, t.TempDir())
+	defer writer.Stop()
+
+	// Create and register a collector.
+	category := "test-category"
+	collector := newMockCollector(category)
+	writer.RegisterCollector(collector)
+
+	// Add some test data.
+	testData := []any{
+		map[string]any{"id": 1, "value": "test1", "timestamp": time.Now().Unix()},
+		map[string]any{"id": 2, "value": "test2", "timestamp": time.Now().Unix()},
+		map[string]any{"id": 3, "value": "test3", "timestamp": time.Now().Unix()},
+	}
+	for _, data := range testData {
+		collector.Collect(data)
+	}
+
+	// Flush the data.
+	ts := time.Now().Truncate(time.Minute).Unix()
+	writer.flushMeteringData(ts)
+
+	// Read the data back using helper function.
+	readData := readMeteringData(ctx, re, reader, category, ts)
+	re.NotNil(readData)
+	re.Len(readData, 3)
+
+	// Verify the data content.
+	for i, record := range readData {
+		data := record["data"].(map[string]any)
+		originalData := testData[i].(map[string]any)
+
+		// Compare each field individually to handle type conversion issues.
+		re.Equal(originalData["id"], int(data["id"].(float64)))
+		re.Equal(originalData["value"], data["value"])
+		re.Equal(originalData["timestamp"], int64(data["timestamp"].(float64)))
+	}
+}
+
+func TestMeteringDataReadWriteMultipleCategories(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create writer and reader using helper function.
+	writer, reader := newLocalWriter(ctx, re, t.TempDir())
+	defer writer.Stop()
+
+	// Create and register multiple collectors.
+	categories := []string{"category-0", "category-1", "category-2"}
+	collectors := make([]*mockCollector, 0, len(categories))
+	for _, category := range categories {
+		collector := newMockCollector(category)
+		writer.RegisterCollector(collector)
+		collectors = append(collectors, collector)
+	}
+
+	// Add different test data to each collector.
+	collectors[0].Collect(map[string]any{"type": "type1", "count": 10})
+	collectors[0].Collect(map[string]any{"type": "type1", "count": 20})
+	collectors[1].Collect(map[string]any{"metric": "cpu", "value": 75.5})
+	collectors[1].Collect(map[string]any{"metric": "memory", "value": 85.2})
+	collectors[1].Collect(map[string]any{"metric": "disk", "value": 45.8})
+	collectors[2].Collect(map[string]any{"event": "login", "user": "user1"})
+
+	// Flush the data.
+	ts := time.Now().Truncate(time.Minute).Unix()
+	writer.flushMeteringData(ts)
+
+	// Read data for each category.
+	data0 := readMeteringData(ctx, re, reader, categories[0], ts)
+	data1 := readMeteringData(ctx, re, reader, categories[1], ts)
+	data2 := readMeteringData(ctx, re, reader, categories[2], ts)
+
+	// Verify category-0 data.
+	re.NotNil(data0)
+	re.Len(data0, 2)
+	data0_0 := data0[0]["data"].(map[string]any)
+	re.Equal("type1", data0_0["type"])
+	re.Equal(10, int(data0_0["count"].(float64)))
+	data0_1 := data0[1]["data"].(map[string]any)
+	re.Equal("type1", data0_1["type"])
+	re.Equal(20, int(data0_1["count"].(float64)))
+
+	// Verify category-2 data.
+	re.NotNil(data1)
+	re.Len(data1, 3)
+	data1_0 := data1[0]["data"].(map[string]any)
+	re.Equal("cpu", data1_0["metric"])
+	re.Equal(75.5, data1_0["value"])
+	data1_1 := data1[1]["data"].(map[string]any)
+	re.Equal("memory", data1_1["metric"])
+	re.Equal(85.2, data1_1["value"])
+	data1_2 := data1[2]["data"].(map[string]any)
+	re.Equal("disk", data1_2["metric"])
+	re.Equal(45.8, data1_2["value"])
+
+	// Verify category-3 data.
+	re.NotNil(data2)
+	re.Len(data2, 1)
+	data2_0 := data2[0]["data"].(map[string]any)
+	re.Equal("login", data2_0["event"])
+	re.Equal("user1", data2_0["user"])
+}
+
+func TestMeteringDataReadWriteEmptyData(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create writer and reader using helper function.
+	writer, reader := newLocalWriter(ctx, re, t.TempDir())
+	defer writer.Stop()
+
+	// Create and register a collector but don't add any data.
+	emptyCategory := "empty-category"
+	collector := newMockCollector(emptyCategory)
+	writer.RegisterCollector(collector)
+
+	// Flush without any data.
+	ts := time.Now().Truncate(time.Minute).Unix()
+	writer.flushMeteringData(ts)
+
+	// Try to read data - should return nil for empty category.
+	readData := readMeteringData(ctx, re, reader, emptyCategory, ts)
+	re.Nil(readData)
+
+	// Try to read data for non-existent category.
+	nonExistentData := readMeteringData(ctx, re, reader, "non-existent", ts)
+	re.Nil(nonExistentData)
 }

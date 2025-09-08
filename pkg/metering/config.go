@@ -21,24 +21,25 @@ import (
 
 // Config represents the configuration for metering.
 type Config struct {
-	Type   storage.ProviderType `toml:"type" json:"type"`
-	Bucket string               `toml:"bucket" json:"bucket"`
-	Prefix string               `toml:"prefix" json:"prefix"`
-	Region string               `toml:"region" json:"region"`
+	Type    storage.ProviderType `yaml:"type,omitempty" toml:"type,omitempty" json:"type,omitempty" reloadable:"false"`
+	Region  string               `yaml:"region,omitempty" toml:"region,omitempty" json:"region,omitempty" reloadable:"false"`
+	Bucket  string               `yaml:"bucket,omitempty" toml:"bucket,omitempty" json:"bucket,omitempty" reloadable:"false"`
+	Prefix  string               `yaml:"prefix,omitempty" toml:"prefix,omitempty" json:"prefix,omitempty" reloadable:"false"`
+	RoleARN string               `yaml:"role-arn,omitempty" toml:"role-arn,omitempty" json:"role-arn,omitempty" reloadable:"false"`
 }
 
 func (c *Config) adjust() error {
 	if len(c.Type) == 0 {
 		c.Type = storage.ProviderTypeS3
 	}
+	if len(c.Region) == 0 {
+		return errors.New("region is required for the metering config")
+	}
 	if len(c.Bucket) == 0 {
 		return errors.New("bucket is required for the metering config")
 	}
-	if len(c.Prefix) == 0 {
-		return errors.New("prefix is required for the metering config")
-	}
-	if len(c.Region) == 0 {
-		return errors.New("region is required for the metering config")
+	if c.Type == storage.ProviderTypeS3 && len(c.RoleARN) == 0 {
+		return errors.New("role-arn is required for the metering config when using S3")
 	}
 	return nil
 }

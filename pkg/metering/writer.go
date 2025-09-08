@@ -67,6 +67,9 @@ func NewWriter(ctx context.Context, meteringConfig *Config, id string) (*Writer,
 		Bucket: meteringConfig.Bucket,
 		Region: meteringConfig.Region,
 		Prefix: meteringConfig.Prefix,
+		AWS: &storage.AWSConfig{
+			AssumeRoleARN: meteringConfig.RoleARN,
+		},
 	}
 	provider, err := storage.NewObjectStorageProvider(providerConfig)
 	if err != nil {
@@ -130,28 +133,37 @@ func (mw *Writer) meteringLoop() {
 	defer logutil.LogPanic()
 	defer mw.wg.Done()
 
-	ticker := time.NewTicker(meteringFlushInterval)
-	defer ticker.Stop()
-
+	now := time.Now()
+	// Truncate to the nearest minute and add the interval to get the next flush time.
+	next := now.Truncate(meteringFlushInterval).Add(meteringFlushInterval)
+	log.Info("metering writer loop started",
+		zap.String("self-id", mw.id),
+		zap.Time("now", now),
+		zap.Time("next", next))
 	for {
 		select {
 		case <-mw.ctx.Done():
+			ts := next.Unix()
+			log.Info("context done received, flushing metering data one last time",
+				zap.Int64("timestamp", ts))
+			mw.flushMeteringData(ts)
 			log.Info("metering writer loop exits")
 			return
-		case <-ticker.C:
-			mw.flushMeteringData()
+		case <-time.After(next.Sub(now)):
+			mw.flushMeteringData(next.Unix())
+			now = time.Now()
+			next = next.Add(meteringFlushInterval)
 		}
 	}
 }
 
 // flushMeteringData flushes aggregated metering data to the underlying storage
-func (mw *Writer) flushMeteringData() {
+func (mw *Writer) flushMeteringData(ts int64) {
 	collectors := mw.getCollectors()
 	if len(collectors) == 0 {
 		return
 	}
 
-	ts := time.Now().Unix() / 60
 	for category, collector := range collectors {
 		records := collector.Flush()
 		if len(records) == 0 {
@@ -167,16 +179,22 @@ func (mw *Writer) flushMeteringData() {
 			Category:  category,
 			Data:      records,
 		}
+		recordCount := len(records)
 		// TODO: write with pagination if needed.
 		if err := mw.inner.Write(mw.ctx, meteringData); err != nil {
 			log.Error("failed to write metering data to underlying storage",
-				zap.String("category", category), zap.Error(err))
-			continue
+				zap.String("self-id", mw.id),
+				zap.Int64("timestamp", ts),
+				zap.String("category", category),
+				zap.Int("record-count", recordCount),
+				zap.Error(err))
+		} else {
+			log.Info("successfully wrote metering data to underlying storage",
+				zap.String("self-id", mw.id),
+				zap.Int64("timestamp", ts),
+				zap.String("category", category),
+				zap.Int("record-count", recordCount))
 		}
-		log.Info("successfully wrote metering data to underlying storage",
-			zap.Int64("timestamp", meteringData.Timestamp),
-			zap.String("category", category),
-			zap.Int("record-count", len(records)))
 	}
 }
 
