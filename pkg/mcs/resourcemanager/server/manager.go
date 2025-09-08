@@ -71,7 +71,8 @@ type Manager struct {
 		isTiFlash    bool
 	}
 	// record update time of each resource group
-	consumptionRecord map[consumptionRecordKey]time.Time
+	consumptionRecordMu syncutil.RWMutex
+	consumptionRecord   map[consumptionRecordKey]time.Time
 }
 
 type consumptionRecordKey struct {
@@ -343,22 +344,55 @@ func (m *Manager) persistLoop(ctx context.Context) {
 }
 
 func (m *Manager) persistResourceGroupRunningState() {
-	m.RLock()
-	keys := make([]string, 0, len(m.groups))
-	for k := range m.groups {
-		keys = append(keys, k)
-	}
-	m.RUnlock()
-	for idx := range keys {
-		m.RLock()
-		group, ok := m.groups[keys[idx]]
-		if ok {
-			if err := group.persistStates(m.storage); err != nil {
-				log.Error("persist resource group state failed", zap.Error(err))
-			}
+	for _, group := range m.getActiveResourceGroups() {
+		if err := group.persistStates(m.storage); err != nil {
+			log.Error("persist resource group state failed", zap.Error(err))
 		}
-		m.RUnlock()
 	}
+}
+
+func (m *Manager) updateConsumptionRecord(name string, ruType string) {
+	m.consumptionRecordMu.Lock()
+	defer m.consumptionRecordMu.Unlock()
+	m.consumptionRecord[consumptionRecordKey{name: name, ruType: ruType}] = time.Now()
+}
+
+func (m *Manager) getActiveResourceGroups() []*ResourceGroup {
+	m.consumptionRecordMu.RLock()
+	groupNames := make([]string, 0, len(m.consumptionRecord))
+	for k := range m.consumptionRecord {
+		if k.name == reservedDefaultGroupName {
+			continue
+		}
+		groupNames = append(groupNames, k.name)
+	}
+	m.consumptionRecordMu.RUnlock()
+
+	m.RLock()
+	defer m.RUnlock()
+	groups := make([]*ResourceGroup, 0, len(groupNames))
+	for _, name := range groupNames {
+		if group, ok := m.groups[name]; ok {
+			groups = append(groups, group)
+		}
+	}
+	return groups
+}
+
+func (m *Manager) getInactiveResourceGroups() []consumptionRecordKey {
+	m.consumptionRecordMu.Lock()
+	defer m.consumptionRecordMu.Unlock()
+	var keys []consumptionRecordKey
+	for k, lastTime := range m.consumptionRecord {
+		if k.name == reservedDefaultGroupName {
+			continue
+		}
+		if time.Since(lastTime) > metricsCleanupTimeout {
+			delete(m.consumptionRecord, k)
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 // Receive the consumption and flush it to the metrics.
@@ -386,10 +420,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 		case <-ctx.Done():
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			consumption := consumptionInfo.Consumption
-			if consumption == nil {
-				continue
-			}
+			name := consumptionInfo.resourceGroupName
 			ruLabelType := defaultTypeLabel
 			if consumptionInfo.isBackground {
 				ruLabelType = backgroundTypeLabel
@@ -398,8 +429,14 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				ruLabelType = tiflashTypeLabel
 			}
 
+			m.updateConsumptionRecord(name, ruLabelType)
+
+			consumption := consumptionInfo.Consumption
+			if consumption == nil {
+				continue
+			}
+
 			var (
-				name                     = consumptionInfo.resourceGroupName
 				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType)
 				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
 				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name)
@@ -454,50 +491,34 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
 			}
 
-			m.consumptionRecord[consumptionRecordKey{name: name, ruType: ruLabelType}] = time.Now()
-
 			// TODO: maybe we need to distinguish background ru.
 			if rg := m.GetMutableResourceGroup(name); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.consumptionRecord {
-				if time.Since(lastTime) > metricsCleanupTimeout {
-					readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
-					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(r.name, r.name)
-					delete(m.consumptionRecord, r)
-					delete(maxPerSecTrackers, r.name)
-					delete(rcuTrackers, r.name)
-					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
-					writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
-					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: r.name})
-					requestUnitSumPerSec.DeleteLabelValues(r.name)
-					requestUnitConsumeRate.DeleteLabelValues(r.name)
-				}
+			for _, r := range m.getInactiveResourceGroups() {
+				readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
+				requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
+				availableRUCounter.DeleteLabelValues(r.name, r.name)
+				delete(maxPerSecTrackers, r.name)
+				delete(rcuTrackers, r.name)
+				readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
+				writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
+				resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: r.name})
+				requestUnitSumPerSec.DeleteLabelValues(r.name)
+				requestUnitConsumeRate.DeleteLabelValues(r.name)
 			}
+
 		case <-availableRUTicker.C:
-			m.RLock()
-			groups := make([]*ResourceGroup, 0, len(m.consumptionRecord))
-			for r := range m.consumptionRecord {
-				if r.name == reservedDefaultGroupName {
-					continue
-				}
-				group, ok := m.groups[r.name]
-				if ok {
-					groups = append(groups, group)
-				}
-			}
-			m.RUnlock()
-			// prevent many groups and hold the lock long time.
+			groups := m.getActiveResourceGroups()
 			for _, group := range groups {
 				ru := group.getRUToken()
 				if ru < 0 {
