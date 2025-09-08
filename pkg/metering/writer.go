@@ -31,8 +31,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-// meteringFlushInterval is the interval to flush the metering to the underlying storage.
-const meteringFlushInterval = time.Minute
+const (
+	flushInterval = time.Minute
+	flushTimeout  = flushInterval / 2
+)
 
 // Collector collects events into records with caller-defined fields.
 type Collector interface {
@@ -97,7 +99,6 @@ func (mw *Writer) Start() {
 	}
 	mw.wg.Add(1)
 	go mw.meteringLoop()
-	log.Info("metering writer started")
 }
 
 // Stop stops the metering writer
@@ -135,7 +136,7 @@ func (mw *Writer) meteringLoop() {
 
 	now := time.Now()
 	// Truncate to the nearest minute and add the interval to get the next flush time.
-	next := now.Truncate(meteringFlushInterval).Add(meteringFlushInterval)
+	next := now.Truncate(flushInterval).Add(flushInterval)
 	log.Info("metering writer loop started",
 		zap.String("self-id", mw.id),
 		zap.Time("now", now),
@@ -146,19 +147,20 @@ func (mw *Writer) meteringLoop() {
 			ts := next.Unix()
 			log.Info("context done received, flushing metering data one last time",
 				zap.Int64("timestamp", ts))
-			mw.flushMeteringData(ts)
+			// Due to the context is already done, we need to use a new context to flush the data.
+			mw.flushMeteringData(context.Background(), ts)
 			log.Info("metering writer loop exits")
 			return
 		case <-time.After(next.Sub(now)):
-			mw.flushMeteringData(next.Unix())
+			mw.flushMeteringData(mw.ctx, next.Unix())
 			now = time.Now()
-			next = next.Add(meteringFlushInterval)
+			next = next.Add(flushInterval)
 		}
 	}
 }
 
 // flushMeteringData flushes aggregated metering data to the underlying storage
-func (mw *Writer) flushMeteringData(ts int64) {
+func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 	collectors := mw.getCollectors()
 	if len(collectors) == 0 {
 		return
@@ -180,20 +182,25 @@ func (mw *Writer) flushMeteringData(ts int64) {
 			Data:      records,
 		}
 		recordCount := len(records)
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(ctx, flushTimeout)
 		// TODO: write with pagination if needed.
-		if err := mw.inner.Write(mw.ctx, meteringData); err != nil {
+		err := mw.inner.Write(ctx, meteringData)
+		cancel()
+		cost := time.Since(start)
+		logFields := []zap.Field{
+			zap.String("self-id", mw.id),
+			zap.Int64("timestamp", ts),
+			zap.String("category", category),
+			zap.Int("record-count", recordCount),
+			zap.Duration("cost", cost),
+		}
+		if err != nil {
 			log.Error("failed to write metering data to underlying storage",
-				zap.String("self-id", mw.id),
-				zap.Int64("timestamp", ts),
-				zap.String("category", category),
-				zap.Int("record-count", recordCount),
-				zap.Error(err))
+				append(logFields, zap.Error(err))...)
 		} else {
 			log.Info("successfully wrote metering data to underlying storage",
-				zap.String("self-id", mw.id),
-				zap.Int64("timestamp", ts),
-				zap.String("category", category),
-				zap.Int("record-count", recordCount))
+				logFields...)
 		}
 	}
 }

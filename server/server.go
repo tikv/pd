@@ -541,6 +541,9 @@ func (s *Server) Close() {
 	if s.tsoAllocator != nil {
 		s.tsoAllocator.Close()
 	}
+	if s.meteringWriter != nil {
+		s.meteringWriter.Stop()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {

@@ -173,7 +173,7 @@ func TestFlushMeteringDataWithCollectors(t *testing.T) {
 
 	ts := time.Now().Unix()
 	// Noop if no registered collectors.
-	writer.flushMeteringData(ts)
+	writer.flushMeteringData(ctx, ts)
 
 	// Add collectors with data.
 	collector1 := newMockCollector("category1")
@@ -196,7 +196,7 @@ func TestFlushMeteringDataWithCollectors(t *testing.T) {
 	re.Empty(collector3.getCollectedData())
 
 	// Call flush.
-	writer.flushMeteringData(ts)
+	writer.flushMeteringData(ctx, ts)
 
 	// Verify collectors were flushed (data cleared).
 	re.Empty(collector1.getCollectedData())
@@ -293,7 +293,7 @@ func TestMeteringDataReadWriteSingleCategory(t *testing.T) {
 
 	// Flush the data.
 	ts := time.Now().Truncate(time.Minute).Unix()
-	writer.flushMeteringData(ts)
+	writer.flushMeteringData(ctx, ts)
 
 	// Read the data back using helper function.
 	readData := readMeteringData(ctx, re, reader, category, ts)
@@ -340,7 +340,7 @@ func TestMeteringDataReadWriteMultipleCategories(t *testing.T) {
 
 	// Flush the data.
 	ts := time.Now().Truncate(time.Minute).Unix()
-	writer.flushMeteringData(ts)
+	writer.flushMeteringData(ctx, ts)
 
 	// Read data for each category.
 	data0 := readMeteringData(ctx, re, reader, categories[0], ts)
@@ -394,7 +394,7 @@ func TestMeteringDataReadWriteEmptyData(t *testing.T) {
 
 	// Flush without any data.
 	ts := time.Now().Truncate(time.Minute).Unix()
-	writer.flushMeteringData(ts)
+	writer.flushMeteringData(ctx, ts)
 
 	// Try to read data - should return nil for empty category.
 	readData := readMeteringData(ctx, re, reader, emptyCategory, ts)
