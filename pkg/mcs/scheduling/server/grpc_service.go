@@ -172,6 +172,95 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 	}
 }
 
+// bucketHeartbeatServer wraps Scheduling_ReportBucketsServer to ensure when any error
+// occurs on Send() or Recv(), both endpoints will be closed.
+type bucketHeartbeatServer struct {
+	stream schedulingpb.Scheduling_ReportBucketsServer
+	closed int32
+}
+
+func (s *bucketHeartbeatServer) send(m *schedulingpb.ReportBucketsResponse) error {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return io.EOF
+	}
+	done := make(chan error, 1)
+	go func() {
+		defer logutil.LogPanic()
+		done <- s.stream.SendAndClose(m)
+	}()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			atomic.StoreInt32(&s.closed, 1)
+		}
+		return errors.WithStack(err)
+	case <-timer.C:
+		atomic.StoreInt32(&s.closed, 1)
+		return errs.ErrSendHeartbeatTimeout
+	}
+}
+
+func (s *bucketHeartbeatServer) recv() (*schedulingpb.ReportBucketsRequest, error) {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return nil, io.EOF
+	}
+	req, err := s.stream.Recv()
+	if err != nil {
+		atomic.StoreInt32(&s.closed, 1)
+		return nil, errors.WithStack(err)
+	}
+	return req, nil
+}
+
+// ReportBuckets implements gRPC SchedulingServer.
+func (s *Service) ReportBuckets(stream schedulingpb.Scheduling_ReportBucketsServer) error {
+	var (
+		server = &bucketHeartbeatServer{stream: stream}
+		cancel context.CancelFunc
+	)
+	defer func() {
+		// cancel the forward stream
+		if cancel != nil {
+			cancel()
+		}
+	}()
+
+	for {
+		request, err := server.recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		c := s.GetCluster()
+		if c == nil {
+			resp := &schedulingpb.ReportBucketsResponse{Header: notBootstrappedHeader()}
+			err := server.send(resp)
+			return errors.WithStack(err)
+		}
+
+		buckets := request.GetBuckets()
+		if buckets == nil || len(buckets.Keys) == 0 {
+			continue
+		}
+		store := c.GetLeaderStoreByRegionID(buckets.GetRegionId())
+		if store == nil {
+			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
+			// So we should not return error here.
+			log.Warn("the store of the bucket in region is not found ", zap.Uint64("region-id", buckets.GetRegionId()))
+		}
+
+		err = c.HandleReportBuckets(buckets)
+		if err != nil {
+			continue
+		}
+	}
+}
+
 // StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
