@@ -284,6 +284,15 @@ func createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.Cli
 	return forwardStream, forwardCtx, cancelForward, err
 }
 
+func createReportBucketsSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_ReportBucketsClient, context.Context, context.CancelFunc, error) {
+	done := make(chan struct{})
+	forwardCtx, cancelForward := context.WithCancel(ctx)
+	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
+	forwardStream, err := schedulingpb.NewSchedulingClient(client).ReportBuckets(forwardCtx)
+	done <- struct{}{}
+	return forwardStream, forwardCtx, cancelForward, err
+}
+
 func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream schedulingpb.Scheduling_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
@@ -351,6 +360,54 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 			return
 		}
 		if err := server.Send(resp); err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+	}
+}
+
+func forwardReportBucketsToScheduling(rc *cluster.RaftCluster, forwardStream schedulingpb.Scheduling_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.CloseAndRecv()
+		if err == io.EOF {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		// TODO: find a better way to halt scheduling immediately.
+		if rc.IsSchedulingHalted() {
+			continue
+		}
+		// The error types defined for schedulingpb and pdpb are different, so we need to convert them.
+		var pdpbErr *pdpb.Error
+		schedulingpbErr := resp.GetHeader().GetError()
+		if schedulingpbErr != nil {
+			if schedulingpbErr.Type == schedulingpb.ErrorType_OK {
+				pdpbErr = &pdpb.Error{
+					Type:    pdpb.ErrorType_OK,
+					Message: schedulingpbErr.GetMessage(),
+				}
+			} else {
+				// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
+				pdpbErr = &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: schedulingpbErr.GetMessage(),
+				}
+			}
+		}
+		response := &pdpb.ReportBucketsResponse{
+			Header: &pdpb.ResponseHeader{
+				ClusterId: resp.GetHeader().GetClusterId(),
+				Error:     pdpbErr,
+			},
+		}
+
+		if err := server.send(response); err != nil {
 			errCh <- errors.WithStack(err)
 			return
 		}
