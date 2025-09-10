@@ -1061,7 +1061,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		lastForwardedHost           string
 		errCh                       chan error
 		forwardErrCh                chan error
-		forwardSchedulingStream     schedulingpb.Scheduling_ReportBucketsClient
+		forwardSchedulingStream     schedulingpb.Scheduling_RegionBucketsClient
 		lastForwardedSchedulingHost string
 	)
 	defer func() {
@@ -1152,7 +1152,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 
 		start := time.Now()
-		err = rc.HandleReportBuckets(buckets)
+		err = rc.HandleRegionBuckets(buckets)
 		if err != nil {
 			bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			continue
@@ -1194,16 +1194,16 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 					continue
 				}
 				log.Debug("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
-				forwardSchedulingStream, _, cancel, err = createReportBucketsSchedulingStream(stream.Context(), client)
+				forwardSchedulingStream, _, cancel, err = createRegionBucketsSchedulingStream(stream.Context(), client)
 				if err != nil {
 					log.Debug("failed to create stream", zap.Error(err))
 					continue
 				}
 				lastForwardedSchedulingHost = forwardedSchedulingHost
 				forwardErrCh = make(chan error, 1)
-				go forwardReportBucketsToScheduling(forwardSchedulingStream, server, forwardErrCh)
+				go forwardRegionBucketsToScheduling(forwardSchedulingStream, server, forwardErrCh)
 			}
-			schedulingpbReq := &schedulingpb.ReportBucketsRequest{
+			schedulingpbReq := &schedulingpb.RegionBucketsRequest{
 				Header: &schedulingpb.RequestHeader{
 					ClusterId: request.GetHeader().GetClusterId(),
 					SenderId:  request.GetHeader().GetSenderId(),

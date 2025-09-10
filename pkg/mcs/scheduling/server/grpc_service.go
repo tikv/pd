@@ -172,54 +172,9 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 	}
 }
 
-// bucketHeartbeatServer wraps Scheduling_ReportBucketsServer to ensure when any error
-// occurs on Send() or Recv(), both endpoints will be closed.
-type bucketHeartbeatServer struct {
-	stream schedulingpb.Scheduling_ReportBucketsServer
-	closed int32
-}
-
-func (s *bucketHeartbeatServer) send(m *schedulingpb.ReportBucketsResponse) error {
-	if atomic.LoadInt32(&s.closed) == 1 {
-		return io.EOF
-	}
-	done := make(chan error, 1)
-	go func() {
-		defer logutil.LogPanic()
-		done <- s.stream.SendAndClose(m)
-	}()
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case err := <-done:
-		if err != nil {
-			atomic.StoreInt32(&s.closed, 1)
-		}
-		return errors.WithStack(err)
-	case <-timer.C:
-		atomic.StoreInt32(&s.closed, 1)
-		return errs.ErrSendHeartbeatTimeout
-	}
-}
-
-func (s *bucketHeartbeatServer) recv() (*schedulingpb.ReportBucketsRequest, error) {
-	if atomic.LoadInt32(&s.closed) == 1 {
-		return nil, io.EOF
-	}
-	req, err := s.stream.Recv()
-	if err != nil {
-		atomic.StoreInt32(&s.closed, 1)
-		return nil, errors.WithStack(err)
-	}
-	return req, nil
-}
-
-// ReportBuckets implements gRPC SchedulingServer.
-func (s *Service) ReportBuckets(stream schedulingpb.Scheduling_ReportBucketsServer) error {
-	var (
-		server = &bucketHeartbeatServer{stream: stream}
-		cancel context.CancelFunc
-	)
+// RegionBuckets implements gRPC SchedulingServer.
+func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServer) error {
+	var cancel context.CancelFunc
 	defer func() {
 		// cancel the forward stream
 		if cancel != nil {
@@ -228,7 +183,7 @@ func (s *Service) ReportBuckets(stream schedulingpb.Scheduling_ReportBucketsServ
 	}()
 
 	for {
-		request, err := server.recv()
+		request, err := stream.Recv()
 		if err == io.EOF {
 			return nil
 		}
@@ -238,8 +193,8 @@ func (s *Service) ReportBuckets(stream schedulingpb.Scheduling_ReportBucketsServ
 
 		c := s.GetCluster()
 		if c == nil {
-			resp := &schedulingpb.ReportBucketsResponse{Header: notBootstrappedHeader()}
-			err := server.send(resp)
+			resp := &schedulingpb.RegionBucketsResponse{Header: notBootstrappedHeader()}
+			err := stream.Send(resp)
 			return errors.WithStack(err)
 		}
 
@@ -254,11 +209,16 @@ func (s *Service) ReportBuckets(stream schedulingpb.Scheduling_ReportBucketsServ
 			log.Warn("the store of the bucket in region is not found ", zap.Uint64("region-id", buckets.GetRegionId()))
 		}
 
-		err = c.HandleReportBuckets(buckets)
+		err = c.HandleRegionBuckets(buckets)
 		if err != nil {
 			// TODO: if we need to send the error back to PD.
-			log.Error("failed handle report buckets", zap.Error(err))
-			continue
+			log.Debug("failed handle region buckets", zap.Error(err))
+		}
+		response := &schedulingpb.RegionBucketsResponse{
+			Header: wrapHeader(),
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
 		}
 	}
 }

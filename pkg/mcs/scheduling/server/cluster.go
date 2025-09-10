@@ -770,9 +770,9 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	return nil
 }
 
-// HandleReportBuckets processes buckets reports from client
-func (c *Cluster) HandleReportBuckets(b *metapb.Buckets) error {
-	if err := c.processReportBuckets(b); err != nil {
+// HandleRegionBuckets processes region buckets from client
+func (c *Cluster) HandleRegionBuckets(b *metapb.Buckets) error {
+	if err := c.processRegionBuckets(b); err != nil {
 		return err
 	}
 
@@ -780,8 +780,8 @@ func (c *Cluster) HandleReportBuckets(b *metapb.Buckets) error {
 	return nil
 }
 
-// processReportBuckets update the bucket information.
-func (c *Cluster) processReportBuckets(buckets *metapb.Buckets) error {
+// processRegionBuckets update the bucket information.
+func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		return errors.Errorf("region %v not found", buckets.GetRegionId())

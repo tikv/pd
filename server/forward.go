@@ -284,11 +284,11 @@ func createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.Cli
 	return forwardStream, forwardCtx, cancelForward, err
 }
 
-func createReportBucketsSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_ReportBucketsClient, context.Context, context.CancelFunc, error) {
+func createRegionBucketsSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_RegionBucketsClient, context.Context, context.CancelFunc, error) {
 	done := make(chan struct{})
 	forwardCtx, cancelForward := context.WithCancel(ctx)
 	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
-	forwardStream, err := schedulingpb.NewSchedulingClient(client).ReportBuckets(forwardCtx)
+	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionBuckets(forwardCtx)
 	done <- struct{}{}
 	return forwardStream, forwardCtx, cancelForward, err
 }
@@ -366,11 +366,11 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 	}
 }
 
-func forwardReportBucketsToScheduling(forwardStream schedulingpb.Scheduling_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+func forwardRegionBucketsToScheduling(forwardStream schedulingpb.Scheduling_RegionBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
 	for {
-		resp, err := forwardStream.CloseAndRecv()
+		resp, err := forwardStream.Recv()
 		if err == io.EOF {
 			errCh <- errors.WithStack(err)
 			return
@@ -393,6 +393,7 @@ func forwardReportBucketsToScheduling(forwardStream schedulingpb.Scheduling_Repo
 				}
 			}
 		}
+		// ignore other error types or success responses for now.
 	}
 }
 
