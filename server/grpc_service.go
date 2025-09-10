@@ -1010,7 +1010,7 @@ func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (*schedulingCli
 	return forwardCli, nil
 }
 
-// bucketHeartbeatServer	wraps PD_ReportBucketsServer to ensure when any error
+// bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
 // occurs on SendAndClose() or Recv(), both endpoints will be closed.
 type bucketHeartbeatServer struct {
 	stream pdpb.PD_ReportBucketsServer
@@ -1201,7 +1201,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 				}
 				lastForwardedSchedulingHost = forwardedSchedulingHost
 				forwardErrCh = make(chan error, 1)
-				go forwardReportBucketsToScheduling(rc, forwardSchedulingStream, server, forwardErrCh)
+				go forwardReportBucketsToScheduling(forwardSchedulingStream, server, forwardErrCh)
 			}
 			schedulingpbReq := &schedulingpb.ReportBucketsRequest{
 				Header: &schedulingpb.RequestHeader{

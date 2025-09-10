@@ -256,6 +256,8 @@ func (s *Service) ReportBuckets(stream schedulingpb.Scheduling_ReportBucketsServ
 
 		err = c.HandleReportBuckets(buckets)
 		if err != nil {
+			// TODO: if we need to send the error back to PD.
+			log.Error("failed handle report buckets", zap.Error(err))
 			continue
 		}
 	}
