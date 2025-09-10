@@ -311,7 +311,7 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 		// report buckets interval is 10s
 		PeriodInMs: 10000,
 	}
-	err := cluster.HandleReportBuckets(buckets)
+	err := cluster.HandleRegionBuckets(buckets)
 	re.NoError(err)
 	// TODO: forwards to scheduling server after it supports buckets
 	return buckets
