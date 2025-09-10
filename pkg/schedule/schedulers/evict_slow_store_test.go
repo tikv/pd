@@ -192,8 +192,9 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		re.Equal(evicted, suite.tc.GetStore(storeID1).EvictedAsSlowStore())
 	}
 
+	// test conflict with disk slow store scheduler
 	{
-		// a -> b -> c -> d -> e
+		log.Info("a -> b -> c -> d -> e")
 		triggerDiskSlowStore(true)
 		triggerNetworkSlowStore()
 
@@ -210,7 +211,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		suite.tc.PutStore(originStoreInfo)
 	}
 	{
-		// a -> b -> c -> e -> d
+		log.Info("a -> b -> c -> e -> d")
 		triggerDiskSlowStore(true)
 		triggerNetworkSlowStore()
 
@@ -244,7 +245,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		suite.tc.PutStore(originStoreInfo)
 	}
 	{
-		// b -> a -> c -> e -> d
+		log.Info("b -> a -> c -> e -> d")
 		triggerNetworkSlowStore()
 		triggerDiskSlowStore(true)
 
@@ -261,7 +262,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		suite.tc.PutStore(originStoreInfo)
 	}
 	{
-		// b -> c -> a -> d -> e
+		log.Info("b -> c -> a -> d -> e")
 		triggerNetworkSlowStore()
 		triggerNetworkSlowStoreEvicted(true)
 		triggerDiskSlowStore(false)
