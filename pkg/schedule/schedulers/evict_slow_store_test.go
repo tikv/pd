@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -30,6 +31,14 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+)
+
+const (
+	storeID1 = 1
+	storeID2 = 2
+	storeID3 = 3
+	storeID4 = 4
+	storeID5 = 5
 )
 
 type evictSlowStoreTestSuite struct {
@@ -119,13 +128,178 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
+func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	captureErr := false
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/core/CaptureSlowStoreEvicted", func() {
+		captureErr = true
+	}))
+
+	originStoreInfo := suite.tc.GetStore(storeID1).Clone()
+	es := suite.es.(*evictSlowStoreScheduler)
+	// step a
+	triggerDiskSlowStore := func(success bool) {
+		suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().SlowScore = 100
+		}))
+		es.scheduleDiskSlowStore(suite.tc)
+		if !success {
+			re.True(captureErr)
+			captureErr = false // reset
+		} else {
+			re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+		}
+	}
+	// step b
+	triggerNetworkSlowStore := func() {
+		suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{
+				storeID2: 10,
+				storeID3: 10,
+				storeID4: 100,
+			}
+		}))
+		checkNetworkSlowStore(re, suite.es.(*evictSlowStoreScheduler), suite.tc, storeID1, true, true, false)
+	}
+	// step c
+	triggerNetworkSlowStoreEvicted := func(success bool) {
+		for range 10 {
+			suite.tc.TriggerNetworkSlowEvict(storeID1)
+		}
+
+		es.scheduleNetworkSlowStore(suite.tc)
+		if !success {
+			re.True(captureErr)
+			captureErr = false // reset
+		}
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+	}
+	// step d
+	recoverNetworkSlowStore := func(allowLeaderTransferIn bool) {
+		suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{}
+		}))
+		checkNetworkSlowStore(re, suite.es.(*evictSlowStoreScheduler), suite.tc, storeID1, false, false, true)
+		re.Equal(allowLeaderTransferIn, suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
+	}
+	// step e
+	recoverDiskSlowStore := func(evicted bool) {
+		suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().SlowScore = 0
+		}))
+		es.scheduleDiskSlowStore(suite.tc)
+		re.Equal(evicted, suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+	}
+
+	{
+		// a -> b -> c -> d -> e
+		triggerDiskSlowStore(true)
+		triggerNetworkSlowStore()
+
+		// trigger network slow store doesn't affect disk slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		triggerNetworkSlowStoreEvicted(false)
+		recoverNetworkSlowStore(true)
+
+		// recover network slow store doesn't affect disk slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+		recoverDiskSlowStore(false)
+
+		suite.tc.PutStore(originStoreInfo)
+	}
+	{
+		// a -> b -> c -> e -> d
+		triggerDiskSlowStore(true)
+		triggerNetworkSlowStore()
+
+		// trigger network slow store doesn't affect disk slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		triggerNetworkSlowStoreEvicted(false)
+		recoverDiskSlowStore(false)
+
+		// recover disk slow store doesn't affect network slow store
+		re.Equal(false, suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
+		recoverNetworkSlowStore(true)
+
+		suite.tc.PutStore(originStoreInfo)
+	}
+	{
+		log.Info("b -> a -> c -> d -> e")
+		triggerNetworkSlowStore()
+		triggerDiskSlowStore(true)
+
+		// trigger network slow store doesn't affect disk slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		triggerNetworkSlowStoreEvicted(false)
+		recoverNetworkSlowStore(true)
+
+		// recover network slow store doesn't affect disk slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+		recoverDiskSlowStore(false)
+
+		suite.tc.PutStore(originStoreInfo)
+	}
+	{
+		// b -> a -> c -> e -> d
+		triggerNetworkSlowStore()
+		triggerDiskSlowStore(true)
+
+		// trigger network slow store doesn't affect disk slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		triggerNetworkSlowStoreEvicted(false)
+		recoverDiskSlowStore(false)
+
+		// recover disk slow store doesn't affect network slow store
+		re.Equal(false, suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
+		recoverNetworkSlowStore(true)
+
+		suite.tc.PutStore(originStoreInfo)
+	}
+	{
+		// b -> c -> a -> d -> e
+		triggerNetworkSlowStore()
+		triggerNetworkSlowStoreEvicted(true)
+		triggerDiskSlowStore(false)
+
+		// trigger disk slow store doesn't affect network slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		recoverNetworkSlowStore(true)
+		// previous disk slow store doesn't trigger successful.
+		re.False(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		recoverDiskSlowStore(false)
+		suite.tc.PutStore(originStoreInfo)
+	}
+	{
+		log.Info("b -> c -> a -> e -> d")
+		triggerNetworkSlowStore()
+		triggerNetworkSlowStoreEvicted(true)
+		triggerDiskSlowStore(false)
+
+		// trigger disk slow store doesn't affect network slow store
+		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		// previous disk slow store doesn't trigger successful,
+		// so even if disk slow store recover, store 1 is still evicted.
+		recoverDiskSlowStore(true)
+
+		recoverNetworkSlowStore(true)
+		re.False(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
+
+		suite.tc.PutStore(originStoreInfo)
+	}
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/CaptureSlowStoreEvicted"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
-	const (
-		storeID1 uint64 = 1
-		storeID2 uint64 = 2
-		storeID3 uint64 = 3
-		storeID4 uint64 = 4
-	)
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
 	testCases := []struct {
@@ -221,13 +395,6 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 }
 
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
-	const (
-		storeID1 = 1
-		storeID2 = 2
-		storeID3 = 3
-		storeID4 = 4
-		storeID5 = 5
-	)
 	re := suite.Require()
 	reachedLimit := false
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
@@ -387,12 +554,6 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 }
 
 func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreSwitchEnableToDisable() {
-	const (
-		storeID1 uint64 = 1
-		storeID2 uint64 = 2
-		storeID3 uint64 = 3
-		storeID4 uint64 = 4
-	)
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
 
@@ -431,13 +592,13 @@ func checkNetworkSlowStore(
 		ts, ok := es.conf.networkSlowStoreRecoverStartAts[storeID]
 		re.True(ok)
 		re.Nil(ts)
-		es.Schedule(tc, false)
+		es.scheduleNetworkSlowStore(tc)
 		ts, ok = es.conf.networkSlowStoreRecoverStartAts[storeID]
 		re.True(ok)
 		re.NotNil(ts)
 	}
 
-	es.Schedule(tc, false)
+	es.scheduleNetworkSlowStore(tc)
 
 	_, ok := es.conf.networkSlowStoreRecoverStartAts[storeID]
 	re.Equal(expectedSlow, ok)

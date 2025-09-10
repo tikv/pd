@@ -196,6 +196,7 @@ func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStoreLocked(storeID 
 	}
 	cluster.ResumeLeaderTransfer(storeID, constant.In)
 	if needRecoverEvict {
+		log.Info("recovered network evicted slow store", zap.Uint64("store-id", storeID))
 		cluster.SlowStoreRecovered(storeID)
 		evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkEvictedStore))
 	}
@@ -450,13 +451,12 @@ func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 }
 
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
-	err := s.conf.setStoreAndPersist(storeID)
-	if err != nil {
-		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", storeID))
+	if err := cluster.SlowStoreEvicted(storeID); err != nil {
+		log.Info("failed to evict slow store", zap.Uint64("store-id", storeID), zap.Error(err))
 		return err
 	}
 
-	return cluster.SlowStoreEvicted(storeID)
+	return s.conf.setStoreAndPersist(storeID)
 }
 
 func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
@@ -554,6 +554,7 @@ func (s *evictSlowStoreScheduler) tryEvictLeaderFromNetworkSlowStores(cluster sc
 					zap.Error(err))
 				cluster.SlowStoreRecovered(storeID)
 			}
+			log.Info("evicted network slow store", zap.Uint64("store-id", storeID))
 			evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkEvictedStore)).Set(1)
 		}
 	}
