@@ -16,6 +16,8 @@ package statistics
 
 import (
 	"fmt"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -161,6 +163,8 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	if store.IsTiFlash() {
 		statistics = s.engineStatistics[core.EngineTiFlash]
 		if statistics == nil {
+			log.Info("store statistics observe", zap.String("store-type", "tiflash"),
+				zap.Uint64("store-id", store.GetID()))
 			s.engineStatistics[core.EngineTiFlash] = &storeStatusStatistics{opt: s.opt}
 			statistics = s.engineStatistics[core.EngineTiFlash]
 		}
@@ -280,6 +284,7 @@ func (s *storeStatistics) collect() {
 	}
 
 	// Store status metrics.
+	log.Info("store statistics collect", zap.Int("region-count", s.RegionCount))
 	storeRegionCountGauge.Set(float64(s.RegionCount))
 	storeLeaderCountGauge.Set(float64(s.LeaderCount))
 	storeWitnessCountGauge.Set(float64(s.WitnessCount))
