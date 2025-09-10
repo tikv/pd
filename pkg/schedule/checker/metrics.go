@@ -109,21 +109,12 @@ type checkerControllerMetrics struct {
 
 // newCheckerControllerMetrics creates and initializes a new checkerControllerMetrics instance.
 func newCheckerControllerMetrics() *checkerControllerMetrics {
-	m := &checkerControllerMetrics{
-		patrolPhaseHistograms:   make(map[string]prometheus.Observer),
-		checkRegionHistograms:   make(map[string]prometheus.Observer),
-		patrolRegionChannelSize: patrolRegionChannelSize, // Use the gauge defined at package-level
-	}
-
 	patrolPhases := []string{
 		phaseWaitForChannel,
 		phaseCheckPriority,
 		phaseCheckPending,
 		phaseScanRegions,
 		phaseUpdateLabel,
-	}
-	for _, phase := range patrolPhases {
-		m.patrolPhaseHistograms[phase] = patrolPhaseDuration.WithLabelValues(phase)
 	}
 
 	checkerTypes := []string{
@@ -134,6 +125,17 @@ func newCheckerControllerMetrics() *checkerControllerMetrics {
 		replicaChecker,
 		mergeChecker,
 	}
+
+	m := &checkerControllerMetrics{
+		patrolPhaseHistograms:   make(map[string]prometheus.Observer, len(patrolPhases)),
+		checkRegionHistograms:   make(map[string]prometheus.Observer, len(checkerTypes)),
+		patrolRegionChannelSize: patrolRegionChannelSize, // Use the gauge defined at package-level
+	}
+
+	for _, phase := range patrolPhases {
+		m.patrolPhaseHistograms[phase] = patrolPhaseDuration.WithLabelValues(phase)
+	}
+
 	for _, checker := range checkerTypes {
 		m.checkRegionHistograms[checker] = checkRegionDuration.WithLabelValues(checker)
 	}
