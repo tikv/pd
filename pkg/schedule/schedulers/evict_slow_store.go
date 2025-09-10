@@ -456,7 +456,13 @@ func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerClust
 		return err
 	}
 
-	return s.conf.setStoreAndPersist(storeID)
+	if err := s.conf.setStoreAndPersist(storeID); err != nil {
+		log.Info("failed to persist evicted slow store", zap.Uint64("store-id", storeID), zap.Error(err))
+		cluster.SlowStoreRecovered(storeID)
+		return err
+	}
+
+	return nil
 }
 
 func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
