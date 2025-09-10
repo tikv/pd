@@ -63,8 +63,8 @@ func (mc *mockCollector) Collect(data any) {
 	mc.data = append(mc.data, data)
 }
 
-// Flush implements the Collector interface.
-func (mc *mockCollector) Flush() []map[string]any {
+// Aggregate implements the Collector interface.
+func (mc *mockCollector) Aggregate() []map[string]any {
 	mc.Lock()
 	defer mc.Unlock()
 

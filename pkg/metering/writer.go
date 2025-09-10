@@ -40,7 +40,7 @@ const (
 type Collector interface {
 	Category() string
 	Collect(data any)
-	Flush() []map[string]any
+	Aggregate() []map[string]any
 }
 
 // Writer is used to as a delegate to collect and flush the metering data to the underlying storage.
@@ -136,6 +136,8 @@ func (mw *Writer) meteringLoop() {
 
 	now := time.Now()
 	// Truncate to the nearest minute and add the interval to get the next flush time.
+	// By default, metering data should be flushed at the minute level with the correct timestamp.
+	// To ensure accuracy and avoid unexpected overwrites from overlapping timestamps, we need to round the time accordingly.
 	next := now.Truncate(flushInterval).Add(flushInterval)
 	log.Info("metering writer loop started",
 		zap.String("self-id", mw.id),
@@ -167,7 +169,7 @@ func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 	}
 
 	for category, collector := range collectors {
-		records := collector.Flush()
+		records := collector.Aggregate()
 		if len(records) == 0 {
 			continue
 		}

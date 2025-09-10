@@ -105,8 +105,8 @@ func (c *ruCollector) Collect(data any) {
 	rm.add(consumption)
 }
 
-// Flush flushes the RU metering data.
-func (c *ruCollector) Flush() []map[string]any {
+// Aggregate aggregates the RU metering data.
+func (c *ruCollector) Aggregate() []map[string]any {
 	c.Lock()
 	keyspaceRUMetering := c.keyspaceRUMetering
 	c.keyspaceRUMetering = make(map[string]*ruMetering)

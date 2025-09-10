@@ -49,7 +49,7 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	tiflashConsumption.isTiFlash = true
 	collector.Collect(tiflashConsumption)
 
-	records := collector.Flush()
+	records := collector.Aggregate()
 	re.Len(records, 1)
 	re.Empty(collector.keyspaceRUMetering)
 	record := records[0]
@@ -92,7 +92,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 	collector.Collect(consumption1)
 	collector.Collect(consumption2)
 
-	records := collector.Flush()
+	records := collector.Aggregate()
 	re.Len(records, 2)
 	re.Empty(collector.keyspaceRUMetering)
 
