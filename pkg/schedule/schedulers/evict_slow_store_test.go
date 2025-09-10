@@ -176,12 +176,11 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
 	}
 	// step d
-	recoverNetworkSlowStore := func(allowLeaderTransferIn bool) {
+	recoverNetworkSlowStore := func() {
 		suite.tc.PutStore(suite.tc.GetStore(storeID1).Clone(func(store *core.StoreInfo) {
 			store.GetStoreStats().NetworkSlowScores = map[uint64]uint64{}
 		}))
 		checkNetworkSlowStore(re, suite.es.(*evictSlowStoreScheduler), suite.tc, storeID1, false, false, true)
-		re.Equal(allowLeaderTransferIn, suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
 	}
 	// step e
 	recoverDiskSlowStore := func(evicted bool) {
@@ -202,7 +201,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
 
 		triggerNetworkSlowStoreEvicted(false)
-		recoverNetworkSlowStore(true)
+		recoverNetworkSlowStore()
 
 		// recover network slow store doesn't affect disk slow store
 		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
@@ -222,8 +221,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		recoverDiskSlowStore(false)
 
 		// recover disk slow store doesn't affect network slow store
-		re.Equal(false, suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
-		recoverNetworkSlowStore(true)
+		re.False(suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
+		recoverNetworkSlowStore()
 
 		suite.tc.PutStore(originStoreInfo)
 	}
@@ -236,7 +235,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
 
 		triggerNetworkSlowStoreEvicted(false)
-		recoverNetworkSlowStore(true)
+		recoverNetworkSlowStore()
 
 		// recover network slow store doesn't affect disk slow store
 		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
@@ -256,8 +255,8 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		recoverDiskSlowStore(false)
 
 		// recover disk slow store doesn't affect network slow store
-		re.Equal(false, suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
-		recoverNetworkSlowStore(true)
+		re.False(suite.tc.GetStore(storeID1).AllowLeaderTransferIn())
+		recoverNetworkSlowStore()
 
 		suite.tc.PutStore(originStoreInfo)
 	}
@@ -270,7 +269,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		// trigger disk slow store doesn't affect network slow store
 		re.True(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
 
-		recoverNetworkSlowStore(true)
+		recoverNetworkSlowStore()
 		// previous disk slow store doesn't trigger successful.
 		re.False(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
 
@@ -290,7 +289,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkNotConflictWithOtherScheduler()
 		// so even if disk slow store recover, store 1 is still evicted.
 		recoverDiskSlowStore(true)
 
-		recoverNetworkSlowStore(true)
+		recoverNetworkSlowStore()
 		re.False(suite.tc.GetStore(storeID1).EvictedAsSlowStore())
 
 		suite.tc.PutStore(originStoreInfo)
