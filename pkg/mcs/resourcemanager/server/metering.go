@@ -89,6 +89,12 @@ func newRUCollector() *ruCollector {
 	}
 }
 
+func (c *ruCollector) remove(keyspaceName string) {
+	c.Lock()
+	defer c.Unlock()
+	delete(c.keyspaceRUMetering, keyspaceName)
+}
+
 // Category returns the category of the collector.
 func (*ruCollector) Category() string { return resourceManagerCategory }
 

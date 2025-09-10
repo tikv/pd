@@ -8,7 +8,7 @@ replace (
 )
 
 require (
-	github.com/BurntSushi/toml v0.3.1
+	github.com/BurntSushi/toml v1.5.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.1
@@ -157,7 +157,7 @@ require (
 	github.com/petermattis/goid v0.0.0-20240813172612-4fcff4a6cae7 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
-	github.com/pingcap/metering_sdk v0.0.0-20250907080303-39f34e0a1ca0 // indirect
+	github.com/pingcap/metering_sdk v0.0.0-20250910063513-219eaccb6f53 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20250630090911-e1f8338b7285 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect

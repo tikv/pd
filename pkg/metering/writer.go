@@ -57,27 +57,16 @@ type Writer struct {
 }
 
 // NewWriter creates a new metering writer to collect and report the metering data to the underlying storage.
-func NewWriter(ctx context.Context, meteringConfig *Config, id string) (*Writer, error) {
-	err := meteringConfig.adjust()
+func NewWriter(ctx context.Context, c *config.MeteringConfig, id string) (*Writer, error) {
+	err := validateMeteringConfig(c)
 	if err != nil {
 		return nil, err
 	}
-
-	// Create storage provider
-	providerConfig := &storage.ProviderConfig{
-		Type:   meteringConfig.Type,
-		Bucket: meteringConfig.Bucket,
-		Region: meteringConfig.Region,
-		Prefix: meteringConfig.Prefix,
-		AWS: &storage.AWSConfig{
-			AssumeRoleARN: meteringConfig.RoleARN,
-		},
-	}
-	provider, err := storage.NewObjectStorageProvider(providerConfig)
+	var provider storage.ObjectStorageProvider
+	provider, err = storage.NewObjectStorageProvider(c.ToProviderConfig())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create storage provider for metering")
 	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	return &Writer{
 		id:       id,
@@ -90,6 +79,30 @@ func NewWriter(ctx context.Context, meteringConfig *Config, id string) (*Writer,
 		),
 		collectors: make(map[string]Collector),
 	}, nil
+}
+
+func validateMeteringConfig(c *config.MeteringConfig) error {
+	if len(c.Type) == 0 {
+		return errors.New("type is required for the metering config")
+	}
+	switch c.Type {
+	case storage.ProviderTypeS3:
+		fallthrough
+	case storage.ProviderTypeOSS:
+		if len(c.Region) == 0 {
+			return errors.New("region is required for the metering config")
+		}
+		if len(c.Bucket) == 0 {
+			return errors.New("bucket is required for the metering config")
+		}
+	case storage.ProviderTypeLocalFS:
+		if len(c.LocalFS.BasePath) == 0 {
+			return errors.New("base path is required for the metering config")
+		}
+	default:
+		return errors.New("unsupported provider type for the metering config")
+	}
+	return nil
 }
 
 // Start starts the metering writer background loop

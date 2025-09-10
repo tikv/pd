@@ -529,6 +529,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					continue
 				}
 				m.metrics.cleanupAllMetrics(r, keyspaceName)
+				m.ruCollector.remove(keyspaceName)
 			}
 		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.

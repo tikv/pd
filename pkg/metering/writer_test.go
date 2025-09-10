@@ -24,10 +24,9 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 
-	mconfig "github.com/pingcap/metering_sdk/config"
+	"github.com/pingcap/metering_sdk/config"
 	meteringreader "github.com/pingcap/metering_sdk/reader/metering"
 	"github.com/pingcap/metering_sdk/storage"
-	meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -91,28 +90,24 @@ func (mc *mockCollector) getCollectedData() []any {
 	return mc.data
 }
 
-func TestConfigAdjust(t *testing.T) {
+func TestConfigValidate(t *testing.T) {
 	re := require.New(t)
 
 	// Test config without Type field - should set default to S3.
-	config := &Config{
-		Bucket:  "test-bucket",
-		Prefix:  "test-prefix",
-		Region:  "us-west-2",
-		RoleARN: "test-role-arn",
+	c := &config.MeteringConfig{
+		Region: "us-west-2",
+		Bucket: "test-bucket",
 	}
 
-	err := config.adjust()
-	re.NoError(err)
-	re.Equal(storage.ProviderTypeS3, config.Type)
+	err := validateMeteringConfig(c)
+	re.Error(err)
 
-	// Test config without RoleARN field - should return error.
-	config = &Config{
-		Bucket: "test-bucket",
-		Prefix: "test-prefix",
+	// Test config without Bucket field - should return error.
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeS3,
 		Region: "us-west-2",
 	}
-	err = config.adjust()
+	err = validateMeteringConfig(c)
 	re.Error(err)
 }
 
@@ -210,28 +205,13 @@ func TestFlushMeteringDataWithCollectors(t *testing.T) {
 }
 
 func newLocalWriter(ctx context.Context, re *require.Assertions, dir string) (*Writer, *meteringreader.MeteringReader) {
-	config := &Config{
-		Bucket:  "bucket",
-		Region:  "region",
-		RoleARN: "role-arn",
-	}
-	writer, err := NewWriter(ctx, config, "testlocalwriter")
+	c := config.NewMeteringConfig().WithLocalFS(dir)
+	writer, err := NewWriter(ctx, c, "testlocalwriter")
 	re.NoError(err)
 
-	// Replace the S3 writer with the local writer for testing.
-	localConfig := &storage.ProviderConfig{
-		Type:   storage.ProviderTypeLocalFS,
-		Bucket: config.Bucket,
-		Region: config.Region,
-		LocalFS: &storage.LocalFSConfig{
-			BasePath:   dir,
-			CreateDirs: true,
-		},
-	}
-	provider, err := storage.NewObjectStorageProvider(localConfig)
+	provider, err := storage.NewObjectStorageProvider(c.ToProviderConfig())
 	re.NoError(err)
-	meteringConfig := mconfig.DefaultConfig().WithLogger(zap.L())
-	writer.inner = meteringwriter.NewMeteringWriter(provider, meteringConfig)
+	meteringConfig := config.DefaultConfig().WithLogger(zap.L())
 	reader := meteringreader.NewMeteringReader(provider, meteringConfig)
 	return writer, reader
 }
