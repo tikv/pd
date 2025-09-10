@@ -366,7 +366,7 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 	}
 }
 
-func forwardReportBucketsToScheduling(rc *cluster.RaftCluster, forwardStream schedulingpb.Scheduling_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+func forwardReportBucketsToScheduling(forwardStream schedulingpb.Scheduling_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
 	for {
@@ -379,37 +379,19 @@ func forwardReportBucketsToScheduling(rc *cluster.RaftCluster, forwardStream sch
 			errCh <- errors.WithStack(err)
 			return
 		}
-		// TODO: find a better way to halt scheduling immediately.
-		if rc.IsSchedulingHalted() {
-			continue
-		}
-		// The error types defined for schedulingpb and pdpb are different, so we need to convert them.
-		var pdpbErr *pdpb.Error
+
 		schedulingpbErr := resp.GetHeader().GetError()
 		if schedulingpbErr != nil {
-			if schedulingpbErr.Type == schedulingpb.ErrorType_OK {
-				pdpbErr = &pdpb.Error{
-					Type:    pdpb.ErrorType_OK,
-					Message: schedulingpbErr.GetMessage(),
+			// TODO: handle more error types if needed.
+			if schedulingpbErr.Type == schedulingpb.ErrorType_NOT_BOOTSTRAPPED {
+				response := &pdpb.ReportBucketsResponse{
+					Header: notBootstrappedHeader(),
 				}
-			} else {
-				// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
-				pdpbErr = &pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: schedulingpbErr.GetMessage(),
+				if err := server.send(response); err != nil {
+					errCh <- errors.WithStack(err)
+					return
 				}
 			}
-		}
-		response := &pdpb.ReportBucketsResponse{
-			Header: &pdpb.ResponseHeader{
-				ClusterId: resp.GetHeader().GetClusterId(),
-				Error:     pdpbErr,
-			},
-		}
-
-		if err := server.send(response); err != nil {
-			errCh <- errors.WithStack(err)
-			return
 		}
 	}
 }
