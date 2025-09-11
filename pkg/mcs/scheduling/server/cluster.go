@@ -547,47 +547,47 @@ func (c *Cluster) GetPrepareRegionCount() int {
 	defer ticker.Stop()
 	// Retry until the request is successful or the context is done.
 	url := fmt.Sprintf("%s/pd/api/v1/regions/count", backendAddress)
-	var (
-		ctx    context.Context
-		cancel context.CancelFunc
-	)
 
 	start := time.Now()
 	for {
 		if time.Since(start) > schedule.CollectTimeout {
-			return 0
+			log.Warn("get prepare region count timeout, use total region count instead")
+			return c.GetTotalRegionCount()
 		}
 		select {
 		case <-c.ctx.Done():
+			log.Info("cluster is closing, stop getting prepare region count")
 			return 0
 		case <-ticker.C:
-			ctx, cancel = context.WithTimeout(c.ctx, requestTimeout)
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-			if err != nil {
-				cancel()
-				continue
+			if count, err := c.getPrepareRegionCountFromPD(url); err == nil {
+				return count
 			}
-			resp, err := c.httpClient.Do(req)
-			if err != nil {
-				cancel()
-				continue
-			}
-			body, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				cancel()
-				continue
-			}
-
-			var regionsInfo response.RegionsInfo
-			if err := json.Unmarshal(body, &regionsInfo); err != nil {
-				cancel()
-				continue
-			}
-			cancel()
-			return regionsInfo.Count
 		}
 	}
+}
+
+func (c *Cluster) getPrepareRegionCountFromPD(url string) (int, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return 0, err
+	}
+
+	var regionsInfo response.RegionsInfo
+	if err := json.Unmarshal(body, &regionsInfo); err != nil {
+		return 0, err
+	}
+	return regionsInfo.Count, nil
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
