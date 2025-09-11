@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"sync"
 	"testing"
 	"time"
@@ -697,6 +698,34 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	re.Equal(uint64(0), op.ConfVerChanged(region))
 	// no new step
 	re.Equal(3, stream.MsgLength())
+}
+
+func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
+	re := suite.Require()
+	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderRegionWithRange(1, "200", "300", 1, 2, 3)
+	op := &Operator{
+		regionID: 1,
+		kind:     OpRegion,
+		steps: []OpStep{
+			AddLearner{ToStore: 2, PeerID: 2},
+		},
+		timeout: time.Minute,
+	}
+	re.True(controller.addOperatorInner(op))
+	op.Start()
+	inf := controller.GetOpInfluence(cluster.GetBasicCluster())
+	re.Len(inf.StoresInfluence, 1)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("200")}}))
+	re.Empty(inf.StoresInfluence)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
+	re.Len(inf.StoresInfluence, 1)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("200"), EndKey: []byte("300")}}))
+	re.Len(inf.StoresInfluence, 1)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("200"), EndKey: []byte("299")}}))
+	re.Len(inf.StoresInfluence, 0)
 }
 
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
