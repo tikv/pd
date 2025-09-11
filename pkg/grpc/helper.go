@@ -39,12 +39,12 @@ func GetRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest) (resp *pdp
 	}()
 
 	if rc == nil {
-		return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: NotBootstrappedHeader()}, nil
 	}
 	region := rc.GetRegionByKey(request.GetRegionKey())
 	if region == nil {
 		log.Warn("leader get region nil", zap.String("key", string(request.GetRegionKey())))
-		return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: WrapHeader()}, nil
 	}
 
 	var buckets *metapb.Buckets
@@ -52,7 +52,7 @@ func GetRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest) (resp *pdp
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
-		Header:       wrapHeader(),
+		Header:       WrapHeader(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
@@ -68,19 +68,19 @@ func GetPrevRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest) (resp 
 	}()
 
 	if rc == nil {
-		return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: NotBootstrappedHeader()}, nil
 	}
 
 	region := rc.GetPrevRegionByKey(request.GetRegionKey())
 	if region == nil {
-		return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: WrapHeader()}, nil
 	}
 	var buckets *metapb.Buckets
 	if request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
-		Header:       wrapHeader(),
+		Header:       WrapHeader(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
@@ -95,18 +95,18 @@ func GetRegionByID(rc *core.BasicCluster, request *pdpb.GetRegionByIDRequest) (r
 		incRegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error)
 	}()
 	if rc == nil {
-		return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: NotBootstrappedHeader()}, nil
 	}
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
-		return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: WrapHeader()}, nil
 	}
 	var buckets *metapb.Buckets
 	if request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
-		Header:       wrapHeader(),
+		Header:       WrapHeader(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
@@ -122,13 +122,13 @@ func ScanRegions(rc *core.BasicCluster, request *pdpb.ScanRegionsRequest) (resp 
 		incRegionRequestCounter("ScanRegions", request.Header, resp.Header.Error)
 	}()
 	if rc == nil {
-		return &pdpb.ScanRegionsResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.ScanRegionsResponse{Header: NotBootstrappedHeader()}, nil
 	}
 	regions := rc.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
 	if len(regions) == 0 {
-		return &pdpb.ScanRegionsResponse{Header: regionNotFound()}, nil
+		return &pdpb.ScanRegionsResponse{Header: RegionNotFound()}, nil
 	}
-	resp = &pdpb.ScanRegionsResponse{Header: wrapHeader()}
+	resp = &pdpb.ScanRegionsResponse{Header: WrapHeader()}
 	for _, r := range regions {
 		leader := r.GetLeader()
 		if leader == nil {
@@ -154,7 +154,7 @@ func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsReque
 	}()
 
 	if rc == nil {
-		return &pdpb.BatchScanRegionsResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.BatchScanRegionsResponse{Header: NotBootstrappedHeader()}, nil
 	}
 	needBucket := request.GetNeedBuckets()
 	limit := request.GetLimit()
@@ -164,11 +164,11 @@ func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsReque
 	for i, reqRange := range reqRanges {
 		if i > 0 {
 			if bytes.Compare(reqRange.StartKey, reqRanges[i-1].EndKey) < 0 {
-				return &pdpb.BatchScanRegionsResponse{Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, ranges overlapped")}, nil
+				return &pdpb.BatchScanRegionsResponse{Header: WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, ranges overlapped")}, nil
 			}
 		}
 		if len(reqRange.EndKey) > 0 && bytes.Compare(reqRange.StartKey, reqRange.EndKey) > 0 {
-			return &pdpb.BatchScanRegionsResponse{Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, start key > end key")}, nil
+			return &pdpb.BatchScanRegionsResponse{Header: WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, start key > end key")}, nil
 		}
 		keyRanges.Append(reqRange.StartKey, reqRange.EndKey)
 	}
@@ -181,11 +181,11 @@ func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsReque
 	if err != nil {
 		if errs.ErrRegionNotAdjacent.Equal(multierr.Errors(err)[0]) {
 			return &pdpb.BatchScanRegionsResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error()),
+				Header: WrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error()),
 			}, nil
 		}
 		return &pdpb.BatchScanRegionsResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	regions := make([]*pdpb.Region, 0, len(res))
@@ -207,9 +207,9 @@ func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsReque
 		})
 	}
 	if len(regions) == 0 {
-		return &pdpb.BatchScanRegionsResponse{Header: regionNotFound()}, nil
+		return &pdpb.BatchScanRegionsResponse{Header: RegionNotFound()}, nil
 	}
-	resp = &pdpb.BatchScanRegionsResponse{Header: wrapHeader(), Regions: regions}
+	resp = &pdpb.BatchScanRegionsResponse{Header: WrapHeader(), Regions: regions}
 	return resp, nil
 }
 
@@ -227,7 +227,7 @@ func QueryRegion(rc *core.BasicCluster, request *pdpb.QueryRegionRequest) *pdpb.
 		queryRegionDuration.Observe(time.Since(start).Seconds())
 		// Build the response and send it to the client.
 		response := &pdpb.QueryRegionResponse{
-			Header:       wrapHeader(),
+			Header:       WrapHeader(),
 			KeyIdMap:     keyIDMap,
 			PrevKeyIdMap: prevKeyIDMap,
 			RegionsById:  regionsByID,
@@ -241,19 +241,19 @@ func QueryRegion(rc *core.BasicCluster, request *pdpb.QueryRegionRequest) *pdpb.
 // GetStore implements gRPC PDServer.
 func GetStore(rc *core.BasicCluster, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	if rc == nil {
-		return &pdpb.GetStoreResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.GetStoreResponse{Header: NotBootstrappedHeader()}, nil
 	}
 
 	storeID := request.GetStoreId()
 	store := rc.GetStore(storeID)
 	if store == nil {
 		return &pdpb.GetStoreResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("invalid store ID %d, not found", storeID)),
 		}, nil
 	}
 	return &pdpb.GetStoreResponse{
-		Header: wrapHeader(),
+		Header: WrapHeader(),
 		Store:  store.GetMeta(),
 		Stats:  store.GetStoreStats(),
 	}, nil
@@ -262,7 +262,7 @@ func GetStore(rc *core.BasicCluster, request *pdpb.GetStoreRequest) (*pdpb.GetSt
 // GetAllStores implements the GetAllStores RPC method.
 func GetAllStores(rc *core.BasicCluster, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
 	if rc == nil {
-		return &pdpb.GetAllStoresResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.GetAllStoresResponse{Header: NotBootstrappedHeader()}, nil
 	}
 	var stores []*metapb.Store
 	if request.GetExcludeTombstoneStores() {
@@ -275,42 +275,47 @@ func GetAllStores(rc *core.BasicCluster, request *pdpb.GetAllStoresRequest) (*pd
 		stores = rc.GetMetaStores()
 	}
 	return &pdpb.GetAllStoresResponse{
-		Header: wrapHeader(),
+		Header: WrapHeader(),
 		Stores: stores,
 	}, nil
 }
 
-func wrapHeader() *pdpb.ResponseHeader {
+// WrapHeader creates a response header with the current cluster ID.
+func WrapHeader() *pdpb.ResponseHeader {
 	clusterID := keypath.ClusterID()
 	if clusterID == 0 {
-		return wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+		return WrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
 	}
 	return &pdpb.ResponseHeader{ClusterId: clusterID}
 }
 
-func wrapErrorToHeader(errorType pdpb.ErrorType, message string) *pdpb.ResponseHeader {
-	return errorHeader(&pdpb.Error{
+// WrapErrorToHeader creates a response header with the given error type and message.
+func WrapErrorToHeader(errorType pdpb.ErrorType, message string) *pdpb.ResponseHeader {
+	return ErrorHeader(&pdpb.Error{
 		Type:    errorType,
 		Message: message,
 	})
 }
 
-func errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
+// ErrorHeader creates a response header with the given error.
+func ErrorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
 	return &pdpb.ResponseHeader{
 		ClusterId: keypath.ClusterID(),
 		Error:     err,
 	}
 }
 
-func notBootstrappedHeader() *pdpb.ResponseHeader {
-	return errorHeader(&pdpb.Error{
+// NotBootstrappedHeader returns a response header indicating the cluster is not bootstrapped.
+func NotBootstrappedHeader() *pdpb.ResponseHeader {
+	return ErrorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
 		Message: "cluster is not bootstrapped",
 	})
 }
 
-func regionNotFound() *pdpb.ResponseHeader {
-	return errorHeader(&pdpb.Error{
+// RegionNotFound returns a response header indicating the region is not found.
+func RegionNotFound() *pdpb.ResponseHeader {
+	return ErrorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_REGION_NOT_FOUND,
 		Message: "region not found",
 	})
