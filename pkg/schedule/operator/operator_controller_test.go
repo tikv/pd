@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type operatorControllerTestSuite struct {
@@ -718,6 +718,10 @@ func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
 	op.Start()
 	inf := controller.GetOpInfluence(cluster.GetBasicCluster())
 	re.Len(inf.StoresInfluence, 1)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("300"), EndKey: []byte("400")}}))
+	re.Empty(inf.StoresInfluence)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("199")}}))
+	re.Empty(inf.StoresInfluence)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("200")}}))
 	re.Empty(inf.StoresInfluence)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
@@ -725,7 +729,7 @@ func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("200"), EndKey: []byte("300")}}))
 	re.Len(inf.StoresInfluence, 1)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("200"), EndKey: []byte("299")}}))
-	re.Len(inf.StoresInfluence, 0)
+	re.Len(inf.StoresInfluence, 1)
 }
 
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
