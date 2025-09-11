@@ -91,7 +91,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		cancel:                cancel,
 		schedulersInitialized: false,
 		cluster:               cluster,
-		prepareChecker:        newPrepareChecker(cluster.GetPrepareRegionCount()),
+		prepareChecker:        newPrepareChecker(cluster.GetPrepareRegionCount),
 		checkers:              checkers,
 		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddPendingProcessedRegions),
 		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddPendingProcessedRegions),

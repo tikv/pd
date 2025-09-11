@@ -129,7 +129,7 @@ func (mc *Cluster) AllocID(uint32) (uint64, uint32, error) {
 }
 
 // GetPrepareRegionCount returns the count of regions that are in prepare state.
-func (*Cluster) GetPrepareRegionCount() int { return 0 }
+func (*Cluster) GetPrepareRegionCount() (int, error) { return 0, nil }
 
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (*Cluster) UpdateRegionsLabelLevelStats(_ []*core.RegionInfo) {}

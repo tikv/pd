@@ -125,18 +125,17 @@ func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *
 		return tc.pd.GetLeaderServer().GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
 	})
 	// send a heartbeat immediately to make prepare checker pass
+	grpcPDClient := testutil.MustNewGrpcClient(re, tc.pd.GetLeaderServer().GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(tc.ctx)
+	re.NoError(err)
 	regions := tc.pd.GetLeaderServer().GetRegions()
 	for _, region := range regions {
-		tc.heartbeat(re, region)
+		re.NoError(tc.heartbeat(stream, region))
 	}
 	return primary
 }
 
-func (tc *TestSchedulingCluster) heartbeat(re *require.Assertions, region *core.RegionInfo) {
-	grpcPDClient := testutil.MustNewGrpcClient(re, tc.pd.GetLeaderServer().GetServer().GetAddr())
-	stream, err := grpcPDClient.RegionHeartbeat(tc.ctx)
-	re.NoError(err)
-
+func (tc *TestSchedulingCluster) heartbeat(stream pdpb.PD_RegionHeartbeatClient, region *core.RegionInfo) error {
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(tc.pd.GetLeaderServer().GetClusterID()),
 		Region:          region.GetMeta(),
@@ -151,8 +150,7 @@ func (tc *TestSchedulingCluster) heartbeat(re *require.Assertions, region *core.
 		ApproximateSize: uint64(region.GetApproximateSize()),
 		Term:            region.GetTerm(),
 	}
-	err = stream.Send(regionReq)
-	re.NoError(err)
+	return stream.Send(regionReq)
 }
 
 // GetServer returns the scheduling server by the given address.

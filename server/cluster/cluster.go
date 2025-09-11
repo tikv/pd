@@ -949,8 +949,8 @@ func (c *RaftCluster) AllocID(uint32) (uint64, uint32, error) {
 }
 
 // GetPrepareRegionCount returns the count of regions that are in prepare state.
-func (c *RaftCluster) GetPrepareRegionCount() int {
-	return c.GetTotalRegionCount()
+func (c *RaftCluster) GetPrepareRegionCount() (int, error) {
+	return c.GetTotalRegionCount(), nil
 }
 
 // GetRegionSyncer returns the region syncer.

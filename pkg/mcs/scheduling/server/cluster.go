@@ -536,37 +536,18 @@ func (c *Cluster) runCoordinator() {
 }
 
 // GetPrepareRegionCount returns the count of regions that are in prepare state.
-func (c *Cluster) GetPrepareRegionCount() int {
+func (c *Cluster) GetPrepareRegionCount() (int, error) {
+	return c.getPrepareRegionCountFromPD()
+}
+
+func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
 	backendAddresses := strings.Split(c.backendAddress, ",")
 	var backendAddress string
 	if len(backendAddresses) >= 1 {
 		backendAddress = backendAddresses[0]
 	}
 
-	ticker := time.NewTicker(requestInterval)
-	defer ticker.Stop()
-	// Retry until the request is successful or the context is done.
 	url := fmt.Sprintf("%s/pd/api/v1/regions/count", backendAddress)
-
-	start := time.Now()
-	for {
-		if time.Since(start) > schedule.CollectTimeout {
-			log.Warn("get prepare region count timeout, use total region count instead")
-			return c.GetTotalRegionCount()
-		}
-		select {
-		case <-c.ctx.Done():
-			log.Info("cluster is closing, stop getting prepare region count")
-			return 0
-		case <-ticker.C:
-			if count, err := c.getPrepareRegionCountFromPD(url); err == nil {
-				return count
-			}
-		}
-	}
-}
-
-func (c *Cluster) getPrepareRegionCountFromPD(url string) (int, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)

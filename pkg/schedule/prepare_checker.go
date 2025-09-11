@@ -27,15 +27,15 @@ import (
 
 type prepareChecker struct {
 	syncutil.RWMutex
-	start            time.Time
-	totalRegionCount int
-	prepared         bool
+	start              time.Time
+	totalRegionCountFn func() (int, error)
+	prepared           bool
 }
 
-func newPrepareChecker(totalRegionCount int) *prepareChecker {
+func newPrepareChecker(totalRegionCountFn func() (int, error)) *prepareChecker {
 	return &prepareChecker{
-		start:            time.Now(),
-		totalRegionCount: totalRegionCount,
+		start:              time.Now(),
+		totalRegionCountFn: totalRegionCountFn,
 	}
 }
 
@@ -51,8 +51,12 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return true
 	}
 	notLoadedFromRegionsCnt := c.GetNotFromStorageRegionsCnt()
+	totalRegionCount, err := checker.totalRegionCountFn()
+	if err != nil {
+		return false
+	}
 	// The number of active regions should be more than total region of all stores * core.CollectFactor
-	if float64(checker.totalRegionCount)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
+	if float64(totalRegionCount)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
 		return false
 	}
 	for _, store := range c.GetStores() {
@@ -68,7 +72,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 			return false
 		}
 	}
-	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", checker.totalRegionCount))
+	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionCount))
 	checker.prepared = true
 	return true
 }

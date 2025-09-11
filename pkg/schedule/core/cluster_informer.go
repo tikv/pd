@@ -65,7 +65,7 @@ type SharedCluster interface {
 	GetKeyRangeManager() *keyrange.Manager
 	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
-	GetPrepareRegionCount() int
+	GetPrepareRegionCount() (int, error)
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces
