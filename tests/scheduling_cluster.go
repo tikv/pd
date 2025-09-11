@@ -16,6 +16,7 @@ package tests
 
 import (
 	"context"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -119,7 +120,7 @@ func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *
 			}
 		}
 		return false
-	})
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 	testutil.Eventually(re, func() bool {
 		return tc.pd.GetLeaderServer().GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
 	})
