@@ -848,8 +848,6 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	})
 
 	re.True(coordinator2.ShouldRun())
-	suite.TearDownSuite()
-	suite.SetupSuite()
 }
 
 func (suite *serverTestSuite) TestOnlineProgress() {
@@ -1263,6 +1261,7 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 
 func (suite *serverTestSuite) TestForwardSplitRegion() {
 	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -1375,4 +1374,5 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	re.Equal(uint64(100), splitResp.GetFinishedPercentage())
 	// Should have regions IDs for the split operation
 	re.Equal([]uint64{101}, splitResp.GetRegionsId())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 }
