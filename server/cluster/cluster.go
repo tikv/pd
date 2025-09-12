@@ -1160,8 +1160,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	return nil
 }
 
-// processReportBuckets update the bucket information.
-func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
+// processRegionBuckets update the bucket information.
+func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		regionCacheMissCounter.Inc()

@@ -256,9 +256,9 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
 
-// HandleReportBuckets processes buckets reports from client
-func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	if err := c.processReportBuckets(b); err != nil {
+// HandleRegionBuckets processes region buckets from client
+func (c *RaftCluster) HandleRegionBuckets(b *metapb.Buckets) error {
+	if err := c.processRegionBuckets(b); err != nil {
 		return err
 	}
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {

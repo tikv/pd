@@ -500,6 +500,130 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	})
 }
 
+func (suite *serverTestSuite) TestForwardReportBuckets() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+
+	// First create a region via region heartbeat
+	heartbeatStream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region: &metapb.Region{
+			Id:       10,
+			Peers:    peers,
+			StartKey: []byte("a"),
+			EndKey:   []byte("z"),
+		},
+		Leader:          peers[0],
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+	}
+	err = heartbeatStream.Send(regionReq)
+	re.NoError(err)
+
+	// Wait for the region to be created
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetApproximateKeys() == 300
+	})
+
+	// Now test ReportBuckets forwarding with multiple requests
+	bucketStream, err := grpcPDClient.ReportBuckets(suite.ctx)
+	re.NoError(err)
+
+	// Send multiple bucket reports to test streaming
+	for version := uint64(1); version <= 3; version++ {
+		// Create bucket stats with increasing read/write metrics for each version
+		bucketStats := &metapb.BucketStats{
+			ReadBytes:  []uint64{100 * version, 200 * version, 150 * version},
+			ReadKeys:   []uint64{10 * version, 20 * version, 15 * version},
+			ReadQps:    []uint64{5 * version, 10 * version, 8 * version},
+			WriteBytes: []uint64{50 * version, 100 * version, 75 * version},
+			WriteKeys:  []uint64{5 * version, 10 * version, 7 * version},
+			WriteQps:   []uint64{2 * version, 5 * version, 3 * version},
+		}
+
+		buckets := &metapb.Buckets{
+			RegionId:   10,
+			Version:    version,
+			Keys:       [][]byte{[]byte("a"), []byte("m"), []byte("r"), []byte("z")},
+			Stats:      bucketStats,
+			PeriodInMs: 10000, // 10 seconds
+		}
+
+		bucketReq := &pdpb.ReportBucketsRequest{
+			Header:      testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Buckets:     buckets,
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: version},
+		}
+
+		err = bucketStream.Send(bucketReq)
+		re.NoError(err)
+
+		// Wait a bit between requests to simulate real streaming
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Close the stream (ReportBuckets is fire-and-forget)
+	err = bucketStream.CloseSend()
+	re.NoError(err)
+
+	// Verify the buckets are processed by the scheduling server
+	// The scheduling server should receive and process the bucket keys and version
+	// Should have the latest version (3) after all requests
+	testutil.Eventually(re, func() bool {
+		// Check if the scheduling server has the region and bucket information
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetBuckets() != nil &&
+			region.GetBuckets().GetVersion() == 3 &&
+			len(region.GetBuckets().GetKeys()) == 4
+	})
+
+	// Verify bucket keys are properly stored (stats are not stored in scheduling server)
+	// Should contain the final version (3) with correct keys
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		if region == nil || region.GetBuckets() == nil {
+			return false
+		}
+		buckets := region.GetBuckets()
+		return buckets.GetRegionId() == 10 &&
+			buckets.GetVersion() == 3 &&
+			len(buckets.GetKeys()) == 4 &&
+			string(buckets.GetKeys()[0]) == "a" &&
+			string(buckets.GetKeys()[3]) == "z"
+	})
+}
+
 func (suite *serverTestSuite) TestStoreLimit() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
