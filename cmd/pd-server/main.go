@@ -29,6 +29,7 @@ import (
 
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	resource_manager "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/memory"
@@ -48,6 +49,7 @@ import (
 const (
 	apiMode        = "api"
 	tsoMode        = "tso"
+	rmMode         = "resource-manager"
 	serviceModeEnv = "PD_SERVICE_MODE"
 )
 
@@ -72,9 +74,10 @@ func main() {
 func NewServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "services <mode>",
-		Short: "Run services, for example, tso, scheduling",
+		Short: "Run services, for example, tso, resource_manager",
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
+	cmd.AddCommand(NewResourceManagerServiceCommand())
 	cmd.AddCommand(NewSchedulingServiceCommand())
 	cmd.AddCommand(NewPDServiceCommand())
 	return cmd
@@ -113,6 +116,27 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
 	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
+	cmd.Flags().StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
+	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
+	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
+	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
+	return cmd
+}
+
+// NewResourceManagerServiceCommand returns the resource manager service command.
+func NewResourceManagerServiceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   rmMode,
+		Short: "Run the resource manager service",
+		Run:   resource_manager.CreateServerWrapper,
+	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this resource manager member")
+	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
+	cmd.Flags().StringP("config", "", "", "config file")
+	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
+	cmd.Flags().StringP("listen-addr", "", "", "listen address for resource management service")
 	cmd.Flags().StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")

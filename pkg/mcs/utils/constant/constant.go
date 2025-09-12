@@ -49,6 +49,8 @@ const (
 	PDServiceName = "pd"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
+	// ResourceManagerServiceName is the name of resource manager server.
+	ResourceManagerServiceName = "resource_manager"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
 
