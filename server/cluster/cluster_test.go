@@ -3119,7 +3119,7 @@ func TestShouldRun(t *testing.T) {
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(7, tc.GetClusterNotFromStorageRegionsCnt())
+	re.Equal(7, tc.GetNotFromStorageRegionsCnt())
 }
 
 func TestShouldRunWithNonLeaderRegions(t *testing.T) {
@@ -3162,7 +3162,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(9, tc.GetClusterNotFromStorageRegionsCnt())
+	re.Equal(9, tc.GetNotFromStorageRegionsCnt())
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())

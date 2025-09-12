@@ -58,7 +58,6 @@ func TestAPI(t *testing.T) {
 func (suite *apiTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
@@ -66,7 +65,6 @@ func (suite *apiTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 }
 
 func (suite *apiTestSuite) TestGetCheckerByName() {
