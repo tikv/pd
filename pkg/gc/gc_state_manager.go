@@ -116,11 +116,18 @@ type GCStateManager struct {
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
+
+	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
 func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager) *GCStateManager {
-	return &GCStateManager{gcMetaStorage: store, cfg: cfg, keyspaceManager: keyspaceManager}
+	return &GCStateManager{
+		gcMetaStorage:                    store,
+		cfg:                              cfg,
+		keyspaceManager:                  keyspaceManager,
+		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
+	}
 }
 
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
@@ -648,8 +655,18 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.
 // Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
-// Note, it returns only the GC states of active keyspace. If a keyspace is in DISABLE/ARCHIVED/TOMBSTONE state, it's ignored here.
+// The result contains only the GC states of active keyspace. If a keyspace is in DISABLE/ARCHIVED/TOMBSTONE state,
+// it will be filtered out.
+//
+// Concurrent calls to this method might be internally merged, in which case the result will be shared. As a result,
+// the caller should NEVER change the content of the returned result and error. It's guaranteed that the returned result
+// must be fetched AFTER the beginning of the current invocation, and it never reuses the result of invocations that
+// started earlier than the current one.
 func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
+	return m.allKeyspacesGCStatesSingleFlight.Do(context.Background(), m.getAllKeyspacesGCStatesImpl)
+}
+
+func (m *GCStateManager) getAllKeyspacesGCStatesImpl() (map[uint32]GCState, error) {
 	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
 	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
 	if err != nil {
