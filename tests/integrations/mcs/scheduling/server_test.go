@@ -848,6 +848,8 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	})
 
 	re.True(coordinator2.ShouldRun())
+	suite.TearDownSuite()
+	suite.SetupSuite()
 }
 
 func (suite *serverTestSuite) TestOnlineProgress() {
