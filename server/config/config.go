@@ -34,6 +34,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
@@ -164,6 +165,8 @@ type Config struct {
 	Microservice MicroserviceConfig `toml:"micro-service" json:"micro-service"`
 
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
 // NewConfig creates a new config.
@@ -213,8 +216,6 @@ const (
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
-	defaultEnableWitness       = false
-	defaultHaltScheduling      = false
 
 	defaultDashboardAddress = "auto"
 

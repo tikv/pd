@@ -32,6 +32,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
@@ -70,24 +71,29 @@ type Manager struct {
 	keyspaceIDLookup map[string]uint32
 	// metrics is the collection of metrics.
 	metrics *metrics
+	// ruCollector is used to collect the RU metering data.
+	ruCollector *ruCollector
 }
 
-// ConfigProvider is used to get resource manager config from the given
-// `bs.server` without modifying its interface.
-type ConfigProvider interface {
+// factoryProvider is a factory provider for the manager, which injects some specialized functions
+// that need to be retrieved from the `bs.Server` instance without interacting with its interface.
+type factoryProvider interface {
 	GetControllerConfig() *ControllerConfig
+	GetMeteringWriter() *metering.Writer
 }
 
 // NewManager returns a new manager base on the given server,
-// which should implement the `ConfigProvider` interface.
-func NewManager[T ConfigProvider](srv bs.Server) *Manager {
+// which should implement the `FactoryProvider` interface.
+func NewManager[T factoryProvider](srv bs.Server) *Manager {
+	fp := srv.(T)
 	m := &Manager{
-		controllerConfig:      srv.(T).GetControllerConfig(),
+		controllerConfig:      fp.GetControllerConfig(),
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
 		keyspaceNameLookup:    make(map[uint32]string),
 		keyspaceIDLookup:      make(map[string]uint32),
 		metrics:               newMetrics(),
+		ruCollector:           newRUCollector(),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -100,6 +106,8 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	})
 	// The second initialization after becoming serving.
 	srv.AddServiceReadyCallback(m.Init)
+	// Register the RU collector to the metering writer.
+	fp.GetMeteringWriter().RegisterCollector(m.ruCollector)
 	return m
 }
 
@@ -503,7 +511,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig, time.Now())
+			consumptionInfo.keyspaceName = keyspaceName
+			m.ruCollector.Collect(consumptionInfo)
+			m.metrics.recordConsumption(consumptionInfo, m.controllerConfig, time.Now())
 			// TODO: maybe we need to distinguish background ru.
 			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
@@ -519,6 +529,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					continue
 				}
 				m.metrics.cleanupAllMetrics(r, keyspaceName)
+				m.ruCollector.remove(keyspaceName)
 			}
 		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
