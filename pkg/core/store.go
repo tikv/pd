@@ -21,6 +21,9 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -29,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -865,6 +867,7 @@ func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 	if store.EvictedAsSlowStore() {
+		failpoint.InjectCall("CaptureSlowStoreEvicted")
 		return errs.ErrSlowStoreEvicted.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(SlowStoreEvicted())
