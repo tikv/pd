@@ -63,7 +63,7 @@ func TestResourceManagerServer(t *testing.T) {
 	_, err = c.GetResourceGroup(context.Background(), &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: "pingcap",
 	})
-	re.ErrorContains(err, "resource group not found")
+	re.ErrorContains(err, "resource group does not exist")
 
 	// Test registered REST HTTP Handler
 	url := addr + "/resource-manager/api/v1/config"
