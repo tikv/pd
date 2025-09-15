@@ -1,3 +1,17 @@
+// Copyright 2025 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package syncutil
 
 import (
@@ -56,9 +70,6 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 		// Executed by other goroutines. Reuse the result.
 		return currentTask.result, currentTask.err
 	case <-s.tokenCh:
-		defer func() {
-			s.tokenCh <- struct{}{}
-		}()
 	}
 
 	// Token is acquired. But as another goroutine closes `finishCh` and releases the token at almost the same time,
@@ -66,6 +77,8 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 	// again. If the result is already ready, return it directly.
 	select {
 	case <-currentTask.finishCh:
+		// Release the token back.
+		s.tokenCh <- struct{}{}
 		return currentTask.result, currentTask.err
 	default:
 	}
@@ -80,6 +93,10 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 	// Execute the function and distribute the result. Spawn it into a separate goroutine to make the current call able
 	// to be canceled by the context without interrupting other callers.
 	go func() {
+		defer func() {
+			s.tokenCh <- struct{}{}
+		}()
+
 		res, err := f()
 		currentTask.result = res
 		currentTask.err = err
