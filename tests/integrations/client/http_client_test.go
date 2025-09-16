@@ -608,9 +608,6 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 		"end-key":   "200",
 		"alias":     "test",
 	}
-	re.ErrorContains(client.CreateSchedulerWithInput(ctx, schedulerName2, input), "unknown scheduler")
-	// todo: enable the test after implementing the balance-range-scheduler
-	/**
 	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName2, input))
 	checkFn := func() map[string]any {
 		config, err := client.GetSchedulerConfig(ctx, schedulerName2)
@@ -637,7 +634,6 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	status, ok := job["status"]
 	re.True(ok)
 	re.Equal("cancelled", status)
-	**/
 }
 
 func (suite *httpClientTestSuite) TestStoreLabels() {

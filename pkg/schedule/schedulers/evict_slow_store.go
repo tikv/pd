@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -72,11 +73,11 @@ func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 	return conf.EvictedStores
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	if conf.evictStore() != id {
 		return nil
 	}
-	return []core.KeyRange{core.NewKeyRange("", "")}
+	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
 func (*evictSlowStoreSchedulerConfig) getBatch() int {

@@ -58,8 +58,6 @@ const (
 	RandomMergeScheduler CheckerSchedulerType = "random-merge-scheduler"
 	// ScatterRangeScheduler is scatter range scheduler name.
 	ScatterRangeScheduler CheckerSchedulerType = "scatter-range-scheduler"
-	// BalanceRangeScheduler is balance range scheduler name.
-	BalanceRangeScheduler CheckerSchedulerType = "balance-range-scheduler"
 	// ShuffleHotRegionScheduler is shuffle hot region scheduler name.
 	ShuffleHotRegionScheduler CheckerSchedulerType = "shuffle-hot-region-scheduler"
 	// ShuffleLeaderScheduler is shuffle leader scheduler name.
@@ -72,6 +70,8 @@ const (
 	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
+	// BalanceRangeScheduler is balance key range scheduler name.
+	BalanceRangeScheduler CheckerSchedulerType = "balance-range-scheduler"
 )
 
 // TODO: SchedulerTypeCompatibleMap and ConvertOldStrToType should be removed after
@@ -82,25 +82,24 @@ var (
 	//	It is used for `SchedulerConfig` in the `PersistOptions` and `PersistConfig`.
 	//	These two structs are persisted in the storage, so we need to keep the compatibility.
 	SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
-		BalanceLeaderScheduler:    "balance-leader",
-		BalanceRegionScheduler:    "balance-region",
-		BalanceWitnessScheduler:   "balance-witness",
-		EvictLeaderScheduler:      "evict-leader",
-		EvictSlowStoreScheduler:   "evict-slow-store",
-		EvictSlowTrendScheduler:   "evict-slow-trend",
-		GrantLeaderScheduler:      "grant-leader",
-		GrantHotRegionScheduler:   "grant-hot-region",
-		BalanceHotRegionScheduler: "hot-region",
-		RandomMergeScheduler:      "random-merge",
-		ScatterRangeScheduler:     "scatter-range",
-		// todo: enable this if cp balance range
-		//BalanceRangeScheduler:          "balance-range",
+		BalanceLeaderScheduler:         "balance-leader",
+		BalanceRegionScheduler:         "balance-region",
+		BalanceWitnessScheduler:        "balance-witness",
+		EvictLeaderScheduler:           "evict-leader",
+		EvictSlowStoreScheduler:        "evict-slow-store",
+		EvictSlowTrendScheduler:        "evict-slow-trend",
+		GrantLeaderScheduler:           "grant-leader",
+		GrantHotRegionScheduler:        "grant-hot-region",
+		BalanceHotRegionScheduler:      "hot-region",
+		RandomMergeScheduler:           "random-merge",
+		ScatterRangeScheduler:          "scatter-range",
 		ShuffleHotRegionScheduler:      "shuffle-hot-region",
 		ShuffleLeaderScheduler:         "shuffle-leader",
 		ShuffleRegionScheduler:         "shuffle-region",
 		SplitBucketScheduler:           "split-bucket",
 		TransferWitnessLeaderScheduler: "transfer-witness-leader",
 		LabelScheduler:                 "label",
+		BalanceRangeScheduler:          "balance-range",
 	}
 
 	// ConvertOldStrToType exists for compatibility.
@@ -118,13 +117,13 @@ var (
 		"hot-region":              BalanceHotRegionScheduler,
 		"random-merge":            RandomMergeScheduler,
 		"scatter-range":           ScatterRangeScheduler,
-		"balance-range":           BalanceRangeScheduler,
 		"shuffle-hot-region":      ShuffleHotRegionScheduler,
 		"shuffle-leader":          ShuffleLeaderScheduler,
 		"shuffle-region":          ShuffleRegionScheduler,
 		"split-bucket":            SplitBucketScheduler,
 		"transfer-witness-leader": TransferWitnessLeaderScheduler,
 		"label":                   LabelScheduler,
+		"balance-range":           BalanceRangeScheduler,
 	}
 
 	// StringToSchedulerType is a map to convert the scheduler string to the CheckerSchedulerType.
@@ -149,6 +148,7 @@ var (
 		"split-bucket-scheduler":            SplitBucketScheduler,
 		"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
 		"label-scheduler":                   LabelScheduler,
+		"balance-range-scheduler":           BalanceRangeScheduler,
 	}
 
 	// DefaultSchedulers is the default scheduler types.
