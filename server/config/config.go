@@ -746,6 +746,7 @@ type DashboardConfig struct {
 	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
 	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
 	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	TempDir               string `toml:"temp-dir" json:"temp-dir"`
 	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
