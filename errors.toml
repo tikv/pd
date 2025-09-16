@@ -926,6 +926,11 @@ error = '''
 empty region
 '''
 
+["PD:resourcemanager:ErrResourceGroupsLoading"]
+error = '''
+resource groups are still being loaded, please try again later
+'''
+
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s

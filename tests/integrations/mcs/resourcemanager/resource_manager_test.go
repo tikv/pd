@@ -193,6 +193,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 		// Ensure RM service discovery has picked up the standalone endpoint before running tests.
 		waitResourceManagerServiceURL(re, suite.client, true)
 	}
+	waitAsyncLoadResourceGroups(re, suite.client)
 
 	suite.initGroups = []*rmpb.ResourceGroup{
 		{
@@ -269,6 +270,13 @@ func waitResourceManagerServiceURL(re *require.Assertions, cli pd.Client, wantNo
 		}
 		return url == ""
 	})
+}
+
+func waitAsyncLoadResourceGroups(re *require.Assertions, cli pd.Client) {
+	testutil.Eventually(re, func() bool {
+		_, err := cli.ListResourceGroups(context.TODO())
+		return err == nil
+	}, testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func TestSwitchModeDuringWorkload(t *testing.T) {
@@ -545,6 +553,7 @@ func (suite *resourceManagerClientTestSuite) resignAndWaitLeader(re *require.Ass
 	newLeader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(newLeader)
 	waitLeaderServingClient(re, suite.client, newLeader.GetAddr())
+	waitAsyncLoadResourceGroups(re, suite.client)
 }
 
 func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
