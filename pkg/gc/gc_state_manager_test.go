@@ -21,9 +21,11 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -1932,4 +1934,79 @@ func (s *gcStateManagerTestSuite) TestDowngradeCompatibilityForNullKeyspace() {
 
 func (s *gcStateManagerTestSuite) TestDowngradeCompatibilityForNonNullKeyspace() {
 	s.testDowngradeCompatibility(2)
+}
+
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallSharingResult() {
+	re := s.Require()
+
+	var executionCount atomic.Int64
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish", "pause"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
+		executionCount.Add(1)
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart"))
+	}()
+
+	type result struct {
+		gcStates map[uint32]GCState
+		err      error
+	}
+	ch := make(chan result, 10)
+
+	callOnce := func() {
+		gcStates, err := s.manager.GetAllKeyspacesGCStates()
+		ch <- result{gcStates: gcStates, err: err}
+	}
+
+	go callOnce()
+
+	// Blocked
+	select {
+	case res := <-ch:
+		re.FailNowf("failpoint not taking effect to block the invocation to GetAllKeyspacesGCStates", "result: %v, %v", res.gcStates, res.err)
+	case <-time.After(time.Millisecond * 200):
+	}
+
+	re.Equal(int64(1), executionCount.Load())
+
+	_, err := s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 100, time.Now())
+	re.NoError(err)
+	// Start another several calls
+	const concurrency = 5
+	for i := 0; i < concurrency; i++ {
+		go callOnce()
+	}
+	// Still blocked
+	select {
+	case <-ch:
+		re.FailNow("expects GetAllKeyspacesGCStates to be blocked but returned")
+	case <-time.After(time.Millisecond * 100):
+	}
+
+	// Resume execution
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish"))
+	// The first call finishes with the old result
+	var res result
+	select {
+	case res = <-ch:
+	case <-time.After(time.Second):
+		re.FailNow("GetAllKeyspacesGCStates blocked while expected to return")
+	}
+	re.NoError(res.err)
+	re.Equal(uint64(0), res.gcStates[constant.NullKeyspaceID].TxnSafePoint)
+	// Following calls started strictly after the first finishes (thus also strictly after the updating), and return
+	// the updated result.
+	for i := 0; i < concurrency; i++ {
+		select {
+		case res = <-ch:
+		case <-time.After(time.Second):
+			re.FailNow("GetAllKeyspacesGCStates blocked while expected to return")
+		}
+		re.NoError(res.err)
+		re.Equal(uint64(100), res.gcStates[constant.NullKeyspaceID].TxnSafePoint)
+	}
+
+	re.Equal(int64(2), executionCount.Load())
 }

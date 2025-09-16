@@ -22,6 +22,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -663,10 +664,16 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 // must be fetched AFTER the beginning of the current invocation, and it never reuses the result of invocations that
 // started earlier than the current one.
 func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
-	return m.allKeyspacesGCStatesSingleFlight.Do(context.Background(), m.getAllKeyspacesGCStatesImpl)
+	return m.allKeyspacesGCStatesSingleFlight.Do(context.Background(), func() (map[uint32]GCState, error) {
+		result, err := m.getAllKeyspacesGCStatesImpl()
+		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
+		return result, err
+	})
 }
 
 func (m *GCStateManager) getAllKeyspacesGCStatesImpl() (map[uint32]GCState, error) {
+	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
+
 	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
 	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
 	if err != nil {
@@ -715,6 +722,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl() (map[uint32]GCState, erro
 			return nil, err
 		}
 	}
+
 	return results, nil
 }
 
