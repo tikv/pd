@@ -686,6 +686,11 @@ error = '''
 invalid group settings, please check the group name, priority and the number of resources
 '''
 
+["PD:resourcemanager:ErrResourceGroupsLoading"]
+error = '''
+resource groups are still being loaded, please try again later
+'''
+
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s

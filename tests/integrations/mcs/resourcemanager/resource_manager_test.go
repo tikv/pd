@@ -82,6 +82,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(leader)
 	waitLeader(re, suite.client, leader.GetAddr())
+	waitAsyncLoadResourceGroups(re, suite.client)
 
 	suite.initGroups = []*rmpb.ResourceGroup{
 		{
@@ -148,6 +149,13 @@ func waitLeader(re *require.Assertions, cli pd.Client, leaderAddr string) {
 	})
 }
 
+func waitAsyncLoadResourceGroups(re *require.Assertions, cli pd.Client) {
+	testutil.Eventually(re, func() bool {
+		_, err := cli.ListResourceGroups(context.TODO())
+		return err == nil
+	}, testutil.WithTickInterval(100*time.Millisecond))
+}
+
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	re := suite.Require()
 	suite.client.Close()
@@ -181,6 +189,7 @@ func (suite *resourceManagerClientTestSuite) resignAndWaitLeader(re *require.Ass
 	newLeader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(newLeader)
 	waitLeader(re, suite.client, newLeader.GetAddr())
+	waitAsyncLoadResourceGroups(re, suite.client)
 }
 
 func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {

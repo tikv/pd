@@ -21,6 +21,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -73,7 +74,22 @@ type Manager struct {
 	// record update time of each resource group
 	consumptionRecordMu syncutil.RWMutex
 	consumptionRecord   map[consumptionRecordKey]time.Time
+
+	// async loading state management
+	loadingState int32 // atomic access
+	// syncLoadedGroups records groups that were loaded synchronously (e.g., by lazy loading)
+	syncLoadedGroups map[string]bool
 }
+
+// LoadingState represents the current loading state of resource groups
+const (
+	// LoadingStateNotStarted means resource groups haven't started loading
+	LoadingStateNotStarted int32 = iota
+	// LoadingStateInProgress means resource groups are being loaded asynchronously
+	LoadingStateInProgress
+	// LoadingStateCompleted means all resource groups have been loaded
+	LoadingStateCompleted
+)
 
 type consumptionRecordKey struct {
 	name   string
@@ -99,6 +115,8 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			isTiFlash    bool
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[consumptionRecordKey]time.Time),
+		loadingState:      LoadingStateNotStarted,
+		syncLoadedGroups:  make(map[string]bool),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -134,55 +152,16 @@ func (m *Manager) Init(ctx context.Context) error {
 	if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
 		return err
 	}
+
 	// Load resource group meta info from storage.
 	m.Lock()
 	m.groups = make(map[string]*ResourceGroup)
+	m.syncLoadedGroups = make(map[string]bool)
+	atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
 	m.Unlock()
-	handler := func(k, v string) {
-		group := &rmpb.ResourceGroup{}
-		if err := proto.Unmarshal([]byte(v), group); err != nil {
-			log.Error("failed to parse the resource group", zap.Error(err), zap.String("k", k), zap.String("v", v))
-			panic(err)
-		}
-		m.groups[group.Name] = FromProtoResourceGroup(group)
-	}
-	if err := m.storage.LoadResourceGroupSettings(handler); err != nil {
-		return err
-	}
-	// Load resource group states from storage.
-	tokenHandler := func(k, v string) {
-		tokens := &GroupStates{}
-		if err := json.Unmarshal([]byte(v), tokens); err != nil {
-			log.Error("failed to parse the resource group state", zap.Error(err), zap.String("k", k), zap.String("v", v))
-			panic(err)
-		}
-		if group, ok := m.groups[k]; ok {
-			group.SetStatesIntoResourceGroup(tokens)
-		}
-	}
-	if err := m.storage.LoadResourceGroupStates(tokenHandler); err != nil {
-		return err
-	}
 
-	// Add default group if it's not inited.
-	if _, ok := m.groups[reservedDefaultGroupName]; !ok {
-		defaultGroup := &ResourceGroup{
-			Name: reservedDefaultGroupName,
-			Mode: rmpb.GroupMode_RUMode,
-			RUSettings: &RequestUnitSettings{
-				RU: &GroupTokenBucket{
-					Settings: &rmpb.TokenLimitSettings{
-						FillRate:   math.MaxInt32,
-						BurstLimit: -1,
-					},
-				},
-			},
-			Priority: middlePriority,
-		}
-		if err := m.AddResourceGroup(defaultGroup.IntoProtoResourceGroup()); err != nil {
-			log.Warn("init default group failed", zap.Error(err))
-		}
-	}
+	// Start async loading of resource groups
+	go m.asyncLoadResourceGroups(ctx)
 
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx, m.controllerConfig.PushMetricsAddress, m.controllerConfig.PushMetricsInterval.Duration)
@@ -190,8 +169,197 @@ func (m *Manager) Init(ctx context.Context) error {
 		defer logutil.LogPanic()
 		m.persistLoop(ctx)
 	}()
-	log.Info("resource group manager finishes initialization")
+	log.Info("resource group manager finishes initialization (async loading started)")
 	return nil
+}
+
+// asyncLoadResourceGroups loads all resource groups asynchronously
+func (m *Manager) asyncLoadResourceGroups(ctx context.Context) {
+	defer logutil.LogPanic()
+
+	const retryInterval = 10 * time.Second
+	retry := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("async loading resource groups cancelled")
+			return
+		default:
+		}
+		if retry > 0 {
+			log.Info("retrying async loading resource groups", zap.Int("retry", retry))
+			time.Sleep(retryInterval)
+		}
+
+		atomic.StoreInt32(&m.loadingState, LoadingStateInProgress)
+
+		log.Info("start async loading resource groups", zap.Int("retry", retry))
+
+		// Start timing the async loading
+		startTime := time.Now()
+
+		// Use a separate map to load all resource groups completely
+		tempGroups := make(map[string]*ResourceGroup)
+
+		// Load resource group settings from storage
+		settingsHandler := func(k, v string) {
+			group := &rmpb.ResourceGroup{}
+			if err := proto.Unmarshal([]byte(v), group); err != nil {
+				log.Error("failed to parse the resource group", zap.Error(err), zap.String("k", k), zap.String("v", v))
+				panic(err)
+			}
+			tempGroups[group.Name] = FromProtoResourceGroup(group)
+		}
+		if err := m.storage.LoadResourceGroupSettings(settingsHandler); err != nil {
+			log.Error("failed to load resource group settings", zap.Error(err), zap.Int("retry", retry))
+			atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
+			retry++
+			continue
+		}
+
+		// Load resource group states from storage
+		statesHandler := func(k, v string) {
+			tokens := &GroupStates{}
+			if err := json.Unmarshal([]byte(v), tokens); err != nil {
+				log.Error("failed to parse the resource group state", zap.Error(err), zap.String("k", k), zap.String("v", v))
+				panic(err)
+			}
+			if group, ok := tempGroups[k]; ok {
+				group.SetStatesIntoResourceGroup(tokens)
+			}
+		}
+		if err := m.storage.LoadResourceGroupStates(statesHandler); err != nil {
+			log.Error("failed to load resource group states", zap.Error(err), zap.Int("retry", retry))
+			atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
+			retry++
+			continue
+		}
+
+		// Now update the main groups map with completely loaded resource groups
+		m.Lock()
+		for name, group := range tempGroups {
+			// Skip if the group was loaded synchronously (e.g., by lazy loading)
+			// In case lazy loaded group is deleted.
+			if !m.syncLoadedGroups[name] {
+				m.groups[name] = group
+			}
+		}
+		m.syncLoadedGroups = nil
+		m.Unlock()
+
+		err := m.addDefaultGroupIfNeed()
+		if err != nil {
+			log.Error("failed to persist default group", zap.Error(err))
+			continue
+		}
+
+		atomic.StoreInt32(&m.loadingState, LoadingStateCompleted)
+
+		// Record the async loading duration
+		duration := time.Since(startTime)
+		asyncLoadGroupDuration.Observe(duration.Seconds())
+
+		log.Info("async loading resource groups completed", zap.Int("loaded_groups", len(tempGroups)), zap.Duration("duration", duration))
+		return
+	}
+}
+
+func (m *Manager) loadResourceGroup(name string) (*ResourceGroup, error) {
+	// Load the specific resource group setting
+	group, err := m.storage.LoadResourceGroupSetting(name)
+	if err != nil {
+		return nil, err
+	}
+
+	groupProto := &rmpb.ResourceGroup{}
+	if err := proto.Unmarshal([]byte(group), groupProto); err != nil {
+		return nil, err
+	}
+
+	resourceGroup := FromProtoResourceGroup(groupProto)
+
+	// Load states if available
+	states, err := m.storage.LoadResourceGroupState(name)
+	if err == nil && states != "" {
+		tokens := &GroupStates{}
+		if err := json.Unmarshal([]byte(states), tokens); err == nil {
+			resourceGroup.SetStatesIntoResourceGroup(tokens)
+		}
+	}
+	return resourceGroup, nil
+}
+
+// loadResourceGroupIfNeeded loads a specific resource group if it's not already loaded
+func (m *Manager) loadResourceGroupIfNeeded(name string) error {
+	if atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted {
+		return nil
+	}
+
+	// Check if already loaded (for cases where async loading hasn't started yet)
+	m.RLock()
+	if _, ok := m.groups[name]; ok {
+		m.RUnlock()
+		return nil
+	}
+	m.RUnlock()
+
+	group, err := m.loadResourceGroup(name)
+	if err != nil && name == reservedDefaultGroupName {
+		err = m.addDefaultGroupIfNeed()
+	}
+	if err != nil {
+		return err
+	}
+
+	// Double-check if the group was loaded by another goroutine while we were loading
+	m.Lock()
+	defer m.Unlock()
+	if _, exists := m.groups[name]; exists {
+		// Another goroutine already loaded it, use the existing one
+		return nil
+	}
+	// Add our loaded group to the map
+	m.groups[name] = group
+	// Mark this group as synchronously loaded
+	m.syncLoadedGroups[name] = true
+
+	// Increment the sync load group counter
+	syncLoadGroupCounter.Inc()
+
+	return nil
+}
+
+func (m *Manager) addDefaultGroupIfNeed() error {
+	defaultGroup := &ResourceGroup{
+		Name: reservedDefaultGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &RequestUnitSettings{
+			RU: &GroupTokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   math.MaxInt32,
+					BurstLimit: -1,
+				},
+			},
+		},
+		Priority: middlePriority,
+	}
+	group := FromProtoResourceGroup(defaultGroup.IntoProtoResourceGroup())
+	m.Lock()
+	defer m.Unlock()
+	if _, ok := m.groups[reservedDefaultGroupName]; ok {
+		return nil
+	}
+	m.groups[group.Name] = group
+	if err := group.persistSettings(m.storage); err != nil {
+		return err
+	}
+	return group.persistStates(m.storage)
+}
+
+// isResourceGroupLoadingComplete returns true if resource group loading is completed
+func (m *Manager) isResourceGroupLoadingComplete() bool {
+	return atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted
 }
 
 // UpdateControllerConfigItem updates the controller config item.
@@ -247,6 +415,11 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if grouppb.GetPriority() > 16 {
 		return errs.ErrInvalidGroup
 	}
+	// Try to load the resource group if not already loaded
+	if err := m.loadResourceGroupIfNeeded(grouppb.Name); err != nil {
+		log.Debug("failed to load resource group", zap.String("name", grouppb.Name), zap.Error(err))
+		// maybe not found, put new one directly.
+	}
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
 	defer m.Unlock()
@@ -264,6 +437,11 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if group == nil || group.Name == "" {
 		return errs.ErrInvalidGroup
+	}
+	// Try to load the resource group if not already loaded
+	if err := m.loadResourceGroupIfNeeded(group.Name); err != nil {
+		log.Debug("failed to load resource group", zap.String("name", group.Name), zap.Error(err))
+		return err
 	}
 	m.Lock()
 	curGroup, ok := m.groups[group.Name]
@@ -284,6 +462,11 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	if name == reservedDefaultGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
+	// Try to load the resource group if not already loaded
+	if err := m.loadResourceGroupIfNeeded(name); err != nil {
+		log.Debug("failed to load resource group", zap.String("name", name), zap.Error(err))
+		return err
+	}
 	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
@@ -295,6 +478,12 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 
 // GetResourceGroup returns a copy of a resource group.
 func (m *Manager) GetResourceGroup(name string, withStats bool) *ResourceGroup {
+	// Try to load the resource group if not already loaded
+	if err := m.loadResourceGroupIfNeeded(name); err != nil {
+		log.Debug("failed to load resource group", zap.String("name", name), zap.Error(err))
+		return nil
+	}
+
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
@@ -305,6 +494,12 @@ func (m *Manager) GetResourceGroup(name string, withStats bool) *ResourceGroup {
 
 // GetMutableResourceGroup returns a mutable resource group.
 func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
+	// Try to load the resource group if not already loaded
+	if err := m.loadResourceGroupIfNeeded(name); err != nil {
+		log.Debug("failed to load resource group", zap.String("name", name), zap.Error(err))
+		return nil
+	}
+
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
@@ -314,7 +509,14 @@ func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
 }
 
 // GetResourceGroupList returns copies of resource group list.
-func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
+// Returns error if resource groups are still being loaded asynchronously.
+func (m *Manager) GetResourceGroupList(withStats bool) ([]*ResourceGroup, error) {
+	// Check if resource groups are still being loaded
+	if !m.isResourceGroupLoadingComplete() {
+		log.Debug("resource groups are still being loaded, cannot return list")
+		return nil, errs.ErrResourceGroupsLoading
+	}
+
 	m.RLock()
 	res := make([]*ResourceGroup, 0, len(m.groups))
 	for _, group := range m.groups {
@@ -324,7 +526,7 @@ func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 	sort.Slice(res, func(i, j int) bool {
 		return res[i].Name < res[j].Name
 	})
-	return res
+	return res, nil
 }
 
 func (m *Manager) persistLoop(ctx context.Context) {

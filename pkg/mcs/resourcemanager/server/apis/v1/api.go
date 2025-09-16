@@ -201,7 +201,11 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Router		/config/groups [get]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	groups := s.manager.GetResourceGroupList(withStats)
+	groups, err := s.manager.GetResourceGroupList(withStats)
+	if err != nil {
+		c.String(http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	c.IndentedJSON(http.StatusOK, groups)
 }
 

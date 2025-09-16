@@ -112,7 +112,10 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(req.WithRuStats)
+	groups, err := s.manager.GetResourceGroupList(req.WithRuStats)
+	if err != nil {
+		return nil, err
+	}
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}

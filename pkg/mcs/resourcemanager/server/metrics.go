@@ -154,6 +154,22 @@ var (
 			Name:      "request_unit_consume_rate",
 			Help:      "request_unit_per_second/fill_rate for all resource groups.",
 		}, []string{newResourceGroupNameLabel})
+
+	syncLoadGroupCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "sync_load_group_counter",
+			Help:      "The number of the sync load group.",
+		})
+
+	asyncLoadGroupDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "async_load_group_duration_seconds",
+			Help:      "The duration of the async load group.",
+		})
 )
 
 func init() {
@@ -172,4 +188,6 @@ func init() {
 	prometheus.MustRegister(pushRUMetricsDuration)
 	prometheus.MustRegister(requestUnitSumPerSec)
 	prometheus.MustRegister(requestUnitConsumeRate)
+	prometheus.MustRegister(syncLoadGroupCounter)
+	prometheus.MustRegister(asyncLoadGroupDuration)
 }

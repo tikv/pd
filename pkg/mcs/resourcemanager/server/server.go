@@ -183,6 +183,7 @@ func (s *Server) campaignLeader() {
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
 			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
+			return
 		}
 	}
 

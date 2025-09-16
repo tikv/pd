@@ -22,9 +22,11 @@ import (
 // ResourceGroupStorage defines the storage operations on the resource group.
 type ResourceGroupStorage interface {
 	LoadResourceGroupSettings(f func(k, v string)) error
+	LoadResourceGroupSetting(name string) (string, error)
 	SaveResourceGroupSetting(name string, msg proto.Message) error
 	DeleteResourceGroupSetting(name string) error
 	LoadResourceGroupStates(f func(k, v string)) error
+	LoadResourceGroupState(name string) (string, error)
 	SaveResourceGroupStates(name string, obj any) error
 	DeleteResourceGroupStates(name string) error
 	SaveControllerConfig(config any) error
@@ -48,6 +50,11 @@ func (se *StorageEndpoint) LoadResourceGroupSettings(f func(k, v string)) error 
 	return se.loadRangeByPrefix(keypath.ResourceGroupSettingsPath+"/", f)
 }
 
+// LoadResourceGroupSetting loads a specific resource group from storage.
+func (se *StorageEndpoint) LoadResourceGroupSetting(name string) (string, error) {
+	return se.Load(keypath.ResourceGroupSettingKeyPath(name))
+}
+
 // SaveResourceGroupStates stores a resource group to storage.
 func (se *StorageEndpoint) SaveResourceGroupStates(name string, obj any) error {
 	return se.saveJSON(keypath.ResourceGroupStateKeyPath(name), obj)
@@ -61,6 +68,11 @@ func (se *StorageEndpoint) DeleteResourceGroupStates(name string) error {
 // LoadResourceGroupStates loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupStates(f func(k, v string)) error {
 	return se.loadRangeByPrefix(keypath.ResourceGroupStatesPath+"/", f)
+}
+
+// LoadResourceGroupState loads a specific resource group state from storage.
+func (se *StorageEndpoint) LoadResourceGroupState(name string) (string, error) {
+	return se.Load(keypath.ResourceGroupStateKeyPath(name))
 }
 
 // SaveControllerConfig stores the resource controller config to storage.
