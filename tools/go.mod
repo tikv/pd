@@ -20,13 +20,8 @@ require (
 	github.com/influxdata/tdigest v0.0.1
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
-<<<<<<< HEAD
-	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20240403065636-c699538f7aa1
-=======
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250117013947-1fdf41372412
->>>>>>> 9805a9541 (cluster: return NodeState in the response of StoreHeartbeat. (#8991))
+	github.com/pingcap/kvproto v0.0.0-20250709071721-7f3c4e328828
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.19.0
