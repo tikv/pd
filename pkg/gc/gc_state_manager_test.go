@@ -25,12 +25,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -1975,7 +1975,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	re.NoError(err)
 	// Start another several calls
 	const concurrency = 5
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go callOnce()
 	}
 	// Still blocked
@@ -1998,7 +1998,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	re.Equal(uint64(0), res.gcStates[constant.NullKeyspaceID].TxnSafePoint)
 	// Following calls started strictly after the first finishes (thus also strictly after the updating), and return
 	// the updated result.
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case res = <-ch:
 		case <-time.After(time.Second):

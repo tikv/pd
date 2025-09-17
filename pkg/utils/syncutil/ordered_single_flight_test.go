@@ -24,8 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/errors"
 )
 
 func mustBlocking[T any](re *require.Assertions, ch chan T) {
@@ -69,6 +70,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 	inCh := make(chan int, 100)
 	outCh := make(chan int, 100)
 
+	//nolint:unparam
 	f := func() (int, error) {
 		return <-inCh, nil
 	}
@@ -84,7 +86,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 
 	// Start some concurrent invocations. As there's already an existing execution, the following invocations will enter
 	// the next batch and return the second result.
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		i2 := i
 		go func() {
 			labels := pprof.Labels("worker", strconv.FormatInt(int64(i2), 10))
@@ -108,7 +110,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 
 	inCh <- 102
 	// The remaining calls finishes.
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		re.Equal(102, mustGetResult(re, outCh))
 	}
 
@@ -132,6 +134,7 @@ func TestOrderedSingleFlightCancellation(t *testing.T) {
 
 	inCh := make(chan int, 100)
 	outCh := make(chan result, 100)
+	//nolint:unparam
 	f := func() (int, error) {
 		res := <-inCh
 		return res, nil
@@ -178,6 +181,8 @@ func TestOrderedSingleFlightCancellation(t *testing.T) {
 	res, err := s.Do(context.Background(), func() (int, error) {
 		return 100, nil
 	})
+	re.NoError(err)
+	re.Equal(100, res)
 
 	// Test multiple concurrent invocations.
 	const concurrency = 5
@@ -188,7 +193,7 @@ func TestOrderedSingleFlightCancellation(t *testing.T) {
 	}()
 	mustBlocking(re, outCh)
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		i2 := i
 		go func() {
 			ctx3 := context.Background()
@@ -227,7 +232,7 @@ func TestOrderedSingleFlightCancellation(t *testing.T) {
 	inCh <- 4
 
 	index := make([]int, 0, 3)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		r = mustGetResult(re, outCh)
 		re.NoError(r.err)
 		re.Equal(4, r.v)
@@ -257,6 +262,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 
 	currentValue := &atomic.Int64{}
 	s := NewOrderedSingleFlight[int64]()
+	//nolint:unparam
 	f := func() (int64, error) {
 		res := currentValue.Load()
 		time.Sleep(time.Duration(rand.Int64N(20)) * time.Millisecond)
@@ -282,7 +288,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 		err error
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -336,7 +342,6 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 					innerCancel()
 					re.FailNow("result blocked for too long")
 				}
-
 			}
 		}()
 	}

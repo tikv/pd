@@ -18,8 +18,6 @@ import (
 	"context"
 )
 
-//type request[TResult any] chan<- TResult
-
 type task[TResult any] struct {
 	finishCh chan struct{}
 	result   TResult
@@ -44,6 +42,7 @@ type OrderedSingleFlight[TResult any] struct {
 	pendingTask *task[TResult]
 }
 
+// NewOrderedSingleFlight creates an instance of OrderedSingleFlight.
 func NewOrderedSingleFlight[TResult any]() *OrderedSingleFlight[TResult] {
 	res := &OrderedSingleFlight[TResult]{
 		tokenCh: make(chan struct{}, 1),
@@ -52,6 +51,8 @@ func NewOrderedSingleFlight[TResult any]() *OrderedSingleFlight[TResult] {
 	return res
 }
 
+// Do tries to execute the function `f`, or if possible, wait and reuse the result of an execution triggered by another
+// goroutine. See comments of OrderedSingleFlight for details.
 func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult, error)) (TResult, error) {
 	var currentTask *task[TResult]
 
@@ -72,7 +73,10 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 	case <-s.tokenCh:
 	}
 
-	// Token is acquired. But as another goroutine closes `finishCh` and releases the token at almost the same time,
+	// Token is acquired. Before starting the goroutine for executing the function f, any early return should be done
+	// after returning back the token to tokenCh.
+
+	// If another goroutine closes `finishCh` and releases the token at almost the same time,
 	// it's possible that the token arrives earlier than the `finishCh` is detected to be closed. Check the result
 	// again. If the result is already ready, return it directly.
 	select {

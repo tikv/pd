@@ -22,9 +22,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
