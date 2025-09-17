@@ -335,11 +335,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		}
 
 		if ops := measureChecker(c.metrics.checkRegionHistograms[replicaChecker], func() []*operator.Operator {
-			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-				return []*operator.Operator{c.replicaChecker.Check(region)}
+			if op := c.replicaChecker.Check(region); op != nil {
+				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
+					return []*operator.Operator{op}
+				}
+				operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
+				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
-			operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
-			c.pendingProcessedRegions.Put(region.GetID(), nil)
 			return nil
 		}); len(ops) > 0 {
 			return ops
