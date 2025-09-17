@@ -128,7 +128,7 @@ func TestRegisterCollector(t *testing.T) {
 	collector1 := newMockCollector("category1")
 	writer.RegisterCollector(collector1)
 
-	collectors := writer.getCollectors()
+	collectors := writer.GetCollectors()
 	re.Len(collectors, 1)
 	re.Contains(collectors, "category1")
 	re.Equal(collector1, collectors["category1"])
@@ -137,7 +137,7 @@ func TestRegisterCollector(t *testing.T) {
 	collector2 := newMockCollector("category2")
 	writer.RegisterCollector(collector2)
 
-	collectors = writer.getCollectors()
+	collectors = writer.GetCollectors()
 	re.Len(collectors, 2)
 	re.Contains(collectors, "category1")
 	re.Contains(collectors, "category2")
@@ -146,7 +146,7 @@ func TestRegisterCollector(t *testing.T) {
 	collector1New := newMockCollector("category1")
 	writer.RegisterCollector(collector1New)
 
-	collectors = writer.getCollectors()
+	collectors = writer.GetCollectors()
 	re.Len(collectors, 2)
 	re.Equal("category1", collectors["category1"].Category())
 	// Verify it's a different instance by checking if it's not the original.
