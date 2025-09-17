@@ -107,6 +107,7 @@ func NewService(srv *scheserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", mcsutils.PromHandler())
 	apiHandlerEngine.GET("status", mcsutils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	root.Use(multiservicesapi.ServiceRedirector())
@@ -235,6 +236,21 @@ func (s *Service) RegisterConfigRouter() {
 func (s *Service) RegisterPrimaryRouter() {
 	router := s.root.Group("primary")
 	router.POST("transfer", transferPrimary)
+}
+
+// getHealth returns the health status of the TSO service.
+func getHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.String(http.StatusInternalServerError, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
+	if svr.GetParticipant().IsPrimaryElected() {
+		c.IndentedJSON(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no primary elected")
 }
 
 // @Tags     admin

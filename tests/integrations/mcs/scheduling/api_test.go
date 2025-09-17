@@ -743,3 +743,20 @@ func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
 		testutil.Status(re, http.StatusNotFound), testutil.StringContain(re, "not found"))
 	re.NoError(err)
 }
+
+func (suite *apiTestSuite) TestHealth() {
+	suite.env.RunTestInMicroserviceEnv(suite.checkHealth)
+}
+
+func (suite *apiTestSuite) checkHealth(cluster *tests.TestCluster) {
+	re := suite.Require()
+
+	s := cluster.GetSchedulingPrimaryServer()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	})
+	resp, err := tests.TestDialClient.Get(s.GetConfig().GetAdvertiseListenAddr() + "/health")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+}

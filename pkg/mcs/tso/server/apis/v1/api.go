@@ -89,6 +89,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	apiHandlerEngine.GET("status", utils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	root.Use(multiservicesapi.ServiceRedirector())
@@ -100,6 +101,8 @@ func NewService(srv *tsoserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterKeyspaceGroupRouter()
+	// Deprecated, kept for compatibility.
+	// Use /health instead.
 	s.RegisterHealthRouter()
 	s.RegisterConfigRouter()
 	s.RegisterPrimaryRouter()
@@ -109,20 +112,20 @@ func NewService(srv *tsoserver.Service) *Service {
 // RegisterAdminRouter registers the router of the TSO admin handler.
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
-	router.POST("/reset-ts", ResetTS)
+	router.POST("/reset-ts", resetTS)
 	router.PUT("/log", changeLogLevel)
 }
 
 // RegisterKeyspaceGroupRouter registers the router of the TSO keyspace group handler.
 func (s *Service) RegisterKeyspaceGroupRouter() {
 	router := s.root.Group("keyspace-groups")
-	router.GET("/members", GetKeyspaceGroupMembers)
+	router.GET("/members", getKeyspaceGroupMembers)
 }
 
 // RegisterHealthRouter registers the router of the health handler.
 func (s *Service) RegisterHealthRouter() {
 	router := s.root.Group("health")
-	router.GET("", GetHealth)
+	router.GET("", getHealth)
 }
 
 // RegisterConfigRouter registers the router of the config handler.
@@ -181,7 +184,7 @@ type ResetTSParams struct {
 //	reset ts to input ts if it > current ts and < upper bound, error if not in that range
 //
 // during EBS based restore, we call this to make sure ts of pd >= resolved_ts in backup.
-func ResetTS(c *gin.Context) {
+func resetTS(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	var param ResetTSParams
 	if err := c.ShouldBindJSON(&param); err != nil {
@@ -221,9 +224,13 @@ func ResetTS(c *gin.Context) {
 	c.String(http.StatusOK, "Reset ts successfully.")
 }
 
-// GetHealth returns the health status of the TSO service.
-func GetHealth(c *gin.Context) {
+// getHealth returns the health status of the TSO service.
+func getHealth(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	if svr.IsClosed() {
+		c.String(http.StatusInternalServerError, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
 	allocator, err := svr.GetKeyspaceGroupManager().GetAllocator(constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -245,8 +252,8 @@ type KeyspaceGroupMember struct {
 	PrimaryID uint64 `json:"primary_id"`
 }
 
-// GetKeyspaceGroupMembers gets the keyspace group members that the TSO service is serving.
-func GetKeyspaceGroupMembers(c *gin.Context) {
+// getKeyspaceGroupMembers gets the keyspace group members that the TSO service is serving.
+func getKeyspaceGroupMembers(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	kgm := svr.GetKeyspaceGroupManager()
 	keyspaceGroups := kgm.GetKeyspaceGroups()
