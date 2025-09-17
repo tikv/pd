@@ -23,7 +23,8 @@ import (
 )
 
 const (
-	resourceManagerCategory = "resource-manager"
+	// ResourceManagerCategory is the category of the resource manager.
+	ResourceManagerCategory = "resource-manager"
 	ruMeteringVersion       = "1"
 	sourceName              = "pd"
 
@@ -96,7 +97,7 @@ func (c *ruCollector) remove(keyspaceName string) {
 }
 
 // Category returns the category of the collector.
-func (*ruCollector) Category() string { return resourceManagerCategory }
+func (*ruCollector) Category() string { return ResourceManagerCategory }
 
 // Collect collects the RU metering data.
 func (c *ruCollector) Collect(data any) {

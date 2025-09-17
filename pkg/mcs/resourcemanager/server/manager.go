@@ -103,11 +103,12 @@ func NewManager[T factoryProvider](srv bs.Server) *Manager {
 			nil,
 		)
 		m.srv = srv
+		// Register the RU collector to the metering writer after the server is started.
+		// This ensure the metering writer is started before the RU collector is registered.
+		fp.GetMeteringWriter().RegisterCollector(m.ruCollector)
 	})
 	// The second initialization after becoming serving.
 	srv.AddServiceReadyCallback(m.Init)
-	// Register the RU collector to the metering writer.
-	fp.GetMeteringWriter().RegisterCollector(m.ruCollector)
 	return m
 }
 

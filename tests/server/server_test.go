@@ -32,7 +32,10 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	mconfig "github.com/pingcap/metering_sdk/config"
+	"github.com/pingcap/metering_sdk/storage"
 
+	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
@@ -550,4 +553,29 @@ func TestCheckClusterID(t *testing.T) {
 	re.Error(err)
 	etcd.Close()
 	testutil.CleanServer(cfgA.DataDir)
+}
+
+func TestMeteringWriter(t *testing.T) {
+	re := require.New(t)
+	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	// Ensure the metering writer can be started.
+	cfg.Metering = mconfig.MeteringConfig{
+		Type:   storage.ProviderTypeS3,
+		Region: "us-west-2",
+		Bucket: "test-bucket",
+	}
+	defer testutil.CleanServer(cfg.DataDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockHandler := tests.CreateMockHandler(re, "127.0.0.1")
+	svr, err := server.CreateServer(ctx, cfg, []string{constant.PDServiceName}, mockHandler)
+	re.NoError(err)
+	defer svr.Close()
+	err = svr.Run()
+	re.NoError(err)
+	collectors := svr.GetMeteringWriter().GetCollectors()
+	re.Len(collectors, 1)
+	ruCollector, ok := collectors[rmserver.ResourceManagerCategory]
+	re.True(ok)
+	re.Equal(rmserver.ResourceManagerCategory, ruCollector.Category())
 }

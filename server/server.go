@@ -489,6 +489,8 @@ func (s *Server) startServer(ctx context.Context) error {
 		} else {
 			s.meteringWriter.Start()
 		}
+	} else {
+		log.Info("no metering config provided, the metering writer will not be started")
 	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
