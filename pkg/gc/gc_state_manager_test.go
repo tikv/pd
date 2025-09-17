@@ -1717,7 +1717,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 
 	// Check the result of GetAllKeyspaceGCStates and GetGCState are matching.
 	checkAllKeyspaceGCStates := func() {
-		allStates, err := s.manager.GetAllKeyspacesGCStates()
+		allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
 		re.NoError(err)
 		re.Len(allStates, len(s.keyspacePresets.all))
 		for keyspaceID, state := range allStates {
@@ -1909,7 +1909,7 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	gcState, err := s.manager.GetGCState(keyspaceID)
 	re.NoError(err)
 	re.Empty(gcState.GCBarriers)
-	allGCStates, err := s.manager.GetAllKeyspacesGCStates()
+	allGCStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
 	re.NoError(err)
 	re.Empty(allGCStates[keyspaceID].GCBarriers)
 
@@ -1921,7 +1921,7 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	re.Len(gcState.GCBarriers, 1)
 	re.Equal("b1", gcState.GCBarriers[0].BarrierID)
 	re.Equal(uint64(40), gcState.GCBarriers[0].BarrierTS)
-	allGCStates, err = s.manager.GetAllKeyspacesGCStates()
+	allGCStates, err = s.manager.GetAllKeyspacesGCStates(context.Background())
 	re.NoError(err)
 	re.Len(allGCStates[keyspaceID].GCBarriers, 1)
 	re.Equal("b1", allGCStates[keyspaceID].GCBarriers[0].BarrierID)
@@ -1956,7 +1956,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	ch := make(chan result, 10)
 
 	callOnce := func() {
-		gcStates, err := s.manager.GetAllKeyspacesGCStates()
+		gcStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
 		ch <- result{gcStates: gcStates, err: err}
 	}
 

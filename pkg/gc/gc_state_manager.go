@@ -663,8 +663,8 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 // the caller should NEVER change the content of the returned result and error. It's guaranteed that the returned result
 // must be fetched AFTER the beginning of the current invocation, and it never reuses the result of invocations that
 // started earlier than the current one.
-func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
-	return m.allKeyspacesGCStatesSingleFlight.Do(context.Background(), func() (map[uint32]GCState, error) {
+func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint32]GCState, error) {
+	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func() (map[uint32]GCState, error) {
 		result, err := m.getAllKeyspacesGCStatesImpl()
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 		return result, err
