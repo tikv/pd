@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
@@ -38,6 +39,7 @@ const (
 	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/primary".
 	resourceManagerSvcDiscoveryFormat = "/ms/%d/" + resourceManagerServiceName + "/primary"
 	serviceURLRetryInterval           = 3 * time.Second
+	serviceURLWatchRetryInterval      = 3 * time.Second
 )
 
 // ResourceManagerDiscovery is used to discover the resource manager service.
@@ -103,8 +105,9 @@ func (r *ResourceManagerDiscovery) Init() error {
 		}
 	}
 	r.resetConn(url)
-	r.wg.Add(1)
+	r.wg.Add(2)
 	go r.updateServiceURLLoop(revision)
+	go r.watchServiceURL(revision)
 	return nil
 }
 
@@ -219,6 +222,62 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 			if newRevision > revision {
 				r.resetConn(url)
 				revision = newRevision
+			}
+		}
+	}
+}
+
+func (r *ResourceManagerDiscovery) watchServiceURL(revision int64) {
+	defer r.wg.Done()
+
+	log.Info("[resource-manager] watching service URL",
+		zap.String("discovery-key", r.discoveryKey))
+
+	lastRevision := revision
+startWatch:
+	ch, err := r.metaCli.Watch(r.ctx, []byte(r.discoveryKey), WithRev(lastRevision))
+	if err != nil {
+		log.Error("[resource-manager] failed to watch service URL",
+			zap.String("discovery-key", r.discoveryKey),
+			zap.Error(err))
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-time.After(serviceURLWatchRetryInterval):
+			goto startWatch
+		}
+	}
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case events, ok := <-ch:
+			if !ok {
+				log.Info("[resource-manager] service URL watch channel closed",
+					zap.String("discovery-key", r.discoveryKey))
+				goto startWatch
+			}
+			var connReset bool
+			for _, event := range events {
+				if event.Type != meta_storagepb.Event_PUT {
+					continue
+				}
+				url, err := r.parseURLFromStorageValue(event.Kv.Value)
+				if err != nil {
+					log.Error("[resource-manager] failed to parse service URL",
+						zap.String("discovery-key", r.discoveryKey),
+						zap.Error(err))
+					continue
+				}
+				log.Info("[resource-manager] service URL changed",
+					zap.String("discovery-key", r.discoveryKey),
+					zap.String("new-url", url))
+				lastRevision = event.Kv.ModRevision
+				r.resetConn(url)
+				connReset = true
+			}
+			if connReset && r.onLeaderChanged != nil {
+				r.onLeaderChanged()
 			}
 		}
 	}
