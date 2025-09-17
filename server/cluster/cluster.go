@@ -895,6 +895,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	statistics.UpdateStoreHeartbeatMetrics(store)
 	c.core.PutStore(newStore, opts...)
+	// Supply NodeState in the response to help the store handle special cases
+	// more conveniently, such as avoiding calling `remove_peer` redundantly under
+	// NodeState_Removing.
+	resp.State = store.GetNodeState()
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
