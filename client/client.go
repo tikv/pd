@@ -193,22 +193,24 @@ type serviceModeKeeper struct {
 	// RMutex here is for the future usage that there might be multiple goroutines
 	// triggering service mode switching concurrently.
 	sync.RWMutex
-	serviceMode     pdpb.ServiceMode
-	tsoClient       *tsoClient
-	tsoSvcDiscovery ServiceDiscovery
+	serviceMode              pdpb.ServiceMode
+	tsoClient                *tsoClient
+	tsoSvcDiscovery          ServiceDiscovery
+	resourceManagerDiscovery *ResourceManagerDiscovery
 }
 
 func (k *serviceModeKeeper) close() {
 	k.Lock()
 	defer k.Unlock()
-	switch k.serviceMode {
-	case pdpb.ServiceMode_API_SVC_MODE:
+	if k.tsoSvcDiscovery != nil {
 		k.tsoSvcDiscovery.Close()
-		fallthrough
-	case pdpb.ServiceMode_PD_SVC_MODE:
-		k.tsoClient.close()
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		k.tsoSvcDiscovery = nil
 	}
+	if k.resourceManagerDiscovery != nil {
+		k.resourceManagerDiscovery.Close()
+		k.resourceManagerDiscovery = nil
+	}
+	k.tsoClient.close()
 }
 
 type client struct {
@@ -521,23 +523,31 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
 
-	if c.option.useTSOServerProxy {
-		// If we are using TSO server proxy, we always use PD_SVC_MODE.
-		newMode = pdpb.ServiceMode_PD_SVC_MODE
-	}
-
 	if newMode == c.serviceMode {
 		return
 	}
-	log.Info("[pd] changing service mode",
-		zap.String("old-mode", c.serviceMode.String()),
-		zap.String("new-mode", newMode.String()))
-	c.resetTSOClientLocked(newMode)
-	oldMode := c.serviceMode
+	switch newMode {
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		log.Warn("[pd] intend to switch to unknown service mode, use PD_SVC_MODE")
+		fallthrough
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		if c.tsoSvcDiscovery != nil || c.tsoClient == nil {
+			c.resetTSOClientLocked(newMode)
+		}
+		if c.resourceManagerDiscovery != nil {
+			c.resetResourceManagerDiscoveryLocked(newMode)
+		}
+	case pdpb.ServiceMode_API_SVC_MODE:
+		// If we are using TSO server proxy, we always use PD_SVC_MODE.
+		if c.tsoSvcDiscovery == nil && !c.option.useTSOServerProxy {
+			c.resetTSOClientLocked(newMode)
+		}
+		if c.resourceManagerDiscovery == nil && !c.option.useResourceManagerProxy {
+			c.resetResourceManagerDiscoveryLocked(newMode)
+		}
+	}
 	c.serviceMode = newMode
-	log.Info("[pd] service mode changed",
-		zap.String("old-mode", oldMode.String()),
-		zap.String("new-mode", newMode.String()))
+	log.Info("[pd] service mode changed", zap.String("new-mode", newMode.String()))
 }
 
 // Reset a new TSO client.
@@ -551,6 +561,7 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = newTSOClient(c.ctx, c.option,
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
+		log.Info("[pd] tso provider changed to pd")
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = newTSOServiceDiscovery(
 			c.ctx, MetaStorageClient(c), c.pdSvcDiscovery,
@@ -566,6 +577,7 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 				zap.Error(err))
 			return
 		}
+		log.Info("[pd] tso provider changed to tso server")
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
@@ -600,10 +612,52 @@ func (c *client) ResetTSOClient() {
 	c.resetTSOClientLocked(c.serviceMode)
 }
 
-func (c *client) getServiceMode() pdpb.ServiceMode {
+type tsoProvider int
+
+const (
+	tsoProviderPD tsoProvider = iota
+	tsoProviderTSOServer
+)
+
+func (c *client) getTSOProvider() tsoProvider {
 	c.RLock()
 	defer c.RUnlock()
-	return c.serviceMode
+	if c.tsoSvcDiscovery != nil {
+		return tsoProviderTSOServer
+	}
+	return tsoProviderPD
+}
+
+func (c *client) resetResourceManagerDiscoveryLocked(newMode pdpb.ServiceMode) {
+	var newResourceManagerDiscovery *ResourceManagerDiscovery
+	if newMode == pdpb.ServiceMode_API_SVC_MODE && !c.option.useResourceManagerProxy {
+		newResourceManagerDiscovery = NewResourceManagerDiscovery(
+			c.ctx, c.pdSvcDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
+		if err := newResourceManagerDiscovery.Init(); err != nil {
+			log.Error("[pd] failed to initialize resource manager discovery. keep the current service mode",
+				zap.Strings("svr-urls", c.svrUrls),
+				zap.String("current-mode", c.serviceMode.String()),
+				zap.Error(err))
+			newResourceManagerDiscovery.Close()
+			return
+		}
+	}
+	if c.resourceManagerDiscovery != nil {
+		c.resourceManagerDiscovery.Close()
+	}
+	c.resourceManagerDiscovery = newResourceManagerDiscovery
+	if newMode == pdpb.ServiceMode_PD_SVC_MODE {
+		log.Info("[pd] resource manager provider changed to pd")
+	} else {
+		log.Info("[pd] resource manager provider changed to resource manager server")
+	}
+	c.scheduleUpdateTokenConnection()
+}
+
+func (c *client) getResourceManagerDiscovery() *ResourceManagerDiscovery {
+	c.RLock()
+	defer c.RUnlock()
+	return c.resourceManagerDiscovery
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -640,12 +694,12 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 			return err
 		}
 	case EnableTSOFollowerProxy:
-		if c.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported in PD service mode")
-		}
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
+		}
+		if c.getTSOProvider() != tsoProviderPD && enable {
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		c.option.setEnableTSOFollowerProxy(enable)
 	case EnableFollowerHandle:
@@ -783,17 +837,10 @@ func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical in
 // GetMinTS implements the TSOClient interface.
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
 	// Handle compatibility issue in case of PD/API server doesn't support GetMinTS API.
-	serviceMode := c.getServiceMode()
-	switch serviceMode {
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
-		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
-	case pdpb.ServiceMode_PD_SVC_MODE:
+	if c.getTSOProvider() == tsoProviderPD {
 		// If the service mode is switched to API during GetTS() call, which happens during migration,
 		// returning the default timeline should be fine.
 		return c.GetTS(ctx)
-	case pdpb.ServiceMode_API_SVC_MODE:
-	default:
-		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
