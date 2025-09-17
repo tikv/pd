@@ -874,7 +874,9 @@ type tokenCounter struct {
 		setupNotificationCh        <-chan time.Time
 		setupNotificationThreshold float64
 		setupNotificationTimer     *time.Timer
-		cancelCh                   chan struct{}
+		// cancelCh is used to cancel the notification to unblock gc goroutines.
+		// It's needed since setupNotificationTimer.Stop() does not close the setupNotificationCh channel.
+		cancelCh chan struct{}
 	}
 
 	lastDeadline time.Time
@@ -1044,7 +1046,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 			ch := counter.notify.setupNotificationCh
 			cancel := counter.notify.cancelCh
 			counter.notify.mu.Unlock()
-			if ch == nil {
+			if ch == nil || cancel == nil {
 				continue
 			}
 			select {
@@ -1056,7 +1058,8 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 				counter.notify.mu.Unlock()
 				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-cancel:
-				return
+				// move on to the next resource token counter since this one is cancelled.
+				continue
 			case <-ctx.Done():
 				return
 			}
@@ -1068,7 +1071,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 			ch := counter.notify.setupNotificationCh
 			cancel := counter.notify.cancelCh
 			counter.notify.mu.Unlock()
-			if ch == nil {
+			if ch == nil || cancel == nil {
 				continue
 			}
 			select {
@@ -1080,7 +1083,8 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 				counter.notify.mu.Unlock()
 				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-cancel:
-				return
+				// move on to the next request unit token counter since this one is cancelled.
+				continue
 			case <-ctx.Done():
 				return
 			}
