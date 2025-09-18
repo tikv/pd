@@ -55,13 +55,20 @@ func genRandName() string {
 	return "pd" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
+type TestEtcdClusterOptions struct {
+	ServerCfgModifier func(cfg *embed.Config)
+}
+
 // NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.
-func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdClient *clientv3.Client, clean func()) {
+func NewTestEtcdCluster(t testing.TB, count int, opt *TestEtcdClusterOptions) (servers []*embed.Etcd, etcdClient *clientv3.Client, clean func()) {
 	re := require.New(t)
 	servers = make([]*embed.Etcd, 0, count)
 
 	cfg := NewTestSingleConfig()
 	cfg.Dir = t.TempDir()
+	if opt != nil && opt.ServerCfgModifier != nil {
+		opt.ServerCfgModifier(cfg)
+	}
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
 	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls)
@@ -104,7 +111,7 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 }
 
 // MustAddEtcdMember is used to add a new etcd member to the cluster for test.
-func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
+func MustAddEtcdMember(t testing.TB, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
 	re := require.New(t)
 	cfg2 := NewTestSingleConfig()
 	cfg2.Dir = t.TempDir()

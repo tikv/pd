@@ -358,7 +358,7 @@ func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
 	}
 }
 
-func benchmarkOrderedSingleFlightParallel(b *testing.B, concurrency int) {
+func benchmarkOrderedSingleFlightParallel(b *testing.B, parallelism int) {
 	s := NewOrderedSingleFlight[int]()
 	var execCount atomic.Int64
 	f := func() (int, error) {
@@ -367,8 +367,8 @@ func benchmarkOrderedSingleFlightParallel(b *testing.B, concurrency int) {
 	}
 	ctx := context.Background()
 
-	b.SetParallelism(concurrency)
 	b.ResetTimer()
+	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			_, _ = s.Do(ctx, f)
@@ -377,6 +377,10 @@ func benchmarkOrderedSingleFlightParallel(b *testing.B, concurrency int) {
 	b.StopTimer()
 	b.ReportMetric(float64(execCount.Load()), "exec/op")
 	b.ReportMetric(1-float64(execCount.Load())/float64(b.N), "reusing_rate")
+}
+
+func BenchmarkOrderedSingleFlightParallel1(b *testing.B) {
+	benchmarkOrderedSingleFlightParallel(b, 1)
 }
 
 func BenchmarkOrderedSingleFlightParallel8(b *testing.B) {

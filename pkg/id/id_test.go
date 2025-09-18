@@ -45,7 +45,7 @@ const (
 // share rootPath and member val update their ids concurrently.
 func TestMultipleAllocator(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Put memberValue to leaderPath to simulate an election success.
@@ -88,7 +88,7 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 // TestIDAllocationEndValue tests if keyspace allocator hits ErrIDExhausted when trying to allocate into reserved range.
 func TestIDAllocationEndValue(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)

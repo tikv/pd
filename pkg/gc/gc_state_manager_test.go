@@ -17,7 +17,9 @@ package gc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
+	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
@@ -83,11 +86,21 @@ func TestGCStateManager(t *testing.T) {
 	suite.Run(t, new(gcStateManagerTestSuite))
 }
 
-func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
+type newGCStateManagerForTestOptions struct {
+	// Nil for generating initial keyspaces by the default preset
+	// Non-nil (including empty) for generating specified keyspaces
+	specifyInitialKeyspaces []*keyspace.CreateKeyspaceRequest
+	etcdServerCfgModifier   func(cfg *embed.Config)
+}
+
+func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
 
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	var etcdClusterOpt etcdutil.TestEtcdClusterOptions
+	etcdClusterOpt.ServerCfgModifier = opt.etcdServerCfgModifier
+
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdClusterOpt)
 	kvBase := kv.NewEtcdKVBase(client)
 
 	// Simulate a member which id.Allocator may need to check.
@@ -112,46 +125,52 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	re.NoError(err)
 
 	// keyspaceID 0 exists automatically after bootstrapping.
+	if opt.specifyInitialKeyspaces == nil {
+		ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks1",
+			Config:     map[string]string{"gc_management_type": "unified"},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		re.Equal(uint32(1), ks1.Id)
 
-	ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks1",
-		Config:     map[string]string{"gc_management_type": "global"},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.Equal(uint32(1), ks1.Id)
+		ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks2",
+			Config:     map[string]string{"gc_management_type": "keyspace_level"},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		re.Equal(uint32(2), ks2.Id)
 
-	ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks2",
-		Config:     map[string]string{"gc_management_type": "keyspace_level"},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.Equal(uint32(2), ks2.Id)
+		ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks3",
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		re.Equal(uint32(3), ks3.Id)
 
-	ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks3",
-		Config:     map[string]string{},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.Equal(uint32(3), ks3.Id)
-
-	ks4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks4",
-		Config:     map[string]string{},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	_, err = keyspaceManager.UpdateKeyspaceState("ks4", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
-	re.NoError(err)
-	re.Equal(uint32(4), ks4.Id)
+		ks4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks4",
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceState("ks4", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		re.Equal(uint32(4), ks4.Id)
+	} else {
+		for _, req := range opt.specifyInitialKeyspaces {
+			_, err := keyspaceManager.CreateKeyspace(req)
+			re.NoError(err)
+		}
+	}
 
 	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel
 }
 
 func (s *gcStateManagerTestSuite) SetupTest() {
-	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T())
+	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T(), newGCStateManagerForTestOptions{})
 
 	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, 0, 1, 2, 3}
 	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
@@ -2009,4 +2028,86 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	}
 
 	re.Equal(int64(2), executionCount.Load())
+}
+
+func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, parallelism int) {
+	fname := testutil.InitTempFileLogger("info")
+	defer os.Remove(fname)
+
+	opt := newGCStateManagerForTestOptions{
+		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceRequest, 0, keyspacesCount),
+		etcdServerCfgModifier: func(cfg *embed.Config) {
+			cfg.LogOutputs = []string{fname}
+		},
+	}
+	for i := range keyspacesCount {
+		opt.specifyInitialKeyspaces = append(opt.specifyInitialKeyspaces, &keyspace.CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("ks%d", i),
+			Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
+			CreateTime: time.Now().Unix(),
+		})
+	}
+
+	_, _, gcStateManager, clean, cancel := newGCStateManagerForTest(b, opt)
+	defer func() {
+		b.StopTimer()
+		cancel()
+		clean()
+	}()
+
+	b.ResetTimer()
+	if parallelism == 0 {
+		for i := 0; i < b.N; i++ {
+			_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	} else {
+		b.SetParallelism(parallelism)
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+	b.StopTimer()
+	execCount := gcStateManager.allKeyspacesGCStatesSingleFlight.ExecCount()
+	b.ReportMetric(float64(execCount), "exec/op")
+	b.ReportMetric(1-float64(execCount)/float64(b.N), "reusing_rate")
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_SingleThread(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 0)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_P1(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 1)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_P8(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 8)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_P128(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 128)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_SingleThread(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 0)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_P1(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 1)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_P8(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 8)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_P128(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 128)
 }

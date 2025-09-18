@@ -16,6 +16,7 @@ package syncutil
 
 import (
 	"context"
+	"sync/atomic"
 )
 
 type task[TResult any] struct {
@@ -40,6 +41,9 @@ type OrderedSingleFlight[TResult any] struct {
 
 	mu          Mutex
 	pendingTask *task[TResult]
+
+	// A counter calculating the accumulated number of executions.
+	execCounter atomic.Int64
 }
 
 // NewOrderedSingleFlight creates an instance of OrderedSingleFlight.
@@ -104,6 +108,7 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 		res, err := f()
 		currentTask.result = res
 		currentTask.err = err
+		s.execCounter.Add(1)
 		close(currentTask.finishCh)
 	}()
 
@@ -114,4 +119,8 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 	case <-currentTask.finishCh:
 		return currentTask.result, currentTask.err
 	}
+}
+
+func (s *OrderedSingleFlight[TResult]) ExecCount() int64 {
+	return s.execCounter.Load()
 }
