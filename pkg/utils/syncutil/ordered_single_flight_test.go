@@ -346,3 +346,43 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 		}()
 	}
 }
+
+func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
+	s := NewOrderedSingleFlight[int]()
+	noop := func() (int, error) { return 0, nil }
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = s.Do(ctx, noop)
+	}
+}
+
+func benchmarkOrderedSingleFlightParallel(b *testing.B, concurrency int) {
+	s := NewOrderedSingleFlight[int]()
+	var execCount atomic.Int64
+	f := func() (int, error) {
+		execCount.Add(1)
+		return 0, nil
+	}
+	ctx := context.Background()
+
+	b.SetParallelism(concurrency)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = s.Do(ctx, f)
+		}
+	})
+	b.StopTimer()
+	b.ReportMetric(float64(execCount.Load()), "exec/op")
+	b.ReportMetric(1-float64(execCount.Load())/float64(b.N), "reusing_rate")
+}
+
+func BenchmarkOrderedSingleFlightParallel8(b *testing.B) {
+	benchmarkOrderedSingleFlightParallel(b, 8)
+}
+
+func BenchmarkOrderedSingleFlightParallel128(b *testing.B) {
+	benchmarkOrderedSingleFlightParallel(b, 128)
+}
