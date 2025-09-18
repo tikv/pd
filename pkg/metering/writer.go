@@ -73,9 +73,10 @@ func NewWriter(ctx context.Context, c *config.MeteringConfig, id string) (*Write
 		ctx:      ctx,
 		cancel:   cancel,
 		provider: provider,
-		inner: meteringwriter.NewMeteringWriter(
+		inner: meteringwriter.NewMeteringWriterFromConfig(
 			provider,
 			config.DefaultConfig().WithLogger(zap.L()),
+			c,
 		),
 		collectors: make(map[string]Collector),
 	}, nil

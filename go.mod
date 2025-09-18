@@ -37,7 +37,7 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
 	github.com/pingcap/kvproto v0.0.0-20250807083051-d83f0718696f
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
-	github.com/pingcap/metering_sdk v0.0.0-20250910063513-219eaccb6f53
+	github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20250630090911-e1f8338b7285
 	github.com/prometheus/client_golang v1.20.5
