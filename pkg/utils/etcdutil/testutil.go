@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -31,8 +32,14 @@ import (
 )
 
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig() *embed.Config {
+func NewTestSingleConfig(c ...*log.Config) *embed.Config {
 	cfg := embed.NewConfig()
+	if len(c) > 0 {
+		lg, p, _ := log.InitLogger(c[0])
+		log.ReplaceGlobals(lg, p)
+		cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(lg, lg.Core(), p.Syncer)
+	}
+
 	cfg.Name = genRandName()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
@@ -56,11 +63,11 @@ func genRandName() string {
 }
 
 // NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.
-func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdClient *clientv3.Client, clean func()) {
+func NewTestEtcdCluster(t *testing.T, count int, c ...*log.Config) (servers []*embed.Etcd, etcdClient *clientv3.Client, clean func()) {
 	re := require.New(t)
 	servers = make([]*embed.Etcd, 0, count)
 
-	cfg := NewTestSingleConfig()
+	cfg := NewTestSingleConfig(c...)
 	cfg.Dir = t.TempDir()
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
