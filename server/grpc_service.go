@@ -22,6 +22,7 @@ import (
 	"path"
 	"runtime"
 	"runtime/trace"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -64,6 +66,8 @@ const (
 	defaultGRPCDialTimeout        = 3 * time.Second
 
 	gRPCServiceName = "pdpb.PD"
+
+	gracefulShutdownSchedulerName = "graceful-shutdown-scheduler"
 )
 
 var (
@@ -887,6 +891,31 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 	}, nil
 }
 
+// getGracefulShutdownHandler safely retrieves and type-asserts the graceful shutdown scheduler.
+// It uses an anonymous interface to match the scheduler's expected methods.
+// Returns nil if the scheduler doesn't exist or is not the expected type.
+func (s *GrpcServer) getGracefulShutdownHandler(name string) interface {
+	AddStore(uint64) error
+	RemoveStore(uint64) error
+	EvictStoreIDs() []uint64
+} {
+	sc := s.GetRaftCluster().GetCoordinator().GetSchedulersController()
+	scheduler := sc.GetScheduler(name)
+	if scheduler == nil {
+		return nil
+	}
+	evictScheduler, ok := scheduler.Scheduler.(interface {
+		AddStore(uint64) error
+		RemoveStore(uint64) error
+		EvictStoreIDs() []uint64
+	})
+	if !ok {
+		log.Error("scheduler is not an evict-leader-scheduler", zap.String("scheduler-name", name))
+		return nil
+	}
+	return evictScheduler
+}
+
 // StoreHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
 	done, err := s.rateLimitCheck()
@@ -925,6 +954,46 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("store %v not found", storeID)),
 		}, nil
+	}
+
+	// Dedicate evict-leader scheduler for graceful shutdown.
+	// When the store is stopping, manage a dedicated instance named "graceful-shutdown-scheduler".
+	// When it is not stopping, try to remove the dedicated instance if it exists.
+	{
+		h := s.GetHandler()
+		if request.GetStats().GetIsStopping() {
+			evictScheduler := s.getGracefulShutdownHandler(gracefulShutdownSchedulerName)
+			if evictScheduler == nil {
+				if err := h.AddSchedulerWithName(types.EvictLeaderScheduler, gracefulShutdownSchedulerName); err != nil {
+					log.Error("add scheduler failed", zap.Error(err))
+				} else {
+					evictScheduler = s.getGracefulShutdownHandler(gracefulShutdownSchedulerName)
+				}
+			}
+
+			if evictScheduler != nil {
+				if err := evictScheduler.AddStore(storeID); err != nil {
+					log.Error("add store to evict scheduler failed", zap.Uint64("store-id", storeID), zap.Error(err))
+				}
+			} else {
+				log.Error("graceful shutdown scheduler not found even after trying to add it", zap.String("scheduler-name", gracefulShutdownSchedulerName))
+			}
+		} else {
+			// try to remove the dedicated scheduler every time when the state is not stopping.
+			// avoid the case that the last StoreHeartbeat of graceful shutdown process failed and can't remove the dedicated scheduler
+			evictScheduler := s.getGracefulShutdownHandler(gracefulShutdownSchedulerName)
+			if evictScheduler != nil {
+				ids := evictScheduler.EvictStoreIDs()
+				log.Info("get evict leader store ids", zap.Any("ids", ids))
+				if slices.Contains(ids, storeID) {
+					if err := evictScheduler.RemoveStore(storeID); err != nil {
+						log.Error("remove store from evict scheduler failed", zap.Uint64("store-id", storeID), zap.Error(err))
+					} else {
+						log.Info("remove store from evict scheduler successfully", zap.Uint64("store-id", storeID))
+					}
+				}
+			}
+		}
 	}
 
 	resp := &pdpb.StoreHeartbeatResponse{Header: wrapHeader()}
