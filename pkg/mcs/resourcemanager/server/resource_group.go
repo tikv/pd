@@ -62,9 +62,9 @@ func (rus *RequestUnitSettings) Clone() *RequestUnitSettings {
 }
 
 // NewRequestUnitSettings creates a new RequestUnitSettings with the given token bucket.
-func NewRequestUnitSettings(tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
+func NewRequestUnitSettings(resourceGroupName string, tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
 	return &RequestUnitSettings{
-		RU: NewGroupTokenBucket(tokenBucket),
+		RU: NewGroupTokenBucket(resourceGroupName, tokenBucket),
 	}
 }
 
@@ -169,9 +169,9 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
 		if group.GetRUSettings() == nil {
-			rg.RUSettings = NewRequestUnitSettings(nil)
+			rg.RUSettings = NewRequestUnitSettings(rg.Name, nil)
 		} else {
-			rg.RUSettings = NewRequestUnitSettings(group.GetRUSettings().GetRU())
+			rg.RUSettings = NewRequestUnitSettings(rg.Name, group.GetRUSettings().GetRU())
 		}
 		if group.RUStats != nil {
 			rg.RUConsumption = group.RUStats
@@ -195,6 +195,9 @@ func (rg *ResourceGroup) RequestRU(
 		return nil
 	}
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
+	if tb == nil {
+		return nil
+	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
