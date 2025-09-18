@@ -242,11 +242,11 @@ func (s *Service) RegisterPrimaryRouter() {
 func getHealth(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	if svr.IsClosed() {
-		c.String(http.StatusInternalServerError, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
 		return
 	}
 	if svr.GetParticipant().IsPrimaryElected() {
-		c.IndentedJSON(http.StatusOK, "ok")
+		c.String(http.StatusOK, "ok")
 		return
 	}
 

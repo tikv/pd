@@ -228,7 +228,7 @@ func resetTS(c *gin.Context) {
 func getHealth(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	if svr.IsClosed() {
-		c.String(http.StatusInternalServerError, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
 		return
 	}
 	allocator, err := svr.GetKeyspaceGroupManager().GetAllocator(constant.DefaultKeyspaceGroupID)
@@ -237,7 +237,7 @@ func getHealth(c *gin.Context) {
 		return
 	}
 	if allocator.GetMember().(*member.Participant).IsPrimaryElected() {
-		c.IndentedJSON(http.StatusOK, "ok")
+		c.String(http.StatusOK, "ok")
 		return
 	}
 
