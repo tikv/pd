@@ -272,18 +272,7 @@ func (c *RaftCluster) InitCluster(
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
-<<<<<<< HEAD
-	if c.opt.IsPlacementRulesEnabled() {
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
-		if err != nil {
-			return err
-		}
-	}
 	c.schedulingController = newSchedulingController(c.ctx, c.core, c.opt, c.ruleManager)
-=======
-	c.keyRangeManager = keyrange.NewManager()
-	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
->>>>>>> 4d498809b (placement-rule: move placement rule initialization after LoadStores (#9616))
 	return nil
 }
 
@@ -310,7 +299,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 	if c.opt.IsPlacementRulesEnabled() {
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
+		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
 		if err != nil {
 			return err
 		}
