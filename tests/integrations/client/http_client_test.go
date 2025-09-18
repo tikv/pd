@@ -348,6 +348,45 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 	err = client.SetPlacementRule(env.ctx, testRule)
 	re.NoError(err)
 	suite.checkRuleResult(re, env, client, testRule, 1, true)
+
+	// ***** Test placement rule failed passing check after transfer leader
+	// Transfer the leader to another store to ensure the PD follower
+	// exists stale store labels.
+	suite.transferLeader(env, client)
+	tranferLeaderRule := []*pd.GroupBundle{
+		{
+			ID: "test-transfer-leader",
+			Rules: []*pd.Rule{
+				{
+					GroupID:  "test-transfer-leader",
+					ID:       "readonly",
+					Role:     pd.Voter,
+					Count:    3,
+					StartKey: []byte{},
+					EndKey:   []byte{},
+					LabelConstraints: []pd.LabelConstraint{
+						{
+							Key:    "$mode",
+							Op:     pd.In,
+							Values: []string{"readonly"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = client.SetPlacementRuleBundles(env.ctx, tranferLeaderRule, true)
+	re.Error(err)
+	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
+	suite.setStoreLabels(env.ctx, client, map[string]string{
+		"$mode": "readonly",
+	})
+	err = client.SetPlacementRuleBundles(env.ctx, tranferLeaderRule, true)
+	re.NoError(err)
+	suite.checkRuleResult(re, env, client, tranferLeaderRule[0].Rules[0], 1, true)
+
+	suite.transferLeader(env, client)
+	suite.checkRuleResult(re, env, client, tranferLeaderRule[0].Rules[0], 1, true)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -593,20 +632,25 @@ func (suite *httpClientTestSuite) TestSetStoreLabels() {
 }
 
 func (suite *httpClientTestSuite) checkSetStoreLabels(mode mode, client pd.Client) {
-	re := suite.Require()
 	env := suite.env[mode]
 
-	resp, err := client.GetStores(env.ctx)
+	suite.setStoreLabels(env.ctx, client, map[string]string{
+		"zone": "zone1",
+	})
+}
+
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, client pd.Client, storeLabels map[string]string) {
+	re := suite.Require()
+
+	resp, err := client.GetStores(ctx)
 	re.NoError(err)
 	setStore := resp.Stores[0]
 	re.Empty(setStore.Store.Labels, nil)
-	storeLabels := map[string]string{
-		"zone": "zone1",
-	}
-	err = client.SetStoreLabels(env.ctx, 1, storeLabels)
+
+	err = client.SetStoreLabels(ctx, 1, storeLabels)
 	re.NoError(err)
 
-	resp, err = client.GetStores(env.ctx)
+	resp, err = client.GetStores(ctx)
 	re.NoError(err)
 	for _, store := range resp.Stores {
 		if store.Store.ID == setStore.Store.ID {
@@ -622,9 +666,12 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 }
 
 func (suite *httpClientTestSuite) checkTransferLeader(mode mode, client pd.Client) {
-	re := suite.Require()
 	env := suite.env[mode]
+	suite.transferLeader(env, client)
+}
 
+func (suite *httpClientTestSuite) transferLeader(env *httpClientTestEnv, client pd.Client) {
+	re := suite.Require()
 	members, err := client.GetMembers(env.ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
