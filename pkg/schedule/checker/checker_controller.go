@@ -138,7 +138,6 @@ func (c *Controller) PatrolRegions() {
 	for {
 		select {
 		case <-ticker.C:
-			loopStart := time.Now()
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
 			if c.cluster.IsSchedulingHalted() {
@@ -151,8 +150,9 @@ func (c *Controller) PatrolRegions() {
 			c.metrics.patrolRegionChannelSize.Set(float64(len(c.patrolRegionContext.regionChan)))
 
 			// wait for the regionChan to be drained
+			waitDrainChanel := time.Now()
 			if len(c.patrolRegionContext.regionChan) > 0 {
-				c.metrics.patrolPhaseHistograms[phaseWaitForChannel].Observe(time.Since(loopStart).Seconds())
+				c.metrics.patrolPhaseHistograms[phaseWaitForChannel].Observe(time.Since(waitDrainChanel).Seconds())
 				continue
 			}
 
