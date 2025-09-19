@@ -117,6 +117,7 @@ func newCheckerControllerMetrics() *checkerControllerMetrics {
 		phaseUpdateLabel,
 	}
 
+	// when adding a new checker, remember to add it here for metrics
 	checkerTypes := []string{
 		jointStateChecker,
 		splitChecker,

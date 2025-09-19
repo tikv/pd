@@ -610,14 +610,14 @@ func measureChecker(observer prometheus.Observer, action func() []*operator.Oper
 	measure(observer, func() {
 		rawOps = action()
 	})
-	if rawOps == nil {
-		return nil
-	}
-	var ops []*operator.Operator
+	ops := make([]*operator.Operator, 0, len(rawOps))
 	for _, op := range rawOps {
 		if op != nil {
 			ops = append(ops, op)
 		}
+	}
+	if len(ops) == 0 {
+		return nil
 	}
 	return ops
 }
