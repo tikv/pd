@@ -165,24 +165,22 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
-	if input["recovery-duration"] != nil && !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+	recoveryDurationGapFloat, inputRecoveryDuration := input["recovery-duration"].(float64)
+	if input["recovery-duration"] != nil && !inputRecoveryDuration {
+		handler.rd.JSON(w, http.StatusBadRequest, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 
-	batch := handler.config.getBatch()
-	batchFloat, ok := input["batch"].(float64)
-	if input["batch"] != nil && !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'batch'").Error())
+	batchFloat, inputBatch := input["batch"].(float64)
+	if input["batch"] != nil && !inputBatch {
+		handler.rd.JSON(w, http.StatusBadRequest, errors.New("invalid argument for 'batch'").Error())
 		return
 	}
-	if ok {
+	if inputBatch {
 		if batchFloat < 1 || batchFloat > 10 {
 			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
-		batch = (int)(batchFloat)
 	}
 
 	handler.config.Lock()
@@ -190,8 +188,13 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	prevBatch := handler.config.Batch
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
-	handler.config.RecoveryDurationGap = recoveryDurationGap
-	handler.config.Batch = batch
+	batch := int(batchFloat)
+	if inputRecoveryDuration {
+		handler.config.RecoveryDurationGap = recoveryDurationGap
+	}
+	if inputBatch {
+		handler.config.Batch = batch
+	}
 	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap

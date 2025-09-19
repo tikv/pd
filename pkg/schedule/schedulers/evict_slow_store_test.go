@@ -178,10 +178,10 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 	re.Equal(types.EvictSlowStoreScheduler.String(), ops[0].Desc())
 
-	es.(*evictSlowStoreScheduler).conf.Batch = 5
+	es.(*evictSlowStoreScheduler).conf.Batch = 10
 	re.NoError(es.(*evictSlowStoreScheduler).conf.save())
 	ops, _ = es.Schedule(tc, false)
-	re.Len(ops, 5)
+	re.Len(ops, 10)
 
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 0
@@ -204,7 +204,8 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	re.Zero(persistValue.evictStore())
 	re.True(persistValue.readyForRecovery())
-	re.Equal(5, persistValue.Batch)
+	re.Equal(10, persistValue.Batch)
+	re.Equal(uint64(1800), persistValue.RecoveryDurationGap)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
