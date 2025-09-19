@@ -191,6 +191,7 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 func (*Server) AddServiceReadyCallback(...func(context.Context) error) {}
 
 // IsServing returns whether the server is serving.
+// TODO: implement it.
 func (*Server) IsServing() bool { return false }
 
 // ServerLoopWgDone decreases the server loop wait group.
