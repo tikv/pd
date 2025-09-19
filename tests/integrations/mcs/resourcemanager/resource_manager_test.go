@@ -48,10 +48,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs/utils"
-
-	// Register Service
-	_ "github.com/tikv/pd/pkg/mcs/registry"
-	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
 )
 
 func TestMain(m *testing.M) {

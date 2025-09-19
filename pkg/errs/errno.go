@@ -189,8 +189,9 @@ var (
 	ErrSchedulerConfig                  = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
 	ErrCacheOverflow                    = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
 	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
-	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
+	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
 	ErrSchedulerTiKVSplitDisabled       = errors.Normalize("tikv split region disabled", errors.RFCCodeText("PD:scheduler:ErrSchedulerTiKVSplitDisabled"))
+	ErrNoStoreToBeSelected              = errors.Normalize("no store to be selected", errors.RFCCodeText("PD:scheduler:ErrNoStoreToBeSelected"))
 )
 
 // checker errors

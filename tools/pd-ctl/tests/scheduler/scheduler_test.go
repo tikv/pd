@@ -547,13 +547,19 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	conf1 = make(map[string]any)
 	testutil.Eventually(re, func() bool {
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "show"}, &conf)
-		return conf["batch"] == 3.
+		return conf["batch"] == 3. && conf["enable-network-slow-store"] == false && conf["recovery-duration"] == 1800.
 	})
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "batch", "10"}, nil)
 	re.Contains(echo, "Success!")
 	testutil.Eventually(re, func() bool {
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
-		return conf1["batch"] == 10.
+		return conf1["batch"] == 10. && conf1["enable-network-slow-store"] == false && conf["recovery-duration"] == 1800.
+	})
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "enable-network-slow-store", "true"}, nil)
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
+		return conf1["batch"] == 10. && conf1["enable-network-slow-store"] == true && conf["recovery-duration"] == 1800.
 	})
 }
 
@@ -820,21 +826,23 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
-	re.NoError(err)
-	storeInfo := new(response.StoreInfo)
-	re.NoError(json.Unmarshal(output, &storeInfo))
-	re.True(storeInfo.Status.PauseLeaderTransferIn)
-	re.False(storeInfo.Status.PauseLeaderTransferOut)
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
+		re.NoError(err)
+		storeInfo := new(response.StoreInfo)
+		re.NoError(json.Unmarshal(output, &storeInfo))
+		return storeInfo.Status.PauseLeaderTransferIn && !storeInfo.Status.PauseLeaderTransferOut
+	})
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
-	re.NoError(err)
-	storeInfo1 := new(response.StoreInfo)
-	re.NoError(json.Unmarshal(output, &storeInfo1))
-	re.False(storeInfo1.Status.PauseLeaderTransferIn)
-	re.False(storeInfo.Status.PauseLeaderTransferOut)
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
+		re.NoError(err)
+		storeInfo1 := new(response.StoreInfo)
+		re.NoError(json.Unmarshal(output, &storeInfo1))
+		return !storeInfo1.Status.PauseLeaderTransferIn && !storeInfo1.Status.PauseLeaderTransferOut
+	})
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")

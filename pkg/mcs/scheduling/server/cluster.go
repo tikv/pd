@@ -16,7 +16,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -74,6 +80,9 @@ type Cluster struct {
 	pdLeader          atomic.Value
 	running           atomic.Bool
 
+	backendAddress string
+	httpClient     *http.Client
+
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
 	// miscRunner is used to process the statistics and persistent tasks asynchronously.
@@ -85,7 +94,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
-	collectWaitTime       = time.Minute
+	requestInterval       = 10 * time.Second
 
 	// heartbeat relative const
 	heartbeatTaskRunner = "heartbeat-task-runner"
@@ -103,6 +112,8 @@ func NewCluster(
 	basicCluster *core.BasicCluster,
 	hbStreams *hbstream.HeartbeatStreams,
 	checkMembershipCh chan struct{},
+	httpClient *http.Client,
+	backendAddress string,
 ) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
@@ -124,11 +135,14 @@ func NewCluster(
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
 		checkMembershipCh: checkMembershipCh,
+		httpClient:        httpClient,
+		backendAddress:    backendAddress,
 
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
+
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel(), true)
 	if err != nil {
@@ -362,7 +376,7 @@ func (c *Cluster) updateScheduler() {
 			}
 			name := s.GetName()
 			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
-				log.Info("scheduler has already existed, skip adding it",
+				log.Debug("scheduler has already existed, skip adding it",
 					zap.String("scheduler-name", name),
 					zap.Strings("scheduler-args", scheduler.Args))
 				continue
@@ -518,12 +532,43 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	// force wait for 1 minute to make prepare checker won't be directly skipped
-	runCollectWaitTime := collectWaitTime
-	failpoint.Inject("changeRunCollectWaitTime", func() {
-		runCollectWaitTime = 1 * time.Second
-	})
-	c.coordinator.RunUntilStop(runCollectWaitTime)
+	c.coordinator.RunUntilStop()
+}
+
+// GetPrepareRegionCount returns the count of regions that are in prepare state.
+func (c *Cluster) GetPrepareRegionCount() (int, error) {
+	return c.getPrepareRegionCountFromPD()
+}
+
+func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
+	backendAddresses := strings.Split(c.backendAddress, ",")
+	var backendAddress string
+	if len(backendAddresses) >= 1 {
+		backendAddress = backendAddresses[0]
+	}
+
+	url := fmt.Sprintf("%s/pd/api/v1/regions/count", backendAddress)
+	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return 0, err
+	}
+
+	var regionsInfo response.RegionsInfo
+	if err := json.Unmarshal(body, &regionsInfo); err != nil {
+		return 0, err
+	}
+	return regionsInfo.Count, nil
 }
 
 func (c *Cluster) runMetricsCollectionJob() {

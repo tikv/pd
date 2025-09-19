@@ -244,7 +244,7 @@ func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *htt
 	}
 	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
 	if !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+		handler.rd.JSON(w, http.StatusBadRequest, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 	handler.config.Lock()

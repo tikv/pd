@@ -47,9 +47,9 @@ import (
 
 const (
 	randomRegionMaxRetry = 10
-	// ScanRegionLimit is the default limit for the number of regions to scan in a region scan request.
-	ScanRegionLimit = 1000
-	batchSearchSize = 16
+	// MaxScanRegionLimit is the maximum number of regions to scan in one lock.
+	MaxScanRegionLimit = 1000
+	batchSearchSize    = 16
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
@@ -1763,8 +1763,8 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
-// GetClusterNotFromStorageRegionsCnt gets the `NotFromStorageRegionsCnt` count of regions that not loaded from storage anymore.
-func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
+// GetNotFromStorageRegionsCnt gets the `NotFromStorageRegionsCnt` count of regions that not loaded from storage anymore.
+func (r *RegionsInfo) GetNotFromStorageRegionsCnt() int {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	return r.tree.notFromStorageRegionsCount()
@@ -2018,22 +2018,34 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	return r.tree.GetCountByRange(startKey, endKey)
 }
 
+func (r *RegionsInfo) scanRegionsInner(startKey, endKey []byte, limit int, fns ...scanRegionFunc) ([]*RegionInfo, error) {
+	var res []*RegionInfo
+	for {
+		scanLimit := limit - len(res)
+		regions, err := r.scanRegionsOnce(startKey, endKey, scanLimit, fns...)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, regions...)
+		if limit >= 0 && len(res) >= limit {
+			break
+		}
+		if len(regions) == 0 {
+			break
+		}
+		startKey = regions[len(regions)-1].GetEndKey()
+		// if startKey is empty, it means there is no more region to scan.
+		if len(startKey) == 0 {
+			break
+		}
+	}
+	return res, nil
+}
+
 // ScanRegions scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
-	r.t.RLock()
-	defer r.t.RUnlock()
-	var res []*RegionInfo
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
-		}
-		if limit > 0 && len(res) >= limit {
-			return false
-		}
-		res = append(res, region)
-		return true
-	})
+	res, _ := r.scanRegionsInner(startKey, endKey, limit)
 	return res
 }
 
@@ -2050,10 +2062,8 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...Bat
 		opt(scanOptions)
 	}
 
-	r.t.RLock()
-	defer r.t.RUnlock()
 	for _, keyRange := range krs {
-		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
+		regions, err := r.scanRegion(keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
 		if err != nil {
 			return nil, err
 		}
@@ -2070,26 +2080,48 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...Bat
 	return res, nil
 }
 
-func scanRegion(regionTree *regionTree, keyRange *keyutil.KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
+type scanRegionFunc = func(region *RegionInfo) error
+
+func (r *RegionsInfo) scanRegionsOnce(startKey, endKey []byte, limit int, fns ...scanRegionFunc) ([]*RegionInfo, error) {
+	scanLimit := limit
+	// limit <= 0 means no limit.
+	if limit > MaxScanRegionLimit || limit <= 0 {
+		scanLimit = MaxScanRegionLimit
+	}
+	regions := make([]*RegionInfo, 0)
+	r.t.RLock()
+	defer r.t.RUnlock()
+	var err error
+	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+			return false
+		}
+		if len(regions) >= scanLimit {
+			return false
+		}
+		for _, fn := range fns {
+			if err = fn(region); err != nil {
+				return false
+			}
+		}
+		regions = append(regions, region)
+		return true
+	})
+	return regions, err
+}
+
+func (r *RegionsInfo) scanRegion(keyRange *keyutil.KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
 	var (
 		res        []*RegionInfo
 		lastRegion = &RegionInfo{
 			meta: &metapb.Region{EndKey: keyRange.StartKey},
 		}
 		exceedLimit = func() bool { return limit > 0 && len(res) >= limit }
-		err         error
 	)
-	regionTree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
-		if len(keyRange.EndKey) > 0 && len(region.GetStartKey()) > 0 &&
-			bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
-			return false
-		}
-		if exceedLimit() {
-			return false
-		}
+	fn := func(region *RegionInfo) error {
 		if len(lastRegion.GetEndKey()) > 0 && len(region.GetStartKey()) > 0 &&
 			bytes.Compare(region.GetStartKey(), lastRegion.GetEndKey()) > 0 {
-			err = errs.ErrRegionNotAdjacent.FastGen(
+			err := errs.ErrRegionNotAdjacent.FastGen(
 				"key range[%x, %x) found a hole region between region[%x, %x) and region[%x, %x)",
 				keyRange.StartKey, keyRange.EndKey,
 				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
@@ -2097,19 +2129,18 @@ func scanRegion(regionTree *regionTree, keyRange *keyutil.KeyRange, limit int, o
 			log.Warn("scan regions failed", zap.Bool("contain-all-key-range",
 				outputMustContainAllKeyRange), zap.Error(err))
 			if outputMustContainAllKeyRange {
-				return false
+				return err
 			}
 		}
-
 		lastRegion = region
-		res = append(res, region)
-		return true
-	})
+		return nil
+	}
+	res, err := r.scanRegionsInner(keyRange.StartKey, keyRange.EndKey, limit, fn)
 	if outputMustContainAllKeyRange && err != nil {
 		return nil, err
 	}
-
-	if !(exceedLimit()) && len(keyRange.EndKey) > 0 && len(lastRegion.GetEndKey()) > 0 &&
+	if !(exceedLimit()) && len(keyRange.EndKey) > 0 &&
+		len(lastRegion.GetEndKey()) > 0 &&
 		bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) < 0 {
 		err = errs.ErrRegionNotAdjacent.FastGen(
 			"key range[%x, %x) found a hole region in the last, the last scanned region is [%x, %x), [%x, %x) is missing",
@@ -2149,7 +2180,7 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
 				return false
 			}
-			if cnt >= ScanRegionLimit {
+			if cnt >= MaxScanRegionLimit {
 				return false
 			}
 			cnt++

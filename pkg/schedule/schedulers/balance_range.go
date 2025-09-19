@@ -638,10 +638,9 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 			balanceRangeCreateOpFailCounter.Inc()
 			return nil
 		}
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(solver.targetStoreID(), 10)
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(s.score(sourceID), 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(s.score(targetID), 'f', 2, 64))
@@ -694,7 +693,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		}
 	}
 	if len(sources) <= 1 {
-		return errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
+		return errs.ErrNoStoreToBeSelected.FastGenByArgs()
 	}
 	// storeID <--> score mapping
 	scoreMap := make(map[uint64]float64, len(sources))
