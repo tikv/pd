@@ -24,7 +24,6 @@ import (
 	"github.com/docker/go-units"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -62,8 +61,8 @@ type StoreInfo struct {
 	*storeStats
 	pauseLeaderTransferIn  atomic.Int64 // not allow to be used as target of transfer leader
 	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
-	slowStoreEvicted       bool         // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted       bool         // this store has been evicted as a slow store by trend, should not transfer leader to it
+	slowStoreEvicted       atomic.Int64 // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted       atomic.Int64 // this store has been evicted as a slow store by trend, should not transfer leader to it
 	leaderCount            int
 	regionCount            int
 	learnerCount           int
@@ -119,8 +118,6 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                typeutil.DeepClone(s.meta, StoreFactory),
 		storeStats:          s.storeStats,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		slowTrendEvicted:    s.slowTrendEvicted,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		learnerCount:        s.learnerCount,
@@ -138,6 +135,8 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	}
 	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
+	store.slowStoreEvicted.Store(s.slowStoreEvicted.Load())
+	store.slowTrendEvicted.Store(s.slowTrendEvicted.Load())
 	for _, opt := range opts {
 		if opt != nil {
 			opt(store)
@@ -165,8 +164,6 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                s.meta,
 		storeStats:          s.storeStats,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		slowTrendEvicted:    s.slowTrendEvicted,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
 		learnerCount:        s.learnerCount,
@@ -184,6 +181,8 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	}
 	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
+	store.slowStoreEvicted.Store(s.slowStoreEvicted.Load())
+	store.slowTrendEvicted.Store(s.slowTrendEvicted.Load())
 	for _, opt := range opts {
 		opt(store)
 	}
@@ -204,12 +203,12 @@ func (s *StoreInfo) AllowLeaderTransferOut() bool {
 
 // EvictedAsSlowStore returns if the store should be evicted as a slow store.
 func (s *StoreInfo) EvictedAsSlowStore() bool {
-	return s.slowStoreEvicted
+	return s.slowStoreEvicted.Load() > 0
 }
 
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
 func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
-	return s.slowTrendEvicted
+	return s.slowTrendEvicted.Load() > 0
 }
 
 // IsAvailable returns if the store bucket of limitation is available
@@ -293,7 +292,7 @@ func (s *StoreInfo) WitnessScore(delta int64) float64 {
 func (s *StoreInfo) IsSlow() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.slowTrendEvicted || s.rawStats.GetSlowScore() >= slowStoreThreshold
+	return s.IsEvictedAsSlowTrend() || s.rawStats.GetSlowScore() >= slowStoreThreshold
 }
 
 // GetSlowTrend returns the slow trend information of the store.
@@ -942,10 +941,6 @@ func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-	if store.EvictedAsSlowStore() {
-		failpoint.InjectCall("CaptureSlowStoreEvicted")
-		return errs.ErrSlowStoreEvicted.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(SlowStoreEvicted())
 	return nil

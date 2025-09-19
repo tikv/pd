@@ -146,11 +146,6 @@ error = '''
 can not remove store %d since there are no extra up store to store the leader
 '''
 
-["PD:core:ErrSlowStoreEvicted"]
-error = '''
-store %v is evicted as a slow store
-'''
-
 ["PD:core:ErrSlowTrendEvicted"]
 error = '''
 store %v is evicted as a slow store by trend
