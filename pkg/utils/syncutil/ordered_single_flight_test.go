@@ -353,7 +353,7 @@ func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
 	ctx := context.Background()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = s.Do(ctx, noop)
 	}
 }

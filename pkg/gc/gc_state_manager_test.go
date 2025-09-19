@@ -2058,7 +2058,7 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, para
 
 	b.ResetTimer()
 	if parallelism == 0 {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
 			re.NoError(err)
 		}

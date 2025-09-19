@@ -121,6 +121,7 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 	}
 }
 
+// ExecCount returns the accumulated number of executions of the inner function.
 func (s *OrderedSingleFlight[TResult]) ExecCount() int64 {
 	return s.execCounter.Load()
 }

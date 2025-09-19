@@ -55,6 +55,7 @@ func genRandName() string {
 	return "pd" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
+// TestEtcdClusterOptions is the options for NewTestEtcdCluster.
 type TestEtcdClusterOptions struct {
 	ServerCfgModifier func(cfg *embed.Config)
 }
