@@ -17,18 +17,23 @@ package gc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
+	"os"
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -81,11 +86,21 @@ func TestGCStateManager(t *testing.T) {
 	suite.Run(t, new(gcStateManagerTestSuite))
 }
 
-func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
+type newGCStateManagerForTestOptions struct {
+	// Nil for generating initial keyspaces by the default preset
+	// Non-nil (including empty) for generating specified keyspaces
+	specifyInitialKeyspaces []*keyspace.CreateKeyspaceRequest
+	etcdServerCfgModifier   func(cfg *embed.Config)
+}
+
+func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
 
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	var etcdClusterOpt etcdutil.TestEtcdClusterOptions
+	etcdClusterOpt.ServerCfgModifier = opt.etcdServerCfgModifier
+
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdClusterOpt)
 	kvBase := kv.NewEtcdKVBase(client)
 
 	// Simulate a member which id.Allocator may need to check.
@@ -110,46 +125,52 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	re.NoError(err)
 
 	// keyspaceID 0 exists automatically after bootstrapping.
+	if opt.specifyInitialKeyspaces == nil {
+		ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks1",
+			Config:     map[string]string{"gc_management_type": "unified"},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		re.Equal(uint32(1), ks1.Id)
 
-	ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks1",
-		Config:     map[string]string{"gc_management_type": "global"},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.Equal(uint32(1), ks1.Id)
+		ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks2",
+			Config:     map[string]string{"gc_management_type": "keyspace_level"},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		re.Equal(uint32(2), ks2.Id)
 
-	ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks2",
-		Config:     map[string]string{"gc_management_type": "keyspace_level"},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.Equal(uint32(2), ks2.Id)
+		ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks3",
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		re.Equal(uint32(3), ks3.Id)
 
-	ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks3",
-		Config:     map[string]string{},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	re.Equal(uint32(3), ks3.Id)
-
-	ks4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:       "ks4",
-		Config:     map[string]string{},
-		CreateTime: time.Now().Unix(),
-	})
-	re.NoError(err)
-	_, err = keyspaceManager.UpdateKeyspaceState("ks4", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
-	re.NoError(err)
-	re.Equal(uint32(4), ks4.Id)
+		ks4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:       "ks4",
+			Config:     map[string]string{},
+			CreateTime: time.Now().Unix(),
+		})
+		re.NoError(err)
+		_, err = keyspaceManager.UpdateKeyspaceState("ks4", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+		re.NoError(err)
+		re.Equal(uint32(4), ks4.Id)
+	} else {
+		for _, req := range opt.specifyInitialKeyspaces {
+			_, err := keyspaceManager.CreateKeyspace(req)
+			re.NoError(err)
+		}
+	}
 
 	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel
 }
 
 func (s *gcStateManagerTestSuite) SetupTest() {
-	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T())
+	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T(), newGCStateManagerForTestOptions{})
 
 	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, 0, 1, 2, 3}
 	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
@@ -1715,7 +1736,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 
 	// Check the result of GetAllKeyspaceGCStates and GetGCState are matching.
 	checkAllKeyspaceGCStates := func() {
-		allStates, err := s.manager.GetAllKeyspacesGCStates()
+		allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
 		re.NoError(err)
 		re.Len(allStates, len(s.keyspacePresets.all))
 		for keyspaceID, state := range allStates {
@@ -1907,7 +1928,7 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	gcState, err := s.manager.GetGCState(keyspaceID)
 	re.NoError(err)
 	re.Empty(gcState.GCBarriers)
-	allGCStates, err := s.manager.GetAllKeyspacesGCStates()
+	allGCStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
 	re.NoError(err)
 	re.Empty(allGCStates[keyspaceID].GCBarriers)
 
@@ -1919,7 +1940,7 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	re.Len(gcState.GCBarriers, 1)
 	re.Equal("b1", gcState.GCBarriers[0].BarrierID)
 	re.Equal(uint64(40), gcState.GCBarriers[0].BarrierTS)
-	allGCStates, err = s.manager.GetAllKeyspacesGCStates()
+	allGCStates, err = s.manager.GetAllKeyspacesGCStates(context.Background())
 	re.NoError(err)
 	re.Len(allGCStates[keyspaceID].GCBarriers, 1)
 	re.Equal("b1", allGCStates[keyspaceID].GCBarriers[0].BarrierID)
@@ -1932,4 +1953,158 @@ func (s *gcStateManagerTestSuite) TestDowngradeCompatibilityForNullKeyspace() {
 
 func (s *gcStateManagerTestSuite) TestDowngradeCompatibilityForNonNullKeyspace() {
 	s.testDowngradeCompatibility(2)
+}
+
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallSharingResult() {
+	re := s.Require()
+
+	var executionCount atomic.Int64
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish", "pause"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
+		executionCount.Add(1)
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart"))
+	}()
+
+	type result struct {
+		gcStates map[uint32]GCState
+		err      error
+	}
+	ch := make(chan result, 10)
+
+	callOnce := func() {
+		gcStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
+		ch <- result{gcStates: gcStates, err: err}
+	}
+
+	go callOnce()
+
+	// Blocked
+	select {
+	case res := <-ch:
+		re.FailNowf("failpoint not taking effect to block the invocation to GetAllKeyspacesGCStates", "result: %v, %v", res.gcStates, res.err)
+	case <-time.After(time.Millisecond * 200):
+	}
+
+	re.Equal(int64(1), executionCount.Load())
+
+	_, err := s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 100, time.Now())
+	re.NoError(err)
+	// Start another several calls
+	const concurrency = 5
+	for range concurrency {
+		go callOnce()
+	}
+	// Still blocked
+	select {
+	case <-ch:
+		re.FailNow("expects GetAllKeyspacesGCStates to be blocked but returned")
+	case <-time.After(time.Millisecond * 100):
+	}
+
+	// Resume execution
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish"))
+	// The first call finishes with the old result
+	var res result
+	select {
+	case res = <-ch:
+	case <-time.After(time.Second):
+		re.FailNow("GetAllKeyspacesGCStates blocked while expected to return")
+	}
+	re.NoError(res.err)
+	re.Equal(uint64(0), res.gcStates[constant.NullKeyspaceID].TxnSafePoint)
+	// Following calls started strictly after the first finishes (thus also strictly after the updating), and return
+	// the updated result.
+	for range concurrency {
+		select {
+		case res = <-ch:
+		case <-time.After(time.Second):
+			re.FailNow("GetAllKeyspacesGCStates blocked while expected to return")
+		}
+		re.NoError(res.err)
+		re.Equal(uint64(100), res.gcStates[constant.NullKeyspaceID].TxnSafePoint)
+	}
+
+	re.Equal(int64(2), executionCount.Load())
+}
+
+func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, parallelism int) {
+	re := require.New(b)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.Remove(fname)
+
+	opt := newGCStateManagerForTestOptions{
+		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceRequest, 0, keyspacesCount),
+		etcdServerCfgModifier: func(cfg *embed.Config) {
+			cfg.LogOutputs = []string{fname}
+		},
+	}
+	for i := range keyspacesCount {
+		opt.specifyInitialKeyspaces = append(opt.specifyInitialKeyspaces, &keyspace.CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("ks%d", i),
+			Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
+			CreateTime: time.Now().Unix(),
+		})
+	}
+
+	_, _, gcStateManager, clean, cancel := newGCStateManagerForTest(b, opt)
+	defer func() {
+		b.StopTimer()
+		cancel()
+		clean()
+	}()
+
+	b.ResetTimer()
+	if parallelism == 0 {
+		for range b.N {
+			_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+			re.NoError(err)
+		}
+	} else {
+		b.SetParallelism(parallelism)
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+				re.NoError(err)
+			}
+		})
+	}
+	b.StopTimer()
+	execCount := gcStateManager.allKeyspacesGCStatesSingleFlight.ExecCount()
+	b.ReportMetric(float64(execCount), "exec/op")
+	b.ReportMetric(1-float64(execCount)/float64(b.N), "reusing_rate")
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_SingleThread(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 0)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_P1(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 1)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_P8(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 8)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS1_P128(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 1, 128)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_SingleThread(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 0)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_P1(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 1)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_P8(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 8)
+}
+
+func BenchmarkGetAllKeyspacesGCStates_KS10_P128(b *testing.B) {
+	benchmarkGetAllKeyspacesGCStatesImpl(b, 10, 128)
 }

@@ -68,7 +68,7 @@ func TestKeyspaceGroupManagerTestSuite(t *testing.T) {
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	suite.backendEndpoints, suite.etcdClient, suite.clean = servers[0].Config().ListenClientUrls[0].String(), client, clean
 	suite.cfg = suite.createConfig()
 }

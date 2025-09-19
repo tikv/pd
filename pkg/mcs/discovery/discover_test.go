@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 
 func TestDiscover(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", DefaultLeaseInSeconds)
 	err := sr1.Register()
@@ -58,7 +58,7 @@ func TestDiscover(t *testing.T) {
 
 func TestServiceRegistryEntry(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
 	s1, err := entry1.Serialize()

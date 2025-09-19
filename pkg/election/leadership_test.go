@@ -40,7 +40,7 @@ const defaultLeaseTimeout = 1
 
 func TestLeadership(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Campaign the same leadership
@@ -206,7 +206,7 @@ func TestExitWatch(t *testing.T) {
 
 func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client) func()) {
 	re := require.New(t)
-	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
 	re.NoError(err)
@@ -242,7 +242,7 @@ func TestRequestProgress(t *testing.T) {
 		re := require.New(t)
 		fname := testutil.InitTempFileLogger("debug")
 		defer os.RemoveAll(fname)
-		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 		defer clean()
 		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
 		re.NoError(err)
@@ -286,7 +286,7 @@ func TestRequestProgress(t *testing.T) {
 
 func TestCampaignTimes(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	leadership := NewLeadership(client, "test_leader", "test_leader")
 
