@@ -51,6 +51,8 @@ const (
 	TSOServiceName = "tso"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
+	// RouterServiceName is the name of router server.
+	RouterServiceName = "router"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards
