@@ -2031,6 +2031,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 }
 
 func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, parallelism int) {
+	re := require.New(b)
 	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
 
@@ -2059,18 +2060,14 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, para
 	if parallelism == 0 {
 		for i := 0; i < b.N; i++ {
 			_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
-			if err != nil {
-				b.Fatal(err)
-			}
+			re.NoError(err)
 		}
 	} else {
 		b.SetParallelism(parallelism)
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
-				if err != nil {
-					b.Fatal(err)
-				}
+				re.NoError(err)
 			}
 		})
 	}
