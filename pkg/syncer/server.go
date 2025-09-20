@@ -346,6 +346,7 @@ func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 }
 
 func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionResponse) {
+<<<<<<< HEAD
 	broadcastDone := make(chan struct{}, 1)
 	go func() {
 		defer logutil.LogPanic()
@@ -359,11 +360,33 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 				return
 			default:
 			}
+=======
+	broadcastDone := make(chan struct{})
+
+	defer logutil.LogPanic()
+	var (
+		failed sync.Map
+		wg     sync.WaitGroup
+	)
+	s.mu.RLock()
+	for name, sender := range s.mu.streams {
+		select {
+		case <-ctx.Done():
+			s.mu.RUnlock()
+			return
+		default:
+		}
+
+		wg.Add(1)
+		go func(name string, sender ServerStream) {
+			defer wg.Done()
+>>>>>>> 23bd6d0b6 (syncer: fix lock usage (#9688))
 			err := sender.Send(regions)
 			if err != nil {
 				log.Warn("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
 				failed = append(failed, name)
 			}
+<<<<<<< HEAD
 		}
 		s.mu.RUnlock()
 		if len(failed) > 0 {
@@ -374,6 +397,22 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 			}
 			s.mu.Unlock()
 		}
+=======
+		}(name, sender)
+	}
+	s.mu.RUnlock()
+
+	go func() {
+		wg.Wait()
+		s.mu.Lock()
+		failed.Range(func(key, _ any) bool {
+			name := key.(string)
+			delete(s.mu.streams, name)
+			log.Info("region syncer delete the stream", zap.String("stream", name))
+			return true
+		})
+		s.mu.Unlock()
+>>>>>>> 23bd6d0b6 (syncer: fix lock usage (#9688))
 		close(broadcastDone)
 	}()
 	select {
