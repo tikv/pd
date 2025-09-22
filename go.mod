@@ -39,7 +39,7 @@ require (
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20250630090911-e1f8338b7285
+	github.com/pingcap/tidb-dashboard v0.0.0-20250908031600-468ef95996bb
 	github.com/prometheus/client_golang v1.20.5
 	github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3
 	github.com/sasha-s/go-deadlock v0.3.5
@@ -222,7 +222,7 @@ require (
 	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/mod v0.25.0 // indirect
 	golang.org/x/net v0.41.0 // indirect
-	golang.org/x/oauth2 v0.21.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect
