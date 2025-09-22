@@ -19,11 +19,7 @@ import (
 	"testing"
 	"time"
 
-<<<<<<< HEAD
 	"github.com/pingcap/failpoint"
-	"github.com/stretchr/testify/assert"
-=======
->>>>>>> f3d41fab5 (syncer: use task runner to sync region (#9159))
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/testutil"

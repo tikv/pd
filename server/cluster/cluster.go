@@ -111,19 +111,13 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-<<<<<<< HEAD
-	heartbeatTaskRunner = "heartbeat-async"
-	miscTaskRunner      = "misc-async"
-	logTaskRunner       = "log-async"
-
-	// TODO: make it configurable
-	IsTSODynamicSwitchingEnabled = false
-=======
 	heartbeatTaskRunner  = "heartbeat-async"
 	miscTaskRunner       = "misc-async"
 	logTaskRunner        = "log-async"
 	syncRegionTaskRunner = "sync-region-async"
->>>>>>> f3d41fab5 (syncer: use task runner to sync region (#9159))
+
+	// TODO: make it configurable
+	IsTSODynamicSwitchingEnabled = false
 )
 
 // Server is the interface for cluster.

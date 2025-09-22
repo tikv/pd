@@ -369,13 +369,8 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 			defer wg.Done()
 			err := sender.Send(regions)
 			if err != nil {
-<<<<<<< HEAD
 				log.Warn("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
-				failed = append(failed, name)
-=======
-				log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
 				failed.Store(name, struct{}{})
->>>>>>> f3d41fab5 (syncer: use task runner to sync region (#9159))
 			}
 		}(name, sender)
 	}
