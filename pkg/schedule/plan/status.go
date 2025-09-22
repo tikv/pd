@@ -94,6 +94,8 @@ const (
 	StatusRegionLabelReject
 	// StatusRegionSendSnapshotThrottled represents the plan conflicts with send snapshot.
 	StatusRegionSendSnapshotThrottled
+	// StatusRegionScheduleDeny represents the region is not allowed to schedule
+	StatusRegionScheduleDeny
 )
 
 const (

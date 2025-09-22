@@ -21,11 +21,15 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/plan"
 )
 
 const (
-	splitOptionLabel     = "auto_split"
-	splitOptionValueDeny = "deny"
+	splitOptionLabel        = "auto_split"
+	splitOptionValueDeny    = "deny"
+	scheduleOptionLabel     = "schedule"
+	scheduleOptionValueDeny = "deny"
 )
 
 // AllowAutoSplit returns true if the region can be auto split
@@ -47,4 +51,23 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 	}
 
 	return true
+}
+
+type regionDenyFilter struct {
+	labeler *labeler.RegionLabeler
+}
+
+// NewRegionDenyFilter creates a RegionFilter that filters all deny regions.
+func NewRegionDenyFilter(cluster sche.SharedCluster) RegionFilter {
+	return &regionDenyFilter{
+		labeler: cluster.GetRegionLabeler(),
+	}
+}
+
+// Select implements the RegionFilter interface.
+func (f *regionDenyFilter) Select(region *core.RegionInfo) *plan.Status {
+	if f.labeler != nil && f.labeler.GetRegionLabel(region, scheduleOptionLabel) == scheduleOptionValueDeny {
+		return statusRegionScheduleDeny
+	}
+	return statusOK
 }
