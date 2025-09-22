@@ -12,7 +12,7 @@ import (
 
 func TestPatchResourceGroup(t *testing.T) {
 	re := require.New(t)
-	rg := &ResourceGroup{Name: "test", Mode: rmpb.GroupMode_RUMode, RUSettings: NewRequestUnitSettings(nil)}
+	rg := &ResourceGroup{Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: NewRequestUnitSettings(testResourceGroupName, nil)}
 	testCaseRU := []struct {
 		patchJSONString  string
 		expectJSONString string
