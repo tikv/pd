@@ -597,6 +597,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			return
 		}
 		if bs.rank.isAvailable(bs.cur) && bs.rank.betterThan(bs.best) {
+			if !bs.isReadyToBuild() {
+				return
+			}
 			if newOps := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
 				clone := *bs.cur
@@ -1268,12 +1271,9 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 }
 
 func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
-	if !bs.isReadyToBuild() {
-		return nil
-	}
-
+	enabledBucket := bs.GetStoreConfig().IsEnableRegionBucket()
 	splitRegions := make([]*core.RegionInfo, 0)
-	if bs.opTy == movePeer {
+	if bs.opTy == movePeer && enabledBucket {
 		for _, region := range []*core.RegionInfo{bs.cur.region, bs.cur.revertRegion} {
 			if region == nil {
 				continue
