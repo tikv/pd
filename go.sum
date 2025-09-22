@@ -500,13 +500,6 @@ github.com/prometheus/common v0.55.0 h1:KEi6DK7lXW/m7Ig5i47x0vRzuBsHuvJdi5ee6Y3G
 github.com/prometheus/common v0.55.0/go.mod h1:2SECS4xJG1kd8XF9IcM1gMX6510RAEL65zxzNImwdc8=
 github.com/prometheus/procfs v0.15.1 h1:YagwOFzUgYfKKHX6Dr+sHT7km/hxC76UB0learggepc=
 github.com/prometheus/procfs v0.15.1/go.mod h1:fB45yRUv8NstnjriLhBQLuOUt+WW4BsoGhij/e3PBqk=
-<<<<<<< HEAD
-=======
-github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/rleungx/kvproto v0.0.0-20250910092308-9ff4462edd39 h1:Z/SmeGVHWwWM9N6VzdoddUthu3yl/C429H/YZ6mZcj0=
-github.com/rleungx/kvproto v0.0.0-20250910092308-9ff4462edd39/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
->>>>>>> fix and rename
 github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3 h1:ancdy92KVH1IGYpBYUj/QsI2MIf06goCv2OWGuVJbwE=
 github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3/go.mod h1:wT/XWGnHH9zRLy/3D6xDAkMQVUDrRLxcJDa/YwN3w98=
 github.com/rogpeppe/fastuuid v1.2.0/go.mod h1:jVj6XXZzXRy/MSR5jhDC/2q6DgLz+nrA6LYCDYWNEvQ=
