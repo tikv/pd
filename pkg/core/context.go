@@ -23,21 +23,23 @@ import (
 // MetaProcessContext is a context for meta process.
 type MetaProcessContext struct {
 	context.Context
-	Tracer     RegionHeartbeatProcessTracer
-	TaskRunner ratelimit.Runner
-	MiscRunner ratelimit.Runner
-	LogRunner  ratelimit.Runner
+	Tracer           RegionHeartbeatProcessTracer
+	TaskRunner       ratelimit.Runner
+	MiscRunner       ratelimit.Runner
+	LogRunner        ratelimit.Runner
+	SyncRegionRunner ratelimit.Runner
 }
 
 // NewMetaProcessContext creates a new MetaProcessContext.
 // used in tests, can be changed if no need to test concurrency.
 func ContextTODO() *MetaProcessContext {
 	return &MetaProcessContext{
-		Context:    context.TODO(),
-		Tracer:     NewNoopHeartbeatProcessTracer(),
-		TaskRunner: ratelimit.NewSyncRunner(),
-		MiscRunner: ratelimit.NewSyncRunner(),
-		LogRunner:  ratelimit.NewSyncRunner(),
+		Context:          context.TODO(),
+		Tracer:           NewNoopHeartbeatProcessTracer(),
+		TaskRunner:       ratelimit.NewSyncRunner(),
+		MiscRunner:       ratelimit.NewSyncRunner(),
+		LogRunner:        ratelimit.NewSyncRunner(),
+		SyncRegionRunner: ratelimit.NewSyncRunner(),
 		// Limit default is nil
 	}
 }
