@@ -137,6 +137,7 @@ func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 // tokenSlot is used to split a token bucket into multiple slots to
 // server different clients within the same resource group.
 type tokenSlot struct {
+	id uint64
 	// ruTracker is used to track the RU demand of this slot,
 	// which will be used to calculate a fair allocation for this slot.
 	rt                *ruTracker
@@ -147,22 +148,17 @@ type tokenSlot struct {
 	lastReqTime       time.Time
 }
 
-func newTokenSlot(now time.Time, gtb *GroupTokenBucket) *tokenSlot {
-	ts := &tokenSlot{
+func newTokenSlot(clientUniqueID uint64, now time.Time) *tokenSlot {
+	return &tokenSlot{
+		id:          clientUniqueID,
 		rt:          newRUTracker(defaultRUTrackerTimeConstant),
 		lastReqTime: now,
 	}
-	if gtb != nil {
-		ts.fillRate = uint64(gtb.getFillRate())
-		ts.burstLimit = gtb.getBurstLimit()
-		ts.curTokenCapacity = gtb.Tokens
-		ts.lastTokenCapacity = gtb.Tokens
-	}
-	return ts
 }
 
 func (ts *tokenSlot) logFields() []zap.Field {
 	return []zap.Field{
+		zap.Uint64("slot-id", ts.id),
 		zap.Uint64("slot-fill-rate", ts.fillRate),
 		zap.Int64("slot-burst-limit", ts.burstLimit),
 		zap.Float64("slot-cur-token-capacity", ts.curTokenCapacity),
@@ -247,14 +243,14 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	slot, exist := gtb.tokenSlots[clientUniqueID]
 	if !exist && requiredToken != 0 {
 		// Create a new slot if the slot is not exist and the required token is not 0.
-		slot = newTokenSlot(now, nil)
+		slot = newTokenSlot(clientUniqueID, now)
 		slot.rt.sample(now, requiredToken)
 		gtb.tokenSlots[clientUniqueID] = slot
 	} else if exist && requiredToken != 0 {
 		// Update the existing slot.
 		slot.lastReqTime = now
 		slot.rt.sample(now, requiredToken)
-	} else if exist && requiredToken == 0 {
+	} else if requiredToken == 0 {
 		// Clean up the slot that required 0.
 		delete(gtb.tokenSlots, clientUniqueID)
 	}
@@ -296,44 +292,20 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	}
 
 	var (
-		basicDemandSum, overDemandSum  = 0.0, 0.0
-		basicDemandMap                 = make(map[uint64]float64, len(gtb.tokenSlots))
-		overDemandMap                  = make(map[uint64]float64, len(gtb.tokenSlots))
+		demandSum                      = 0.0
+		demandMap                      = make(map[uint64]float64, len(gtb.tokenSlots))
 		totalFillRate, totalBurstLimit = gtb.getFillRateAndBurstLimit()
-		evenFillRate                   = float64(totalFillRate) * evenRatio
 	)
-	// First, try to meet the basic demand of all slots without exceeding the even fill rate.
 	for clientUniqueID, slot := range gtb.tokenSlots {
 		ruDemand := slot.rt.getRUPerSec()
-		// Calculate the basic demand of the slot.
-		basicDemand := math.Min(ruDemand, float64(evenFillRate))
-		basicDemandSum += basicDemand
-		basicDemandMap[clientUniqueID] = basicDemand
-		// Calculate the over demand of the slot.
-		overDemand := math.Max(0, ruDemand-float64(evenFillRate))
-		overDemandSum += overDemand
-		overDemandMap[clientUniqueID] = overDemand
+		demandSum += ruDemand
+		demandMap[clientUniqueID] = ruDemand
 	}
-	// Then, distribute the remaining fill rate to all slots according to its over demand proportion.
-	var (
-		// The remaining fill rate should always be greater than 0.
-		remainingFillRate    = math.Max(0, float64(totalFillRate)-basicDemandSum)
-		fillRate, burstLimit float64
-	)
 	for clientUniqueID, slot := range gtb.tokenSlots {
-		basicDemand := basicDemandMap[clientUniqueID]
-		overDemand := overDemandMap[clientUniqueID]
-		if overDemand == 0 || remainingFillRate == 0 {
-			// No over demand or remaining fill rate, use the basic demand as the final fill rate.
-			fillRate = basicDemand
-		} else {
-			// There is over demand, distribute the remaining fill rate to the slot according to its over demand proportion.
-			proportion := overDemand / overDemandSum
-			fillRate = basicDemand + remainingFillRate*proportion
-		}
-
-		ratio := fillRate / float64(totalFillRate)
-		burstLimit = float64(totalBurstLimit) * ratio
+		demand := demandMap[clientUniqueID]
+		ratio := demand / demandSum
+		fillRate := float64(totalFillRate) * ratio
+		burstLimit := float64(totalBurstLimit) * ratio
 		assignTokens := tokensForBalance * ratio
 		// Need to reserve burst limit to next balance.
 		if burstLimit > 0 && slot.curTokenCapacity > burstLimit {
@@ -405,15 +377,13 @@ func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 }
 
 // init initializes the group token bucket.
-func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
+func (gtb *GroupTokenBucket) init(now time.Time) {
 	if gtb.getFillRate() == 0 {
 		gtb.setFillRateSetting(defaultRefillRate)
 	}
 	if gtb.Tokens < defaultInitialTokens && gtb.getBurstLimit() > 0 {
 		gtb.Tokens = defaultInitialTokens
 	}
-	// Init the first slot.
-	gtb.tokenSlots[clientID] = newTokenSlot(now, gtb)
 	gtb.LastUpdate = &now
 	gtb.Initialized = true
 }
@@ -423,7 +393,7 @@ func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clientUniqueID uint64, requiredToken float64) {
 	var tokensForBalance float64
 	if !gtb.Initialized {
-		gtb.init(now, clientUniqueID)
+		gtb.init(now)
 	} else if burst := float64(burstLimit); burst > 0 {
 		if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
 			totalNewTokens := gtb.getFillRate()*delta.Seconds() + gtb.reservedBurstTokens + gtb.reservedServiceTokens
@@ -437,8 +407,8 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 			tokensForBalance -= excessTokens
 			gtb.Tokens = burst
 		}
+		gtb.LastUpdate = &now
 	}
-	gtb.LastUpdate = &now
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
 		tokensForBalance = 0
