@@ -127,7 +127,11 @@ require (
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
+<<<<<<< HEAD
 	github.com/pingcap/tidb-dashboard v0.0.0-20241212035039-4b076331523a // indirect
+=======
+	github.com/pingcap/tidb-dashboard v0.0.0-20250908031600-468ef95996bb // indirect
+>>>>>>> e2f7162d7 (chore(dashboard): update TiDB Dashboard to 20250908031600-468ef95996bb (#9770))
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -169,12 +173,21 @@ require (
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
+<<<<<<< HEAD
 	golang.org/x/image v0.10.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/oauth2 v0.18.0 // indirect
 	golang.org/x/sync v0.6.0 // indirect
 	golang.org/x/sys v0.20.0 // indirect
 	golang.org/x/text v0.15.0 // indirect
+=======
+	golang.org/x/image v0.18.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
+	golang.org/x/sync v0.15.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
+>>>>>>> e2f7162d7 (chore(dashboard): update TiDB Dashboard to 20250908031600-468ef95996bb (#9770))
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.14.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
