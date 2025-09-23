@@ -195,6 +195,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 	snapshotFilter := filter.NewSnapshotSendFilter(bs.GetStores(), constant.Medium)
+	denyFilter := filter.NewRegionDenyFilter(bs.SchedulerCluster)
 	splitThresholds := bs.sche.conf.getSplitThresholds()
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
@@ -202,11 +203,13 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
-			} else if bs.opTy == movePeer {
-				if !snapshotFilter.Select(bs.cur.region).IsOK() {
-					hotSchedulerSnapshotSenderLimitCounter.Inc()
-					continue
-				}
+			}
+			if bs.opTy == movePeer && !snapshotFilter.Select(bs.cur.region).IsOK() {
+				hotSchedulerSnapshotSenderLimitCounter.Inc()
+				continue
+			}
+			if !denyFilter.Select(bs.cur.region).IsOK() {
+				continue
 			}
 			bs.cur.mainPeerStat = mainPeerStat
 			if bs.GetStoreConfig().IsEnableRegionBucket() && bs.tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) {
