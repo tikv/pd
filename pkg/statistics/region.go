@@ -23,27 +23,28 @@ import (
 
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
-	Count                int               `json:"count"`
-	EmptyCount           int               `json:"empty_count"`
-	StorageSize          int64             `json:"storage_size"`
-	UserStorageSize      int64             `json:"user_storage_size"`
-	StorageKeys          int64             `json:"storage_keys"`
-	StoreLeaderCount     map[uint64]int    `json:"store_leader_count"`
-	StorePeerCount       map[uint64]int    `json:"store_peer_count"`
-	StoreLeaderSize      map[uint64]int64  `json:"store_leader_size"`
-	StoreLeaderKeys      map[uint64]int64  `json:"store_leader_keys"`
-	StorePeerSize        map[uint64]int64  `json:"store_peer_size"`
-	StorePeerKeys        map[uint64]int64  `json:"store_peer_keys,omitempty"`
-	StoreWriteBytes      map[uint64]uint64 `json:"store_write_bytes,omitempty"`
-	StoreWriteKeys       map[uint64]uint64 `json:"store_write_keys,omitempty"`
-	StoreWriteQuery      map[uint64]uint64 `json:"store_write_query,omitempty"`
-	StoreLeaderReadBytes map[uint64]uint64 `json:"store_leader_read_bytes,omitempty"`
-	StoreLeaderReadKeys  map[uint64]uint64 `json:"store_leader_read_keys,omitempty"`
-	StoreLeaderReadQuery map[uint64]uint64 `json:"store_leader_read_query,omitempty"`
-	StorePeerReadBytes   map[uint64]uint64 `json:"store_peer_read_bytes,omitempty"`
-	StorePeerReadKeys    map[uint64]uint64 `json:"store_peer_read_keys,omitempty"`
-	StorePeerReadQuery   map[uint64]uint64 `json:"store_peer_read_query,omitempty"`
-	StoreEngine          map[uint64]string `json:"store_engine,omitempty"`
+	Count                   int               `json:"count"`
+	EmptyCount              int               `json:"empty_count"`
+	StorageSize             int64             `json:"storage_size"`
+	UserStorageSize         int64             `json:"user_storage_size"`
+	UserColumnarStorageSize int64             `json:"user_columnar_storage_size"`
+	StorageKeys             int64             `json:"storage_keys"`
+	StoreLeaderCount        map[uint64]int    `json:"store_leader_count"`
+	StorePeerCount          map[uint64]int    `json:"store_peer_count"`
+	StoreLeaderSize         map[uint64]int64  `json:"store_leader_size"`
+	StoreLeaderKeys         map[uint64]int64  `json:"store_leader_keys"`
+	StorePeerSize           map[uint64]int64  `json:"store_peer_size"`
+	StorePeerKeys           map[uint64]int64  `json:"store_peer_keys,omitempty"`
+	StoreWriteBytes         map[uint64]uint64 `json:"store_write_bytes,omitempty"`
+	StoreWriteKeys          map[uint64]uint64 `json:"store_write_keys,omitempty"`
+	StoreWriteQuery         map[uint64]uint64 `json:"store_write_query,omitempty"`
+	StoreLeaderReadBytes    map[uint64]uint64 `json:"store_leader_read_bytes,omitempty"`
+	StoreLeaderReadKeys     map[uint64]uint64 `json:"store_leader_read_keys,omitempty"`
+	StoreLeaderReadQuery    map[uint64]uint64 `json:"store_leader_read_query,omitempty"`
+	StorePeerReadBytes      map[uint64]uint64 `json:"store_peer_read_bytes,omitempty"`
+	StorePeerReadKeys       map[uint64]uint64 `json:"store_peer_read_keys,omitempty"`
+	StorePeerReadQuery      map[uint64]uint64 `json:"store_peer_read_query,omitempty"`
+	StoreEngine             map[uint64]string `json:"store_engine,omitempty"`
 }
 
 // GetRegionStatsOption is used to filter the peer statistics.
@@ -94,11 +95,13 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
 	approximateKvSize := r.GetApproximateKvSize()
+	approximateColumnarKvSize := r.GetApproximateColumnarKvSize()
 	if approximateSize <= core.EmptyRegionApproximateSize {
 		s.EmptyCount++
 	}
 	s.StorageSize += approximateSize
 	s.UserStorageSize += approximateKvSize
+	s.UserColumnarStorageSize += approximateColumnarKvSize
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()
 	checkFn := func(p *metapb.Peer) bool {

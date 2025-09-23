@@ -161,6 +161,31 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 	}
 }
 
+// ParseKeyspaceIDFromLabelRule parses the keyspace ID from the label rule.
+// It will return the keyspace ID and a boolean indicating whether the label
+// rule is a keyspace label rule.
+func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
+	if rule.RuleType != labeler.KeyRange {
+		return 0, false
+	}
+	var (
+		containIDKey bool
+		id           uint64
+		err          error
+	)
+	for _, label := range rule.Labels {
+		containIDKey = label.Key == regionLabelKey
+		if containIDKey {
+			id, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
+			if err != nil {
+				return 0, false
+			}
+			break
+		}
+	}
+	return uint32(id), containIDKey
+}
+
 // indexedHeap is a heap with index.
 type indexedHeap struct {
 	items []*endpoint.KeyspaceGroup
