@@ -402,9 +402,45 @@ func (m *storeStatisticsMap) Collect() {
 // Reset resets the metrics.
 func Reset() {
 	storeStatusGauge.Reset()
-	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()
+	ResetClusterStatusMetrics()
 	ResetRegionStatsMetrics()
 	ResetLabelStatsMetrics()
 	ResetHotCacheStatusMetrics()
+}
+
+// ResetClusterStatusMetrics resets the cluster status metrics.
+func ResetClusterStatusMetrics() {
+	tikvUpCounter.Set(0)
+	tikvDiconnectedCounter.Set(0)
+	tikvDownCounter.Set(0)
+	tikvUnhealthCounter.Set(0)
+	tikvOfflineCounter.Set(0)
+	tikvTombstoneCounter.Set(0)
+	tikvLowSpaceCounter.Set(0)
+	tikvPreparingCounter.Set(0)
+	tikvServingCounter.Set(0)
+	tikvRemovingCounter.Set(0)
+	tikvRemovedCounter.Set(0)
+
+	// tiflash status counters.
+	tiflashUpCounter.Set(0)
+	tiflashDiconnectedCounter.Set(0)
+	tiflashDownCounter.Set(0)
+	tiflashUnhealthCounter.Set(0)
+	tiflashOfflineCounter.Set(0)
+	tiflashTombstoneCounter.Set(0)
+	tiflashLowSpaceCounter.Set(0)
+	tiflashPreparingCounter.Set(0)
+	tiflashServingCounter.Set(0)
+	tiflashRemovingCounter.Set(0)
+	tiflashRemovedCounter.Set(0)
+
+	// Store status metrics.
+	storeRegionCountGauge.Set(0)
+	storeLeaderCountGauge.Set(0)
+	storeWitnessCountGauge.Set(0)
+	storeLearnerCountGauge.Set(0)
+	storeStorageSizeGauge.Set(0)
+	storeStorageCapacityGauge.Set(0)
 }

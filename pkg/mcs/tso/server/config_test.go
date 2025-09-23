@@ -58,7 +58,7 @@ func TestConfigBasic(t *testing.T) {
 	cfg.MaxResetTSGap.Duration = time.Duration(1) * time.Hour
 
 	re.Equal("test-name", cfg.GetName())
-	re.Equal("test-endpoints", cfg.GeBackendEndpoints())
+	re.Equal("test-endpoints", cfg.GetBackendEndpoints())
 	re.Equal("test-listen-addr", cfg.GetListenAddr())
 	re.Equal("test-advertise-listen-addr", cfg.GetAdvertiseListenAddr())
 	re.Equal(int64(123), cfg.GetLease())
@@ -89,7 +89,7 @@ max-gap-reset-ts = "1h"
 	re.NoError(err)
 
 	re.Equal("tso-test-name", cfg.GetName())
-	re.Equal("test-endpoints", cfg.GeBackendEndpoints())
+	re.Equal("test-endpoints", cfg.GetBackendEndpoints())
 	re.Equal("test-listen-addr", cfg.GetListenAddr())
 	re.Equal("test-advertise-listen-addr", cfg.GetAdvertiseListenAddr())
 	re.Equal(int64(123), cfg.GetLease())

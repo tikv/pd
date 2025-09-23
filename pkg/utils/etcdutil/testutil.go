@@ -26,13 +26,21 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig() *embed.Config {
+func NewTestSingleConfig(c ...*log.Config) *embed.Config {
 	cfg := embed.NewConfig()
+	if len(c) > 0 {
+		lg, p, _ := log.InitLogger(c[0])
+		log.ReplaceGlobals(lg, p)
+		cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(lg, lg.Core(), p.Syncer)
+	}
+
 	cfg.Name = genRandName()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -530,13 +531,24 @@ func (suite *keyspaceGroupTestSuite) checkKeyspaceContains(keyspaceGroupID uint3
 	cmd := ctl.GetRootCmd()
 	keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
 	args := []string{"-u", suite.pdAddr, "keyspace-group"}
-	output, err := tests.ExecuteCommand(cmd, append(args, keyspaceGroupIDStr)...)
-	re.NoError(err)
-	var keyspaceGroup endpoint.KeyspaceGroup
-	err = json.Unmarshal(output, &keyspaceGroup)
-	re.NoError(err)
-	re.Equal(keyspaceGroupID, keyspaceGroup.ID)
-	for _, keyspaceID := range keyspaceIDs {
-		re.Contains(keyspaceGroup.Keyspaces, keyspaceID)
-	}
+
+	// Manager may not initialize when the server starts, so we need to wait for it.
+	testutil.Eventually(re, func() bool {
+		output, err := tests.ExecuteCommand(cmd, append(args, keyspaceGroupIDStr)...)
+		re.NoError(err)
+		var keyspaceGroup endpoint.KeyspaceGroup
+		err = json.Unmarshal(output, &keyspaceGroup)
+		if err != nil {
+			return false
+		}
+		if keyspaceGroup.ID != keyspaceGroupID {
+			return false
+		}
+		for _, keyspaceID := range keyspaceIDs {
+			if !slices.Contains(keyspaceGroup.Keyspaces, keyspaceID) {
+				return false
+			}
+		}
+		return true
+	})
 }

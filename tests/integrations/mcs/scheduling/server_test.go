@@ -63,7 +63,6 @@ func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
@@ -85,7 +84,6 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -95,7 +93,6 @@ func (suite *serverTestSuite) TestAllocID() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	time.Sleep(200 * time.Millisecond)
 	id, _, err := tc.GetPrimaryServer().GetCluster().AllocID(1)
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
@@ -114,7 +111,6 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	time.Sleep(200 * time.Millisecond)
 	cluster := tc.GetPrimaryServer().GetCluster()
 	id, _, err := cluster.AllocID(1)
 	re.NoError(err)
@@ -709,6 +705,151 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 	rc.IsPrepared()
 }
 
+func (suite *serverTestSuite) TestPrepareChecker() {
+	re := suite.Require()
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Create stores
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	// Send enough regions to satisfy the prepare checker in the initial cluster
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	// Send many regions to ensure the initial scheduling cluster's prepare checker is satisfied
+	for i := uint64(1); i <= 100; i++ {
+		regionReq := &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:       i,
+				Peers:    peers,
+				StartKey: []byte(fmt.Sprintf("k%d", i)),
+				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+			},
+			Leader:          peers[0],
+			ApproximateSize: 10 * units.MiB,
+			ApproximateKeys: 100,
+		}
+		err = stream.Send(regionReq)
+		re.NoError(err)
+	}
+
+	// Wait for the initial cluster's prepare checker to be satisfied
+	primary1 := tc.GetPrimaryServer()
+	cluster1 := primary1.GetCluster()
+	coordinator1 := cluster1.GetCoordinator()
+	prepareChecker1 := coordinator1.GetPrepareChecker()
+
+	testutil.Eventually(re, func() bool {
+		return prepareChecker1.IsPrepared()
+	})
+
+	re.True(prepareChecker1.IsPrepared(), "initial cluster's prepare checker should be prepared")
+	re.True(coordinator1.ShouldRun(), "initial cluster's coordinator should run when prepare checker is ready")
+
+	primary1.Close()
+
+	// Wait for a new primary to be elected from the remaining servers
+	testutil.Eventually(re, func() bool {
+		primary2 := tc.GetPrimaryServer()
+		return primary2 != nil && primary2 != primary1
+	})
+
+	// Get the new primary server
+	primary2 := tc.GetPrimaryServer()
+	re.NotNil(primary2)
+
+	// Get the current cluster components
+	cluster2 := primary2.GetCluster()
+	coordinator2 := cluster2.GetCoordinator()
+	prepareChecker2 := coordinator2.GetPrepareChecker()
+
+	// After closing, the new scheduling server should NOT be prepared
+	// because it hasn't received enough fresh region heartbeats
+	re.False(prepareChecker2.IsPrepared())
+	re.False(coordinator2.ShouldRun())
+
+	// Send only a small number of region heartbeats (insufficient for prepare checker)
+	for i := uint64(1); i <= 50; i++ {
+		regionReq := &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:       i,
+				Peers:    peers,
+				StartKey: []byte(fmt.Sprintf("k%d", i)),
+				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+			},
+			Leader:          peers[0],
+			ApproximateSize: 10 * units.MiB,
+			ApproximateKeys: 100,
+		}
+		err = stream.Send(regionReq)
+		re.NoError(err)
+	}
+
+	// Wait a bit to ensure the prepare checker has time to process the incoming heartbeats
+	time.Sleep(2 * time.Second)
+
+	// The prepare checker should still be checking and potentially not satisfied
+	shouldRun := coordinator2.ShouldRun()
+	isPrepared := prepareChecker2.IsPrepared()
+
+	// The coordinator's readiness should be controlled by the prepare checker
+	re.False(isPrepared)
+	re.False(shouldRun)
+
+	// Send enough regions to eventually satisfy the prepare checker
+	for i := uint64(51); i <= 100; i++ {
+		regionReq := &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:       i,
+				Peers:    peers,
+				StartKey: []byte(fmt.Sprintf("k%d", i)),
+				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+			},
+			Leader:          peers[0],
+			ApproximateSize: 10 * units.MiB,
+			ApproximateKeys: 100,
+		}
+		err = stream.Send(regionReq)
+		re.NoError(err)
+	}
+
+	// Finally verify that once prepared, the coordinator should be ready to run
+	testutil.Eventually(re, func() bool {
+		return prepareChecker2.IsPrepared()
+	})
+
+	re.True(coordinator2.ShouldRun())
+}
+
 func (suite *serverTestSuite) TestOnlineProgress() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
@@ -1120,6 +1261,7 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 
 func (suite *serverTestSuite) TestForwardSplitRegion() {
 	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -1232,4 +1374,5 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	re.Equal(uint64(100), splitResp.GetFinishedPercentage())
 	// Should have regions IDs for the split operation
 	re.Equal([]uint64{101}, splitResp.GetRegionsId())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 }
