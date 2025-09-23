@@ -68,6 +68,7 @@ const (
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
 	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
 	SnapshotRecoveringMark = "/pd/api/v1/admin/cluster/markers/snapshot-recovering"
+	PitrRestoreModeMark    = "/pd/api/v1/admin/cluster/markers/pitr-restore-mode"
 	// Debug
 	PProfProfile   = "/pd/api/v1/debug/pprof/profile"
 	PProfHeap      = "/pd/api/v1/debug/pprof/heap"
