@@ -876,7 +876,8 @@ type tokenCounter struct {
 		setupNotificationTimer     *time.Timer
 		// cancelCh is used to cancel the notification to unblock gc goroutines.
 		// It's needed since setupNotificationTimer.Stop() does not close the setupNotificationCh channel.
-		cancelCh chan struct{}
+		cancelCh <-chan struct{}
+		cancelFn context.CancelFunc
 	}
 
 	lastDeadline time.Time
@@ -1280,7 +1281,9 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		}
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
 		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
-		counter.notify.cancelCh = make(chan struct{})
+		cancelCtx, cancelFn := context.WithCancel(context.Background())
+		counter.notify.cancelCh = cancelCtx.Done()
+		counter.notify.cancelFn = cancelFn
 		counter.notify.setupNotificationThreshold = 1
 		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
@@ -1301,8 +1304,9 @@ func initCounterNotify(counter *tokenCounter) {
 		counter.notify.setupNotificationTimer.Stop()
 		counter.notify.setupNotificationTimer = nil
 		counter.notify.setupNotificationCh = nil
-		if counter.notify.cancelCh != nil {
-			close(counter.notify.cancelCh)
+		if counter.notify.cancelFn != nil {
+			counter.notify.cancelFn()
+			counter.notify.cancelFn = nil
 			counter.notify.cancelCh = nil
 		}
 	}
