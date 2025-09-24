@@ -421,7 +421,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
-		if err := cluster.SlowStoreEvicted(evictStore); err != nil {
+		if err := cluster.SlowStoppingStoreEvicted(evictStore); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -432,7 +432,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 		}
 	}
 	for _, storeID := range s.conf.getEvictNetworkSlowStores() {
-		if err := cluster.SlowStoreEvicted(storeID); err != nil {
+		if err := cluster.SlowStoppingStoreEvicted(storeID); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -451,7 +451,7 @@ func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 }
 
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
-	if err := cluster.SlowStoreEvicted(storeID); err != nil {
+	if err := cluster.SlowStoppingStoreEvicted(storeID); err != nil {
 		log.Info("failed to evict slow store", zap.Uint64("store-id", storeID), zap.Error(err))
 		return err
 	}
@@ -546,7 +546,7 @@ func (s *evictSlowStoreScheduler) tryEvictLeaderFromNetworkSlowStores(cluster sc
 		}
 
 		if store.GetNetworkSlowTriggers() >= maxNetworkEvictThresholdTriggerCount {
-			if err := cluster.SlowStoreEvicted(storeID); err != nil {
+			if err := cluster.SlowStoppingStoreEvicted(storeID); err != nil {
 				log.Info("failed to evict slow store",
 					zap.Uint64("store-id", storeID),
 					zap.Error(err))

@@ -134,9 +134,9 @@ func ResumeLeaderTransfer(d constant.Direction) StoreCreateOption {
 	}
 }
 
-// SlowStoreEvicted marks a store as a slow store and prevents transferring
+// SlowStoppingStoreEvicted marks a store as a slow store or stopping store and prevents transferring
 // leader to the store
-func SlowStoreEvicted() StoreCreateOption {
+func SlowStoppingStoreEvicted() StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.slowStoreEvicted.Add(1)
 	}

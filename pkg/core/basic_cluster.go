@@ -148,7 +148,7 @@ type StoreSetController interface {
 	PauseLeaderTransfer(id uint64, d constant.Direction) error
 	ResumeLeaderTransfer(id uint64, d constant.Direction)
 
-	SlowStoreEvicted(id uint64) error
+	SlowStoppingStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
 	SlowTrendEvicted(id uint64) error
 	SlowTrendRecovered(id uint64)

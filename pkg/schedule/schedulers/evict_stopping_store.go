@@ -183,7 +183,7 @@ func (s *evictStoppingStoreScheduler) ReloadConfig() error {
 func (s *evictStoppingStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
-		if err := cluster.SlowStoreEvicted(evictStore); err != nil {
+		if err := cluster.SlowStoppingStoreEvicted(evictStore); err != nil {
 			return err
 		}
 	}
@@ -196,7 +196,7 @@ func (s *evictStoppingStoreScheduler) CleanConfig(cluster sche.SchedulerCluster)
 }
 
 func (s *evictStoppingStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
-	if err := cluster.SlowStoreEvicted(storeID); err != nil {
+	if err := cluster.SlowStoppingStoreEvicted(storeID); err != nil {
 		log.Info("failed to evict stopping store", zap.Uint64("store-id", storeID), zap.Error(err))
 		return err
 	}
@@ -239,7 +239,7 @@ func (s *evictStoppingStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCl
 
 // Schedule implements the Scheduler interface.
 func (s *evictStoppingStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
-	evictLeaderCounter.Inc()
+	evictStoppingStoreCounter.Inc()
 	s.scheduleStoppingStore(cluster)
 	return s.schedulerEvictLeader(cluster), nil
 }
