@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/opt"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
@@ -73,7 +74,7 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool 
 	cctx, cancel := context.WithCancel(ctx)
 	var stream *tsoStream
 	if m.createStream == nil {
-		stream = newTSOStream(cctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
+		stream = newTSOStream(cctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated), constants.DefaultKeyspaceName)
 	} else {
 		stream = m.createStream(ctx)
 	}
@@ -104,7 +105,7 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	created := new(atomic.Bool)
 	createStream := func(ctx context.Context) *tsoStream {
 		s.streamInner = newMockTSOStreamImpl(ctx, resultModeGenerateOnSignal)
-		s.stream = newTSOStream(ctx, mockStreamURL, s.streamInner)
+		s.stream = newTSOStream(ctx, mockStreamURL, s.streamInner, constants.DefaultKeyspaceName)
 		created.Store(true)
 		return s.stream
 	}

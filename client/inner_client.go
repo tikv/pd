@@ -42,6 +42,7 @@ const (
 
 type innerClient struct {
 	keyspaceID       uint32
+	keyspaceName     string
 	svrUrls          []string
 	serviceDiscovery sd.ServiceDiscovery
 	tokenDispatcher  *tokenDispatcher
@@ -62,7 +63,7 @@ type innerClient struct {
 func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	c.serviceDiscovery = sd.NewServiceDiscovery(
 		c.ctx, c.cancel, &c.wg, c.setServiceMode,
-		updateKeyspaceIDCb, c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
+		updateKeyspaceIDCb, c.keyspaceID, c.keyspaceName, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		if c.serviceDiscovery != nil {
@@ -181,21 +182,21 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = tso.NewClient(c.ctx, c.option,
-			c.serviceDiscovery, &tso.PDStreamBuilderFactory{})
+			c.serviceDiscovery, &tso.PDStreamBuilderFactory{}, c.keyspaceName)
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.serviceDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
-		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
-		// and will be updated later.
-		newTSOCli = tso.NewClient(c.ctx, c.option,
-			newTSOSvcDiscovery, &tso.MSStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
 			log.Error("[pd] failed to initialize tso service discovery",
 				zap.Strings("svr-urls", c.svrUrls),
 				zap.Error(err))
 			return
 		}
+		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
+		// and will be updated later.
+		newTSOCli = tso.NewClient(c.ctx, c.option,
+			newTSOSvcDiscovery, &tso.MSStreamBuilderFactory{}, c.keyspaceName)
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
