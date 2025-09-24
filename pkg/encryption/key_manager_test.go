@@ -56,7 +56,7 @@ func getTestDataKey(re *require.Assertions) []byte {
 }
 
 func newTestEtcd(t *testing.T) (client *clientv3.Client) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(func() {
 		clean()
 	})

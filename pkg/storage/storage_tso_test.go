@@ -32,7 +32,7 @@ const (
 )
 
 func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	storage = NewStorageWithEtcdBackend(client)
 	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test")
 	err := leadership.Campaign(60, testLeaderValue)

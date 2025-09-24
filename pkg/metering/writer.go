@@ -73,9 +73,10 @@ func NewWriter(ctx context.Context, c *config.MeteringConfig, id string) (*Write
 		ctx:      ctx,
 		cancel:   cancel,
 		provider: provider,
-		inner: meteringwriter.NewMeteringWriter(
+		inner: meteringwriter.NewMeteringWriterFromConfig(
 			provider,
 			config.DefaultConfig().WithLogger(zap.L()),
+			c,
 		),
 		collectors: make(map[string]Collector),
 	}, nil
@@ -134,12 +135,14 @@ func (mw *Writer) RegisterCollector(collector Collector) {
 	if mw == nil {
 		return
 	}
+	category := collector.Category()
+	log.Info("registering metering collector", zap.String("category", category))
 	mw.Lock()
 	defer mw.Unlock()
 	if mw.collectors == nil {
 		mw.collectors = make(map[string]Collector)
 	}
-	mw.collectors[collector.Category()] = collector
+	mw.collectors[category] = collector
 }
 
 // meteringLoop runs the background loop to flush metering data periodically.
@@ -176,7 +179,7 @@ func (mw *Writer) meteringLoop() {
 
 // flushMeteringData flushes aggregated metering data to the underlying storage
 func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
-	collectors := mw.getCollectors()
+	collectors := mw.GetCollectors()
 	if len(collectors) == 0 {
 		return
 	}
@@ -220,7 +223,8 @@ func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 	}
 }
 
-func (mw *Writer) getCollectors() map[string]Collector {
+// GetCollectors returns the registered collectors.
+func (mw *Writer) GetCollectors() map[string]Collector {
 	mw.RLock()
 	defer mw.RUnlock()
 	collectors := make(map[string]Collector, len(mw.collectors))

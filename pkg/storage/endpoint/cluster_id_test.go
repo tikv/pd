@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 
 func TestInitClusterID(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	id, err := getClusterIDFromEtcd(client)
