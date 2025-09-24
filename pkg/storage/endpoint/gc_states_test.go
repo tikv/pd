@@ -41,7 +41,7 @@ import (
 )
 
 func newEtcdStorageEndpoint(t *testing.T) (se *StorageEndpoint, clean func()) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	kvBase := kv.NewEtcdKVBase(client)
 
 	s := NewStorageEndpoint(kvBase, nil)

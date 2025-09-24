@@ -135,6 +135,8 @@ func (h *historyBuffer) getNextIndex() uint64 {
 }
 
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {
+	h.RLock()
+	defer h.RUnlock()
 	if index < h.nextIndex() && index >= h.firstIndex() {
 		pos := (h.head + int(index-h.firstIndex())) % h.size
 		return h.records[pos]

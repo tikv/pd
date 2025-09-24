@@ -48,17 +48,13 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("not implemented"))
 }
 
-// ConfigProvider is used to get tso config from the given
-// `bs.server` without modifying its interface.
-type ConfigProvider any
-
 // Service is the TSO grpc service.
 type Service struct {
 	*Server
 }
 
 // NewService creates a new TSO service.
-func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService(svr bs.Server) registry.RegistrableService {
 	server, ok := svr.(*Server)
 	if !ok {
 		log.Fatal("create tso server failed")

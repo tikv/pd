@@ -34,6 +34,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
@@ -106,6 +107,7 @@ func NewService(srv *scheserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", mcsutils.PromHandler())
 	apiHandlerEngine.GET("status", mcsutils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	root.Use(multiservicesapi.ServiceRedirector())
@@ -236,6 +238,21 @@ func (s *Service) RegisterPrimaryRouter() {
 	router.POST("transfer", transferPrimary)
 }
 
+// getHealth returns the health status of the TSO service.
+func getHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
+	if svr.GetParticipant().IsPrimaryElected() {
+		c.String(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no primary elected")
+}
+
 // @Tags     admin
 // @Summary  Change the log level.
 // @Produce  json
@@ -264,10 +281,11 @@ func changeLogLevel(c *gin.Context) {
 // @Success  200  {object}  config.Config
 // @Router   /config [get]
 func getConfig(c *gin.Context) {
+	var config *config.Config
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	cfg := svr.GetConfig()
-	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, cfg)
+	config = svr.GetConfig()
+	config.Schedule.MaxMergeRegionKeys = config.Schedule.GetMaxMergeRegionKeys()
+	c.IndentedJSON(http.StatusOK, config)
 }
 
 // @Tags     admin

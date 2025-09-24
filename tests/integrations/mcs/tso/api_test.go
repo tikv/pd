@@ -284,3 +284,16 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
 	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
 }
+
+func (suite *tsoAPITestSuite) TestHealth() {
+	re := suite.Require()
+
+	s := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	})
+	resp, err := tests.TestDialClient.Get(s.GetConfig().GetAdvertiseListenAddr() + "/health")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+}

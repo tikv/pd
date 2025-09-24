@@ -48,7 +48,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -104,6 +103,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	for _, region := range []*core.RegionInfo{
 		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
 		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+		core.NewTestRegionInfo(12, 1, []byte("a3"), []byte("a4")),
 	} {
 		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -160,20 +160,20 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Equal(core.HexRegionKeyStr([]byte("a3")), region.EndKey)
 	regions, err := client.GetRegions(ctx)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	regions, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
 	regions, err = client.GetRegionsByStoreID(ctx, 1)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	regions, err = client.GetEmptyRegions(ctx)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	state, err := client.GetRegionsReplicatedStateByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
 	re.NoError(err)
 	re.Equal("INPROGRESS", state)
@@ -227,10 +227,10 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Equal(int64(2), rgs.Count)
 	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
 	re.NoError(err)
-	re.Equal(int64(1), rgs.Count)
+	re.Equal(int64(2), rgs.Count)
 	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
 	re.NoError(err)
-	re.Equal(int64(2), rgs.Count)
+	re.Equal(int64(3), rgs.Count)
 	// store 2 origin status:offline
 	err = client.DeleteStore(ctx, 2)
 	re.NoError(err)
@@ -864,6 +864,12 @@ func (suite *httpClientTestSuite) TestAdmin() {
 	re.NoError(err)
 	err = client.DeleteSnapshotRecoveringMark(ctx)
 	re.NoError(err)
+
+	// Test PiTR restore mode mark APIs
+	err = client.SetPitrRestoreModeMark(ctx)
+	re.NoError(err)
+	err = client.DeletePitrRestoreModeMark(ctx)
+	re.NoError(err)
 }
 
 func (suite *httpClientTestSuite) TestWithBackoffer() {
@@ -959,7 +965,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	keyspaceName := "DEFAULT"
+	keyspaceName := constant.DefaultKeyspaceName
 	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
@@ -985,6 +991,28 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 		},
 	}
 	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	re.Error(err)
+}
+
+func (suite *httpClientTestSuite) TestGetKeyspaceMetaByID() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Fetch DEFAULT keyspace by name first to get its ID.
+	metaByName, err := client.GetKeyspaceMetaByName(ctx, constant.DefaultKeyspaceName)
+	re.NoError(err)
+	re.NotNil(metaByName)
+
+	// Fetch the same keyspace by ID and compare.
+	metaByID, err := client.GetKeyspaceMetaByID(ctx, metaByName.GetId())
+	re.NoError(err)
+	re.NotNil(metaByID)
+	re.Equal(metaByName, metaByID)
+
+	// Query a non-existing ID should return error.
+	_, err = client.GetKeyspaceMetaByID(ctx, math.MaxUint32)
 	re.Error(err)
 }
 
@@ -1149,61 +1177,13 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re.Equal("Delete service GC safepoint successfully.", msg)
 }
 
-func TestGetSiblingsRegions(t *testing.T) {
-	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2, func(conf *config.Config, _ string) {
-		conf.Replication.MaxReplicas = 1
-	})
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	leader := cluster.WaitLeader()
-	re.NotEmpty(leader)
-	leaderServer := cluster.GetLeaderServer()
+func (suite *httpClientTestSuite) TestGetSiblingsRegions() {
+	re := suite.Require()
 
-	err = leaderServer.BootstrapCluster()
-	// Add 2 more stores to the cluster.
-	for i := 2; i <= 4; i++ {
-		tests.MustPutStore(re, cluster, &metapb.Store{
-			Id:            uint64(i),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		})
-	}
-	re.NoError(err)
-	for _, region := range []*core.RegionInfo{
-		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
-		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
-		core.NewTestRegionInfo(12, 1, []byte("a3"), []byte("a4")),
-	} {
-		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
-	var (
-		testServers = cluster.GetServers()
-		endpoints   = make([]string, 0, len(testServers))
-	)
-	for _, s := range testServers {
-		addr := s.GetConfig().AdvertiseClientUrls
-		url, err := url.Parse(addr)
-		re.NoError(err)
-		endpoints = append(endpoints, url.Host)
-	}
-	client := pd.NewClient("pd-http-client-it-http", endpoints)
-	defer client.Close()
-	rg, err := client.GetRegionByID(ctx, 11)
+	rg, err := suite.client.GetRegionByID(suite.ctx, 11)
 	re.NoError(err)
 	re.NotNil(rg)
-
-	rgs, err := client.GetRegionSiblingsByID(ctx, 11)
+	rgs, err := suite.client.GetRegionSiblingsByID(suite.ctx, 11)
 	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
 	re.Equal(int64(10), rgs.Regions[0].ID)
@@ -1212,14 +1192,32 @@ func TestGetSiblingsRegions(t *testing.T) {
 	rightStartKey := rgs.Regions[rgs.Count-1].GetStartKey()
 	re.Zero(strings.Compare(rightStartKey, rg.EndKey))
 
+	// Create a merge operator to test the siblings regions.
+	leaderServer := suite.cluster.GetLeaderServer()
+	oc := leaderServer.GetRaftCluster().GetOperatorController()
+	err = suite.client.SetConfig(suite.ctx, map[string]any{
+		"max-replicas": 1,
+	})
+	re.NoError(err)
+	defer func() {
+		// clean operators
+		oc.RemoveOperators()
+		oc.CleanAllOpRecords()
+		re.Empty(oc.GetOperators())
+		// reset to default value to avoid affecting other tests.
+		err = suite.client.SetConfig(suite.ctx, map[string]any{
+			"max-replicas": 3,
+		})
+		re.NoError(err)
+	}()
 	input := map[string]any{
 		"name":             "merge-region",
 		"source_region_id": 10,
 		"target_region_id": 11,
 	}
-	err = client.CreateOperators(ctx, input)
+	err = suite.client.CreateOperators(suite.ctx, input)
 	re.NoError(err)
-	ops := leaderServer.GetRaftCluster().GetOperatorController().GetOperators()
+	ops := oc.GetOperators()
 	re.Len(ops, 2)
 	re.NotZero(ops[0].Kind() & operator.OpMerge)
 	re.NotZero(ops[1].Kind() & operator.OpMerge)

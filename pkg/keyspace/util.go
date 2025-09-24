@@ -36,8 +36,8 @@ const (
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
 	// Valid name must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 	// numbers (0-9), hyphens (-), and underscores (_).
-	// currently, we enforce this rule to tidb_service_scope and keyspace_name.
-	namePattern = "^[-A-Za-z0-9_]{1,64}$"
+	// currently, we enforce this rule to keyspace_name.
+	namePattern = "^[-A-Za-z0-9_]{1,20}$"
 )
 
 var (

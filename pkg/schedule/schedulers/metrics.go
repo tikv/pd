@@ -78,7 +78,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "balance_direction",
 			Help:      "Counter of direction of balance related schedulers.",
-		}, []string{"type", "source", "target"})
+		}, []string{"type", "store", "direction"})
 
 	// TODO: pre-allocate gauge metrics
 	hotDirectionCounter = prometheus.NewCounterVec(
@@ -88,14 +88,6 @@ var (
 			Name:      "hot_region_direction",
 			Help:      "Counter of hot region scheduler.",
 		}, []string{"type", "rw", "store", "direction", "dim"})
-
-	hotPendingStatus = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "hot_pending",
-			Help:      "Pending influence status in hot region scheduler.",
-		}, []string{"type", "source", "target"})
 
 	hotPeerHist = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -112,7 +104,15 @@ var (
 			Subsystem: "scheduler",
 			Name:      "evicted_slow_store_status",
 			Help:      "Store evicted status due to slow",
-		}, []string{"type", "store"})
+		}, []string{"store", "slow_type"})
+
+	slowStoreTriggerLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "slow_store_trigger_limit",
+			Help:      "slow store trigger limit",
+		}, []string{"store", "slow_type"})
 
 	storeSlowTrendEvictedStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -154,6 +154,21 @@ var (
 			Name:      "status",
 			Help:      "Status of the rule.",
 		}, []string{"type"})
+
+	balanceRangeGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "balance_range",
+			Name:      "store",
+			Help:      "Store status for balance range schedule",
+		}, []string{"store", "type"})
+	balanceRangeJobGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "balance_range",
+			Name:      "job",
+			Help:      "job status for balance range schedule",
+		}, []string{})
 )
 
 func init() {
@@ -166,13 +181,15 @@ func init() {
 	prometheus.MustRegister(balanceDirectionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
-	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
 	prometheus.MustRegister(evictedSlowStoreStatusGauge)
+	prometheus.MustRegister(slowStoreTriggerLimitGauge)
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
 	prometheus.MustRegister(HotPendingSum)
+	prometheus.MustRegister(balanceRangeGauge)
+	prometheus.MustRegister(balanceRangeJobGauge)
 }
 
 func balanceLeaderCounterWithEvent(event string) prometheus.Counter {
@@ -350,4 +367,6 @@ var (
 	balanceRangeCreateOpFailCounter  = balanceRangeCounterWithEvent("create-operator-fail")
 	balanceRangeNoReplacementCounter = balanceRangeCounterWithEvent("no-replacement")
 	balanceRangeNoJobCounter         = balanceRangeCounterWithEvent("no-job")
+	balanceRangeBalancedCounter      = balanceRangeCounterWithEvent("balanced")
+	balancePersistFailedCounter      = balanceRangeCounterWithEvent("persist-failed")
 )

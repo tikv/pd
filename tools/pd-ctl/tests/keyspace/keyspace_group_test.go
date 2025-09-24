@@ -18,16 +18,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -38,192 +41,124 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
-func TestKeyspaceGroup(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+type keyspaceGroupTestSuite struct {
+	suite.Suite
+	ctx           context.Context
+	cancel        context.CancelFunc
+	cluster       *pdTests.TestCluster
+	pdAddr        string
+	tsoCluster    *pdTests.TestTSOCluster
+	tsoAddrs      []string
+	idAllocator   id.Allocator
+	keyspaceCount int
+}
+
+func TestKeyspaceGroupTestsuite(t *testing.T) {
+	suite.Run(t, new(keyspaceGroupTestSuite))
+}
+
+func (suite *keyspaceGroupTestSuite) SetupTest() {
+	re := suite.Require()
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+
+	suite.idAllocator = mockid.NewIDAllocator()
+	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
+	suite.keyspaceCount = 129
+	keyspaces := make([]string, 0, suite.keyspaceCount)
+	for i := range suite.keyspaceCount {
+		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
+	}
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(suite.ctx, 3, func(conf *config.Config, _ string) {
+		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
+	})
 	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
+	re.NoError(tc.RunInitialServers())
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	pdAddr := tc.GetConfig().GetClientURL()
+	suite.cluster = tc
+	suite.pdAddr = tc.GetConfig().GetClientURL()
+
+	suite.tsoCluster, err = pdTests.NewTestTSOCluster(suite.ctx, 2, suite.pdAddr)
+	re.NoError(err)
+	suite.tsoAddrs = suite.tsoCluster.GetAddrs()
+
+	suite.idAllocator.Alloc(1) // keyspace group 0 is reserved
+}
+
+func (suite *keyspaceGroupTestSuite) TearDownTest() {
+	re := suite.Require()
+	suite.cancel()
+	suite.tsoCluster.Destroy()
+	suite.cluster.Destroy()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+}
+
+func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
+	re := suite.Require()
 	cmd := ctl.GetRootCmd()
+	leaderServer := suite.cluster.GetLeaderServer()
 
 	// Show keyspace group information.
-	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
-	args := []string{"-u", pdAddr, "keyspace-group"}
-	output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
-	re.NoError(err)
-	var keyspaceGroup endpoint.KeyspaceGroup
-	err = json.Unmarshal(output, &keyspaceGroup)
-	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
-	re.Contains(keyspaceGroup.Keyspaces, constant.DefaultKeyspaceID)
+	suite.checkKeyspaceContains(constant.DefaultKeyspaceGroupID, constant.DefaultKeyspaceID)
+	args := []string{"-u", suite.pdAddr, "keyspace-group"}
+
 	// Split keyspace group.
+	keyspaceGroupID, _, err := suite.idAllocator.Alloc(1)
+	re.NoError(err)
+	keyspaceGroupIDStr := strconv.FormatUint(keyspaceGroupID, 10)
 	handlersutil.MustCreateKeyspaceGroup(re, leaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
-				ID:        1,
+				ID:        uint32(keyspaceGroupID),
 				UserKind:  endpoint.Standard.String(),
 				Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 				Keyspaces: []uint32{111, 222, 333},
 			},
 		},
 	})
-	_, err = tests.ExecuteCommand(cmd, append(args, "split", "1", "2", "222", "333")...)
+	newKeyspaceGroupID, _, err := suite.idAllocator.Alloc(1)
 	re.NoError(err)
-	output, err = tests.ExecuteCommand(cmd, append(args, "1")...)
+	newKeyspaceGroupIDStr := strconv.FormatUint(newKeyspaceGroupID, 10)
+	_, err = tests.ExecuteCommand(cmd, append(args, "split", keyspaceGroupIDStr, newKeyspaceGroupIDStr, "222", "333")...)
 	re.NoError(err)
-	keyspaceGroup = endpoint.KeyspaceGroup{}
-	err = json.Unmarshal(output, &keyspaceGroup)
-	re.NoError(err)
-	re.Equal(uint32(1), keyspaceGroup.ID)
-	re.Equal([]uint32{111}, keyspaceGroup.Keyspaces)
-	output, err = tests.ExecuteCommand(cmd, append(args, "2")...)
-	re.NoError(err)
-	keyspaceGroup = endpoint.KeyspaceGroup{}
-	err = json.Unmarshal(output, &keyspaceGroup)
-	re.NoError(err)
-	re.Equal(uint32(2), keyspaceGroup.ID)
-	re.Equal([]uint32{222, 333}, keyspaceGroup.Keyspaces)
+	suite.checkKeyspaceContains(uint32(keyspaceGroupID), 111)
+	suite.checkKeyspaceContains(uint32(newKeyspaceGroupID), 222, 333)
 }
 
-func TestSplitKeyspaceGroup(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	keyspaces := make([]string, 0)
-	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
-	for i := range 129 {
-		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
-	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = keyspaces
-		conf.Keyspace.WaitRegionSplit = false
-	})
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
-	re.NoError(err)
-	defer ttc.Destroy()
-	cmd := ctl.GetRootCmd()
-
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
-	// split keyspace group.
-	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
-		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		return strings.Contains(string(output), "Success")
-	})
-
-	// get all keyspaces
-	args := []string{"-u", pdAddr, "keyspace-group"}
-	output, err := tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	strings.Contains(string(output), "Success")
-	var keyspaceGroups []*endpoint.KeyspaceGroup
-	err = json.Unmarshal(output, &keyspaceGroups)
-	re.NoError(err)
-	re.Len(keyspaceGroups, 2)
-	re.Zero(keyspaceGroups[0].ID)
-	re.Equal(uint32(1), keyspaceGroups[1].ID)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
-}
-
-func TestExternalAllocNodeWhenStart(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (suite *keyspaceGroupTestSuite) TestExternalAllocNodeWhenStart() {
+	re := suite.Require()
 	// external alloc node for keyspace group, when keyspace manager update keyspace info to keyspace group
 	// we hope the keyspace group can be updated correctly.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/externalAllocNode", `return("127.0.0.1:2379,127.0.0.1:2380")`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	keyspaces := make([]string, 0)
-	for i := range 10 {
-		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
-	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = keyspaces
-		conf.Keyspace.WaitRegionSplit = false
-	})
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-
 	cmd := ctl.GetRootCmd()
-
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
 	// check keyspace group information.
 	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
-	args := []string{"-u", pdAddr, "keyspace-group"}
+	args := []string{"-u", suite.pdAddr, "keyspace-group"}
 	testutil.Eventually(re, func() bool {
 		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
 		re.NoError(err)
 		var keyspaceGroup endpoint.KeyspaceGroup
 		err = json.Unmarshal(output, &keyspaceGroup)
 		re.NoError(err)
-		return len(keyspaceGroup.Keyspaces) == len(keyspaces)+1 && len(keyspaceGroup.Members) == 2
+		return len(keyspaceGroup.Keyspaces) == suite.keyspaceCount+1 && len(keyspaceGroup.Members) == 2
 	})
-
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/externalAllocNode"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
-func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	keyspaces := make([]string, 0)
-	for i := range 10 {
-		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
-	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = keyspaces
-		conf.Keyspace.WaitRegionSplit = false
-	})
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
-	re.NoError(err)
-	defer ttc.Destroy()
-	tsoAddrs := ttc.GetAddrs()
+func (suite *keyspaceGroupTestSuite) TestSetNodeAndPriorityKeyspaceGroup() {
+	re := suite.Require()
 	cmd := ctl.GetRootCmd()
-
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
+	re.Len(suite.tsoAddrs, 2)
 
 	// set-node keyspace group.
 	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, tsoAddrs[0], tsoAddrs[1]}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, suite.tsoAddrs[0], suite.tsoAddrs[1]}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
@@ -232,7 +167,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	// set-priority keyspace group.
 	checkPriority := func(p int) {
 		testutil.Eventually(re, func() bool {
-			args := []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, tsoAddrs[0]}
+			args := []string{"-u", suite.pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, suite.tsoAddrs[0]}
 			if p >= 0 {
 				args = append(args, strconv.Itoa(p))
 			} else {
@@ -244,7 +179,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 		})
 
 		// check keyspace group information.
-		args := []string{"-u", pdAddr, "keyspace-group"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group"}
 		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
 		re.NoError(err)
 		var keyspaceGroup endpoint.KeyspaceGroup
@@ -253,8 +188,8 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 		re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
 		re.Len(keyspaceGroup.Members, 2)
 		for _, member := range keyspaceGroup.Members {
-			re.Contains(tsoAddrs, member.Address)
-			if member.Address == tsoAddrs[0] {
+			re.Contains(suite.tsoAddrs, member.Address)
+			if member.Address == suite.tsoAddrs[0] {
 				re.Equal(p, member.Priority)
 			} else {
 				re.Equal(0, member.Priority)
@@ -266,108 +201,91 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	checkPriority(-200)
 
 	// params error for set-node.
-	args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, tsoAddrs[0]}
+	args := []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, suite.tsoAddrs[0]}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	args = []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Failed to parse the tso node address")
-	args = []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, tsoAddrs[0], "http://pingcap.com"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, suite.tsoAddrs[0], "http://pingcap.com"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "node does not exist")
 
 	// params error for set-priority.
-	args = []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, "", "200"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, "", "200"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Failed to parse the tso node address")
-	args = []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, "http://pingcap.com", "200"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, "http://pingcap.com", "200"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "node does not exist")
-	args = []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, tsoAddrs[0], "xxx"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, suite.tsoAddrs[0], "xxx"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Failed to parse the priority")
 }
 
-func TestMergeKeyspaceGroup(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	keyspaces := make([]string, 0)
-	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
-	keyspaceCount := 129
-	for i := range keyspaceCount {
-		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
-	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = keyspaces
-		conf.Keyspace.WaitRegionSplit = false
-	})
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
-	re.NoError(err)
-	defer ttc.Destroy()
+func (suite *keyspaceGroupTestSuite) TestMergeKeyspaceGroup() {
+	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
+	testKeyspaceID := uint32(42)
+	testKeyspaceIDStr := strconv.FormatUint(uint64(testKeyspaceID), 10)
+	suite.checkKeyspaceContains(constant.DefaultKeyspaceGroupID, testKeyspaceID)
+
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
+	newKeyspaceGroupID, _, err := suite.idAllocator.Alloc(1)
+	re.NoError(err)
+	newKeyspaceGroupIDStr := strconv.FormatUint(newKeyspaceGroupID, 10)
+
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, newKeyspaceGroupIDStr, testKeyspaceIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
 	})
 
-	args := []string{"-u", pdAddr, "keyspace-group", "finish-split", "1"}
+	args := []string{"-u", suite.pdAddr, "keyspace-group", "finish-split", newKeyspaceGroupIDStr}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
 
 	// merge keyspace group.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "merge", "0", "1"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "merge", defaultKeyspaceGroupID, newKeyspaceGroupIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
 	})
 
-	args = []string{"-u", pdAddr, "keyspace-group", "finish-merge", "0"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "finish-merge", defaultKeyspaceGroupID}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
-	args = []string{"-u", pdAddr, "keyspace-group", "0"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", defaultKeyspaceGroupID}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	var keyspaceGroup endpoint.KeyspaceGroup
 	err = json.Unmarshal(output, &keyspaceGroup)
 	re.NoError(err, string(output))
-	re.Len(keyspaceGroup.Keyspaces, keyspaceCount+1)
+	re.Len(keyspaceGroup.Keyspaces, suite.keyspaceCount+1)
 	re.Nil(keyspaceGroup.MergeState)
 
 	// split keyspace group multiple times.
 	for i := 1; i <= 10; i++ {
 		splitTargetID := strconv.Itoa(i)
 		testutil.Eventually(re, func() bool {
-			args := []string{"-u", pdAddr, "keyspace-group", "split", "0", splitTargetID, splitTargetID}
+			args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, splitTargetID, splitTargetID}
 			output, err := tests.ExecuteCommand(cmd, args...)
 			re.NoError(err)
 			return strings.Contains(string(output), "Success")
 		})
-		args := []string{"-u", pdAddr, "keyspace-group", "finish-split", splitTargetID}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "finish-split", splitTargetID}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		strings.Contains(string(output), "Success")
@@ -375,87 +293,68 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 
 	// merge keyspace group with `all` flag.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "merge", "0", "--all"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "merge", defaultKeyspaceGroupID, "--all"}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
 	})
 
-	args = []string{"-u", pdAddr, "keyspace-group", "finish-merge", "0"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "finish-merge", defaultKeyspaceGroupID}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
-	args = []string{"-u", pdAddr, "keyspace-group", "0"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", defaultKeyspaceGroupID}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	err = json.Unmarshal(output, &keyspaceGroup)
 	re.NoError(err)
-	re.Len(keyspaceGroup.Keyspaces, keyspaceCount+1)
+	re.Len(keyspaceGroup.Keyspaces, suite.keyspaceCount+1)
 	re.Nil(keyspaceGroup.MergeState)
 
 	// merge keyspace group with wrong args.
-	args = []string{"-u", pdAddr, "keyspace-group", "merge"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "merge"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Must specify the source keyspace group ID(s) or the merge all flag")
-	args = []string{"-u", pdAddr, "keyspace-group", "merge", "0"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "merge", defaultKeyspaceGroupID}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Must specify the source keyspace group ID(s) or the merge all flag")
-	args = []string{"-u", pdAddr, "keyspace-group", "merge", "0", "1", "--all"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "merge", defaultKeyspaceGroupID, newKeyspaceGroupIDStr, "--all"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Must specify the source keyspace group ID(s) or the merge all flag")
-	args = []string{"-u", pdAddr, "keyspace-group", "merge", "1", "--all"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "merge", newKeyspaceGroupIDStr, "--all"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Unable to merge all keyspace groups into a non-default keyspace group")
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
-func TestKeyspaceGroupState(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	keyspaces := make([]string, 0)
-	for i := range 10 {
-		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
-	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = keyspaces
-		conf.Keyspace.WaitRegionSplit = false
-	})
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
-	re.NoError(err)
-	defer ttc.Destroy()
+func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupState() {
+	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
+	testKeyspaceID := uint32(54)
+	testKeyspaceIDStr := strconv.FormatUint(uint64(testKeyspaceID), 10)
+	suite.checkKeyspaceContains(constant.DefaultKeyspaceGroupID, testKeyspaceID)
+
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
+	newKeyspaceGroupID, _, err := suite.idAllocator.Alloc(1)
+	re.NoError(err)
+	newKeyspaceGroupIDStr := strconv.FormatUint(newKeyspaceGroupID, 10)
 
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, newKeyspaceGroupIDStr, testKeyspaceIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
 	})
-	args := []string{"-u", pdAddr, "keyspace-group", "finish-split", "1"}
+	args := []string{"-u", suite.pdAddr, "keyspace-group", "finish-split", newKeyspaceGroupIDStr}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
-	args = []string{"-u", pdAddr, "keyspace-group", "--state", "split"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "--state", "split"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
@@ -463,13 +362,22 @@ func TestKeyspaceGroupState(t *testing.T) {
 	err = json.Unmarshal(output, &keyspaceGroups)
 	re.NoError(err)
 	re.Empty(keyspaceGroups)
+
+	testKeyspaceID = uint32(55)
+	testKeyspaceIDStr = strconv.FormatUint(uint64(testKeyspaceID), 10)
+	suite.checkKeyspaceContains(constant.DefaultKeyspaceGroupID, testKeyspaceID)
+
+	newKeyspaceGroupID, _, err = suite.idAllocator.Alloc(1)
+	re.NoError(err)
+	newKeyspaceGroupIDStr = strconv.FormatUint(newKeyspaceGroupID, 10)
+
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "2", "3"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, newKeyspaceGroupIDStr, testKeyspaceIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
 	})
-	args = []string{"-u", pdAddr, "keyspace-group", "--state", "split"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "--state", "split"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
@@ -477,21 +385,21 @@ func TestKeyspaceGroupState(t *testing.T) {
 	re.NoError(err)
 	re.Len(keyspaceGroups, 2)
 	re.Equal(uint32(0), keyspaceGroups[0].ID)
-	re.Equal(uint32(2), keyspaceGroups[1].ID)
+	re.Equal(uint32(newKeyspaceGroupID), keyspaceGroups[1].ID)
 
-	args = []string{"-u", pdAddr, "keyspace-group", "finish-split", "2"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "finish-split", newKeyspaceGroupIDStr}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
 	// merge keyspace group.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "merge", "0", "1"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "merge", "0", newKeyspaceGroupIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
 	})
 
-	args = []string{"-u", pdAddr, "keyspace-group", "--state", "merge"}
+	args = []string{"-u", suite.pdAddr, "keyspace-group", "--state", "merge"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Success")
@@ -500,48 +408,21 @@ func TestKeyspaceGroupState(t *testing.T) {
 	err = json.Unmarshal(output, &keyspaceGroups)
 	re.NoError(err)
 	re.Len(keyspaceGroups, 1)
-	re.Equal(uint32(0), keyspaceGroups[0].ID)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+	re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroups[0].ID)
 }
 
-func TestShowKeyspaceGroupPrimary(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	keyspaces := make([]string, 0)
-	for i := range 10 {
-		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
-	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = keyspaces
-		conf.Keyspace.WaitRegionSplit = false
-	})
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
-	re.NoError(err)
-	defer ttc.Destroy()
-	tsoAddrs := ttc.GetAddrs()
+func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
+	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
+
 	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 
 	// check keyspace group 0 information.
 	var keyspaceGroup endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group"}
 		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
 		re.NoError(err)
 		err = json.Unmarshal(output, &keyspaceGroup)
@@ -550,22 +431,22 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
-		re.Contains(tsoAddrs, member.Address)
+		re.Contains(suite.tsoAddrs, member.Address)
 	}
 
 	// get primary for keyspace group 0.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "primary", defaultKeyspaceGroupID}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "primary", defaultKeyspaceGroupID}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
 		json.Unmarshal(output, &resp)
-		return tsoAddrs[0] == resp.Primary || tsoAddrs[1] == resp.Primary
+		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
 	})
 
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", "0", "1", "2"}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
@@ -573,7 +454,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 
 	// check keyspace group 1 information.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group"}
 		output, err := tests.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
 		if strings.Contains(string(output), "Failed") {
@@ -586,51 +467,43 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
-		re.Contains(tsoAddrs, member.Address)
+		re.Contains(suite.tsoAddrs, member.Address)
 	}
 
 	// get primary for keyspace group 1.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "primary", "1"}
+		args := []string{"-u", suite.pdAddr, "keyspace-group", "primary", "1"}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
 		json.Unmarshal(output, &resp)
-		return tsoAddrs[0] == resp.Primary || tsoAddrs[1] == resp.Primary
+		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
 	})
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
-func TestCmdWithoutKeyspaceGroupInitialized(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tc, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
+func (suite *keyspaceGroupTestSuite) TestCmdWithoutKeyspaceGroupInitialized() {
+	re := suite.Require()
 	cmd := ctl.GetRootCmd()
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
+
+	leaderServer := suite.cluster.GetLeaderServer().GetServer()
+	kgm := leaderServer.GetKeyspaceGroupManager()
+	leaderServer.SetKeyspaceGroupManager(nil)
+	defer leaderServer.SetKeyspaceGroupManager(kgm)
 
 	argsList := [][]string{
-		{"-u", pdAddr, "keyspace-group"},
-		{"-u", pdAddr, "keyspace-group", "0"},
-		{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"},
-		{"-u", pdAddr, "keyspace-group", "split-range", "1", "2", "3", "4"},
-		{"-u", pdAddr, "keyspace-group", "finish-split", "1"},
-		{"-u", pdAddr, "keyspace-group", "merge", "1", "2"},
-		{"-u", pdAddr, "keyspace-group", "merge", "0", "--all"},
-		{"-u", pdAddr, "keyspace-group", "finish-merge", "1"},
-		{"-u", pdAddr, "keyspace-group", "set-node", "0", "http://127.0.0.1:2379"},
-		{"-u", pdAddr, "keyspace-group", "set-priority", "0", "http://127.0.0.1:2379", "200"},
-		{"-u", pdAddr, "keyspace-group", "primary", "0"},
+		{"-u", suite.pdAddr, "keyspace-group"},
+		{"-u", suite.pdAddr, "keyspace-group", "0"},
+		{"-u", suite.pdAddr, "keyspace-group", "split", "0", "1", "2"},
+		{"-u", suite.pdAddr, "keyspace-group", "split-range", "1", "2", "3", "4"},
+		{"-u", suite.pdAddr, "keyspace-group", "finish-split", "1"},
+		{"-u", suite.pdAddr, "keyspace-group", "merge", "1", "2"},
+		{"-u", suite.pdAddr, "keyspace-group", "merge", "0", "--all"},
+		{"-u", suite.pdAddr, "keyspace-group", "finish-merge", "1"},
+		{"-u", suite.pdAddr, "keyspace-group", "set-node", "0", "http://127.0.0.1:2379"},
+		{"-u", suite.pdAddr, "keyspace-group", "set-priority", "0", "http://127.0.0.1:2379", "200"},
+		{"-u", suite.pdAddr, "keyspace-group", "primary", "0"},
 	}
 	for _, args := range argsList {
 		output, err := tests.ExecuteCommand(cmd, args...)
@@ -641,12 +514,41 @@ func TestCmdWithoutKeyspaceGroupInitialized(t *testing.T) {
 			"args: %v, output: %v", args, string(output))
 	}
 
+	km := leaderServer.GetKeyspaceManager()
 	leaderServer.SetKeyspaceManager(nil)
-	args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+	defer leaderServer.SetKeyspaceManager(km)
+	args := []string{"-u", suite.pdAddr, "keyspace-group", "split", "0", "1", "2"}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Failed",
 		"args: %v, output: %v", args, string(output))
 	re.Contains(string(output), "keyspace manager is not initialized",
 		"args: %v, output: %v", args, string(output))
+}
+
+func (suite *keyspaceGroupTestSuite) checkKeyspaceContains(keyspaceGroupID uint32, keyspaceIDs ...uint32) {
+	re := suite.Require()
+	cmd := ctl.GetRootCmd()
+	keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
+	args := []string{"-u", suite.pdAddr, "keyspace-group"}
+
+	// Manager may not initialize when the server starts, so we need to wait for it.
+	testutil.Eventually(re, func() bool {
+		output, err := tests.ExecuteCommand(cmd, append(args, keyspaceGroupIDStr)...)
+		re.NoError(err)
+		var keyspaceGroup endpoint.KeyspaceGroup
+		err = json.Unmarshal(output, &keyspaceGroup)
+		if err != nil {
+			return false
+		}
+		if keyspaceGroup.ID != keyspaceGroupID {
+			return false
+		}
+		for _, keyspaceID := range keyspaceIDs {
+			if !slices.Contains(keyspaceGroup.Keyspaces, keyspaceID) {
+				return false
+			}
+		}
+		return true
+	})
 }

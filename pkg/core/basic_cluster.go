@@ -140,6 +140,7 @@ type StoreSetInformer interface {
 	GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
+	GetAvgNetworkSlowScore(id uint64) uint64
 }
 
 // StoreSetController is used to control stores' status.

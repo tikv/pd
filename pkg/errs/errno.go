@@ -127,13 +127,10 @@ var (
 var (
 	ErrWrongRangeKeys         = errors.Normalize("wrong range keys", errors.RFCCodeText("PD:core:ErrWrongRangeKeys"))
 	ErrStoreNotFound          = errors.Normalize("store %v not found", errors.RFCCodeText("PD:core:ErrStoreNotFound"))
-	ErrPauseLeaderTransferIn  = errors.Normalize("store %v is paused for leader transfer in", errors.RFCCodeText("PD:core:ErrPauseLeaderTransferIn"))
-	ErrPauseLeaderTransferOut = errors.Normalize("store %v is paused for leader transfer out", errors.RFCCodeText("PD:core:ErrPauseLeaderTransferOut"))
 	ErrStoreRemoved           = errors.Normalize("store %v has been removed", errors.RFCCodeText("PD:core:ErrStoreRemoved"))
 	ErrStoreDestroyed         = errors.Normalize("store %v has been physically destroyed", errors.RFCCodeText("PD:core:ErrStoreDestroyed"))
 	ErrStoreUnhealthy         = errors.Normalize("store %v is unhealthy", errors.RFCCodeText("PD:core:ErrStoreUnhealthy"))
 	ErrStoreServing           = errors.Normalize("store %v has been serving", errors.RFCCodeText("PD:core:ErrStoreServing"))
-	ErrSlowStoreEvicted       = errors.Normalize("store %v is evicted as a slow store", errors.RFCCodeText("PD:core:ErrSlowStoreEvicted"))
 	ErrSlowTrendEvicted       = errors.Normalize("store %v is evicted as a slow store by trend", errors.RFCCodeText("PD:core:ErrSlowTrendEvicted"))
 	ErrStoresNotEnough        = errors.Normalize("can not remove store %v since the number of up stores would be %v while need %v", errors.RFCCodeText("PD:core:ErrStoresNotEnough"))
 	ErrNoStoreForRegionLeader = errors.Normalize("can not remove store %d since there are no extra up store to store the leader", errors.RFCCodeText("PD:core:ErrNoStoreForRegionLeader"))
@@ -191,8 +188,9 @@ var (
 	ErrSchedulerConfig                  = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
 	ErrCacheOverflow                    = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
 	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
-	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
+	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
 	ErrSchedulerTiKVSplitDisabled       = errors.Normalize("tikv split region disabled", errors.RFCCodeText("PD:scheduler:ErrSchedulerTiKVSplitDisabled"))
+	ErrNoStoreToBeSelected              = errors.Normalize("no store to be selected", errors.RFCCodeText("PD:scheduler:ErrNoStoreToBeSelected"))
 )
 
 // checker errors

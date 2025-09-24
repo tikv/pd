@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
@@ -546,13 +547,19 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	conf1 = make(map[string]any)
 	testutil.Eventually(re, func() bool {
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "show"}, &conf)
-		return conf["batch"] == 3.
+		return conf["batch"] == 3. && conf["enable-network-slow-store"] == false && conf["recovery-duration"] == 1800.
 	})
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "batch", "10"}, nil)
 	re.Contains(echo, "Success!")
 	testutil.Eventually(re, func() bool {
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
-		return conf1["batch"] == 10.
+		return conf1["batch"] == 10. && conf1["enable-network-slow-store"] == false && conf["recovery-duration"] == 1800.
+	})
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "enable-network-slow-store", "true"}, nil)
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
+		return conf1["batch"] == 10. && conf1["enable-network-slow-store"] == true && conf["recovery-duration"] == 1800.
 	})
 }
 
@@ -760,7 +767,7 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	suite.env.RunTest(suite.checkSchedulerDiagnostic)
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestCluster) {
@@ -772,6 +779,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 		result := make(map[string]any)
 		testutil.Eventually(re, func() bool {
 			mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+			suite.T().Log(result)
 			return len(result) != 0 && expectedStatus == result["status"] && expectedSummary == result["summary"]
 		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
@@ -818,9 +826,23 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
+		re.NoError(err)
+		storeInfo := new(response.StoreInfo)
+		re.NoError(json.Unmarshal(output, &storeInfo))
+		return storeInfo.Status.PauseLeaderTransferIn && !storeInfo.Status.PauseLeaderTransferOut
+	})
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "1"}...)
+		re.NoError(err)
+		storeInfo1 := new(response.StoreInfo)
+		re.NoError(json.Unmarshal(output, &storeInfo1))
+		return !storeInfo1.Status.PauseLeaderTransferIn && !storeInfo1.Status.PauseLeaderTransferOut
+	})
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
