@@ -131,7 +131,7 @@ func newEvictStoppingStoreHandler(config *evictStoppingStoreSchedulerConfig) htt
 	return router
 }
 
-func (handler *evictStoppingStoreHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictStoppingStoreHandler) updateConfig(w http.ResponseWriter, _ *http.Request) {
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 

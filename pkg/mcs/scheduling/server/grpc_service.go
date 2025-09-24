@@ -172,7 +172,9 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 	}
 }
 
-func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServer) error {
+// RegionBuckets returns region buckets information.
+// Currently not implemented and returns nil.
+func (*Service) RegionBuckets(schedulingpb.Scheduling_RegionBucketsServer) error {
 	return nil
 }
 
