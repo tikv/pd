@@ -793,6 +793,13 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 	return keyspaces, nil
 }
 
+// IterateKeyspaces returns an iterator that yields all keyspaces starting from startID.
+// In case the keyspaces are being modified while iteration is in progress, it's not guaranteed that the results are
+// in a consistent snapshot.
+func (manager *Manager) IterateKeyspaces(startID uint32) *Iterator {
+	return newKeyspaceIterator(manager, startID)
+}
+
 // allocID allocate a new keyspace id.
 func (manager *Manager) allocID() (uint32, error) {
 	id64, _, err := manager.idAllocator.Alloc(1)
@@ -942,5 +949,96 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 		// If all keyspaces in the current batch are assigned, update the next start ID.
 		manager.nextPatrolStartID = nextStartID
 	}
+	return nil
+}
+
+// IteratorLoadingBatchSize is the batch size that the keyspace.Iterator internally loads keyspaces.
+// This constant is public for test purposes.
+const IteratorLoadingBatchSize int = 100
+
+// Iterator iterates over all keyspaces.
+// Create this using keyspace.Manager.IterateKeyspaces, and use Next method for iteration.
+type Iterator struct {
+	manager      *Manager
+	startID      uint32
+	currentBatch []*keyspacepb.KeyspaceMeta
+	currentIndex int
+	isDrained    bool
+	err          error
+
+	onLoadingBatchStart  func()
+	onLoadingBatchFinish func()
+}
+
+func newKeyspaceIterator(manager *Manager, startID uint32) *Iterator {
+	return &Iterator{
+		manager: manager,
+		startID: startID,
+	}
+}
+
+// SetOnLoadingBatchStart sets a callback that is called everytime it begins internally loading a batch of keyspaces.
+func (it *Iterator) SetOnLoadingBatchStart(cb func()) {
+	it.onLoadingBatchStart = cb
+}
+
+// SetOnLoadingBatchFinish sets a callback that is called everytime it finishes internally loading a batch of keyspaces.
+func (it *Iterator) SetOnLoadingBatchFinish(cb func()) {
+	it.onLoadingBatchFinish = cb
+}
+
+// Next advances the iterator to the next item. On a new iterator, Next returns the first item.
+// Returns the next keyspace (if any), and a bool value that indicates whether the next item exists (if false, it means
+// the iteration is ended).
+// Once the iteration is ended, all subsequent calls to Next will result in a false indicates there's no more items.
+// Once an error occurs during the iteration, all subsequent calls to Next will get the same error.
+func (it *Iterator) Next() (*keyspacepb.KeyspaceMeta, bool, error) {
+	if it.err != nil {
+		return nil, false, it.err
+	}
+	if it.isDrained {
+		return nil, false, nil
+	}
+
+	if it.currentBatch == nil || it.currentIndex >= len(it.currentBatch) {
+		if err := it.loadBatch(); err != nil {
+			return nil, false, err
+		}
+		if it.isDrained {
+			return nil, false, nil
+		}
+	}
+
+	result := it.currentBatch[it.currentIndex]
+	it.currentIndex++
+	return result, true, nil
+}
+
+func (it *Iterator) loadBatch() error {
+	if it.onLoadingBatchStart != nil {
+		it.onLoadingBatchStart()
+	}
+	if it.onLoadingBatchFinish != nil {
+		defer it.onLoadingBatchFinish()
+	}
+
+	nextId := uint32(0)
+	if it.currentBatch != nil {
+		nextId = it.currentBatch[len(it.currentBatch)-1].GetId() + 1
+	}
+
+	var err error
+	it.currentIndex = 0
+	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextId, IteratorLoadingBatchSize)
+	if err != nil {
+		err = errors.AddStack(err)
+		it.err = err
+		return err
+	}
+
+	if len(it.currentBatch) == 0 {
+		it.isDrained = true
+	}
+
 	return nil
 }

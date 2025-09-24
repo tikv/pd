@@ -53,13 +53,13 @@ func TestOrderedSingleFlight(t *testing.T) {
 	ctx := context.Background()
 	s := NewOrderedSingleFlight[int]()
 
-	res, err := s.Do(ctx, func() (int, error) {
+	res, err := s.Do(ctx, func(context.Context) (int, error) {
 		return 1, nil
 	})
 	re.NoError(err)
 	re.Equal(1, res)
 
-	res, err = s.Do(ctx, func() (int, error) {
+	res, err = s.Do(ctx, func(context.Context) (int, error) {
 		return 2, errors.New("err")
 	})
 	re.Error(err)
@@ -71,7 +71,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 	outCh := make(chan int, 100)
 
 	//nolint:unparam
-	f := func() (int, error) {
+	f := func(context.Context) (int, error) {
 		return <-inCh, nil
 	}
 
@@ -91,7 +91,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 		go func() {
 			labels := pprof.Labels("worker", strconv.FormatInt(int64(i2), 10))
 			pprof.Do(context.Background(), labels, func(context.Context) {
-				res, err := s.Do(ctx, func() (int, error) {
+				res, err := s.Do(ctx, func(context.Context) (int, error) {
 					return <-inCh, nil
 				})
 				re.NoError(err)
@@ -116,7 +116,7 @@ func TestOrderedSingleFlight(t *testing.T) {
 
 	// No corrupted state is left.
 	re.Nil(s.pendingTask)
-	res, err = s.Do(ctx, func() (int, error) {
+	res, err = s.Do(ctx, func(context.Context) (int, error) {
 		return 200, nil
 	})
 	re.NoError(err)
@@ -135,7 +135,7 @@ func TestOrderedSingleFlightCancellation(t *testing.T) {
 	inCh := make(chan int, 100)
 	outCh := make(chan result, 100)
 	//nolint:unparam
-	f := func() (int, error) {
+	f := func(context.Context) (int, error) {
 		res := <-inCh
 		return res, nil
 	}
@@ -178,7 +178,7 @@ func TestOrderedSingleFlightCancellation(t *testing.T) {
 
 	// The state is clear
 	re.Nil(s.pendingTask)
-	res, err := s.Do(context.Background(), func() (int, error) {
+	res, err := s.Do(context.Background(), func(context.Context) (int, error) {
 		return 100, nil
 	})
 	re.NoError(err)
@@ -242,7 +242,7 @@ func TestOrderedSingleFlightCancellation(t *testing.T) {
 
 	// The state is clear now, no remaining invocations or executions are left.
 	re.Nil(s.pendingTask)
-	res, err = s.Do(context.Background(), func() (int, error) {
+	res, err = s.Do(context.Background(), func(context.Context) (int, error) {
 		return 101, nil
 	})
 	re.NoError(err)
@@ -263,7 +263,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 	currentValue := &atomic.Int64{}
 	s := NewOrderedSingleFlight[int64]()
 	//nolint:unparam
-	f := func() (int64, error) {
+	f := func(context.Context) (int64, error) {
 		res := currentValue.Load()
 		time.Sleep(time.Duration(rand.Int64N(20)) * time.Millisecond)
 		return res, nil
@@ -349,7 +349,7 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 
 func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
 	s := NewOrderedSingleFlight[int]()
-	noop := func() (int, error) { return 0, nil }
+	noop := func(context.Context) (int, error) { return 0, nil }
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -360,7 +360,7 @@ func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
 
 func benchmarkOrderedSingleFlightParallel(b *testing.B, parallelism int) {
 	s := NewOrderedSingleFlight[int]()
-	f := func() (int, error) {
+	f := func(context.Context) (int, error) {
 		return 0, nil
 	}
 	ctx := context.Background()
