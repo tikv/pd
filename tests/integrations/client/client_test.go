@@ -2640,12 +2640,20 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 
 func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	s.prepareKeyspacesForGCTest()
+	ks3, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks3",
+		Config:     map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC},
+		CreateTime: time.Now().Unix(),
+	})
+	s.NoError(err)
+	s.Equal(uint32(3), ks3.Id)
+
 	re := s.Require()
 	ctx := context.Background()
 
 	// Modify some GC states and verify TestGetAllKeyspaceGCStates gets the correct result.
 	cli := s.client.GetGCStatesClient(constants.NullKeyspaceID)
-	_, err := cli.SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
+	_, err = cli.SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
 	re.NoError(err)
 	res, err := cli.GetAllKeyspacesGCStates(ctx)
 	re.NoError(err)

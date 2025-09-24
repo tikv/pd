@@ -339,7 +339,7 @@ func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time) gc.GCState {
 	}
 }
 
-// SetGlobalGCBarrier sets (creates or updates) a GC barrier.
+// SetGlobalGCBarrier sets (creates or updates) a global GC barrier.
 func (c gcStatesClient) SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*gc.GlobalGCBarrierInfo, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.SetGlobalGCBarrier", opentracing.ChildOf(span.Context()))
@@ -420,7 +420,13 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.Cluster
 	var ret gc.ClusterGCStates
 	ret.GCStates = make(map[uint32]gc.GCState, len(resp.GetGcStates()))
 	for _, state := range resp.GetGcStates() {
-		ret.GCStates[state.KeyspaceScope.KeyspaceId] = pbToGCState(state, start)
+		var keyspaceID uint32
+		if state.KeyspaceScope == nil {
+			keyspaceID = constants.NullKeyspaceID
+		} else {
+			keyspaceID = state.KeyspaceScope.KeyspaceId
+		}
+		ret.GCStates[keyspaceID] = pbToGCState(state, start)
 	}
 	for _, barrier := range resp.GetGlobalGcBarriers() {
 		ret.GlobalGCBarriers = append(ret.GlobalGCBarriers, pbToGlobalGCBarrierInfo(barrier, start))
