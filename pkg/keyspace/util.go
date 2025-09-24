@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -165,25 +166,33 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 // It will return the keyspace ID and a boolean indicating whether the label
 // rule is a keyspace label rule.
 func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
-	if rule.RuleType != labeler.KeyRange {
+	// Validate the ID matches the expected format "keyspaces/<id>".
+	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
 		return 0, false
 	}
-	var (
-		containIDKey bool
-		id           uint64
-		err          error
+	// Retrieve the keyspace ID.
+	keyspaceID, err := strconv.ParseUint(
+		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
+		endpoint.SpaceIDBase, 32,
 	)
+	if err != nil {
+		return 0, false
+	}
+	// Double check the keyspace ID from the label rule.
+	var idFromLabel uint64
 	for _, label := range rule.Labels {
-		containIDKey = label.Key == regionLabelKey
-		if containIDKey {
-			id, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
+		if label.Key == regionLabelKey {
+			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
 			if err != nil {
 				return 0, false
 			}
 			break
 		}
 	}
-	return uint32(id), containIDKey
+	if keyspaceID != idFromLabel {
+		return 0, false
+	}
+	return uint32(keyspaceID), true
 }
 
 // indexedHeap is a heap with index.

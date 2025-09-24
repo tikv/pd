@@ -2560,6 +2560,10 @@ func (c *RaftCluster) runStorageSizeCollector(
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
+	if writer == nil {
+		log.Info("no metering writer provided, the storage size collector will not be started")
+		return
+	}
 	log.Info("running the storage size collector")
 	// Init and register the collector before starting the loop.
 	collector := newStorageSizeCollector()
