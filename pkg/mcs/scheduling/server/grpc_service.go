@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -147,18 +148,27 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
 
+		storeAddress := store.GetAddress()
+		storeLabel := strconv.FormatUint(storeID, 10)
+
 		if time.Since(lastBind) > time.Minute {
 			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
+
+		start := time.Now()
 		// scheduling service doesn't sync the pd server config, so we use 0 here
 		region := core.RegionFromHeartbeat(request, 0)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
-			// TODO: if we need to send the error back to PD.
-			log.Error("failed handle region heartbeat", zap.Error(err))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+			regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			log.Debug("failed handle region heartbeat", zap.Error(err))
 			continue
 		}
+
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 }
 
@@ -170,18 +180,28 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
 	if c == nil {
-		// TODO: add metrics
-		log.Info("cluster isn't initialized")
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
+	start := time.Now()
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
 		s.metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
-	// TODO: add metrics
+	storeID := request.GetStats().GetStoreId()
+	store := c.GetStore(storeID)
+	storeAddress := ""
+	if store != nil {
+		storeAddress = store.GetAddress()
+	}
+	storeLabel := strconv.FormatUint(storeID, 10)
 	if err := c.HandleStoreHeartbeat(request); err != nil {
-		log.Error("handle store heartbeat failed", zap.Error(err))
+		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+		log.Debug("handle store heartbeat failed", zap.Error(err))
+	} else {
+		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 	return &schedulingpb.StoreHeartbeatResponse{Header: wrapHeader()}, nil
 }

@@ -103,6 +103,8 @@ type Client interface {
 	ResetBaseAllocID(context.Context, uint64) error
 	SetSnapshotRecoveringMark(context.Context) error
 	DeleteSnapshotRecoveringMark(context.Context) error
+	SetPitrRestoreModeMark(context.Context) error
+	DeletePitrRestoreModeMark(context.Context) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
@@ -976,6 +978,22 @@ func (c *client) DeleteSnapshotRecoveringMark(ctx context.Context) error {
 	return c.request(ctx, newRequestInfo().
 		WithName(deleteSnapshotRecoveringMarkName).
 		WithURI(SnapshotRecoveringMark).
+		WithMethod(http.MethodDelete))
+}
+
+// SetPitrRestoreModeMark sets the pitr restore mode mark.
+func (c *client) SetPitrRestoreModeMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(setPitrRestoreModeMarkName).
+		WithURI(PitrRestoreModeMark).
+		WithMethod(http.MethodPost))
+}
+
+// DeletePitrRestoreModeMark deletes the pitr restore mode mark.
+func (c *client) DeletePitrRestoreModeMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deletePitrRestoreModeMarkName).
+		WithURI(PitrRestoreModeMark).
 		WithMethod(http.MethodDelete))
 }
 
