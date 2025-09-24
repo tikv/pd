@@ -133,15 +133,15 @@ func TestMakeLabelRule(t *testing.T) {
 		{
 			id: 0,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    "keyspaces/0",
+				ID:    getRegionLabelID(0),
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   "id",
+						Key:   regionLabelKey,
 						Value: "0",
 					},
 				},
-				RuleType: "key-range",
+				RuleType: labeler.KeyRange,
 				Data: []any{
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 0})),
@@ -157,15 +157,15 @@ func TestMakeLabelRule(t *testing.T) {
 		{
 			id: 4242,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    "keyspaces/4242",
+				ID:    getRegionLabelID(4242),
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   "id",
+						Key:   regionLabelKey,
 						Value: "4242",
 					},
 				},
-				RuleType: "key-range",
+				RuleType: labeler.KeyRange,
 				Data: []any{
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
@@ -181,5 +181,55 @@ func TestMakeLabelRule(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id))
+	}
+}
+
+func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		labelRule  *labeler.LabelRule
+		expectedID uint32
+		expectedOK bool
+	}{
+		{
+			labelRule:  MakeLabelRule(1),
+			expectedID: 1,
+			expectedOK: true,
+		},
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    getRegionLabelID(1),
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   regionLabelKey,
+						Value: "1",
+					},
+				},
+				RuleType: "not-key-range",
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    getRegionLabelID(1),
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "not-id",
+						Value: "1",
+					},
+				},
+				RuleType: labeler.KeyRange,
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+	}
+	for _, testCase := range testCases {
+		id, ok := ParseKeyspaceIDFromLabelRule(testCase.labelRule)
+		re.Equal(testCase.expectedID, id)
+		re.Equal(testCase.expectedOK, ok)
 	}
 }

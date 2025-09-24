@@ -77,8 +77,8 @@ type RegionInfo struct {
 	readBytes                 uint64
 	readKeys                  uint64
 	approximateSize           int64
-	approximateKvSize         int64
-	approximateColumnarKvSize int64
+	approximateKvSize         int64 // Unit: MiB
+	approximateColumnarKvSize int64 // Unit: MiB
 	approximateKeys           int64
 	interval                  *pdpb.TimeInterval
 	replicationStatus         *replication_modepb.RegionReplicationStatus
