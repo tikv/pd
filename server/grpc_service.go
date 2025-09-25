@@ -1053,11 +1053,14 @@ func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 // ReportBuckets implements gRPC PDServer
 func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	var (
-		server            = &bucketHeartbeatServer{stream: stream}
-		forwardStream     pdpb.PD_ReportBucketsClient
-		cancel            context.CancelFunc
-		lastForwardedHost string
-		errCh             chan error
+		server                      = &bucketHeartbeatServer{stream: stream}
+		forwardStream               pdpb.PD_ReportBucketsClient
+		cancel                      context.CancelFunc
+		lastForwardedHost           string
+		errCh                       chan error
+		forwardErrCh                chan error
+		forwardSchedulingStream     schedulingpb.Scheduling_RegionBucketsClient
+		lastForwardedSchedulingHost string
 	)
 	defer func() {
 		if cancel != nil {
@@ -1147,7 +1150,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 
 		start := time.Now()
-		err = rc.HandleReportBuckets(buckets)
+		err = rc.HandleRegionBuckets(buckets)
 		if err != nil {
 			bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			continue
@@ -1155,6 +1158,74 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		bucketReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
 		bucketReportLatency.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
+
+		if rc.IsServiceIndependent(constant.SchedulingServiceName) {
+			if forwardErrCh != nil {
+				select {
+				case err, ok := <-forwardErrCh:
+					if ok {
+						if cancel != nil {
+							cancel()
+						}
+						forwardSchedulingStream = nil
+						log.Error("meet error and need to re-establish the stream", zap.Error(err))
+					}
+				default:
+				}
+			}
+			forwardedSchedulingHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.SchedulingServiceName)
+			if !ok || len(forwardedSchedulingHost) == 0 {
+				log.Debug("failed to find scheduling service primary address")
+				if cancel != nil {
+					cancel()
+				}
+				continue
+			}
+			if forwardSchedulingStream == nil || lastForwardedSchedulingHost != forwardedSchedulingHost {
+				if cancel != nil {
+					cancel()
+				}
+
+				client, err := s.getDelegateClient(s.ctx, forwardedSchedulingHost)
+				if err != nil {
+					log.Error("failed to get client", zap.Error(err))
+					continue
+				}
+				log.Debug("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
+				forwardSchedulingStream, _, cancel, err = createRegionBucketsSchedulingStream(stream.Context(), client)
+				if err != nil {
+					log.Debug("failed to create stream", zap.Error(err))
+					continue
+				}
+				lastForwardedSchedulingHost = forwardedSchedulingHost
+				forwardErrCh = make(chan error, 1)
+				go forwardRegionBucketsToScheduling(forwardSchedulingStream, server, forwardErrCh)
+			}
+			schedulingpbReq := &schedulingpb.RegionBucketsRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				Buckets:     request.GetBuckets(),
+				RegionEpoch: request.GetRegionEpoch(),
+			}
+			if err := forwardSchedulingStream.Send(schedulingpbReq); err != nil {
+				forwardSchedulingStream = nil
+				if grpcutil.NeedRebuildConnection(err) {
+					s.closeDelegateClient(lastForwardedSchedulingHost)
+				}
+				log.Error("failed to send request to scheduling service", zap.Error(err))
+			}
+
+			select {
+			case err, ok := <-forwardErrCh:
+				if ok {
+					forwardSchedulingStream = nil
+					log.Error("failed to send response", zap.Error(err))
+				}
+			default:
+			}
+		}
 	}
 }
 

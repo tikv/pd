@@ -864,6 +864,12 @@ func (suite *httpClientTestSuite) TestAdmin() {
 	re.NoError(err)
 	err = client.DeleteSnapshotRecoveringMark(ctx)
 	re.NoError(err)
+
+	// Test PiTR restore mode mark APIs
+	err = client.SetPitrRestoreModeMark(ctx)
+	re.NoError(err)
+	err = client.DeletePitrRestoreModeMark(ctx)
+	re.NoError(err)
 }
 
 func (suite *httpClientTestSuite) TestWithBackoffer() {
@@ -959,7 +965,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	keyspaceName := "DEFAULT"
+	keyspaceName := constant.DefaultKeyspaceName
 	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
@@ -985,6 +991,28 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 		},
 	}
 	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	re.Error(err)
+}
+
+func (suite *httpClientTestSuite) TestGetKeyspaceMetaByID() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Fetch DEFAULT keyspace by name first to get its ID.
+	metaByName, err := client.GetKeyspaceMetaByName(ctx, constant.DefaultKeyspaceName)
+	re.NoError(err)
+	re.NotNil(metaByName)
+
+	// Fetch the same keyspace by ID and compare.
+	metaByID, err := client.GetKeyspaceMetaByID(ctx, metaByName.GetId())
+	re.NoError(err)
+	re.NotNil(metaByID)
+	re.Equal(metaByName, metaByID)
+
+	// Query a non-existing ID should return error.
+	_, err = client.GetKeyspaceMetaByID(ctx, math.MaxUint32)
 	re.Error(err)
 }
 

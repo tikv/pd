@@ -948,6 +948,11 @@ func (c *RaftCluster) AllocID(uint32) (uint64, uint32, error) {
 	return c.id.Alloc(1)
 }
 
+// GetPrepareRegionCount returns the count of regions that are in prepare state.
+func (c *RaftCluster) GetPrepareRegionCount() (int, error) {
+	return c.GetTotalRegionCount(), nil
+}
+
 // GetRegionSyncer returns the region syncer.
 func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
 	return c.regionSyncer
@@ -1151,11 +1156,12 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
 	}
+	c.adjustNetworkSlowStore(storeID)
 	return nil
 }
 
-// processReportBuckets update the bucket information.
-func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
+// processRegionBuckets update the bucket information.
+func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		regionCacheMissCounter.Inc()
@@ -2068,21 +2074,13 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 
 func (c *RaftCluster) getRegionStats(startKey, endKey []byte, useHot bool, opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
 	stats := statistics.NewRegionStats()
-	for {
-		regions := c.ScanRegions(startKey, endKey, core.ScanRegionLimit)
-
-		for _, region := range regions {
-			if useHot {
-				stats.Observe(region, c, opts...)
-			} else {
-				stats.Observe(region, nil, opts...)
-			}
+	regions := c.ScanRegions(startKey, endKey, -1)
+	for _, region := range regions {
+		if useHot {
+			stats.Observe(region, c, opts...)
+		} else {
+			stats.Observe(region, nil, opts...)
 		}
-		if len(regions) < core.ScanRegionLimit {
-			break
-		}
-
-		startKey = regions[len(regions)-1].GetEndKey()
 	}
 	return stats
 }
@@ -2525,4 +2523,25 @@ func (c *RaftCluster) SetServiceIndependent(name string) {
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
 	c.independentServices.Delete(name)
+}
+
+// Why 99? If the network is normal within the 10-second store heartbeat, the
+// score will drop from 100 to: 100 - (100/10(min)/(60s/10s)) = 100 - (10/6) < 99. In
+// other words, if the network is completely normal within 10 seconds, the score will
+// be less than 99.
+const networkSlowStoreEvictThreshold = 99
+
+func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
+	if c.GetAvgNetworkSlowScore(storeID) >= networkSlowStoreEvictThreshold {
+		c.TriggerNetworkSlowEvict(storeID)
+		storeTriggerNetworkSlowEvict.WithLabelValues(strconv.FormatUint(storeID, 10)).Inc()
+	}
+	// Note: Currently, only one network slow store needs to be considered.
+	// If multiple network slow stores need to be considered, the scores
+	// of the existing network slow stores need to be eliminated.
+	if c.GetAvgNetworkSlowScore(storeID) <= 1 {
+		// If the node remains normal, it takes 10 minutes to go from 100 to 1
+		c.ResetTriggerNetworkSlowEvict(storeID)
+		storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(storeID, 10))
+	}
 }

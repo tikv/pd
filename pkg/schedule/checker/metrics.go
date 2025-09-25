@@ -39,12 +39,41 @@ var (
 			Name:      "patrol_regions_time",
 			Help:      "Time spent of patrol checks region.",
 		})
+
+	patrolPhaseDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "patrol_phase_duration_seconds",
+			Help:      "Bucketed histogram of duration for patrol phases.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"phase"})
+
+	checkRegionDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "check_region_duration_seconds",
+			Help:      "Bucketed histogram of duration for checking region in checkers.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"checker"})
+
+	patrolRegionChannelSize = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "patrol_region_channel_size",
+			Help:      "Size of patrol region channel.",
+		})
 )
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
 	prometheus.MustRegister(regionListGauge)
 	prometheus.MustRegister(patrolCheckRegionsGauge)
+	prometheus.MustRegister(patrolPhaseDuration)
+	prometheus.MustRegister(checkRegionDuration)
+	prometheus.MustRegister(patrolRegionChannelSize)
 }
 
 const (
@@ -57,6 +86,62 @@ const (
 	replicaChecker    = "replica_checker"
 	splitChecker      = "split_checker"
 )
+
+const (
+	// patrol phases
+	phaseWaitForChannel = "wait_for_channel"
+	phaseCheckPriority  = "check_priority"
+	phaseCheckPending   = "check_pending"
+	phaseScanRegions    = "scan_regions"
+	phaseUpdateLabel    = "update_label_stats"
+)
+
+// checkerControllerMetrics contains pre-created Prometheus metrics for the checker controller.
+// It follows the best practice of pre-compiling metrics with labels to avoid runtime overhead.
+type checkerControllerMetrics struct {
+	// Pre-created histograms for patrol phases. Key is the phase name.
+	patrolPhaseHistograms map[string]prometheus.Observer
+	// Pre-created histograms for checkers. Key is the checker name.
+	checkRegionHistograms map[string]prometheus.Observer
+	// Gauge for patrol region channel size.
+	patrolRegionChannelSize prometheus.Gauge
+}
+
+// newCheckerControllerMetrics creates and initializes a new checkerControllerMetrics instance.
+func newCheckerControllerMetrics() *checkerControllerMetrics {
+	patrolPhases := []string{
+		phaseWaitForChannel,
+		phaseCheckPriority,
+		phaseCheckPending,
+		phaseScanRegions,
+		phaseUpdateLabel,
+	}
+
+	// when adding a new checker, remember to add it here for metrics
+	checkerTypes := []string{
+		jointStateChecker,
+		splitChecker,
+		ruleChecker,
+		learnerChecker,
+		replicaChecker,
+		mergeChecker,
+	}
+
+	m := &checkerControllerMetrics{
+		patrolPhaseHistograms:   make(map[string]prometheus.Observer, len(patrolPhases)),
+		checkRegionHistograms:   make(map[string]prometheus.Observer, len(checkerTypes)),
+		patrolRegionChannelSize: patrolRegionChannelSize, // Use the gauge defined at package-level
+	}
+
+	for _, phase := range patrolPhases {
+		m.patrolPhaseHistograms[phase] = patrolPhaseDuration.WithLabelValues(phase)
+	}
+
+	for _, checker := range checkerTypes {
+		m.checkRegionHistograms[checker] = checkRegionDuration.WithLabelValues(checker)
+	}
+	return m
+}
 
 func ruleCheckerCounterWithEvent(event string) prometheus.Counter {
 	return checkerCounter.WithLabelValues(ruleChecker, event)

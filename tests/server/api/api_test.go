@@ -699,7 +699,7 @@ func (suite *redirectorTestSuite) TestRedirect() {
 	// Test redirect during leader election.
 	leader = suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
-	err := leader.ResignLeader()
+	err := leader.ResignLeaderWithRetry()
 	re.NoError(err)
 	for _, svr := range suite.cluster.GetServers() {
 		url := fmt.Sprintf("%s/pd/api/v1/version", svr.GetServer().GetAddr())
