@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/memory"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
@@ -90,9 +91,6 @@ var (
 	updateSuccessCounter          = bucketEventCounter.WithLabelValues("update_success")
 )
 
-// regionLabelGCInterval is the interval to run region-label's GC work.
-const regionLabelGCInterval = time.Hour
-
 const (
 	// nodeStateCheckJobInterval is the interval to run node state check job.
 	nodeStateCheckJobInterval = 10 * time.Second
@@ -109,6 +107,10 @@ const (
 	persistLimitRetryTimes  = 5
 	persistLimitWaitTime    = 100 * time.Millisecond
 	gcTunerCheckCfgInterval = 10 * time.Second
+	// regionLabelGCInterval is the interval to run region-label's GC work.
+	regionLabelGCInterval = time.Hour
+	// storageSizeCollectorInterval is the interval to run storage size collector.
+	storageSizeCollectorInterval = time.Minute
 
 	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
 	// It should enlarge the limiter if the snapshot's duration is less than this value.
@@ -132,8 +134,10 @@ type Server interface {
 	GetBasicCluster() *core.BasicCluster
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
+	GetKeyspaceManager() *keyspace.Manager
 	GetKeyspaceGroupManager() *keyspace.GroupManager
 	IsKeyspaceGroupEnabled() bool
+	GetMeteringWriter() *metering.Writer
 }
 
 // RaftCluster is used for cluster config management.
@@ -399,7 +403,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 	}
 	c.checkSchedulingService()
-	c.wg.Add(10)
+	c.wg.Add(11)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -410,6 +414,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 	go c.startProgressGC()
+	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -2544,4 +2549,80 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 		c.ResetTriggerNetworkSlowEvict(storeID)
 		storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(storeID, 10))
 	}
+}
+
+// runStorageSizeCollector runs the storage size collector for the metering.
+func (c *RaftCluster) runStorageSizeCollector(
+	writer *metering.Writer,
+	regionLabeler *labeler.RegionLabeler,
+	keyspaceManager *keyspace.Manager,
+) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	if writer == nil {
+		log.Info("no metering writer provided, the storage size collector will not be started")
+		return
+	}
+	log.Info("running the storage size collector")
+	// Init and register the collector before starting the loop.
+	collector := newStorageSizeCollector()
+	writer.RegisterCollector(collector)
+	// Start the ticker to collect the storage size data periodically.
+	ticker := time.NewTicker(storageSizeCollectorInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("storage size collector has been stopped")
+			return
+		case <-ticker.C:
+			storageSizeInfoList := c.collectStorageSize(regionLabeler, keyspaceManager)
+			// Collect the storage size info list of all keyspaces.
+			collector.Collect(storageSizeInfoList)
+		}
+	}
+}
+
+func (c *RaftCluster) collectStorageSize(
+	regionLabeler *labeler.RegionLabeler,
+	keyspaceManager *keyspace.Manager,
+) []*storageSizeInfo {
+	regionBoundsMap := make(map[string]*keyspace.RegionBound)
+	start := time.Now()
+	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
+	regionLabeler.IterateLableRules(func(rule *labeler.LabelRule) bool {
+		// Try to parse the keyspace ID from the label rule.
+		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
+		if !ok {
+			return true
+		}
+		keyspaceName, err := keyspaceManager.GetKeyspaceNameByID(keyspaceID)
+		if err != nil {
+			// TODO: improve the observability of this error.
+			return true
+		}
+		// Make the region bounds.
+		regionBoundsMap[keyspaceName] = keyspace.MakeRegionBound(keyspaceID)
+		return true
+	})
+	log.Info("iterated the region bounds of all keyspaces",
+		zap.Duration("cost", time.Since(start)),
+		zap.Int("count", len(regionBoundsMap)))
+
+	start = time.Now()
+	storageSizeInfoList := make([]*storageSizeInfo, 0, len(regionBoundsMap))
+	// Observe the region stats of each keyspace.
+	for keyspaceName, regionBounds := range regionBoundsMap {
+		regionStats := c.GetRegionStatsByRange(regionBounds.TxnLeftBound, regionBounds.TxnRightBound)
+		storageSizeInfoList = append(storageSizeInfoList, &storageSizeInfo{
+			keyspaceName:           keyspaceName,
+			rowBasedStorageSize:    uint64(regionStats.StorageSize),
+			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
+		})
+	}
+	log.Info("observed the region stats of all keyspaces",
+		zap.Duration("cost", time.Since(start)),
+		zap.Int("count", len(storageSizeInfoList)))
+	return storageSizeInfoList
 }

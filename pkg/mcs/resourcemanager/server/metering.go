@@ -26,14 +26,7 @@ const (
 	// ResourceManagerCategory is the category of the resource manager.
 	ResourceManagerCategory = "resource-manager"
 	ruMeteringVersion       = "1"
-	sourceName              = "pd"
 
-	meteringUnitRU    = "RU"
-	meteringUnitBytes = "Bytes"
-
-	meteringDataVersionField             = "version"
-	meteringDataClusterIDField           = "cluster_id"
-	meteringDataSourceNameField          = "source_name"
 	meteringDataOltpRUField              = "oltp_ru"
 	meteringDataOlapRUField              = "olap_ru"
 	meteringDataCrossAZTrafficBytesField = "cross_az_traffic_bytes"
@@ -57,23 +50,15 @@ func (rm *ruMetering) add(consumption *consumptionItem) {
 }
 
 func (rm *ruMetering) oltpMeteringValue() common.MeteringValue {
-	return newMeteringRUValue(rm.oltpRU)
+	return metering.NewRUValue(rm.oltpRU)
 }
 
 func (rm *ruMetering) olapMeteringValue() common.MeteringValue {
-	return newMeteringRUValue(rm.olapRU)
-}
-
-func newMeteringRUValue(value float64) common.MeteringValue {
-	return common.MeteringValue{Value: uint64(value), Unit: meteringUnitRU}
+	return metering.NewRUValue(rm.olapRU)
 }
 
 func (rm *ruMetering) crossAZTrafficBytesMeteringValue() common.MeteringValue {
-	return newMeteringBytesValue(rm.crossAZTrafficBytes)
-}
-
-func newMeteringBytesValue(value uint64) common.MeteringValue {
-	return common.MeteringValue{Value: value, Unit: meteringUnitBytes}
+	return metering.NewBytesValue(rm.crossAZTrafficBytes)
 }
 
 var _ metering.Collector = (*ruCollector)(nil)
@@ -122,9 +107,9 @@ func (c *ruCollector) Aggregate() []map[string]any {
 	for keyspaceName, ruMetering := range keyspaceRUMetering {
 		// Convert the ruMetering to the map[string]any.
 		records = append(records, map[string]any{
-			meteringDataVersionField:             ruMeteringVersion,
-			meteringDataClusterIDField:           keyspaceName, // keyspaceName is the logical cluster ID in the metering data.
-			meteringDataSourceNameField:          sourceName,
+			metering.DataVersionField:            ruMeteringVersion,
+			metering.DataClusterIDField:          keyspaceName, // keyspaceName is the logical cluster ID in the metering data.
+			metering.DataSourceNameField:         metering.SourceNamePD,
 			meteringDataOltpRUField:              ruMetering.oltpMeteringValue(),
 			meteringDataOlapRUField:              ruMetering.olapMeteringValue(),
 			meteringDataCrossAZTrafficBytesField: ruMetering.crossAZTrafficBytesMeteringValue(),
