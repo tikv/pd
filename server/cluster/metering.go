@@ -68,8 +68,8 @@ func (*storageSizeCollector) Category() string { return storageSizeCollectorCate
 func (c *storageSizeCollector) Collect(data any) {
 	c.Lock()
 	defer c.Unlock()
-	info := data.([]*storageSizeInfo)
-	for _, info := range info {
+	infoList := data.([]*storageSizeInfo)
+	for _, info := range infoList {
 		c.keyspaceStorageSize[info.keyspaceName] = info
 	}
 }
