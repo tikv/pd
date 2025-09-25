@@ -284,15 +284,16 @@ func (s *evictStoppingStoreScheduler) scheduleStoppingStore(cluster sche.Schedul
 	}
 
 	// If there is only one stopping store, evict leaders from that store.
-	log.Info("detected stopping store, start to evict leaders", zap.Uint64("store-id", stoppingStore.GetID()))
-	err := s.prepareEvictLeader(cluster, stoppingStore.GetID())
+	stoppingStoreID := stoppingStore.GetID()
+	log.Info("detected stopping store, start to evict leaders", zap.Uint64("store-id", stoppingStoreID))
+	err := s.prepareEvictLeader(cluster, stoppingStoreID)
 	if err != nil {
-		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", stoppingStore.GetID()))
+		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", stoppingStoreID))
 		return
 	}
 	// Record the stopping store evicted status.
-	storeIDStr := strconv.FormatUint(stoppingStore.GetID(), 10)
-	evictedSlowStoreStatusGauge.WithLabelValues(storeIDStr, string(gracefulShutdownStore)).Set(1)
+	storeIDStr := strconv.FormatUint(stoppingStoreID, 10)
+	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr, string(gracefulShutdownStore)).Set(1)
 }
 
 // newEvictStoppingStoreScheduler creates a scheduler that detects and evicts stopping stores.
