@@ -704,6 +704,12 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 	}
 
 	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		keyspaceMeta, ok, err := keyspaceIterator.Next()
 		if err != nil {
 			return nil, err
