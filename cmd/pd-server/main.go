@@ -75,7 +75,7 @@ func main() {
 func NewServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "services <mode>",
-		Short: "Run services, for example, tso, scheduling, router, resource_manager",
+		Short: "Run services, for example, tso, scheduling, router, resource-manager",
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewResourceManagerServiceCommand())
