@@ -57,6 +57,7 @@ endif
 
 ifeq ($(NEXT_GEN), 1)
 	BUILD_TAGS += nextgen
+	BUILD_TAGS += without_dashboard
 endif
 
 RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
