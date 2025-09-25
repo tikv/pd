@@ -264,6 +264,10 @@ func createClientWithKeyspace(
 	}
 
 	updateKeyspaceNameFunc := func() error {
+		// skip keyspace name if keyspace equals NullKeyspaceID
+		if keyspaceID == constants.NullKeyspaceID {
+			return nil
+		}
 		metas, err := c.GetAllKeyspaces(clientCtx, keyspaceID, 1)
 		if err != nil {
 			return err
