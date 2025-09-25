@@ -22,6 +22,7 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -29,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -131,7 +133,39 @@ func newEvictStoppingStoreHandler(config *evictStoppingStoreSchedulerConfig) htt
 	return router
 }
 
-func (handler *evictStoppingStoreHandler) updateConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *evictStoppingStoreHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+
+	batchFloat, inputBatch := input["batch"].(float64)
+	if input["batch"] != nil && !inputBatch {
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'batch'").Error())
+		return
+	}
+	if inputBatch {
+		if batchFloat < 1 || batchFloat > 10 {
+			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
+			return
+		}
+	}
+
+	handler.config.Lock()
+	defer handler.config.Unlock()
+
+	if err := handler.config.persistLocked(func() {
+		if inputBatch {
+			handler.config.Batch = int(batchFloat)
+		}
+	}); err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Info("evict-stopping-store-scheduler update config",
+		zap.Float64("cur-batch", batchFloat),
+	)
+
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
@@ -219,6 +253,9 @@ func (s *evictStoppingStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerC
 		return
 	}
 	cluster.StoppingStoreRecovered(evictStoppingStore)
+	// Reset the stopping store evicted status metric.
+	storeIDStr := strconv.FormatUint(evictStoppingStore, 10)
+	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr, string(gracefulShutdownStore)).Set(0)
 }
 
 func (s *evictStoppingStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
