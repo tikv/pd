@@ -89,6 +89,7 @@ var filters = [filtersLen]string{
 	"store-state-offline-filter",
 	"store-state-pause-leader-filter",
 	"store-state-slow-filter",
+	"store-state-stopping-filter",
 	"store-state-disconnect-filter",
 	"store-state-busy-filter",
 	"store-state-exceed-remove-limit-filter",
