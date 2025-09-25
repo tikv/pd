@@ -203,7 +203,7 @@ func (s *evictStoppingStoreScheduler) prepareEvictLeader(cluster sche.SchedulerC
 
 	if err := s.conf.setStoreAndPersist(storeID); err != nil {
 		log.Info("failed to persist evicted stopping store", zap.Uint64("store-id", storeID), zap.Error(err))
-		cluster.SlowStoreRecovered(storeID)
+		cluster.StoppingStoreRecovered(storeID)
 		return err
 	}
 
@@ -218,7 +218,7 @@ func (s *evictStoppingStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerC
 	if evictStoppingStore == 0 {
 		return
 	}
-	cluster.SlowStoreRecovered(evictStoppingStore)
+	cluster.StoppingStoreRecovered(evictStoppingStore)
 }
 
 func (s *evictStoppingStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {

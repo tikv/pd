@@ -979,6 +979,19 @@ func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
 	s.stores[storeID] = store.Clone(SlowStoreRecovered())
 }
 
+// StoppingStoreRecovered cleans the evicted state of a store.
+func (s *StoresInfo) StoppingStoreRecovered(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's evicted as a stopping store state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(StoppingStoreRecovered())
+}
+
 // SlowTrendEvicted marks a store as a slow trend and prevents transferring
 // leader to the store
 func (s *StoresInfo) SlowTrendEvicted(storeID uint64) error {

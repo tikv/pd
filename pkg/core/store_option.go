@@ -172,6 +172,13 @@ func SlowStoreRecovered() StoreCreateOption {
 	}
 }
 
+// StoppingStoreRecovered cleans the evicted state of a store.
+func StoppingStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.rawStats.IsStopping = false
+	}
+}
+
 // SetLeaderCount sets the leader count for the store.
 func SetLeaderCount(leaderCount int) StoreCreateOption {
 	return func(store *StoreInfo) {
