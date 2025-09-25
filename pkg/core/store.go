@@ -940,16 +940,29 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, direction constant.Dir
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer(direction))
 }
 
-// SlowStoppingStoreEvicted marks a store as a slow/stopping store and prevents transferring
+// SlowStoreEvicted marks a store as a slow store and prevents transferring
 // leader to the store
-func (s *StoresInfo) SlowStoppingStoreEvicted(storeID uint64) error {
+func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 	s.Lock()
 	defer s.Unlock()
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	s.stores[storeID] = store.Clone(SlowStoppingStoreEvicted())
+	s.stores[storeID] = store.Clone(SlowStoreEvicted())
+	return nil
+}
+
+// StoppingStoreEvicted marks a store as a stopping store and prevents transferring
+// leader to the store
+func (s *StoresInfo) StoppingStoreEvicted(storeID uint64) error {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(StoppingStoreEvicted())
 	return nil
 }
 
