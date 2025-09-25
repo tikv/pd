@@ -17,10 +17,10 @@ package grpc
 import (
 	"bytes"
 	"fmt"
+	"time"
 
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"

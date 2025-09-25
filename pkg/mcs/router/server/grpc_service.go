@@ -18,10 +18,11 @@ import (
 	"context"
 	"net/http"
 
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
-	"google.golang.org/grpc"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	gh "github.com/tikv/pd/pkg/grpc"
