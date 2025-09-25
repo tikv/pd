@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+
+	"github.com/tikv/pd/pkg/metering"
 )
 
 const (
@@ -53,12 +55,12 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	re.Len(records, 1)
 	re.Empty(collector.keyspaceRUMetering)
 	record := records[0]
-	re.Equal(ruMeteringVersion, record[meteringDataVersionField])
-	re.Equal(testKeyspaceName, record[meteringDataClusterIDField])
-	re.Equal(sourceName, record[meteringDataSourceNameField])
-	re.Equal(newMeteringRUValue(150.0), record[meteringDataOltpRUField])
-	re.Equal(newMeteringRUValue(150.0), record[meteringDataOlapRUField])
-	re.Equal(newMeteringBytesValue(6144), record[meteringDataCrossAZTrafficBytesField])
+	re.Equal(ruMeteringVersion, record[metering.DataVersionField])
+	re.Equal(testKeyspaceName, record[metering.DataClusterIDField])
+	re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
+	re.Equal(metering.NewRUValue(150.0), record[meteringDataOltpRUField])
+	re.Equal(metering.NewRUValue(150.0), record[meteringDataOlapRUField])
+	re.Equal(metering.NewBytesValue(6144), record[meteringDataCrossAZTrafficBytesField])
 }
 
 func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
@@ -97,20 +99,20 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 	re.Empty(collector.keyspaceRUMetering)
 
 	for _, record := range records {
-		keyspaceName := record[meteringDataClusterIDField]
+		keyspaceName := record[metering.DataClusterIDField]
 		switch keyspaceName {
 		case testKeyspaceName1:
 			re.Equal(testKeyspaceName1, keyspaceName)
-			re.Equal(sourceName, record[meteringDataSourceNameField])
-			re.Equal(newMeteringRUValue(80.0), record[meteringDataOltpRUField])
-			re.Equal(newMeteringRUValue(0.0), record[meteringDataOlapRUField])
-			re.Equal(newMeteringBytesValue(300), record[meteringDataCrossAZTrafficBytesField])
+			re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
+			re.Equal(metering.NewRUValue(80.0), record[meteringDataOltpRUField])
+			re.Equal(metering.NewRUValue(0.0), record[meteringDataOlapRUField])
+			re.Equal(metering.NewBytesValue(300), record[meteringDataCrossAZTrafficBytesField])
 		case testKeyspaceName2:
 			re.Equal(testKeyspaceName2, keyspaceName)
-			re.Equal(sourceName, record[meteringDataSourceNameField])
-			re.Equal(newMeteringRUValue(0.0), record[meteringDataOltpRUField])
-			re.Equal(newMeteringRUValue(100.0), record[meteringDataOlapRUField])
-			re.Equal(newMeteringBytesValue(700), record[meteringDataCrossAZTrafficBytesField])
+			re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
+			re.Equal(metering.NewRUValue(0.0), record[meteringDataOltpRUField])
+			re.Equal(metering.NewRUValue(100.0), record[meteringDataOlapRUField])
+			re.Equal(metering.NewBytesValue(700), record[meteringDataCrossAZTrafficBytesField])
 		default:
 			re.Fail("unexpected keyspace", keyspaceName)
 		}

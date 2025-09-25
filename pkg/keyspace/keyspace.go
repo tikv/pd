@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -96,6 +97,8 @@ type Manager struct {
 	kgm *GroupManager
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
+	// cached keyspace name for each keyspace ID.
+	keyspaceNameLookup sync.Map // store as ID(uint32) -> name(string)
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -411,6 +414,8 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		if err != nil {
 			return err
 		}
+		// Update the keyspace name cache.
+		manager.keyspaceNameLookup.Store(keyspace.Id, keyspace.Name)
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
 		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.Id)
@@ -943,4 +948,30 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 		manager.nextPatrolStartID = nextStartID
 	}
 	return nil
+}
+
+// GetKeyspaceNameByID gets the keyspace name by ID, which will try to get it from the cache first.
+// If not found, it will try to get it from the storage.
+func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
+	if id == constant.NullKeyspaceID {
+		return "", nil
+	}
+	// Try to get the keyspace name from the cache first.
+	name, ok := manager.keyspaceNameLookup.Load(id)
+	if ok {
+		return name.(string), nil
+	}
+	var loadedName string
+	// If the keyspace name is not in the cache, try to get it from the storage.
+	meta, err := manager.LoadKeyspaceByID(id)
+	if err != nil {
+		return "", err
+	}
+	loadedName = meta.GetName()
+	if len(loadedName) == 0 {
+		return "", errors.Errorf("got an empty keyspace name by id %d", id)
+	}
+	// Load or store the keyspace name to the cache.
+	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
+	return actual.(string), nil
 }

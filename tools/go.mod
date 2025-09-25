@@ -23,7 +23,7 @@ require (
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250922052949-d6cbb9eb8638
+	github.com/pingcap/kvproto v0.0.0-20250923064352-8eeada0a8a03
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.20.5
