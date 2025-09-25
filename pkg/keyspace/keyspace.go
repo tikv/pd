@@ -1022,14 +1022,14 @@ func (it *Iterator) loadBatch() error {
 		defer it.onLoadingBatchFinish()
 	}
 
-	nextId := uint32(0)
+	nextID := uint32(0)
 	if it.currentBatch != nil {
-		nextId = it.currentBatch[len(it.currentBatch)-1].GetId() + 1
+		nextID = it.currentBatch[len(it.currentBatch)-1].GetId() + 1
 	}
 
 	var err error
 	it.currentIndex = 0
-	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextId, IteratorLoadingBatchSize)
+	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextID, IteratorLoadingBatchSize)
 	if err != nil {
 		err = errors.AddStack(err)
 		it.err = err

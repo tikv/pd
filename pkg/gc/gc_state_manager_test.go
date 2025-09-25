@@ -2092,6 +2092,7 @@ func TestGetAllKeysapcesGCStatesOnTooManyKeyspaces(t *testing.T) {
 		expectedKeyspaceIDs = append(expectedKeyspaceIDs, constant.SystemKeyspaceID)
 	}
 	expectedKeyspaceIDs = append(expectedKeyspaceIDs, constant.NullKeyspaceID)
+	re.Equal(expectedKeyspaceIDs, keyspaceIDs)
 }
 
 func TestGetMaxTxnSafePointAmongAllKeyspacesOnTooManyKeyspaces(t *testing.T) {
