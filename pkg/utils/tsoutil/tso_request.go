@@ -15,9 +15,13 @@
 package tsoutil
 
 import (
+	"context"
+
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -36,7 +40,7 @@ type Request interface {
 	// count defines the count of timestamps to retrieve.
 	process(forwardStream stream, count uint32) (tsoResp, error)
 	// postProcess sends the response back to the sender of the request
-	postProcess(countSum, physical, firstLogical int64) (int64, error)
+	postProcess(ctx context.Context, countSum, physical, firstLogical int64) (int64, error)
 }
 
 // PDProtoRequest wraps the request and stream channel in the PD grpc service
@@ -44,16 +48,16 @@ type PDProtoRequest struct {
 	forwardedHost string
 	clientConn    *grpc.ClientConn
 	request       *pdpb.TsoRequest
-	stream        pdpb.PD_TsoServer
+	tsoRespCh     chan *pdpb.TsoResponse
 }
 
 // NewPDProtoRequest creates a PDProtoRequest and returns as a Request
-func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer) Request {
+func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, tsoRespCh chan *pdpb.TsoResponse) Request {
 	tsoRequest := &PDProtoRequest{
 		forwardedHost: forwardedHost,
 		clientConn:    clientConn,
 		request:       request,
-		stream:        stream,
+		tsoRespCh:     tsoRespCh,
 	}
 	return tsoRequest
 }
@@ -82,7 +86,7 @@ func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, e
 }
 
 // postProcess sends the response back to the sender of the request
-func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64) (int64, error) {
+func (r *PDProtoRequest) postProcess(ctx context.Context, countSum, physical, firstLogical int64) (int64, error) {
 	count := r.request.GetCount()
 	countSum += int64(count)
 	response := &pdpb.TsoResponse{
@@ -93,9 +97,11 @@ func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64) (in
 			Logical:  firstLogical + countSum,
 		},
 	}
-	// Send back to the client.
-	if err := r.stream.Send(response); err != nil {
-		return countSum, err
+	select {
+	case <-ctx.Done():
+		// If the ctx is done, we drop the response to avoid blocking. and return nil error
+		log.Warn("tso dispatch ctx is done", zap.Uint32("count", count), zap.Int64("physical", physical), zap.Int64("firstLogical", firstLogical))
+	case r.tsoRespCh <- response:
 	}
 	return countSum, nil
 }
