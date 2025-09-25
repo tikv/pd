@@ -206,6 +206,11 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 	return s.slowStoreEvicted.Load() > 0
 }
 
+// EvictedAsStoppingStore returns if the store should be evicted as a stopping store.
+func (s *StoreInfo) EvictedAsStoppingStore() bool {
+	return s.rawStats.IsStopping
+}
+
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
 func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 	return s.slowTrendEvicted.Load() > 0

@@ -59,6 +59,7 @@ const (
 	storeStateOffline
 	storeStatePauseLeader
 	storeStateSlow
+	storeStateStopping
 	storeStateDisconnected
 	storeStateBusy
 	storeStateExceedRemoveLimit
