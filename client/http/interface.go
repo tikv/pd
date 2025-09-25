@@ -50,6 +50,7 @@ type Client interface {
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	SetStoreLabels(context.Context, int64, map[string]string) error
+	DeleteStoreLabel(ctx context.Context, storeID int64, labelKey string) error
 	/* Config-related interfaces */
 	GetConfig(context.Context) (map[string]any, error)
 	SetConfig(context.Context, map[string]any, ...float64) error
@@ -334,6 +335,19 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		WithName(setStoreLabelsName).
 		WithURI(LabelByStoreID(storeID)).
 		WithMethod(http.MethodPost).
+		WithBody(jsonInput))
+}
+
+// DeleteStoreLabel deletes the labels of a store.
+func (c *client) DeleteStoreLabel(ctx context.Context, storeID int64, labelKey string) error {
+	jsonInput, err := json.Marshal(labelKey)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteStoreLabelName).
+		WithURI(LabelByStoreID(storeID)).
+		WithMethod(http.MethodDelete).
 		WithBody(jsonInput))
 }
 

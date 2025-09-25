@@ -378,7 +378,7 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 	err = client.SetPlacementRuleBundles(env.ctx, tranferLeaderRule, true)
 	re.Error(err)
 	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
-	suite.setStoreLabels(env.ctx, client, map[string]string{
+	storeID := suite.setStoreLabels(env.ctx, client, map[string]string{
 		"$mode": "readonly",
 	})
 	err = client.SetPlacementRuleBundles(env.ctx, tranferLeaderRule, true)
@@ -387,6 +387,10 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 
 	suite.transferLeader(env, client)
 	suite.checkRuleResult(re, env, client, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(env.ctx, storeID, "$mode"))
+	store, err := client.GetStore(env.ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -639,7 +643,7 @@ func (suite *httpClientTestSuite) checkSetStoreLabels(mode mode, client pd.Clien
 	})
 }
 
-func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, client pd.Client, storeLabels map[string]string) {
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, client pd.Client, storeLabels map[string]string) int64 {
 	re := suite.Require()
 
 	resp, err := client.GetStores(ctx)
@@ -659,6 +663,7 @@ func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, client pd.
 			}
 		}
 	}
+	return setStore.Store.ID
 }
 
 func (suite *httpClientTestSuite) TestTransferLeader() {
