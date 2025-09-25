@@ -57,6 +57,32 @@ var (
 			Name:      "region_heartbeat_total",
 			Help:      "Counter of region heartbeat requests.",
 		}, []string{"address", "store", "status"})
+
+	regionBucketsHandleDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "handle_region_buckets_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled region buckets requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
+		}, []string{"address", "store"})
+
+	regionBucketsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "region_buckets_total",
+			Help:      "Counter of region buckets requests.",
+		}, []string{"address", "store", "status"})
+
+	regionBucketsReportInterval = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "region_buckets_report_interval_seconds",
+			Help:      "Bucketed histogram of processing time (s) of region buckets report intervals.",
+			Buckets:   prometheus.LinearBuckets(0, 30, 20), // 1s ~ 17m
+		}, []string{"address", "store"})
 )
 
 func init() {
@@ -64,4 +90,7 @@ func init() {
 	prometheus.MustRegister(storeHeartbeatCounter)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(regionHeartbeatCounter)
+	prometheus.MustRegister(regionBucketsHandleDuration)
+	prometheus.MustRegister(regionBucketsCounter)
+	prometheus.MustRegister(regionBucketsReportInterval)
 }
