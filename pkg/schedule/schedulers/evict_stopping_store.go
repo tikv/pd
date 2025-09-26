@@ -34,12 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-type stoppingStoreType string
-
-const (
-	gracefulShutdownStore stoppingStoreType = "graceful-shutdown"
-)
-
 type evictStoppingStoreSchedulerConfig struct {
 	baseDefaultSchedulerConfig
 
@@ -109,9 +103,11 @@ func (conf *evictStoppingStoreSchedulerConfig) clearEvictedAndPersist() (oldID u
 	oldID = conf.evictStore()
 	conf.Lock()
 	defer conf.Unlock()
-	err = conf.persistLocked(func() {
-		conf.EvictedStores = []uint64{}
-	})
+	if oldID > 0 {
+		err = conf.persistLocked(func() {
+			conf.EvictedStores = []uint64{}
+		})
+	}
 	return
 }
 
@@ -253,7 +249,7 @@ func (s *evictStoppingStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerC
 	cluster.StoppingStoreRecovered(evictStoppingStore)
 	// Reset the stopping store evicted status metric.
 	storeIDStr := strconv.FormatUint(evictStoppingStore, 10)
-	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr, string(gracefulShutdownStore)).Set(0)
+	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr).Set(0)
 }
 
 func (s *evictStoppingStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
@@ -328,7 +324,7 @@ func (s *evictStoppingStoreScheduler) scheduleStoppingStore(cluster sche.Schedul
 	}
 	// Record the stopping store evicted status.
 	storeIDStr := strconv.FormatUint(stoppingStoreID, 10)
-	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr, string(gracefulShutdownStore)).Set(1)
+	evictedStoppingStoreStatusGauge.WithLabelValues(storeIDStr).Set(1)
 }
 
 // newEvictStoppingStoreScheduler creates a scheduler that detects and evicts stopping stores.
