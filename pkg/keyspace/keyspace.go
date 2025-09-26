@@ -965,9 +965,6 @@ type Iterator struct {
 	currentIndex int
 	isDrained    bool
 	err          error
-
-	onLoadingBatchStart  func()
-	onLoadingBatchFinish func()
 }
 
 func newKeyspaceIterator(manager *Manager, startID uint32) *Iterator {
@@ -975,16 +972,6 @@ func newKeyspaceIterator(manager *Manager, startID uint32) *Iterator {
 		manager: manager,
 		startID: startID,
 	}
-}
-
-// SetOnLoadingBatchStart sets a callback that is called everytime it begins internally loading a batch of keyspaces.
-func (it *Iterator) SetOnLoadingBatchStart(cb func()) {
-	it.onLoadingBatchStart = cb
-}
-
-// SetOnLoadingBatchFinish sets a callback that is called everytime it finishes internally loading a batch of keyspaces.
-func (it *Iterator) SetOnLoadingBatchFinish(cb func()) {
-	it.onLoadingBatchFinish = cb
 }
 
 // Next advances the iterator to the next item. On a new iterator, Next returns the first item.
@@ -1015,13 +1002,6 @@ func (it *Iterator) Next() (*keyspacepb.KeyspaceMeta, bool, error) {
 }
 
 func (it *Iterator) loadBatch() error {
-	if it.onLoadingBatchStart != nil {
-		it.onLoadingBatchStart()
-	}
-	if it.onLoadingBatchFinish != nil {
-		defer it.onLoadingBatchFinish()
-	}
-
 	nextID := uint32(0)
 	if it.currentBatch != nil {
 		nextID = it.currentBatch[len(it.currentBatch)-1].GetId() + 1

@@ -674,23 +674,28 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint3
 func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[uint32]GCState, error) {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	mutexLocked := false
+	lock := func() {
+		m.mu.Lock()
+		mutexLocked = true
+	}
+	unlock := func() {
+		m.mu.Unlock()
+		mutexLocked = false
+	}
+
+	ensureUnlocked := func() {
+		if mutexLocked {
+			unlock()
+		}
+	}
+	defer ensureUnlocked()
 
 	keyspaceIterator := m.keyspaceManager.IterateKeyspaces(0)
 
-	// Loading keyspaces may be time-costing and is not part of GC states. When the iterator internally triggers the
-	// batch-loading operations, we temporarily release the mutex, so that it doesn't block other fast operations.
-	// Note that this can be done because that we don't require the atomicity among different keyspaces.
-	keyspaceIterator.SetOnLoadingBatchStart(func() {
-		m.mu.Unlock()
-	})
-	keyspaceIterator.SetOnLoadingBatchFinish(func() {
-		m.mu.Lock()
-	})
-
 	// Do not guarantee atomicity among different keyspaces here.
 	results := make(map[uint32]GCState)
+	lock()
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
 		if err1 != nil {
@@ -699,6 +704,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 		results[constant.NullKeyspaceID] = nullKeyspaceState
 		return nil
 	})
+	unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -731,6 +737,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 			continue
 		}
 
+		lock()
 		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
 			if err1 != nil {
@@ -739,6 +746,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 			results[keyspaceMeta.Id] = state
 			return nil
 		})
+		unlock()
 		if err != nil {
 			return nil, err
 		}
