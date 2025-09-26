@@ -142,6 +142,14 @@ func SlowStoreEvicted() StoreCreateOption {
 	}
 }
 
+// StoppingStoreEvicted marks a store as a stopping store and prevents transferring
+// leader to the store
+func StoppingStoreEvicted() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.rawStats.IsStopping = true
+	}
+}
+
 // SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
 // leader to the store
 func SlowTrendEvicted() StoreCreateOption {
@@ -161,6 +169,13 @@ func SlowTrendRecovered() StoreCreateOption {
 func SlowStoreRecovered() StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.slowStoreEvicted.Add(-1)
+	}
+}
+
+// StoppingStoreRecovered cleans the evicted state of a store.
+func StoppingStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.rawStats.IsStopping = false
 	}
 }
 

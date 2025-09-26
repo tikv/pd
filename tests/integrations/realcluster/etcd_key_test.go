@@ -75,6 +75,7 @@ var (
 		"/pd//scheduler_config/balance-leader-scheduler",
 		"/pd//scheduler_config/balance-region-scheduler",
 		"/pd//scheduler_config/evict-slow-store-scheduler",
+		"/pd//scheduler_config/evict-stopping-store-scheduler",
 		"/pd//timestamp",
 		"/pd//tso/keyspace_groups/membership/", // ms
 		"/pd/cluster_id",

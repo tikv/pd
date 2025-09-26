@@ -590,6 +590,7 @@ var defaultSchedulersInit = func() SchedulerConfigs {
 	}
 	if !kerneltype.IsNextGen() {
 		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]})
+		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictStoppingStoreScheduler]})
 	}
 	return defaultSchedulers
 }

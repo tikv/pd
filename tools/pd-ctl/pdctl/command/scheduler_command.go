@@ -162,6 +162,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceWitnessSchedulerCommand())
 	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceRangeSchedulerCommand())
+	c.AddCommand(NewEvictStoppingStoreSchedulerCommand())
 	return c
 }
 
@@ -298,6 +299,16 @@ func NewEvictSlowStoreSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "evict-slow-store-scheduler",
 		Short: "add a scheduler to detect and evict slow stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewEvictStoppingStoreSchedulerCommand returns a command to add a evict-stopping-store-scheduler.
+func NewEvictStoppingStoreSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-stopping-store-scheduler",
+		Short: "add a scheduler to detect and evict stopping stores",
 		Run:   addSchedulerCommandFunc,
 	}
 	return c
@@ -543,6 +554,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigGrantHotRegionCommand(),
 		newConfigBalanceLeaderCommand(),
 		newConfigEvictSlowStoreCommand(),
+		newConfigEvictStoppingStoreCommand(),
 		newConfigShuffleHotRegionSchedulerCommand(),
 		newConfigEvictSlowTrendCommand(),
 		newConfigBalanceRangeCommand(),
@@ -932,6 +944,25 @@ func newConfigEvictSlowTrendCommand() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use:   "show",
 		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+	return c
+}
+
+func newConfigEvictStoppingStoreCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-stopping-store-scheduler",
+		Short: "evict-stopping-store-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "show the config item",
 		Run:   listSchedulerConfigCommandFunc,
 	}, &cobra.Command{
 		Use:   "set <key> <value>",
