@@ -22,6 +22,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
@@ -290,6 +291,8 @@ func NewParticipantByService(serviceName string) (p participant) {
 		p = &tsopb.Participant{}
 	case constant.SchedulingServiceName:
 		p = &schedulingpb.Participant{}
+	case constant.ResourceManagerServiceName:
+		p = &resource_manager.Participant{}
 	}
 	return p
 }
