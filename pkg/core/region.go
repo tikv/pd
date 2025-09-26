@@ -63,26 +63,27 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
-	meta              *metapb.Region
-	learners          []*metapb.Peer
-	witnesses         []*metapb.Peer
-	voters            []*metapb.Peer
-	leader            *metapb.Peer
-	downPeers         []*pdpb.PeerStats
-	pendingPeers      []*metapb.Peer
-	term              uint64
-	cpuUsage          uint64
-	writtenBytes      uint64
-	writtenKeys       uint64
-	readBytes         uint64
-	readKeys          uint64
-	approximateSize   int64
-	approximateKvSize int64
-	approximateKeys   int64
-	interval          *pdpb.TimeInterval
-	replicationStatus *replication_modepb.RegionReplicationStatus
-	queryStats        *pdpb.QueryStats
-	flowRoundDivisor  uint64
+	meta                      *metapb.Region
+	learners                  []*metapb.Peer
+	witnesses                 []*metapb.Peer
+	voters                    []*metapb.Peer
+	leader                    *metapb.Peer
+	downPeers                 []*pdpb.PeerStats
+	pendingPeers              []*metapb.Peer
+	term                      uint64
+	cpuUsage                  uint64
+	writtenBytes              uint64
+	writtenKeys               uint64
+	readBytes                 uint64
+	readKeys                  uint64
+	approximateSize           int64
+	approximateKvSize         int64 // Unit: MiB
+	approximateColumnarKvSize int64 // Unit: MiB
+	approximateKeys           int64
+	interval                  *pdpb.TimeInterval
+	replicationStatus         *replication_modepb.RegionReplicationStatus
+	queryStats                *pdpb.QueryStats
+	flowRoundDivisor          uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
 	buckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
@@ -247,6 +248,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor int)
 	// scheduling service doesn't need the following fields.
 	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
+		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
 		region.cpuUsage = h.GetCpuUsage()
 	}
@@ -296,23 +298,24 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 
 	region := &RegionInfo{
-		term:              r.term,
-		meta:              typeutil.DeepClone(r.meta, RegionFactory),
-		leader:            typeutil.DeepClone(r.leader, RegionPeerFactory),
-		downPeers:         downPeers,
-		pendingPeers:      pendingPeers,
-		cpuUsage:          r.cpuUsage,
-		writtenBytes:      r.writtenBytes,
-		writtenKeys:       r.writtenKeys,
-		readBytes:         r.readBytes,
-		readKeys:          r.readKeys,
-		approximateSize:   r.approximateSize,
-		approximateKvSize: r.approximateKvSize,
-		approximateKeys:   r.approximateKeys,
-		interval:          typeutil.DeepClone(r.interval, TimeIntervalFactory),
-		replicationStatus: r.replicationStatus,
-		buckets:           r.buckets,
-		queryStats:        typeutil.DeepClone(r.queryStats, QueryStatsFactory),
+		term:                      r.term,
+		meta:                      typeutil.DeepClone(r.meta, RegionFactory),
+		leader:                    typeutil.DeepClone(r.leader, RegionPeerFactory),
+		downPeers:                 downPeers,
+		pendingPeers:              pendingPeers,
+		cpuUsage:                  r.cpuUsage,
+		writtenBytes:              r.writtenBytes,
+		writtenKeys:               r.writtenKeys,
+		readBytes:                 r.readBytes,
+		readKeys:                  r.readKeys,
+		approximateSize:           r.approximateSize,
+		approximateKvSize:         r.approximateKvSize,
+		approximateColumnarKvSize: r.approximateColumnarKvSize,
+		approximateKeys:           r.approximateKeys,
+		interval:                  typeutil.DeepClone(r.interval, TimeIntervalFactory),
+		replicationStatus:         r.replicationStatus,
+		buckets:                   r.buckets,
+		queryStats:                typeutil.DeepClone(r.queryStats, QueryStatsFactory),
 	}
 
 	for _, opt := range opts {
@@ -654,6 +657,11 @@ func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
 // GetApproximateKvSize returns the approximate kv size of the region.
 func (r *RegionInfo) GetApproximateKvSize() int64 {
 	return r.approximateKvSize
+}
+
+// GetApproximateColumnarKvSize returns the approximate columnar kv size of the region.
+func (r *RegionInfo) GetApproximateColumnarKvSize() int64 {
+	return r.approximateColumnarKvSize
 }
 
 // GetApproximateKeys returns the approximate keys of the region.

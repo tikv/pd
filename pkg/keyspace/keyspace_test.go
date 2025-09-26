@@ -135,6 +135,10 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 		re.Equal(uint32(i+1), created.Id)
 		checkCreateRequest(re, request, created)
 
+		name, err := manager.GetKeyspaceNameByID(created.Id)
+		re.NoError(err)
+		re.Equal(created.Name, name)
+
 		loaded, err := manager.LoadKeyspace(request.Name)
 		re.NoError(err)
 		re.Equal(uint32(i+1), loaded.Id)

@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -147,17 +148,92 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
 
+		storeAddress := store.GetAddress()
+		storeLabel := strconv.FormatUint(storeID, 10)
+
 		if time.Since(lastBind) > time.Minute {
 			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
+
+		start := time.Now()
 		// scheduling service doesn't sync the pd server config, so we use 0 here
 		region := core.RegionFromHeartbeat(request, 0)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
-			// TODO: if we need to send the error back to PD.
-			log.Error("failed handle region heartbeat", zap.Error(err))
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+			regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			log.Debug("failed handle region heartbeat", zap.Error(err))
 			continue
+		}
+
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+	}
+}
+
+// RegionBuckets implements gRPC SchedulingServer.
+func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServer) error {
+	var cancel context.CancelFunc
+	defer func() {
+		// cancel the forward stream
+		if cancel != nil {
+			cancel()
+		}
+	}()
+
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		c := s.GetCluster()
+		if c == nil {
+			resp := &schedulingpb.RegionBucketsResponse{Header: notBootstrappedHeader()}
+			err := stream.Send(resp)
+			return errors.WithStack(err)
+		}
+
+		buckets := request.GetBuckets()
+		if buckets == nil || len(buckets.Keys) == 0 {
+			continue
+		}
+
+		var (
+			storeLabel   string
+			storeAddress string
+		)
+		store := c.GetLeaderStoreByRegionID(buckets.GetRegionId())
+		if store == nil {
+			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
+			// So we should not return error here.
+			log.Warn("the store of the bucket in region is not found ", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else {
+			storeLabel = strconv.FormatUint(store.GetID(), 10)
+			storeAddress = store.GetAddress()
+		}
+
+		start := time.Now()
+		err = c.HandleRegionBuckets(buckets)
+		if err != nil {
+			regionBucketsCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+			regionBucketsHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			regionBucketsReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
+			log.Debug("failed handle region buckets", zap.Error(err))
+		} else {
+			regionBucketsCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+			regionBucketsHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+			regionBucketsReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
+		}
+		response := &schedulingpb.RegionBucketsResponse{
+			Header: wrapHeader(),
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
 		}
 	}
 }
@@ -166,18 +242,28 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
 	if c == nil {
-		// TODO: add metrics
-		log.Info("cluster isn't initialized")
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
+	start := time.Now()
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
 		s.metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
-	// TODO: add metrics
+	storeID := request.GetStats().GetStoreId()
+	store := c.GetStore(storeID)
+	storeAddress := ""
+	if store != nil {
+		storeAddress = store.GetAddress()
+	}
+	storeLabel := strconv.FormatUint(storeID, 10)
 	if err := c.HandleStoreHeartbeat(request); err != nil {
-		log.Error("handle store heartbeat failed", zap.Error(err))
+		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+		log.Debug("handle store heartbeat failed", zap.Error(err))
+	} else {
+		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "success").Inc()
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 	return &schedulingpb.StoreHeartbeatResponse{Header: wrapHeader()}, nil
 }
