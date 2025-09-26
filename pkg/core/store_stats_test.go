@@ -48,3 +48,66 @@ func TestStoreStats(t *testing.T) {
 	re.Greater(store.GetAvgAvailable(), uint64(150*units.GiB))
 	re.Less(store.GetAvgAvailable(), uint64(160*units.GiB))
 }
+
+func TestDFSStats(t *testing.T) {
+	re := require.New(t)
+	meta := &metapb.Store{Id: 1, State: metapb.StoreState_Up}
+	storeStats := &pdpb.StoreStats{
+		Capacity:  uint64(200 * units.GiB),
+		UsedSize:  uint64(50 * units.GiB),
+		Available: uint64(150 * units.GiB),
+	}
+	store := NewStoreInfo(meta, SetStoreStats(storeStats))
+	scopedDFSStats := store.TakeScopedDFSStats()
+	re.Empty(scopedDFSStats)
+
+	storeStats.Dfs = []*pdpb.DfsStatItem{
+		{
+			Scope: &pdpb.DfsStatScope{
+				KeyspaceId: 1,
+				Component:  "test-component",
+			},
+			WrittenBytes:  100,
+			WriteRequests: 100,
+		},
+		{
+			Scope: &pdpb.DfsStatScope{
+				KeyspaceId: 2,
+				Component:  "test-component",
+			},
+			WrittenBytes:  200,
+			WriteRequests: 200,
+		},
+	}
+	store = store.Clone(SetStoreStats(storeStats))
+	scopedDFSStats = store.TakeScopedDFSStats()
+	re.Len(scopedDFSStats, 2)
+	re.Equal(storeStats.Dfs[0].WrittenBytes, scopedDFSStats[*storeStats.Dfs[0].Scope].WrittenBytes)
+	re.Equal(storeStats.Dfs[0].WriteRequests, scopedDFSStats[*storeStats.Dfs[0].Scope].WriteRequests)
+	re.Equal(storeStats.Dfs[1].WrittenBytes, scopedDFSStats[*storeStats.Dfs[1].Scope].WrittenBytes)
+	re.Equal(storeStats.Dfs[1].WriteRequests, scopedDFSStats[*storeStats.Dfs[1].Scope].WriteRequests)
+
+	storeStats.Dfs = []*pdpb.DfsStatItem{
+		{
+			Scope: &pdpb.DfsStatScope{
+				KeyspaceId: 1,
+				Component:  "test-component",
+			},
+			WrittenBytes:  100,
+			WriteRequests: 100,
+		},
+		{
+			Scope: &pdpb.DfsStatScope{
+				KeyspaceId: 1,
+				Component:  "test-component",
+			},
+			WrittenBytes:  200,
+			WriteRequests: 200,
+		},
+	}
+	store = store.Clone(SetStoreStats(storeStats))
+	scopedDFSStats = store.TakeScopedDFSStats()
+	re.Len(scopedDFSStats, 1)
+	re.Equal(storeStats.Dfs[0].WrittenBytes+storeStats.Dfs[1].WrittenBytes, scopedDFSStats[*storeStats.Dfs[0].Scope].WrittenBytes)
+	re.Equal(storeStats.Dfs[0].WriteRequests+storeStats.Dfs[1].WriteRequests, scopedDFSStats[*storeStats.Dfs[0].Scope].WriteRequests)
+}

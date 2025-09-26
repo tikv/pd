@@ -22,18 +22,26 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
+// DFSStats is used to calculate the DFS stats info for each scope.
+type DFSStats struct {
+	WrittenBytes  uint64
+	WriteRequests uint64
+}
+
 type storeStats struct {
 	mu       syncutil.RWMutex
 	rawStats *pdpb.StoreStats
 
 	// avgAvailable is used to make available smooth, aka no sudden changes.
-	avgAvailable *movingaverage.HMA
+	avgAvailable   *movingaverage.HMA
+	scopedDFSStats map[pdpb.DfsStatScope]*DFSStats
 }
 
 func newStoreStats() *storeStats {
 	return &storeStats{
-		rawStats:     &pdpb.StoreStats{},
-		avgAvailable: movingaverage.NewHMA(60), // take 10 minutes sample under 10s heartbeat rate
+		rawStats:       &pdpb.StoreStats{},
+		avgAvailable:   movingaverage.NewHMA(60), // take 10 minutes sample under 10s heartbeat rate
+		scopedDFSStats: make(map[pdpb.DfsStatScope]*DFSStats),
 	}
 }
 
@@ -46,6 +54,38 @@ func (ss *storeStats) updateRawStats(rawStats *pdpb.StoreStats) {
 		return
 	}
 	ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
+
+	dfsStatItems := rawStats.GetDfs()
+	if len(dfsStatItems) == 0 {
+		return
+	}
+	for _, dfsStat := range dfsStatItems {
+		scope := dfsStat.GetScope()
+		if scope == nil {
+			continue
+		}
+		writtenBytes := dfsStat.GetWrittenBytes()
+		writeRequests := dfsStat.GetWriteRequests()
+		stat, ok := ss.scopedDFSStats[*scope]
+		if ok {
+			stat.WrittenBytes += writtenBytes
+			stat.WriteRequests += writeRequests
+		} else {
+			ss.scopedDFSStats[*scope] = &DFSStats{
+				WrittenBytes:  writtenBytes,
+				WriteRequests: writeRequests,
+			}
+		}
+	}
+}
+
+// TakeScopedDFSStats takes the DFS stats info for each scope. It will return the DFS stats info and clear the internal map.
+func (ss *storeStats) TakeScopedDFSStats() map[pdpb.DfsStatScope]*DFSStats {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	dfsStats := ss.scopedDFSStats
+	ss.scopedDFSStats = make(map[pdpb.DfsStatScope]*DFSStats)
+	return dfsStats
 }
 
 // GetStoreStats returns the statistics information of the store.
