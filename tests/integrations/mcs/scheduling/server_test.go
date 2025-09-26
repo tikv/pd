@@ -1520,7 +1520,6 @@ func (suite *serverTestSuite) TestRegionBucketsStoreNotFound() {
 	schedulingClient := schedulingpb.NewSchedulingClient(conn)
 	stream, err := schedulingClient.RegionBuckets(suite.ctx)
 	re.NoError(err)
-	defer stream.CloseSend()
 
 	// Create buckets for a region that doesn't exist in the cluster
 	// This will trigger the store == nil condition because GetLeaderStoreByRegionID returns nil
