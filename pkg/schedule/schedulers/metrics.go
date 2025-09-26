@@ -112,7 +112,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "evicted_stopping_store_status",
 			Help:      "Store evicted status due to stopping",
-		}, []string{"store", "stopping_type"})
+		}, []string{"store"})
 
 	slowStoreTriggerLimitGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

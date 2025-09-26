@@ -109,11 +109,9 @@ func (conf *evictStoppingStoreSchedulerConfig) clearEvictedAndPersist() (oldID u
 	oldID = conf.evictStore()
 	conf.Lock()
 	defer conf.Unlock()
-	if oldID > 0 {
-		err = conf.persistLocked(func() {
-			conf.EvictedStores = []uint64{}
-		})
-	}
+	err = conf.persistLocked(func() {
+		conf.EvictedStores = []uint64{}
+	})
 	return
 }
 
@@ -247,7 +245,7 @@ func (s *evictStoppingStoreScheduler) prepareEvictLeader(cluster sche.SchedulerC
 func (s *evictStoppingStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
 	evictStoppingStore, err := s.conf.clearEvictedAndPersist()
 	if err != nil {
-		log.Info("evict-stopping-store-scheduler persist config failed", zap.Uint64("store-id", evictStoppingStore))
+		log.Warn("evict-stopping-store-scheduler persist config failed", zap.Uint64("store-id", evictStoppingStore))
 	}
 	if evictStoppingStore == 0 {
 		return
