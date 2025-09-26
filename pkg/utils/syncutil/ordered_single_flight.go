@@ -23,6 +23,60 @@ type task[TResult any] struct {
 	finishCh chan struct{}
 	result   TResult
 	err      error
+
+	// The refState is a combination of the total number of callers waiting for the result of this task, and a flag
+	// indicating whether the task is sealed, i.e., no more callers are allowed to share this task.
+	// When a waiter is canceled, the caller count is decreased by one. When it reaches zero and the task is sealed,
+	// the execution will be canceled by calling `execCancel`.
+	refState   atomic.Int64
+	execCtx    context.Context
+	execCancel func()
+}
+
+const sealedFlag int64 = 1 << 62
+
+func newTask[TResult any]() *task[TResult] {
+	ctx, cancel := context.WithCancel(context.Background())
+	t := &task[TResult]{
+		finishCh:   make(chan struct{}, 1),
+		execCtx:    ctx,
+		execCancel: cancel,
+	}
+	return t
+}
+
+// cancelOne cancels one of the caller waiting for the task. Assumes it currently has at least one.
+func (t *task[TResult]) cancelOne() {
+	newValue := t.refState.Add(-1)
+	sealed, remainingCallers := (newValue&sealedFlag) != 0, newValue&^sealedFlag
+	if sealed && remainingCallers == 0 {
+		t.execCancel()
+	}
+}
+
+func (t *task[TResult]) seal() {
+	var lastValue int64
+	for {
+		value := t.refState.Load()
+		if value&sealedFlag != 0 {
+			lastValue = value
+			break
+		}
+		newValue := value | sealedFlag
+		if t.refState.CompareAndSwap(value, newValue) {
+			lastValue = newValue
+			break
+		}
+	}
+	remainingCallers := lastValue &^ sealedFlag
+	if remainingCallers == 0 {
+		t.execCancel()
+	}
+}
+
+func (t *task[TResult]) finish() {
+	close(t.finishCh)
+	t.execCancel()
 }
 
 // OrderedSingleFlight is a utility to make concurrent calls to a function internally only one execution, and shares the
@@ -57,18 +111,20 @@ func NewOrderedSingleFlight[TResult any]() *OrderedSingleFlight[TResult] {
 
 // Do tries to execute the function `f`, or if possible, wait and reuse the result of an execution triggered by another
 // goroutine. See comments of OrderedSingleFlight for details.
-func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult, error)) (TResult, error) {
+func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Context) (TResult, error)) (TResult, error) {
 	var currentTask *task[TResult]
 
 	s.mu.Lock()
 	if s.pendingTask == nil {
-		s.pendingTask = &task[TResult]{finishCh: make(chan struct{}, 1)}
+		s.pendingTask = newTask[TResult]()
 	}
 	currentTask = s.pendingTask
+	currentTask.refState.Add(1)
 	s.mu.Unlock()
 
 	select {
 	case <-ctx.Done():
+		currentTask.cancelOne()
 		var res TResult
 		return res, ctx.Err()
 	case <-currentTask.finishCh:
@@ -96,6 +152,9 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 	// Unset the pendingTask, so further calls introduces the next pending task
 	s.mu.Lock()
 	s.pendingTask = nil
+	// Once a caller executes to this point, it disallows further callers to share the task. The task is marked sealed,
+	// which means since now, once the ref count decreases to 0, the task will be canceled.
+	currentTask.seal()
 	s.mu.Unlock()
 
 	// Execute the function and distribute the result. Spawn it into a separate goroutine to make the current call able
@@ -105,15 +164,16 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func() (TResult
 			s.tokenCh <- struct{}{}
 		}()
 
-		res, err := f()
+		res, err := f(currentTask.execCtx)
 		currentTask.result = res
 		currentTask.err = err
 		s.execCounter.Add(1)
-		close(currentTask.finishCh)
+		currentTask.finish()
 	}()
 
 	select {
 	case <-ctx.Done():
+		currentTask.cancelOne()
 		var res TResult
 		return res, ctx.Err()
 	case <-currentTask.finishCh:
