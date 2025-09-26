@@ -874,6 +874,10 @@ type tokenCounter struct {
 		setupNotificationCh        <-chan time.Time
 		setupNotificationThreshold float64
 		setupNotificationTimer     *time.Timer
+		// cancelCh is used to cancel the notification to unblock gc goroutines.
+		// It's needed since setupNotificationTimer.Stop() does not close the setupNotificationCh channel.
+		cancelCh <-chan struct{}
+		cancelFn context.CancelFunc
 	}
 
 	lastDeadline time.Time
@@ -1041,8 +1045,9 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 		for _, counter := range gc.run.resourceTokens {
 			counter.notify.mu.Lock()
 			ch := counter.notify.setupNotificationCh
+			cancel := counter.notify.cancelCh
 			counter.notify.mu.Unlock()
-			if ch == nil {
+			if ch == nil || cancel == nil {
 				continue
 			}
 			select {
@@ -1053,6 +1058,9 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
 				counter.limiter.SetupNotificationThreshold(threshold)
+			case <-cancel:
+				// move on to the next resource token counter since this one is cancelled.
+				continue
 			case <-ctx.Done():
 				return
 			}
@@ -1062,8 +1070,9 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 		for _, counter := range gc.run.requestUnitTokens {
 			counter.notify.mu.Lock()
 			ch := counter.notify.setupNotificationCh
+			cancel := counter.notify.cancelCh
 			counter.notify.mu.Unlock()
-			if ch == nil {
+			if ch == nil || cancel == nil {
 				continue
 			}
 			select {
@@ -1074,6 +1083,9 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
 				counter.limiter.SetupNotificationThreshold(threshold)
+			case <-cancel:
+				// move on to the next request unit token counter since this one is cancelled.
+				continue
 			case <-ctx.Done():
 				return
 			}
@@ -1269,6 +1281,9 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		}
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
 		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+		cancelCtx, cancelFn := context.WithCancel(context.Background())
+		counter.notify.cancelCh = cancelCtx.Done()
+		counter.notify.cancelFn = cancelFn
 		counter.notify.setupNotificationThreshold = 1
 		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
@@ -1289,6 +1304,11 @@ func initCounterNotify(counter *tokenCounter) {
 		counter.notify.setupNotificationTimer.Stop()
 		counter.notify.setupNotificationTimer = nil
 		counter.notify.setupNotificationCh = nil
+		if counter.notify.cancelFn != nil {
+			counter.notify.cancelFn()
+			counter.notify.cancelFn = nil
+			counter.notify.cancelCh = nil
+		}
 	}
 	counter.notify.mu.Unlock()
 }
