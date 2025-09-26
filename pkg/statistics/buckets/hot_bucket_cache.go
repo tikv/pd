@@ -49,6 +49,8 @@ const (
 
 // HotBucketCache is the cache of hot stats.
 type HotBucketCache struct {
+	ctx             context.Context
+	cancel          context.CancelFunc
 	tree            *rangetree.RangeTree       // regionId -> BucketTreeItem
 	bucketsOfRegion map[uint64]*BucketTreeItem // regionId -> BucketTreeItem
 	taskQueue       chan flowBucketsItemTask
@@ -161,6 +163,14 @@ func (h *HotBucketCache) CheckAsync(task flowBucketsItemTask) bool {
 	default:
 		return false
 	}
+
+}
+
+// Close cancels the context to stop background goroutines.
+func (c *HotBucketCache) Close() {
+	if c.cancel != nil {
+		c.cancel()
+	}
 }
 
 // BucketsStats returns hot region's buckets stats.
@@ -249,6 +259,13 @@ func convertToBucketTreeItem(buckets *metapb.Buckets) *BucketTreeItem {
 		interval: interval,
 		version:  buckets.Version,
 		status:   alive,
+	}
+}
+
+// Close terminates all background goroutines managed by HotBucketCache.
+func (bc *HotBucketCache) Close() {
+	if bc.cancel != nil {
+		bc.cancel()
 	}
 }
 
