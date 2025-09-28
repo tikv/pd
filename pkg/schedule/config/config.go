@@ -579,11 +579,26 @@ type SchedulerConfig struct {
 // DefaultSchedulers are the schedulers be created by default.
 // If these schedulers are not in the persistent configuration, they
 // will be created automatically when reloading.
+<<<<<<< HEAD
 var DefaultSchedulers = SchedulerConfigs{
 	{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
 	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
 	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
 	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
+=======
+var DefaultSchedulers = defaultSchedulersInit()
+var defaultSchedulersInit = func() SchedulerConfigs {
+	defaultSchedulers := SchedulerConfigs{
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
+	}
+	if !kerneltype.IsNextGen() {
+		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]})
+		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictStoppingStoreScheduler]})
+	}
+	return defaultSchedulers
+>>>>>>> 9450168983 (scheduler: graceful shutdown implement (#9720))
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.

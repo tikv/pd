@@ -34,7 +34,11 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
+<<<<<<< HEAD
 	github.com/pingcap/kvproto v0.0.0-20250707084400-caf41f244ad8
+=======
+	github.com/pingcap/kvproto v0.0.0-20250923091925-d79d11002599
+>>>>>>> 9450168983 (scheduler: graceful shutdown implement (#9720))
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20251001025619-8cfdaf48f4b1

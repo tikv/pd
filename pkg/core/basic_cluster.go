@@ -147,7 +147,9 @@ type StoreSetController interface {
 	ResumeLeaderTransfer(id uint64)
 
 	SlowStoreEvicted(id uint64) error
+	StoppingStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
+	StoppingStoreRecovered(id uint64)
 	SlowTrendEvicted(id uint64) error
 	SlowTrendRecovered(id uint64)
 }
