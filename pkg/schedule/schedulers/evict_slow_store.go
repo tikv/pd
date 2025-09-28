@@ -52,6 +52,7 @@ type evictSlowStoreSchedulerConfig struct {
 	storage endpoint.ConfigStorage
 	// Last timestamp of the chosen slow store for eviction.
 	lastSlowStoreCaptureTS time.Time
+	isRecovered            bool
 	// Duration gap for recovering the candidate, unit: s.
 	RecoveryDurationGap uint64   `json:"recovery-duration"`
 	EvictedStores       []uint64 `json:"evict-stores"`
@@ -122,6 +123,21 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
+	return conf.persistLocked()
+}
+
+func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bool) error {
+	conf.RLock()
+	if conf.isRecovered == isRecovered {
+		conf.RUnlock()
+		return nil
+	}
+	conf.RUnlock()
+
+	conf.Lock()
+	defer conf.Unlock()
+	conf.lastSlowStoreCaptureTS = time.Now()
+	conf.isRecovered = isRecovered
 	return conf.persistLocked()
 }
 
@@ -291,14 +307,31 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			// slow node next time.
 			log.Info("slow store has been removed",
 				zap.Uint64("store-id", store.GetID()))
-		} else if store.GetSlowScore() <= slowStoreRecoverThreshold && s.conf.readyForRecovery() {
+			s.cleanupEvictLeader(cluster)
+			return nil, nil
+		}
+		// recover slow store if its score is below the threshold.
+		if store.GetSlowScore() <= slowStoreRecoverThreshold {
+			if err := s.conf.tryUpdateRecoverStatus(true); err != nil {
+				log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
+				return nil, nil
+			}
+
+			if !s.conf.readyForRecovery() {
+				return nil, nil
+			}
+
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
-		} else {
-			return s.schedulerEvictLeader(cluster), nil
+			s.cleanupEvictLeader(cluster)
+			return nil, nil
 		}
-		s.cleanupEvictLeader(cluster)
-		return ops, nil
+		// If the slow store is still slow or slow again, we can continue to evict leaders from it.
+		if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
+			log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
+			return nil, nil
+		}
+		return s.schedulerEvictLeader(cluster), nil
 	}
 
 	var slowStore *core.StoreInfo
