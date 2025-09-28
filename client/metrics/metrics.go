@@ -77,7 +77,7 @@ var (
 	// TSOBestBatchSize is the histogram of the best batch size of TSO requests.
 	TSOBestBatchSize prometheus.Histogram
 	// TSOBatchSize is the histogram of the batch size of TSO requests.
-	TSOBatchSize prometheus.Histogram
+	TSOBatchSize *prometheus.HistogramVec
 	// TSOBatchSendLatency is the histogram of the latency of sending TSO requests.
 	TSOBatchSendLatency prometheus.Histogram
 	// TSORetryCount is the histogram of the retry count for TSO requests.
@@ -159,7 +159,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Buckets:     prometheus.ExponentialBuckets(1, 2, 13),
 		})
 
-	TSOBatchSize = prometheus.NewHistogram(
+	TSOBatchSize = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace:   "pd_client",
 			Subsystem:   "request",
@@ -167,7 +167,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Bucketed histogram of the batch size of handled requests.",
 			ConstLabels: constLabels,
 			Buckets:     []float64{1, 2, 4, 8, 10, 14, 18, 22, 26, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200, 500, 1000},
-		})
+		}, []string{"keyspace_name"})
 
 	TSOBatchSendLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{

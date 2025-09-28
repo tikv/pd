@@ -268,6 +268,7 @@ func createClientWithKeyspace(
 		if keyspaceID == constants.NullKeyspaceID {
 			return nil
 		}
+		// todo: create new API to get keyspace by id
 		metas, err := c.GetAllKeyspaces(clientCtx, keyspaceID, 1)
 		if err != nil {
 			return err

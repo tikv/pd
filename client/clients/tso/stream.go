@@ -403,6 +403,10 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		return metrics.RequestDuration.WithLabelValues("tso-failed", s.keyspaceName)
 	})
 
+	batchObserver := sync.OnceValue(func() prometheus.Observer {
+		return metrics.TSOBatchSize.WithLabelValues(s.keyspaceName)
+	})
+
 recvLoop:
 	for {
 		select {
@@ -443,7 +447,7 @@ recvLoop:
 			break recvLoop
 		}
 		failedObserver().Observe(latencySeconds)
-		metrics.TSOBatchSize.Observe(float64(res.count))
+		batchObserver().Observe(float64(res.count))
 		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {
