@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/metering_sdk/common"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/metering"
 )
 
@@ -89,6 +90,60 @@ func (c *storageSizeCollector) Aggregate() []map[string]any {
 			metering.DataSourceNameField:            metering.SourceNamePD,
 			meteringDataRowBasedStorageSizeField:    storageSizeInfo.rowBasedStorageSizeMeteringValue(),
 			meteringDataColumnBasedStorageSizeField: storageSizeInfo.columnBasedStorageSizeMeteringValue(),
+		})
+	}
+	return records
+}
+
+const (
+	dfsStatsCollectorCategory = "dfs-stats"
+	dfsStatsMeteringVersion   = "1"
+
+	meteringDataDfsWrittenBytes  = "written_bytes"
+	meteringDataDfsWriteRequests = "write_requests"
+)
+
+var _ metering.Collector = (*dfsStatsCollector)(nil)
+
+type dfsStatsCollector struct {
+	sync.RWMutex
+	keyspaceDfsStats map[keyspaceDFSStatsKey]*core.DFSStats
+}
+
+func newDfsStatsCollector() *dfsStatsCollector {
+	return &dfsStatsCollector{
+		keyspaceDfsStats: make(keyspaceDFSStatsMap),
+	}
+}
+
+// Category returns the category of the collector.
+func (*dfsStatsCollector) Category() string { return dfsStatsCollectorCategory }
+
+// Collect collects the DFS stats data.
+func (c *dfsStatsCollector) Collect(data any) {
+	c.Lock()
+	defer c.Unlock()
+	keyspaceDFSStats := data.(keyspaceDFSStatsMap)
+	for key, info := range keyspaceDFSStats {
+		c.keyspaceDfsStats[key] = info
+	}
+}
+
+// Aggregate aggregates the DFS stats data.
+func (c *dfsStatsCollector) Aggregate() []map[string]any {
+	c.Lock()
+	keyspaceDfsStats := c.keyspaceDfsStats
+	c.keyspaceDfsStats = make(keyspaceDFSStatsMap)
+	c.Unlock()
+	records := make([]map[string]any, 0, len(keyspaceDfsStats))
+	for key, dfsStats := range keyspaceDfsStats {
+		records = append(records, map[string]any{
+			metering.DataVersionField: dfsStatsMeteringVersion,
+			// keyspaceName is the logical cluster ID in the metering data. Empty string for global scope.
+			metering.DataClusterIDField:  key.keyspaceName,
+			metering.DataSourceNameField: key.component,
+			meteringDataDfsWrittenBytes:  metering.NewBytesValue(dfsStats.WrittenBytes),
+			meteringDataDfsWriteRequests: metering.NewRequestsValue(dfsStats.WriteRequests),
 		})
 	}
 	return records
