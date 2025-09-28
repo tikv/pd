@@ -333,6 +333,11 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	}, nil
 }
 
+// RegionBuckets implements gRPC SchedulingServer.
+func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServer) error {
+	return status.Errorf(codes.Unimplemented, "RegionBuckets not implemented")
+}
+
 // RegisterGRPCService registers the service to gRPC server.
 func (s *Service) RegisterGRPCService(g *grpc.Server) {
 	schedulingpb.RegisterSchedulingServer(g, s)
