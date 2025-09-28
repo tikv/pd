@@ -417,7 +417,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
-	go c.runDfsStatsCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
+	go c.runDFSStatsCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
 
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -2630,7 +2630,8 @@ func (c *RaftCluster) collectStorageSize(
 	return storageSizeInfoList
 }
 
-func (c *RaftCluster) runDfsStatsCollector(
+// runDFSStatsCollector runs the DFS (Distributed File System) stats collector for the metering.
+func (c *RaftCluster) runDFSStatsCollector(
 	writer *metering.Writer,
 	keyspaceManager *keyspace.Manager,
 ) {
@@ -2638,21 +2639,21 @@ func (c *RaftCluster) runDfsStatsCollector(
 	defer c.wg.Done()
 
 	if writer == nil {
-		log.Info("no metering writer provided, the store stats collector will not be started")
+		log.Info("no metering writer provided, the dfs stats collector will not be started")
 		return
 	}
-	log.Info("running the store stats collector")
+	log.Info("running the dfs stats collector")
 	// Init and register the collector before starting the loop.
 	collector := newDfsStatsCollector()
 	writer.RegisterCollector(collector)
-	// Start the ticker to collect the store stats data periodically.
+	// Start the ticker to collect the DFS stats data periodically.
 	ticker := time.NewTicker(dfsStatsCollectorInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("store stats collector has been stopped")
+			log.Info("dfs stats collector has been stopped")
 			return
 		case <-ticker.C:
 			keyspaceDFSStats := c.collectDfsStats(keyspaceManager)
