@@ -125,6 +125,10 @@ func (c *dfsStatsCollector) Collect(data any) {
 	defer c.Unlock()
 	keyspaceDFSStats := data.(keyspaceDFSStatsMap)
 	for key, info := range keyspaceDFSStats {
+		// Do not collect the DFS stats data if the written bytes and write requests are both 0.
+		if info.WrittenBytes == 0 && info.WriteRequests == 0 {
+			continue
+		}
 		c.keyspaceDfsStats[key] = info
 	}
 }
@@ -135,6 +139,9 @@ func (c *dfsStatsCollector) Aggregate() []map[string]any {
 	keyspaceDfsStats := c.keyspaceDfsStats
 	c.keyspaceDfsStats = make(keyspaceDFSStatsMap)
 	c.Unlock()
+	if len(keyspaceDfsStats) == 0 {
+		return nil
+	}
 	records := make([]map[string]any, 0, len(keyspaceDfsStats))
 	for key, dfsStats := range keyspaceDfsStats {
 		records = append(records, map[string]any{
