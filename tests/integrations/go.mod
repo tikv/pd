@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tests/integrations
 
-go 1.23.0
+go 1.23.12
 
 replace (
 	github.com/tikv/pd => ../../
@@ -153,7 +153,7 @@ require (
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20250908031600-468ef95996bb // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20250928152019-e111aaee93f4 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
