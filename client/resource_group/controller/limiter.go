@@ -198,8 +198,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	if r.tokens == 0 || r.lim.burst < 0 || r.lim.limit == Inf {
 		return
 	}
-	// advance time to now
-	now, _, tokens := r.lim.advance(now)
+	_, tokens := r.lim.getTokens(now)
 	// calculate new number of tokens
 	tokens += r.tokens
 
@@ -309,7 +308,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	if lim.burst < 0 || lim.limit == Inf {
 		return
 	}
-	now, _, tokens := lim.advance(now)
+	_, tokens := lim.getTokens(now)
 	lim.last = now
 	lim.tokens = tokens - amount
 	lim.maybeNotify()
@@ -343,7 +342,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		lim.last = now
 		lim.tokens = args.NewTokens
 	} else {
-		now, _, tokens := lim.advance(now)
+		_, tokens := lim.getTokens(now)
 		lim.last = now
 		lim.tokens = tokens + args.NewTokens
 	}
@@ -361,7 +360,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 func (lim *Limiter) AvailableTokens(now time.Time) float64 {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	_, _, tokens := lim.advance(now)
+	_, tokens := lim.getTokens(now)
 	return tokens
 }
 
@@ -390,7 +389,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 			timeToAct: now,
 		}
 	}
-	now, last, tokens := lim.advance(now)
+	last, tokens := lim.getTokens(now)
 
 	// Calculate the remaining number of tokens resulting from the request.
 	tokens -= n
@@ -456,16 +455,16 @@ func (lim *Limiter) ResetRemainingNotifyTimes() {
 	lim.remainingNotifyTimes = 3
 }
 
-// advance calculates and returns an updated state for lim resulting from the passage of time.
+// getTokens returns an updated state for lim based on elapsed time.
 // lim is not changed.
-// advance requires that lim.mu is held.
-func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time, newTokens float64) {
+// getTokens requires that lim.mu is held.
+func (lim *Limiter) getTokens(now time.Time) (newLast time.Time, newTokens float64) {
 	last := lim.last
 	if now.Before(last) {
 		last = now
 	}
 	if lim.burst < 0 {
-		return now, last, lim.tokens
+		return last, lim.tokens
 	}
 
 	// Calculate the new number of tokens, due to time that passed.
@@ -477,7 +476,7 @@ func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time,
 			tokens = burst
 		}
 	}
-	return now, last, tokens
+	return last, tokens
 }
 
 // durationFromTokens is a unit conversion function from the number of tokens to the duration
