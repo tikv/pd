@@ -55,6 +55,7 @@ func (suite *schedulerTestSuite) SetupSuite() {
 		"balance-region-scheduler",
 		"balance-hot-region-scheduler",
 		"evict-slow-store-scheduler",
+		"evict-stopping-store-scheduler",
 	}
 }
 
