@@ -103,6 +103,9 @@ func (c *ruCollector) Aggregate() []map[string]any {
 	keyspaceRUMetering := c.keyspaceRUMetering
 	c.keyspaceRUMetering = make(map[string]*ruMetering)
 	c.Unlock()
+	if len(keyspaceRUMetering) == 0 {
+		return nil
+	}
 	records := make([]map[string]any, 0, len(keyspaceRUMetering))
 	for keyspaceName, ruMetering := range keyspaceRUMetering {
 		// Convert the ruMetering to the map[string]any.
