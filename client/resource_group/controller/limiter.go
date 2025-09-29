@@ -144,7 +144,7 @@ func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArg
 // A Reservation holds information about events that are permitted by a Limiter to happen after a delay.
 // A Reservation may be canceled, which may enable the Limiter to permit additional events.
 type Reservation struct {
-	ok               bool
+	reserved         bool
 	lim              *Limiter
 	tokens           float64
 	timeToAct        time.Time
@@ -155,11 +155,11 @@ type Reservation struct {
 	err             error
 }
 
-// OK returns whether the limiter can provide the requested number of tokens
-// within the maximum wait time.  If OK is false, Delay returns InfDuration, and
+// Reserved returns whether the limiter can provide the requested number of tokens
+// within the maximum wait time. If Reserved is false, Delay returns InfDuration, and
 // Cancel does nothing.
-func (r *Reservation) OK() bool {
-	return r.ok
+func (r *Reservation) Reserved() bool {
+	return r.reserved
 }
 
 // Delay is shorthand for DelayFrom(time.Now()).
@@ -167,15 +167,15 @@ func (r *Reservation) Delay() time.Duration {
 	return r.DelayFrom(time.Now())
 }
 
-// InfDuration is the duration returned by Delay when a Reservation is not OK.
+// InfDuration is the duration returned by Delay when a Reservation fails.
 const InfDuration = time.Duration(1<<63 - 1)
 
 // DelayFrom returns the duration for which the reservation holder must wait
-// before taking the reserved action.  Zero duration means act immediately.
+// before taking the reserved action. Zero duration means act immediately.
 // InfDuration means the limiter cannot grant the tokens requested in this
 // Reservation within the maximum wait time.
 func (r *Reservation) DelayFrom(now time.Time) time.Duration {
-	if !r.ok {
+	if !r.reserved {
 		return InfDuration
 	}
 	delay := r.timeToAct.Sub(now)
@@ -188,7 +188,7 @@ func (r *Reservation) DelayFrom(now time.Time) time.Duration {
 // CancelAt indicates that the reservation holder will not perform the reserved action
 // and reverses tokens which be refilled into limiter.
 func (r *Reservation) CancelAt(now time.Time) {
-	if !r.ok {
+	if !r.reserved {
 		return
 	}
 
@@ -209,11 +209,11 @@ func (r *Reservation) CancelAt(now time.Time) {
 
 // Reserve returns a Reservation that indicates how long the caller must wait before n events happen.
 // The Limiter takes this Reservation into account when allowing future events.
-// The returned Reservation's OK() method returns false if wait duration exceeds deadline.
+// The returned Reservation's Reserved() method returns false if wait duration exceeds deadline.
 // Usage example:
 //
 //	r := lim.Reserve(time.Now(), 1)
-//	if !r.OK() {
+//	if !r.Reserved() {
 //	  // Not allowed to act! Did you remember to set lim.burst to be > 0 ?
 //	  return
 //	}
@@ -226,8 +226,8 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 	select {
 	case <-ctx.Done():
 		return &Reservation{
-			ok:  false,
-			err: ctx.Err(),
+			reserved: false,
+			err:      ctx.Err(),
 		}
 	default:
 	}
@@ -383,7 +383,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 
 	if lim.burst < 0 || lim.limit == Inf {
 		return Reservation{
-			ok:        true,
+			reserved:  true,
 			lim:       lim,
 			tokens:    n,
 			timeToAct: now,
@@ -400,22 +400,22 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	}
 
 	// Decide result
-	ok := waitDuration <= maxFutureReserve
+	reserved := waitDuration <= maxFutureReserve
 
 	// Prepare reservation
 	r := Reservation{
-		ok:               ok,
+		reserved:         reserved,
 		lim:              lim,
 		limit:            lim.limit,
 		needWaitDuration: waitDuration,
 		remainingTokens:  tokens,
 	}
-	if ok {
+	if reserved {
 		r.tokens = n
 		r.timeToAct = now.Add(waitDuration)
 	}
 	// Update state
-	if ok {
+	if reserved {
 		lim.updateLast(now)
 		lim.tokens = tokens
 		lim.maybeNotify()
@@ -511,7 +511,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	}
 	longestDelayDuration := time.Duration(0)
 	for _, res := range reservations {
-		if !res.ok {
+		if !res.reserved {
 			cancel()
 			if res.err != nil {
 				return res.needWaitDuration, res.err

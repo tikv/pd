@@ -85,9 +85,9 @@ func runReserveMax(t *testing.T, lim *Limiter, req request) *Reservation {
 func runReserve(t *testing.T, lim *Limiter, req request, maxReserve time.Duration) *Reservation {
 	t.Helper()
 	r := lim.reserveN(req.t, req.n, maxReserve)
-	if r.ok && (dSince(r.timeToAct) != dSince(req.act)) || r.ok != req.ok {
+	if r.reserved && (dSince(r.timeToAct) != dSince(req.act)) || r.reserved != req.ok {
 		t.Errorf("lim.reserveN(t%d, %v, %v) = (t%d, %v) want (t%d, %v)",
-			dSince(req.t), req.n, maxReserve, dSince(r.timeToAct), r.ok, dSince(req.act), req.ok)
+			dSince(req.t), req.n, maxReserve, dSince(r.timeToAct), r.reserved, dSince(req.act), req.ok)
 	}
 	return &r
 }
@@ -257,7 +257,7 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 				default:
 				}
 				r := lim.Reserve(context.Background(), 30*time.Second, time.Now(), float64(reserveN))
-				if r.OK() {
+				if r.Reserved() {
 					delay := r.DelayFrom(time.Now())
 					<-time.After(delay)
 				} else {
