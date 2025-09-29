@@ -2650,13 +2650,19 @@ func (c *RaftCluster) runDFSStatsCollector(
 	ticker := time.NewTicker(dfsStatsCollectorInterval)
 	defer ticker.Stop()
 
+	var start time.Time
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("dfs stats collector has been stopped")
 			return
 		case <-ticker.C:
-			keyspaceDFSStats := c.collectDfsStats(keyspaceManager)
+			start = time.Now()
+			keyspaceDFSStats, storeCount := c.collectDFSStats(keyspaceManager)
+			log.Info("collected the incremental dfs stats from all stores",
+				zap.Duration("cost", time.Since(start)),
+				zap.Int("keyspace-dfs-stats-count", len(keyspaceDFSStats)),
+				zap.Int("collected-store-count", storeCount))
 			collector.Collect(keyspaceDFSStats)
 		}
 	}
@@ -2669,9 +2675,10 @@ type keyspaceDFSStatsKey struct {
 
 type keyspaceDFSStatsMap map[keyspaceDFSStatsKey]*core.DFSStats
 
-func (c *RaftCluster) collectDfsStats(keyspaceManager *keyspace.Manager) keyspaceDFSStatsMap {
+func (c *RaftCluster) collectDFSStats(keyspaceManager *keyspace.Manager) (keyspaceDFSStatsMap, int) {
 	var (
 		keyspaceDFSStats = make(keyspaceDFSStatsMap, 0)
+		storeCount       = 0
 		keyspaceName     string
 		err              error
 	)
@@ -2680,6 +2687,11 @@ func (c *RaftCluster) collectDfsStats(keyspaceManager *keyspace.Manager) keyspac
 		if len(scopedDFSStats) == 0 {
 			continue
 		}
+		storeCount++
+		log.Info("collected the scoped dfs stats from the store",
+			zap.Uint64("store-id", store.GetID()),
+			zap.Int("collected-store-count", storeCount),
+			zap.Int("scoped-dfs-stats-count", len(scopedDFSStats)))
 		// Merge into the keyspace DFS stats.
 		for scope, stats := range scopedDFSStats {
 			// Set the keyspace name to empty string for global scope.
@@ -2707,5 +2719,5 @@ func (c *RaftCluster) collectDfsStats(keyspaceManager *keyspace.Manager) keyspac
 			}
 		}
 	}
-	return keyspaceDFSStats
+	return keyspaceDFSStats, storeCount
 }

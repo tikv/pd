@@ -159,7 +159,9 @@ func TestCollectDfsStats(t *testing.T) {
 	}
 
 	collector := newDfsStatsCollector()
-	collector.Collect(tc.collectDfsStats(keyspaceManager))
+	keyspaceDFSStats, storeCount := tc.collectDFSStats(keyspaceManager)
+	re.Len(stores, storeCount)
+	collector.Collect(keyspaceDFSStats)
 	records := collector.Aggregate()
 	re.Len(records, 4)
 	// Sort the records by the keyspace name.
