@@ -1,6 +1,6 @@
 module github.com/tikv/pd
 
-go 1.23.0
+go 1.23.12
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
@@ -39,7 +39,7 @@ require (
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20250908031600-468ef95996bb
+	github.com/pingcap/tidb-dashboard v0.0.0-20250928152019-e111aaee93f4
 	github.com/prometheus/client_golang v1.20.5
 	github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3
 	github.com/sasha-s/go-deadlock v0.3.5
