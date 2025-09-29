@@ -3140,61 +3140,61 @@ func currentFunction() string {
 }
 
 // QueryRegion implements gRPC PDServer.
-func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
+func (*GrpcServer) QueryRegion(_ pdpb.PD_QueryRegionServer) error {
 	return status.Errorf(codes.Unimplemented, "QueryRegion not implemented")
 }
 
 // AdvanceGCSafePoint implements gRPC PDServer.
-func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
+func (*GrpcServer) AdvanceGCSafePoint(_ context.Context, _ *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
 	return &pdpb.AdvanceGCSafePointResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "AdvanceGCSafePoint not implemented"),
 	}, nil
 }
 
 // AdvanceTxnSafePoint implements gRPC PDServer.
-func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
+func (*GrpcServer) AdvanceTxnSafePoint(_ context.Context, _ *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
 	return &pdpb.AdvanceTxnSafePointResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "AdvanceTxnSafePoint not implemented"),
 	}, nil
 }
 
 // SetGCBarrier implements gRPC PDServer.
-func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrierRequest) (*pdpb.SetGCBarrierResponse, error) {
+func (*GrpcServer) SetGCBarrier(_ context.Context, _ *pdpb.SetGCBarrierRequest) (*pdpb.SetGCBarrierResponse, error) {
 	return &pdpb.SetGCBarrierResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "SetGCBarrier not implemented"),
 	}, nil
 }
 
 // DeleteGCBarrier implements gRPC PDServer.
-func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
+func (*GrpcServer) DeleteGCBarrier(_ context.Context, _ *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
 	return &pdpb.DeleteGCBarrierResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "DeleteGCBarrier not implemented"),
 	}, nil
 }
 
 // SetGlobalGCBarrier implements gRPC PDServer.
-func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
+func (*GrpcServer) SetGlobalGCBarrier(_ context.Context, _ *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
 	return &pdpb.SetGlobalGCBarrierResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "SetGlobalGCBarrier not implemented"),
 	}, nil
 }
 
 // DeleteGlobalGCBarrier implements gRPC PDServer.
-func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
+func (*GrpcServer) DeleteGlobalGCBarrier(_ context.Context, _ *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
 	return &pdpb.DeleteGlobalGCBarrierResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "DeleteGlobalGCBarrier not implemented"),
 	}, nil
 }
 
 // GetGCState implements gRPC PDServer.
-func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
+func (*GrpcServer) GetGCState(_ context.Context, _ *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
 	return &pdpb.GetGCStateResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "GetGCState not implemented"),
 	}, nil
 }
 
 // GetAllKeyspacesGCStates implements gRPC PDServer.
-func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.GetAllKeyspacesGCStatesRequest) (*pdpb.GetAllKeyspacesGCStatesResponse, error) {
+func (*GrpcServer) GetAllKeyspacesGCStates(_ context.Context, _ *pdpb.GetAllKeyspacesGCStatesRequest) (*pdpb.GetAllKeyspacesGCStatesResponse, error) {
 	return &pdpb.GetAllKeyspacesGCStatesResponse{
 		Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "GetAllKeyspacesGCStates not implemented"),
 	}, nil
