@@ -34,20 +34,20 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-// Limit defines the maximum frequency of some events.
-// Limit is represented as number of events per second.
-// A zero Limit allows no events.
-type Limit float64
+// fillRate defines the maximum frequency of some events.
+// fillRate is represented as number of events per second.
+// A zero fillRate allows no events.
+type fillRate float64
 
 // Inf is the infinite rate limit; it allows all events (even if burst is zero).
-const Inf = Limit(math.MaxFloat64)
+const Inf = fillRate(math.MaxFloat64)
 
-// Every converts a minimum time interval between events to a Limit.
-func Every(interval time.Duration) Limit {
+// Every converts a minimum time interval between events to a fillRate.
+func Every(interval time.Duration) fillRate {
 	if interval <= 0 {
 		return Inf
 	}
-	return 1 / Limit(interval.Seconds())
+	return 1 / fillRate(interval.Seconds())
 }
 
 // A Limiter controls how frequently events are allowed to happen.
@@ -71,10 +71,10 @@ func Every(interval time.Duration) Limit {
 //   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within an unlimited capacity).
 //   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
-	mu     sync.Mutex
-	limit  Limit
-	tokens float64
-	burst  int64
+	mu       sync.Mutex
+	fillRate fillRate
+	tokens   float64
+	burst    int64
 	// last is the last time the limiter's tokens field was updated
 	last                time.Time
 	notifyThreshold     float64
@@ -101,18 +101,11 @@ type limiterMetricsCollection struct {
 	lowTokenNotifyCounter prometheus.Counter
 }
 
-// Limit returns the maximum overall event rate.
-func (lim *Limiter) Limit() Limit {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
-	return lim.limit
-}
-
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- notifyMsg) *Limiter {
+func NewLimiter(now time.Time, r fillRate, b int64, tokens float64, lowTokensNotifyChan chan<- notifyMsg) *Limiter {
 	lim := &Limiter{
-		limit:               r,
+		fillRate:            r,
 		last:                now,
 		tokens:              tokens,
 		burst:               b,
@@ -127,11 +120,11 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- notifyMsg) *Limiter {
 	lim := &Limiter{
 		name:                name,
-		limit:               Limit(cfg.NewRate),
+		fillRate:            fillRate(cfg.newFillRate),
 		last:                now,
-		tokens:              cfg.NewTokens,
-		burst:               cfg.NewBurst,
-		notifyThreshold:     cfg.NotifyThreshold,
+		tokens:              cfg.newTokens,
+		burst:               cfg.newBurst,
+		notifyThreshold:     cfg.newNotifyThreshold,
 		lowTokensNotifyChan: lowTokensNotifyChan,
 	}
 	lim.metrics = &limiterMetricsCollection{
@@ -149,8 +142,8 @@ type Reservation struct {
 	tokens           float64
 	timeToAct        time.Time
 	needWaitDuration time.Duration
-	// This is the Limit at reservation time, it can change later.
-	limit           Limit
+	// This is the fillRate at reservation time, it can change later.
+	fillRate        fillRate
 	remainingTokens float64
 	err             error
 }
@@ -195,7 +188,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	r.lim.mu.Lock()
 	defer r.lim.mu.Unlock()
 
-	if r.tokens == 0 || r.lim.burst < 0 || r.lim.limit == Inf {
+	if r.tokens == 0 || r.lim.burst < 0 || r.lim.fillRate == Inf {
 		return
 	}
 	_, tokens := r.lim.getTokens(now)
@@ -305,7 +298,7 @@ func (lim *Limiter) GetBurst() int64 {
 func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	if lim.burst < 0 || lim.limit == Inf {
+	if lim.burst < 0 || lim.fillRate == Inf {
 		return
 	}
 	_, tokens := lim.getTokens(now)
@@ -315,10 +308,10 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 }
 
 type tokenBucketReconfigureArgs struct {
-	NewTokens       float64
-	NewRate         float64
-	NewBurst        int64
-	NotifyThreshold float64
+	newTokens          float64
+	newFillRate        float64
+	newBurst           int64
+	newNotifyThreshold float64
 }
 
 // LimiterOption configures Limiter.
@@ -337,23 +330,23 @@ func (lim *Limiter) Reconfigure(now time.Time,
 ) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	logControllerTrace("[resource group controller] before reconfigure", zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", lim.notifyThreshold), zap.Int64("old-burst", lim.burst))
-	if args.NewBurst < 0 {
+	logControllerTrace("[resource group controller] before reconfigure", zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.fillRate)), zap.Float64("old-notify-threshold", lim.notifyThreshold), zap.Int64("old-burst", lim.burst))
+	if args.newBurst < 0 {
 		lim.last = now
-		lim.tokens = args.NewTokens
+		lim.tokens = args.newTokens
 	} else {
 		_, tokens := lim.getTokens(now)
 		lim.last = now
-		lim.tokens = tokens + args.NewTokens
+		lim.tokens = tokens + args.newTokens
 	}
-	lim.limit = Limit(args.NewRate)
-	lim.burst = args.NewBurst
-	lim.notifyThreshold = args.NotifyThreshold
+	lim.fillRate = fillRate(args.newFillRate)
+	lim.burst = args.newBurst
+	lim.notifyThreshold = args.newNotifyThreshold
 	for _, opt := range opts {
 		opt(lim)
 	}
 	lim.maybeNotify()
-	logControllerTrace("[resource group controller] after reconfigure", zap.String("name", lim.name), zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
+	logControllerTrace("[resource group controller] after reconfigure", zap.String("name", lim.name), zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.fillRate)), zap.Float64("notify-threshold", args.newNotifyThreshold), zap.Int64("burst", lim.burst))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -381,7 +374,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 
-	if lim.burst < 0 || lim.limit == Inf {
+	if lim.burst < 0 || lim.fillRate == Inf {
 		return Reservation{
 			reserved:  true,
 			lim:       lim,
@@ -396,7 +389,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	// Calculate the wait duration
 	var waitDuration time.Duration
 	if tokens < 0 {
-		waitDuration = lim.limit.durationFromTokens(-tokens)
+		waitDuration = lim.fillRate.durationFromTokens(-tokens)
 	}
 
 	// Decide result
@@ -406,7 +399,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	r := Reservation{
 		reserved:         reserved,
 		lim:              lim,
-		limit:            lim.limit,
+		fillRate:         lim.fillRate,
 		needWaitDuration: waitDuration,
 		remainingTokens:  tokens,
 	}
@@ -426,7 +419,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 				zap.Duration("need-wait-duration", waitDuration),
 				zap.Duration("max-wait-duration", maxFutureReserve),
 				zap.Float64("current-ltb-tokens", lim.tokens),
-				zap.Float64("current-ltb-rate", float64(lim.limit)),
+				zap.Float64("current-ltb-rate", float64(lim.fillRate)),
 				zap.Float64("request-tokens", n),
 				zap.Float64("notify-threshold", lim.notifyThreshold),
 				zap.Bool("is-low-process", lim.isLowProcess),
@@ -435,7 +428,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 				zap.String("name", lim.name))
 		}
 		lim.updateLast(last)
-		if lim.limit == 0 {
+		if lim.fillRate == 0 {
 			lim.notify()
 		} else if lim.remainingNotifyTimes > 0 {
 			// When fillrate is greater than 0, the speed limit is already set.
@@ -469,7 +462,7 @@ func (lim *Limiter) getTokens(now time.Time) (newLast time.Time, newTokens float
 
 	// Calculate the new number of tokens, due to time that passed.
 	elapsed := now.Sub(last)
-	delta := lim.limit.tokensFromDuration(elapsed)
+	delta := lim.fillRate.tokensFromDuration(elapsed)
 	tokens := lim.tokens + delta
 	if lim.burst > 0 {
 		if burst := float64(lim.burst); tokens > burst {
@@ -481,7 +474,7 @@ func (lim *Limiter) getTokens(now time.Time) (newLast time.Time, newTokens float
 
 // durationFromTokens is a unit conversion function from the number of tokens to the duration
 // of time it takes to accumulate them at a rate of limit tokens per second.
-func (limit Limit) durationFromTokens(tokens float64) time.Duration {
+func (limit fillRate) durationFromTokens(tokens float64) time.Duration {
 	if limit <= 0 {
 		return InfDuration
 	}
@@ -491,7 +484,7 @@ func (limit Limit) durationFromTokens(tokens float64) time.Duration {
 
 // tokensFromDuration is a unit conversion function from a time duration to the number of tokens
 // which could be accumulated during that duration at a rate of limit tokens per second.
-func (limit Limit) tokensFromDuration(d time.Duration) float64 {
+func (limit fillRate) tokensFromDuration(d time.Duration) float64 {
 	if limit <= 0 {
 		return 0
 	}
@@ -516,7 +509,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 			if res.err != nil {
 				return res.needWaitDuration, res.err
 			}
-			return res.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(res.needWaitDuration, res.limit, res.remainingTokens)
+			return res.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(res.needWaitDuration, res.fillRate, res.remainingTokens)
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {
