@@ -34,9 +34,7 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-// fillRate defines the maximum frequency of some events.
-// fillRate is represented as number of events per second.
-// A zero fillRate allows no events.
+// fillRate indicates how many tokens are consumed per second
 type fillRate float64
 
 // Inf is the infinite rate limit; it allows all events (even if burst is zero).
@@ -67,8 +65,10 @@ func Every(interval time.Duration) fillRate {
 // or its associated context.Context is canceled.
 //
 // Some changes about burst(b):
-//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
-//   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within an unlimited capacity).
+//   - If b == 0, that means the limiter is unlimited capacity. default use in
+//     resource controller (burst with a rate within an unlimited capacity).
+//   - If b < 0, that means the limiter is unlimited capacity and r is ignored,
+//     can be seen as r == Inf (burst within an unlimited capacity).
 //   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
 	mu       sync.Mutex
@@ -149,8 +149,8 @@ type Reservation struct {
 }
 
 // Reserved returns whether the limiter can provide the requested number of tokens
-// within the maximum wait time. If Reserved is false, Delay returns InfDuration, and
-// Cancel does nothing.
+// within the maximum wait time. If `reserved` is false, `Delay()` will return
+// `InfDuration`, and `Cancel` does nothing.
 func (r *Reservation) Reserved() bool {
 	return r.reserved
 }
@@ -160,7 +160,7 @@ func (r *Reservation) Delay() time.Duration {
 	return r.DelayFrom(time.Now())
 }
 
-// InfDuration is the duration returned by Delay when a Reservation fails.
+// InfDuration is the duration returned by `Delay()` when a `*Reservation` fails.
 const InfDuration = time.Duration(1<<63 - 1)
 
 // DelayFrom returns the duration for which the reservation holder must wait
@@ -330,7 +330,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 ) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	logControllerTrace("[resource group controller] before reconfigure", zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.fillRate)), zap.Float64("old-notify-threshold", lim.notifyThreshold), zap.Int64("old-burst", lim.burst))
+	logControllerTrace("[resource group controller] before reconfigure",
+		zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens),
+		zap.Float64("old-rate", float64(lim.fillRate)),
+		zap.Float64("old-notify-threshold", lim.notifyThreshold),
+		zap.Int64("old-burst", lim.burst))
 	if args.newBurst < 0 {
 		lim.last = now
 		lim.tokens = args.newTokens
@@ -346,7 +350,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		opt(lim)
 	}
 	lim.maybeNotify()
-	logControllerTrace("[resource group controller] after reconfigure", zap.String("name", lim.name), zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.fillRate)), zap.Float64("notify-threshold", args.newNotifyThreshold), zap.Int64("burst", lim.burst))
+	logControllerTrace("[resource group controller] after reconfigure",
+		zap.String("name", lim.name), zap.Float64("tokens", lim.tokens),
+		zap.Float64("rate", float64(lim.fillRate)),
+		zap.Float64("notify-threshold", args.newNotifyThreshold),
+		zap.Int64("burst", lim.burst))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -474,21 +482,21 @@ func (lim *Limiter) getTokens(now time.Time) (newLast time.Time, newTokens float
 
 // durationFromTokens is a unit conversion function from the number of tokens to the duration
 // of time it takes to accumulate them at a rate of limit tokens per second.
-func (limit fillRate) durationFromTokens(tokens float64) time.Duration {
-	if limit <= 0 {
+func (f fillRate) durationFromTokens(tokens float64) time.Duration {
+	if f <= 0 {
 		return InfDuration
 	}
-	seconds := tokens / float64(limit)
+	seconds := tokens / float64(f)
 	return time.Duration(float64(time.Second) * seconds)
 }
 
 // tokensFromDuration is a unit conversion function from a time duration to the number of tokens
 // which could be accumulated during that duration at a rate of limit tokens per second.
-func (limit fillRate) tokensFromDuration(d time.Duration) float64 {
-	if limit <= 0 {
+func (f fillRate) tokensFromDuration(d time.Duration) float64 {
+	if f <= 0 {
 		return 0
 	}
-	return d.Seconds() * float64(limit)
+	return d.Seconds() * float64(f)
 }
 
 // WaitReservations is used to process a series of reservations
