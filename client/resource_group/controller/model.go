@@ -221,10 +221,6 @@ func getRUValueFromConsumption(custom *rmpb.Consumption) float64 {
 	return custom.RRU + custom.WRU
 }
 
-func getRUTokenBucketSetting(group *rmpb.ResourceGroup) *rmpb.TokenBucket {
-	return group.RUSettings.RU
-}
-
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	if custom1 == nil || custom2 == nil {
 		return

@@ -39,29 +39,6 @@ func TestGetRUValueFromConsumption(t *testing.T) {
 	re.Equal(expected, result)
 }
 
-func TestGetRUTokenBucketSetting(t *testing.T) {
-	// Positive test case
-	re := require.New(t)
-	group := &rmpb.ResourceGroup{
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
-		},
-	}
-	expected := &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}}
-
-	result := getRUTokenBucketSetting(group)
-	re.Equal(expected.GetSettings().GetFillRate(), result.GetSettings().GetFillRate())
-
-	// When group is nil
-	group = nil
-	expected = nil
-
-	result = getRUTokenBucketSetting(group)
-	if result != expected {
-		t.Errorf("Expected nil but got %v", result)
-	}
-}
-
 func TestAdd(t *testing.T) {
 	// Positive test case
 	re := require.New(t)

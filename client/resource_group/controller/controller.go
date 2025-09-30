@@ -857,7 +857,7 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 }
 
 type tokenCounter struct {
-	getTokenBucketFunc func() *rmpb.TokenBucket
+	fillRate uint64
 
 	// avgRUPerSec is an exponentially-weighted moving average of the RU
 	// consumption per second; used to estimate the RU requirements for the next
@@ -949,14 +949,12 @@ func (gc *groupCostController) initRunState() {
 
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
-	limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(getRUTokenBucketSetting(gc.meta)), gc.lowRUNotifyChan)
+	limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(gc.meta.RUSettings.RU), gc.lowRUNotifyChan)
 	counter := &tokenCounter{
 		limiter:     limiter,
 		avgRUPerSec: 0,
 		avgLastTime: now,
-		getTokenBucketFunc: func() *rmpb.TokenBucket {
-			return getRUTokenBucketSetting(gc.meta)
-		},
+		fillRate:    gc.meta.RUSettings.RU.Settings.FillRate,
 	}
 	gc.run.requestUnitTokens = counter
 	gc.burstable.Store(isBurstable)
@@ -974,9 +972,8 @@ func (gc *groupCostController) applyDegradedMode() {
 	counter.inDegradedMode = true
 	initCounterNotify(counter)
 	var cfg tokenBucketReconfigureArgs
-	fillRate := counter.getTokenBucketFunc().Settings.FillRate
-	cfg.NewBurst = int64(fillRate)
-	cfg.NewRate = float64(fillRate)
+	cfg.NewBurst = int64(counter.fillRate)
+	cfg.NewRate = float64(counter.fillRate)
 	failpoint.Inject("degradedModeRU", func() {
 		cfg.NewRate = 99999999
 	})
@@ -1109,7 +1106,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		counter.lastDeadline = time.Time{}
 		cfg.NotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
 		if cfg.NewBurst < 0 {
-			cfg.NewTokens = float64(counter.getTokenBucketFunc().Settings.FillRate)
+			cfg.NewTokens = float64(counter.fillRate)
 		}
 		gc.isThrottled.Store(false)
 	} else {
