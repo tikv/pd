@@ -226,7 +226,7 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 	initialTime := time.Now()
 
 	// Initialize the token bucket
-	gtb.init(initialTime, clientUniqueID)
+	gtb.init(initialTime)
 	gtb.Tokens = 50000
 
 	const timeIncrement = 5 * time.Second
