@@ -50,22 +50,25 @@ func (ss *storeStats) updateRawStats(rawStats *pdpb.StoreStats) {
 	defer ss.mu.Unlock()
 	ss.rawStats = rawStats
 
-	if ss.avgAvailable == nil {
-		return
+	if ss.avgAvailable != nil {
+		ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 	}
-	ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 
 	dfsStatItems := rawStats.GetDfs()
 	if len(dfsStatItems) == 0 {
 		return
 	}
 	for _, dfsStat := range dfsStatItems {
+		writtenBytes := dfsStat.GetWrittenBytes()
+		writeRequests := dfsStat.GetWriteRequests()
+		// Skip this item if the written bytes and write requests are both 0.
+		if writtenBytes == 0 && writeRequests == 0 {
+			continue
+		}
 		scope := dfsStat.GetScope()
 		if scope == nil {
 			continue
 		}
-		writtenBytes := dfsStat.GetWrittenBytes()
-		writeRequests := dfsStat.GetWriteRequests()
 		stat, ok := ss.scopedDFSStats[*scope]
 		if ok {
 			stat.WrittenBytes += writtenBytes
