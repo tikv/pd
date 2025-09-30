@@ -584,6 +584,7 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
 	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
 	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.EvictStoppingStoreScheduler]},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.
