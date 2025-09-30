@@ -74,9 +74,7 @@ func TestGroupControlBurstable(t *testing.T) {
 		NewRate:  1000,
 		NewBurst: -1,
 	}
-	for _, counter := range gc.run.requestUnitTokens {
-		counter.limiter.Reconfigure(time.Now(), args)
-	}
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), args)
 	gc.updateAvgRequestResourcePerSec()
 	re.True(gc.burstable.Load())
 }
@@ -212,8 +210,7 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify()
 
 	// modify the counter, then on response should has wait time.
-	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
-	gc.modifyTokenCounter(counter, &rmpb.TokenBucket{
+	gc.modifyTokenCounter(gc.run.requestUnitTokens, &rmpb.TokenBucket{
 		Settings: &rmpb.TokenLimitSettings{
 			FillRate:   1000,
 			BurstLimit: 1000,
@@ -413,7 +410,7 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	}).Return(expectResp, nil)
 	// wait default group request token by PeriodicReport.
 	time.Sleep(2 * time.Second)
-	counter := c2.run.requestUnitTokens[0]
+	counter := c2.run.requestUnitTokens
 	counter.limiter.mu.Lock()
 	counter.limiter.notify()
 	counter.limiter.mu.Unlock()
@@ -604,7 +601,7 @@ func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 		}).Return([]*rmpb.TokenBucketResponse{}, nil)
 
 		// Trigger a low token report to ensure collectTokenBucketRequests is called
-		counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+		counter := gc.run.requestUnitTokens
 		counter.limiter.mu.Lock()
 		counter.limiter.notify()
 		counter.limiter.mu.Unlock()
