@@ -259,6 +259,15 @@ func (s *HeartbeatStreams) SendErr(errType pdpb.ErrorType, errMsg string, target
 	case <-s.hbStreamCtx.Done():
 	}
 }
+	
+	// Close terminates all background goroutines managed by HeartbeatStreams.
+	func (s *HeartbeatStreams) Close() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	// Wait for run goroutine to exit
+	s.wg.Wait()
+	}
 
 // MsgLength gets the length of msgCh.
 // For test only.
