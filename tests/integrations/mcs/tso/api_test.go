@@ -351,8 +351,8 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	kgm := kgms[constant.DefaultKeyspaceGroupID]
 	re.NotNil(kgm)
 	re.Len(kgm.Member.ListenUrls, 1)
-	respListenUrl := kgm.Member.ListenUrls[0]
-	re.Equal(follower.GetConfig().GetListenAddr(), respListenUrl)
-	re.NotEqual(primary.GetConfig().GetListenAddr(), respListenUrl)
+	respListenURL := kgm.Member.ListenUrls[0]
+	re.Equal(follower.GetConfig().GetListenAddr(), respListenURL)
+	re.NotEqual(primary.GetConfig().GetListenAddr(), respListenURL)
 	re.False(kgm.IsPrimary)
 }
