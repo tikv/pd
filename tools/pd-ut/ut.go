@@ -53,11 +53,7 @@ func initTags() {
 }
 
 func isNextGenEnabled() bool {
-	if os.Getenv("NEXT_GEN") == "1" {
-		return true
-	}
-
-	return false
+	return os.Getenv("NEXT_GEN") == "1"
 }
 
 func usage() bool {
