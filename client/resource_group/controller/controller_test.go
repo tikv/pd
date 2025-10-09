@@ -71,8 +71,8 @@ func TestGroupControlBurstable(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 	args := tokenBucketReconfigureArgs{
-		NewRate:  1000,
-		NewBurst: -1,
+		newFillRate: 1000,
+		newBurst:    -1,
 	}
 	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), args)
 	gc.updateAvgRequestResourcePerSec()
