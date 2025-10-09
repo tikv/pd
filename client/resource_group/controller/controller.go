@@ -942,13 +942,13 @@ func (gc *groupCostController) initRunState() {
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
 		initialToken := float64(tb.Settings.FillRate)
 		cfg := tokenBucketReconfigureArgs{
-			NewTokens: initialToken,
-			NewBurst:  tb.Settings.BurstLimit,
+			newTokens: initialToken,
+			newBurst:  tb.Settings.BurstLimit,
 			// This is to trigger token requests as soon as resource group start consuming tokens.
-			NotifyThreshold: math.Max(initialToken*tokenReserveFraction, 1),
+			newNotifyThreshold: math.Max(initialToken*tokenReserveFraction, 1),
 		}
-		if cfg.NewBurst >= 0 {
-			cfg.NewBurst = 0
+		if cfg.newBurst >= 0 {
+			cfg.newBurst = 0
 		}
 		if tb.Settings.BurstLimit >= 0 {
 			isBurstable = false
@@ -1203,10 +1203,10 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
 		fillRate := counter.getTokenBucketFunc().Settings.FillRate
-		cfg.NewBurst = int64(fillRate)
-		cfg.NewRate = float64(fillRate)
+		cfg.newBurst = int64(fillRate)
+		cfg.newFillRate = float64(fillRate)
 		failpoint.Inject("degradedModeRU", func() {
-			cfg.NewRate = 99999999
+			cfg.newFillRate = 99999999
 		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
@@ -1221,8 +1221,8 @@ func (gc *groupCostController) applyBasicConfigForRawResourceTokenCounter() {
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
 		fillRate := counter.getTokenBucketFunc().Settings.FillRate
-		cfg.NewBurst = int64(fillRate)
-		cfg.NewRate = float64(fillRate)
+		cfg.newBurst = int64(fillRate)
+		cfg.newFillRate = float64(fillRate)
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 	}
 }
@@ -1240,24 +1240,24 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	initCounterNotify(counter)
 	counter.inDegradedMode = false
 	var cfg tokenBucketReconfigureArgs
-	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
+	cfg.newBurst = bucket.GetSettings().GetBurstLimit()
 	// When trickleTimeMs equals zero, server has enough tokens and does not need to
 	// limit client consume token. So all token is granted to client right now.
 	if trickleTimeMs == 0 {
-		cfg.NewTokens = granted
-		cfg.NewRate = float64(bucket.GetSettings().FillRate)
+		cfg.newTokens = granted
+		cfg.newFillRate = float64(bucket.GetSettings().FillRate)
 		counter.lastDeadline = time.Time{}
-		cfg.NotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
-		if cfg.NewBurst < 0 {
-			cfg.NewTokens = float64(counter.getTokenBucketFunc().Settings.FillRate)
+		cfg.newNotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
+		if cfg.newBurst < 0 {
+			cfg.newTokens = float64(counter.getTokenBucketFunc().Settings.FillRate)
 		}
 		gc.isThrottled.Store(false)
 	} else {
 		// Otherwise the granted token is delivered to the client by fill rate.
-		cfg.NewTokens = 0
+		cfg.newTokens = 0
 		trickleDuration := time.Duration(trickleTimeMs) * time.Millisecond
 		deadline := gc.run.now.Add(trickleDuration)
-		cfg.NewRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
+		cfg.newFillRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
 
 		timerDuration := trickleDuration - trickleReserveDuration
 		if timerDuration <= 0 {
@@ -1279,7 +1279,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		}
 	}
 
-	counter.lastRate = cfg.NewRate
+	counter.lastRate = cfg.newFillRate
 	counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 }
 
