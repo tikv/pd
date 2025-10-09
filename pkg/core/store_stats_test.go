@@ -110,4 +110,28 @@ func TestDFSStats(t *testing.T) {
 	re.Len(scopedDFSStats, 1)
 	re.Equal(storeStats.Dfs[0].WrittenBytes+storeStats.Dfs[1].WrittenBytes, scopedDFSStats[*storeStats.Dfs[0].Scope].WrittenBytes)
 	re.Equal(storeStats.Dfs[0].WriteRequests+storeStats.Dfs[1].WriteRequests, scopedDFSStats[*storeStats.Dfs[0].Scope].WriteRequests)
+
+	storeStats.Dfs = []*pdpb.DfsStatItem{
+		{
+			Scope: &pdpb.DfsStatScope{
+				KeyspaceId: 1,
+				Component:  "test-component",
+			},
+			WrittenBytes:  10,
+			WriteRequests: 0,
+		},
+		{
+			Scope: &pdpb.DfsStatScope{
+				KeyspaceId: 2,
+				Component:  "test-component",
+			},
+			WrittenBytes:  0,
+			WriteRequests: 0,
+		},
+	}
+	store = store.Clone(SetStoreStats(storeStats))
+	scopedDFSStats = store.TakeScopedDFSStats()
+	re.Len(scopedDFSStats, 1)
+	re.Equal(storeStats.Dfs[0].WrittenBytes, scopedDFSStats[*storeStats.Dfs[0].Scope].WrittenBytes)
+	re.Equal(storeStats.Dfs[0].WriteRequests, scopedDFSStats[*storeStats.Dfs[0].Scope].WriteRequests)
 }
