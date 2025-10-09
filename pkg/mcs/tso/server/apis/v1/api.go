@@ -86,7 +86,6 @@ func NewService(srv *tsoserver.Service) *Service {
 	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
-	root.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
@@ -103,7 +102,12 @@ func NewService(srv *tsoserver.Service) *Service {
 // RegisterAdminRouter registers the router of the TSO admin handler.
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
+<<<<<<< HEAD
 	router.POST("/reset-ts", ResetTS)
+=======
+	// reset-ts needs to be forwarded to the primary.
+	router.POST("/reset-ts", multiservicesapi.ServiceRedirector(), resetTS)
+>>>>>>> f59aebd4a (mcs: fix `/config` and `/members` tso forward logic (#9796))
 	router.PUT("/log", changeLogLevel)
 }
 
@@ -125,6 +129,16 @@ func (s *Service) RegisterConfigRouter() {
 	router.GET("", getConfig)
 }
 
+<<<<<<< HEAD
+=======
+// RegisterPrimaryRouter registers the router of the primary handler.
+func (s *Service) RegisterPrimaryRouter() {
+	router := s.root.Group("primary")
+	// Transferring primary needs to be forwarded to the primary.
+	router.POST("transfer", multiservicesapi.ServiceRedirector(), transferPrimary)
+}
+
+>>>>>>> f59aebd4a (mcs: fix `/config` and `/members` tso forward logic (#9796))
 func changeLogLevel(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	var level string
