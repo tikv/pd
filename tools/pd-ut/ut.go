@@ -41,12 +41,17 @@ import (
 	_ "go.uber.org/automaxprocs"
 )
 
+const (
+	deadlockTag = "deadlock"
+	nextGenTag  = "nextgen"
+)
+
 // initTags sets up the tags.
 func initTags() {
-	tmpTags := []string{"deadlock"}
+	tmpTags := []string{deadlockTag}
 
 	if isNextGenEnabled() {
-		tmpTags = append(tmpTags, "nextgen")
+		tmpTags = append(tmpTags, nextGenTag)
 	}
 
 	tags = strings.Join(tmpTags, " ")
@@ -124,7 +129,7 @@ var (
 	ignoreDirs   string
 	cache        bool
 	// tags for tests
-	tags string = "deadlock"
+	tags string = deadlockTag
 )
 
 func main() {
