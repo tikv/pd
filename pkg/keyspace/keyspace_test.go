@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
@@ -359,26 +360,55 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 		re.NoError(err)
 	}
 
-	// Load all keyspaces including the default keyspace.
+	// Load all keyspaces including the bootstrap keyspace.
 	keyspaces, err := manager.LoadRangeKeyspace(0, 0)
 	re.NoError(err)
 	re.Len(keyspaces, total+1)
-	for i := range keyspaces {
-		re.Equal(uint32(i), keyspaces[i].Id)
-		if i != 0 {
-			checkCreateRequest(re, requests[i-1], keyspaces[i])
+
+	// In next-gen mode, the bootstrap keyspace has SystemKeyspaceID instead of DefaultKeyspaceID (0).
+	// So the keyspaces will be ordered as: [1, 2, 3, ..., 100, SystemKeyspaceID]
+	// In legacy mode, they will be ordered as: [0, 1, 2, 3, ..., 100]
+	if kerneltype.IsNextGen() {
+		// For next-gen: expect keyspaces [1, 2, ..., 100, SystemKeyspaceID]
+		for i := range keyspaces {
+			if i < total {
+				// User-created keyspaces with IDs 1-100
+				re.Equal(uint32(i+1), keyspaces[i].Id)
+				checkCreateRequest(re, requests[i], keyspaces[i])
+			} else {
+				// Bootstrap keyspace with SystemKeyspaceID
+				re.Equal(constant.SystemKeyspaceID, keyspaces[i].Id)
+			}
+		}
+	} else {
+		// For legacy: expect keyspaces [0, 1, 2, ..., 100]
+		for i := range keyspaces {
+			re.Equal(uint32(i), keyspaces[i].Id)
+			if i != 0 {
+				checkCreateRequest(re, requests[i-1], keyspaces[i])
+			}
 		}
 	}
 
 	// Load first 50 keyspaces.
-	// Result should be keyspaces with id 0 - 49.
 	keyspaces, err = manager.LoadRangeKeyspace(0, 50)
 	re.NoError(err)
-	re.Len(keyspaces, 50)
-	for i := range keyspaces {
-		re.Equal(uint32(i), keyspaces[i].Id)
-		if i != 0 {
-			checkCreateRequest(re, requests[i-1], keyspaces[i])
+
+	if kerneltype.IsNextGen() {
+		// In next-gen mode, result should be keyspaces with id 1 - 50.
+		re.Len(keyspaces, 50)
+		for i := range keyspaces {
+			re.Equal(uint32(i+1), keyspaces[i].Id)
+			checkCreateRequest(re, requests[i], keyspaces[i])
+		}
+	} else {
+		// In legacy mode, result should be keyspaces with id 0 - 49.
+		re.Len(keyspaces, 50)
+		for i := range keyspaces {
+			re.Equal(uint32(i), keyspaces[i].Id)
+			if i != 0 {
+				checkCreateRequest(re, requests[i-1], keyspaces[i])
+			}
 		}
 	}
 
