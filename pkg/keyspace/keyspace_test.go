@@ -301,8 +301,9 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		_, err = manager.UpdateKeyspaceConfig(createRequest.Name, mutations)
 		re.Error(err)
 	}
-	// Changing config of DEFAULT keyspace is allowed.
-	updated, err := manager.UpdateKeyspaceConfig(constant.DefaultKeyspaceName, mutations)
+	// Changing config of bootstrap keyspace is allowed.
+	bootstrapKeyspaceName := GetBootstrapKeyspaceName()
+	updated, err := manager.UpdateKeyspaceConfig(bootstrapKeyspaceName, mutations)
 	re.NoError(err)
 	// remove auto filled fields
 	delete(updated.Config, TSOKeyspaceGroupIDKey)
@@ -341,8 +342,9 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		// Changing state of an ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
-		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(constant.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+		// Changing state of bootstrap keyspace is not allowed.
+		bootstrapKeyspaceName := GetBootstrapKeyspaceName()
+		_, err = manager.UpdateKeyspaceState(bootstrapKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.Error(err)
 	}
 }
