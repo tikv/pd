@@ -457,7 +457,13 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	loadStart = 900
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 0)
 	re.NoError(err)
-	re.Empty(keyspaces)
+	if kerneltype.IsNextGen() {
+		// In next-gen mode, only SystemKeyspaceID is greater than 900.
+		re.Len(keyspaces, 1)
+		re.Equal(constant.SystemKeyspaceID, keyspaces[0].Id)
+	} else {
+		re.Empty(keyspaces)
+	}
 
 	// Scanning starting from a non-zero illegal index should result in error.
 	loadStart = math.MaxUint32
