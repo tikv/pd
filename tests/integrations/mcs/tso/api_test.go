@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -339,7 +338,7 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	err = testutil.ReadGetJSON(re, testDialClient, membersURL, &kgms)
 	re.NoError(err)
 	re.Len(kgms, 1)
-	kgm := kgms[utils.DefaultKeyspaceGroupID]
+	kgm := kgms[mcsutils.DefaultKeyspaceGroupID]
 	re.NotNil(kgm)
 	re.Len(kgm.Member.ListenUrls, 1)
 	respListenURL := kgm.Member.ListenUrls[0]
