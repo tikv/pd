@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -285,21 +286,6 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
 	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
 }
-<<<<<<< HEAD
-=======
-
-func (suite *tsoAPITestSuite) TestHealth() {
-	re := suite.Require()
-
-	s := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	})
-	resp, err := tests.TestDialClient.Get(s.GetConfig().GetAdvertiseListenAddr() + "/health")
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
-}
 
 // TestForwardingBehavior specifically tests the API forwarding logic.
 func (suite *tsoAPITestSuite) TestForwardingBehavior() {
@@ -309,7 +295,7 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	re.NotNil(primary)
 	var follower *tso.Server
 	for _, srv := range suite.tsoCluster.GetServers() {
-		if srv.Name() != primary.Name() {
+		if srv.GetAddr() != primary.GetAddr() {
 			follower = srv
 			break
 		}
@@ -324,6 +310,8 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
 	}
 
+	testDialClient := &http.Client{}
+
 	// Test: PUT /admin/log should be handled by the follower locally.
 	logURL := followerURL("/admin/log")
 	level := "debug"
@@ -331,7 +319,7 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	re.NoError(err)
 	req, _ := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := tests.TestDialClient.Do(req)
+	resp, err := testDialClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -339,7 +327,7 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	// Test: GET /config should be handled by the follower locally.
 	configURL := followerURL("/config")
 	var followerCfg tso.Config
-	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &followerCfg)
+	err = testutil.ReadGetJSON(re, testDialClient, configURL, &followerCfg)
 	re.NoError(err)
 	re.Equal(follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
 	re.NotEqual(primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
@@ -348,10 +336,10 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	// Test: GET /keyspace-groups/members should be handled by the follower locally.
 	membersURL := followerURL("/keyspace-groups/members")
 	var kgms map[uint32]*apis.KeyspaceGroupMember
-	err = testutil.ReadGetJSON(re, tests.TestDialClient, membersURL, &kgms)
+	err = testutil.ReadGetJSON(re, testDialClient, membersURL, &kgms)
 	re.NoError(err)
 	re.Len(kgms, 1)
-	kgm := kgms[constant.DefaultKeyspaceGroupID]
+	kgm := kgms[utils.DefaultKeyspaceGroupID]
 	re.NotNil(kgm)
 	re.Len(kgm.Member.ListenUrls, 1)
 	respListenURL := kgm.Member.ListenUrls[0]
@@ -359,4 +347,3 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	re.NotEqual(primary.GetConfig().GetListenAddr(), respListenURL)
 	re.False(kgm.IsPrimary)
 }
->>>>>>> f59aebd4a (mcs: fix `/config` and `/members` tso forward logic (#9796))
