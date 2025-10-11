@@ -408,6 +408,13 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	re := suite.Require()
 	// Enable the failpoint to slow down the system time to test whether the TSO is monotonic.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
+
+	// Enable the failpoint to delay before checking election member
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delayBeforeCheckingElectionMember", `return()`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delayBeforeCheckingElectionMember"))
+	}()
+
 	// Create the keyspace group `oldID` with keyspaces [444, 555, 666].
 	oldID := suite.allocID()
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
