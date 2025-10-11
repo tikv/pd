@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
@@ -468,8 +469,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.Nil(kg)
 }
 
-// TestDefaultMembershipRestriction tests the restriction of default keyspace always
+// TestDefaultMembershipRestriction tests the restriction of bootstrap keyspace always
 // belongs to default keyspace group.
+// In Classic mode: protects keyspace 0 (default keyspace)
+// In NextGen mode: protects keyspace 16777214 (system keyspace), allows keyspace 0 to move freely
 func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	re := suite.Require()
 
@@ -521,18 +524,29 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	// Sleep for a while to wait for the events to propagate. If the logic doesn't work
 	// as expected, it will cause random failure.
 	time.Sleep(1 * time.Second)
-	// Should still be able to get the allocator for keyspace 0 in keyspace group 0.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
-	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
-	re.NotNil(allocator)
-	re.NotNil(kg)
-	// Should succeed and return the keyspace group meta from the default keyspace group
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
-	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
-	re.NotNil(allocator)
+
+	// Behavior differs between Classic and NextGen modes
+	if kerneltype.IsNextGen() {
+		// In NextGen mode, keyspace 0 should be allowed to move to keyspace group 3
+		allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		re.NoError(err)
+		re.Equal(uint32(3), kgid) // Should be in group 3
+		re.NotNil(allocator)
+		re.NotNil(kg)
+	} else {
+		// In Classic mode, keyspace 0 should stay in the default keyspace group 0
+		allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
+			constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		re.NoError(err)
+		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
+		re.NotNil(allocator)
+		re.NotNil(kg)
+		// Should succeed and return the keyspace group meta from the default keyspace group
+		allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		re.NoError(err)
+		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
+		re.NotNil(allocator)
+	}
 	re.NotNil(kg)
 }
 
