@@ -691,7 +691,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 	}
 	defer ensureUnlocked()
 
-	keyspaceIterator := m.keyspaceManager.IterateKeyspaces(0)
+	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
 	// Do not guarantee atomicity among different keyspaces here.
 	results := make(map[uint32]GCState)
@@ -934,7 +934,7 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 // getMaxTxnSafePointAmongAllKeyspaces must be called inside a transaction,
 // The WriteBatch parameter in function signature is deliberate to the call safe, do not pass nil.
 func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCStateWriteBatch) (maxTxnSafePoint uint64, keyspaceName string, keyspaceID uint32, err error) {
-	keyspaceIterator := m.keyspaceManager.IterateKeyspaces(0)
+	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 	for {
 		keyspaceMeta, ok, err2 := keyspaceIterator.Next()
 		if err2 != nil {

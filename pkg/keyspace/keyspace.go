@@ -827,8 +827,8 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 // IterateKeyspaces returns an iterator that yields all keyspaces starting from startID.
 // In case the keyspaces are being modified while iteration is in progress, it's not guaranteed that the results are
 // in a consistent snapshot.
-func (manager *Manager) IterateKeyspaces(startID uint32) *Iterator {
-	return newKeyspaceIterator(manager, startID)
+func (manager *Manager) IterateKeyspaces() *Iterator {
+	return newKeyspaceIterator(manager)
 }
 
 // allocID allocate a new keyspace id.
@@ -991,17 +991,15 @@ const IteratorLoadingBatchSize int = 100
 // Create this using keyspace.Manager.IterateKeyspaces, and use Next method for iteration.
 type Iterator struct {
 	manager      *Manager
-	startID      uint32
 	currentBatch []*keyspacepb.KeyspaceMeta
 	currentIndex int
 	isDrained    bool
 	err          error
 }
 
-func newKeyspaceIterator(manager *Manager, startID uint32) *Iterator {
+func newKeyspaceIterator(manager *Manager) *Iterator {
 	return &Iterator{
 		manager: manager,
-		startID: startID,
 	}
 }
 
