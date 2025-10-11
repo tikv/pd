@@ -86,7 +86,6 @@ func NewService(srv *tsoserver.Service) *Service {
 	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
-	root.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
@@ -103,7 +102,8 @@ func NewService(srv *tsoserver.Service) *Service {
 // RegisterAdminRouter registers the router of the TSO admin handler.
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
-	router.POST("/reset-ts", ResetTS)
+	// reset-ts needs to be forwarded to the primary.
+	router.POST("/reset-ts", multiservicesapi.ServiceRedirector(), ResetTS)
 	router.PUT("/log", changeLogLevel)
 }
 
