@@ -280,21 +280,6 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
 	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
 }
-<<<<<<< HEAD
-=======
-
-func (suite *tsoAPITestSuite) TestHealth() {
-	re := suite.Require()
-
-	s := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	})
-	resp, err := tests.TestDialClient.Get(s.GetConfig().GetAdvertiseListenAddr() + "/health")
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
-}
 
 // TestForwardingBehavior specifically tests the API forwarding logic.
 func (suite *tsoAPITestSuite) TestForwardingBehavior() {
@@ -354,4 +339,3 @@ func (suite *tsoAPITestSuite) TestForwardingBehavior() {
 	re.NotEqual(primary.GetConfig().GetListenAddr(), respListenURL)
 	re.False(kgm.IsPrimary)
 }
->>>>>>> f59aebd4a (mcs: fix `/config` and `/members` tso forward logic (#9796))
