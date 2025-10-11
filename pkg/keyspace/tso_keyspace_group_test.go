@@ -256,9 +256,10 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.NoError(err)
-	// split the default keyspace
-	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{constant.DefaultKeyspaceID})
-	re.ErrorIs(err, errs.ErrModifyDefaultKeyspace)
+	// split the bootstrap keyspace
+	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
+	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{bootstrapKeyspaceID})
+	re.ErrorIs(err, newModifyProtectedKeyspaceError())
 	// split the keyspace group 1 to 4
 	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{444})
 	re.ErrorIs(err, errs.ErrKeyspaceGroupNotEnoughReplicas)
