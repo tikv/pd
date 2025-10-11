@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 const mockStreamURL = "mock:///"
@@ -354,28 +355,13 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 	s.re.Error(res.err)
 	s.re.Equal("mock rpc error", res.err.Error())
 
-	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status.
-	// New requests can still be queued but they should receive error callbacks.
-	callbackCalled := make(chan struct{})
-	var callbackErr error
-	err := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
-		callbackErr = err
-		close(callbackCalled)
+	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
+	// new request anymore.
+	testutil.Eventually(s.re, func() bool {
+		return s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
+			s.re.Error(err)
+		}) != nil
 	})
-
-	// The processRequests call might succeed in queueing the request
-	if err == nil {
-		// If the request was queued, the callback should be called with an error
-		select {
-		case <-callbackCalled:
-			s.re.Error(callbackErr)
-		case <-time.After(time.Second):
-			s.re.FailNow("callback was not called within timeout")
-		}
-	} else {
-		// If processRequests immediately returned an error, that's also acceptable
-		s.re.Error(err)
-	}
 }
 
 func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests int) {
