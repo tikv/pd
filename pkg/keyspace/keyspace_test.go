@@ -308,6 +308,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	// remove auto filled fields
 	delete(updated.Config, TSOKeyspaceGroupIDKey)
 	delete(updated.Config, UserKindKey)
+	delete(updated.Config, GCManagementType)
 	checkMutations(re, nil, updated.Config, mutations)
 }
 
@@ -426,14 +427,30 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	}
 
 	// Attempts to load 30 keyspaces starting from keyspace with id 90.
-	// Scan result should be keyspaces with id 90-100.
 	loadStart = 90
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 30)
 	re.NoError(err)
-	re.Len(keyspaces, 11)
-	for i := range keyspaces {
-		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
-		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
+
+	if kerneltype.IsNextGen() {
+		// In next-gen mode, scan result should be keyspaces with id 90-100 plus SystemKeyspaceID.
+		re.Len(keyspaces, 12)
+		for i := range keyspaces {
+			if i < 11 {
+				// User-created keyspaces with IDs 90-100
+				re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+				checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
+			} else {
+				// System keyspace with SystemKeyspaceID
+				re.Equal(constant.SystemKeyspaceID, keyspaces[i].Id)
+			}
+		}
+	} else {
+		// In legacy mode, scan result should be keyspaces with id 90-100.
+		re.Len(keyspaces, 11)
+		for i := range keyspaces {
+			re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+			checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
+		}
 	}
 
 	// Loading starting from non-existing keyspace ID should result in empty result.
