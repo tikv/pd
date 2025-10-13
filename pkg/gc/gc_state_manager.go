@@ -135,7 +135,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, error) {
 	// Regard it as NullKeyspaceID if the given one is invalid (exceeds the valid range of keyspace id), no matter
 	// whether it exactly matches the NullKeyspaceID.
-	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 || keyspaceID == constant.NullKeyspaceID {
+	if keyspaceID & ^constant.ValidKeyspaceIDMask != 0 {
 		return constant.NullKeyspaceID, nil
 	}
 

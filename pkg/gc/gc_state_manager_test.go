@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -124,7 +125,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	err = keyspaceManager.Bootstrap()
 	re.NoError(err)
 
-	// keyspaceID 0 exists automatically after bootstrapping.
+	// The bootstrap keyspace (DefaultKeyspaceID or SystemKeyspaceID) exists automatically after bootstrapping.
 	if opt.specifyInitialKeyspaces == nil {
 		ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name:       "ks1",
@@ -172,10 +173,21 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 func (s *gcStateManagerTestSuite) SetupTest() {
 	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T(), newGCStateManagerForTestOptions{})
 
-	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, 0, 1, 2, 3}
-	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
-	s.keyspacePresets.unmanageable = []uint32{0, 1, 3}
-	s.keyspacePresets.unifiedGC = []uint32{constant.NullKeyspaceID, 0, 1, 3}
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 2, 3}
+
+	// In NextGen builds, bootstrapKeyspaceID is SystemKeyspaceID (0xFFFFFE) with KeyspaceLevelGC config, so it's manageable.
+	// In Classic builds, bootstrapKeyspaceID is DefaultKeyspaceID (0) without KeyspaceLevelGC config, so it's unmanageable.
+	if kerneltype.IsNextGen() {
+		// NextGen has no unified GC - all keyspaces use keyspace-level GC
+		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 2}
+		s.keyspacePresets.unmanageable = []uint32{1, 3}
+		s.keyspacePresets.unifiedGC = []uint32{} // NextGen has no unified GC
+	} else {
+		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
+		s.keyspacePresets.unmanageable = []uint32{bootstrapKeyspaceID, 1, 3}
+		s.keyspacePresets.unifiedGC = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 3}
+	}
 	s.keyspacePresets.notExisting = []uint32{5, 0xffffff}
 	s.keyspacePresets.nullSynonyms = []uint32{constant.NullKeyspaceID, 0x1000000, 0xfffffffe}
 }
