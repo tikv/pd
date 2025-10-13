@@ -618,9 +618,9 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 	return nil
 }
 
-func buildSplitKeyspaces(
 // `old` is the original keyspace list which will be split out,
 // `new` is the keyspace list which will be split from the old keyspace list.
+func buildSplitKeyspaces(
 	old, new []uint32,
 	startKeyspaceID, endKeyspaceID uint32,
 ) (oldSplit, newSplit []uint32, err error) {
