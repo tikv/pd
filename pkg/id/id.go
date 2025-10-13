@@ -15,17 +15,35 @@
 package id
 
 import (
-	"path"
+	"math"
+
+	"github.com/prometheus/client_golang/prometheus"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
+)
+
+type label string
+
+const (
+	// DefaultLabel is the default label for id allocator.
+	DefaultLabel label = "idalloc"
+	// KeyspaceLabel is the label for keyspace id allocator.
+	KeyspaceLabel label = "keyspace-idAlloc"
+
+	// nonNextGenKeyspaceIDLimit is the upper limit for keyspace IDs when not in NextGen mode.
+	// NullKeyspaceID is math.MaxUint32
+	// IDs should be less than or equal to math.MaxUint32 -1 .
+	nonNextGenKeyspaceIDLimit = uint64(math.MaxUint32) - 1
+
+	defaultAllocStep = uint64(1000)
 )
 
 // Allocator is the allocator to generate unique ID.
@@ -40,21 +58,18 @@ type Allocator interface {
 	Rebase() error
 }
 
-const defaultAllocStep = uint64(1000)
-
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
 	mu   syncutil.RWMutex
 	base uint64
 	end  uint64
 
-	client    *clientv3.Client
-	rootPath  string
-	allocPath string
-	label     string
-	member    string
-	step      uint64
-	metrics   *metrics
+	client       *clientv3.Client
+	label        label
+	member       string
+	step         uint64
+	metrics      *metrics
+	effectiveEnd uint64
 }
 
 // metrics is a collection of idAllocator's metrics.
@@ -64,28 +79,30 @@ type metrics struct {
 
 // AllocatorParams are parameters needed to create a new ID Allocator.
 type AllocatorParams struct {
-	Client    *clientv3.Client
-	RootPath  string
-	AllocPath string // AllocPath specifies path to the persistent window boundary.
-	Label     string // Label used to label metrics and logs.
-	Member    string // Member value, used to check if current pd leader.
-	Step      uint64 // Step size of each persistent window boundary increment, default 1000.
+	Client *clientv3.Client
+	Label  label  // Label used to label metrics and logs.
+	Member string // Member value, used to check if current pd leader.
+	Step   uint64 // Step size of each persistent window boundary increment, default 1000.
 }
 
 // NewAllocator creates a new ID Allocator.
 func NewAllocator(params *AllocatorParams) Allocator {
 	allocator := &allocatorImpl{
-		client:    params.Client,
-		rootPath:  params.RootPath,
-		allocPath: params.AllocPath,
-		label:     params.Label,
-		member:    params.Member,
-		step:      params.Step,
-		metrics:   &metrics{idGauge: idGauge.WithLabelValues(params.Label)},
+		client:  params.Client,
+		label:   params.Label,
+		member:  params.Member,
+		step:    params.Step,
+		metrics: &metrics{idGauge: idGauge.WithLabelValues(string(params.Label))},
 	}
 	if allocator.step == 0 {
 		allocator.step = defaultAllocStep
 	}
+	var effectiveEnd uint64
+	effectiveEnd = math.MaxUint64
+	if params.Label == KeyspaceLabel {
+		effectiveEnd = nonNextGenKeyspaceIDLimit // Last allocable ID for non NextGen
+	}
+	allocator.effectiveEnd = effectiveEnd
 	return allocator
 }
 
@@ -93,7 +110,11 @@ func NewAllocator(params *AllocatorParams) Allocator {
 func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
-
+	// If current base is already at or beyond the effective end,
+	// we need to return an error.
+	if alloc.base >= alloc.effectiveEnd {
+		return 0, errs.ErrIDExhausted.FastGenByArgs()
+	}
 	if alloc.base == alloc.end {
 		if err := alloc.rebaseLocked(true); err != nil {
 			return 0, err
@@ -110,6 +131,10 @@ func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
+	// Ensure the newBase is valid.
+	if newBase >= alloc.effectiveEnd {
+		return errs.ErrIDExhausted.FastGenByArgs()
+	}
 	// set current end to new base, rebaseLocked will change it later.
 	alloc.end = newBase
 
@@ -127,9 +152,14 @@ func (alloc *allocatorImpl) Rebase() error {
 }
 
 func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
-	key := alloc.getAllocIDPath()
+	var key string
+	if alloc.label == KeyspaceLabel {
+		key = keypath.KeyspaceAllocIDPath()
+	} else {
+		key = keypath.AllocIDPath()
+	}
 
-	leaderPath := path.Join(alloc.rootPath, "leader")
+	leaderPath := keypath.LeaderPath()
 	var (
 		cmps = []clientv3.Cmp{clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member)}
 		end  uint64
@@ -156,7 +186,13 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		end = alloc.end
 	}
 
-	end += alloc.step
+	// make sure the end is not beyond the effective end
+	if end+alloc.step > alloc.effectiveEnd {
+		end = alloc.effectiveEnd
+	} else {
+		end += alloc.step
+	}
+
 	value := typeutil.Uint64ToBytes(end)
 	txn := kv.NewSlowLogTxn(alloc.client)
 	resp, err := txn.If(cmps...).Then(clientv3.OpPut(key, string(value))).Commit()
@@ -173,10 +209,6 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	// please do not reorder the first field, it's need when getting the new-end
 	// see: https://docs.pingcap.com/tidb/dev/pd-recover#get-allocated-id-from-pd-log
 	log.Info("idAllocator allocates a new id", zap.Uint64("new-end", end), zap.Uint64("new-base", alloc.base),
-		zap.String("label", alloc.label), zap.Bool("check-curr-end", checkCurrEnd))
+		zap.String("label", string(alloc.label)), zap.Bool("check-curr-end", checkCurrEnd))
 	return nil
-}
-
-func (alloc *allocatorImpl) getAllocIDPath() string {
-	return path.Join(alloc.rootPath, alloc.allocPath)
 }
