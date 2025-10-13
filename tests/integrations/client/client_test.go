@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"sort"
 	"strconv"
@@ -2042,6 +2043,32 @@ func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspac
 	}
 }
 
+// checkGlobalGCBarrier checks whether the specified global GC barrier has the specified barrier TS.
+// This function assumes the barrier TS is never 0, and passing 0 means asserting the GC barrier does not exist.
+func (s *clientStatefulTestSuite) checkGlobalGCBarrier(re *require.Assertions, barrierID string, expectedBarrierTS uint64) {
+	gcStates, err := s.client.GetGCStatesClient(constants.NullKeyspaceID).GetAllKeyspacesGCStates(context.Background())
+	re.NoError(err)
+	found := false
+	for _, b := range gcStates.GlobalGCBarriers {
+		if b.BarrierID == barrierID {
+			if found {
+				re.Failf("duplicated barrier ID found in the global GC barriers", "barrierID: %s", barrierID)
+				return
+			}
+			if expectedBarrierTS != 0 {
+				re.Equal(expectedBarrierTS, b.BarrierTS)
+			} else {
+				re.Failf("expected global GC barrier not exist but found", "barrierID: %s", barrierID)
+				return
+			}
+			found = true
+		}
+	}
+	if expectedBarrierTS != 0 && !found {
+		re.Failf("global GC barrier expected to exist but not found", "barrierID: %s", barrierID)
+	}
+}
+
 func (s *clientStatefulTestSuite) testUpdateGCSafePointImpl(keyspaceID uint32) {
 	re := s.Require()
 	client := s.client
@@ -2471,6 +2498,199 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 		// The existing GC barrier remains unchanged.
 		s.checkGCBarrier(re, keyspaceID, "b1", 22)
 	}
+}
+
+func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
+	s.prepareKeyspacesForGCTest()
+	re := s.Require()
+	ctx := context.Background()
+
+	var clients []gc.GCStatesClient
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		cli := s.client.GetGCStatesClient(keyspaceID)
+		s.checkGlobalGCBarrier(re, "b1", 0)
+		clients = append(clients, cli)
+	}
+	// It doesn't matter what keyspace SetGlobalGCBarrier API is called on.
+	getCli := func() gc.GCStatesClient {
+		return clients[rand.Intn(len(clients))]
+	}
+
+	b, err := getCli().SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
+	re.NoError(err)
+	re.Equal("b1", b.BarrierID)
+	re.Equal(uint64(10), b.BarrierTS)
+	re.Equal(int64(math.MaxInt64), int64(b.TTL))
+	s.checkGlobalGCBarrier(re, "b1", 10)
+
+	// Allows advancing to a value below the global GC barrier.
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 5)
+		re.NoError(err)
+		re.Equal(uint64(5), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		s.checkTxnSafePoint(re, keyspaceID, 5)
+
+		// Blocks on the global GC barrier when trying to advance over it.
+		res, err = c.AdvanceTxnSafePoint(ctx, 11)
+		re.NoError(err)
+		re.Equal(uint64(5), res.OldTxnSafePoint)
+		re.Equal(uint64(11), res.Target)
+		re.Equal(uint64(10), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "b1")
+		s.checkTxnSafePoint(re, keyspaceID, 10)
+	}
+
+	// After deleting the GC barrier, the txn safe point can be resumed to going forward.
+	b, err = getCli().DeleteGlobalGCBarrier(ctx, "b1")
+	re.NoError(err)
+	re.Equal("b1", b.BarrierID)
+	re.Equal(uint64(10), b.BarrierTS)
+	re.Equal(int64(math.MaxInt64), int64(b.TTL))
+	s.checkGlobalGCBarrier(re, "b1", 0)
+
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 11)
+		re.NoError(err)
+		re.Equal(uint64(11), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		s.checkTxnSafePoint(re, keyspaceID, 11)
+	}
+
+	b, err = getCli().SetGlobalGCBarrier(ctx, "b1", 15, math.MaxInt64)
+	re.NoError(err)
+	re.Equal("b1", b.BarrierID)
+	re.Equal(uint64(15), b.BarrierTS)
+	re.Equal(int64(math.MaxInt64), int64(b.TTL))
+
+	// Allows advancing to exactly the same value as the global GC barrier, without reporting the blocker.
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 15)
+		re.NoError(err)
+		re.Equal(uint64(15), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		s.checkTxnSafePoint(re, keyspaceID, 15)
+	}
+
+	// When multiple GC barrier exists, it blocks on the minimum one.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", 22, math.MaxInt64)
+	re.NoError(err)
+	s.checkGlobalGCBarrier(re, "b1", 22)
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, math.MaxInt64)
+	re.NoError(err)
+	s.checkGlobalGCBarrier(re, "b2", 20)
+
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 25)
+		re.NoError(err)
+		re.Equal(uint64(15), res.OldTxnSafePoint)
+		re.Equal(uint64(25), res.Target)
+		re.Equal(uint64(20), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "b2")
+		s.checkTxnSafePoint(re, keyspaceID, 20)
+	}
+
+	// Test expiring GC barrier.
+	b, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, time.Second)
+	s.checkGlobalGCBarrier(re, "b2", 20)
+	re.NoError(err)
+	re.False(b.IsExpired())
+	// Considering the rounding-up behaviors, the actual TTL might be slightly greater.
+	re.GreaterOrEqual(b.TTL, time.Second)
+	re.LessOrEqual(b.TTL, 3*time.Second)
+	testutil.Eventually(re, b.IsExpired,
+		testutil.WithWaitFor(b.TTL+time.Second),
+		testutil.WithTickInterval(50*time.Millisecond))
+
+	// After the returned GlobalGCBarrierInfo is expired, the server might be still keeping it due to its rounding
+	// behavior. Wait another 1 second.
+	time.Sleep(time.Second)
+
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 25)
+		re.NoError(err)
+		re.Equal(uint64(20), res.OldTxnSafePoint)
+		re.Equal(uint64(25), res.Target)
+		re.Equal(uint64(22), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "b1")
+		s.checkTxnSafePoint(re, keyspaceID, 22)
+	}
+
+	s.checkGlobalGCBarrier(re, "b2", 0)
+
+	// Unable to set global GC barrier to earlier ts than txn safe point.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 21, math.MaxInt64)
+	re.Error(err)
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+	s.checkGlobalGCBarrier(re, "b2", 0)
+
+	// Unable to modify an existing GC barrier to earlier ts than txn safe point.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", 21, math.MaxInt64)
+	re.Error(err)
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+
+	// The existing global GC barrier remains unchanged.
+	s.checkGlobalGCBarrier(re, "b1", 22)
+}
+
+func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
+	re := s.Require()
+	ctx := context.Background()
+	s.prepareKeyspacesForGCTest()
+	ks3, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks3",
+		Config:     map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.Equal(uint32(3), ks3.Id)
+
+	// Modify some GC states and verify TestGetAllKeyspaceGCStates gets the correct result.
+	cli := s.client.GetGCStatesClient(constants.NullKeyspaceID)
+	_, err = cli.SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
+	re.NoError(err)
+	res, err := cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	re.Len(res.GlobalGCBarriers, 1)
+	re.Equal("b1", res.GlobalGCBarriers[0].BarrierID)
+	re.Equal(uint64(10), res.GlobalGCBarriers[0].BarrierTS)
+	re.Equal(time.Duration(math.MaxInt64), res.GlobalGCBarriers[0].TTL)
+
+	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, time.Second)
+	re.NoError(err)
+	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	re.Len(res.GlobalGCBarriers, 2)
+	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
+	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
+	re.Equal(time.Second, res.GlobalGCBarriers[1].TTL)
+
+	cli1 := s.client.GetGCStatesClient(1)
+	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
+	re.NoError(err)
+	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	state, ok := res.GCStates[1]
+	re.True(ok)
+	re.Equal("b3", state.GCBarriers[0].BarrierID)
+	re.Equal(uint64(13), state.GCBarriers[0].BarrierTS)
+	re.Equal(time.Duration(math.MaxInt64), state.GCBarriers[0].TTL)
+
+	cli2 := s.client.GetGCStatesClient(2)
+	_, err = cli2.SetGCBarrier(ctx, "b4", 14, 3*time.Second)
+	re.NoError(err)
+	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	state, ok = res.GCStates[2]
+	re.True(ok)
+	re.Equal("b4", state.GCBarriers[0].BarrierID)
+	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
+	re.Equal(3*time.Second, state.GCBarriers[0].TTL)
 }
 
 func TestDecodeHttpKeyRange(t *testing.T) {
