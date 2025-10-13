@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 type keyspaceGroupTestSuite struct {
@@ -561,8 +562,27 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			re.ErrorIs(testCase.err, err, "test case %d", idx)
 		} else {
 			re.NoError(err, "test case %d", idx)
-			re.Equal(testCase.expectedOld, old, "test case %d", idx)
-			re.Equal(testCase.expectedNew, new, "test case %d", idx)
+
+			// Special handling for test case 5 which involves keyspace 0 protection
+			expectedOld := testCase.expectedOld
+			expectedNew := testCase.expectedNew
+			if idx == 5 {
+				// Test case 5: old=[0,1,2,3,4,5], start=0, end=4
+				// In Classic mode: keyspace 0 is protected, so it stays in old group
+				// In NextGen mode: keyspace 0 can move, so it goes to new group
+				if kerneltype.IsNextGen() {
+					// NextGen: keyspace 0 can move to new group
+					expectedOld = []uint32{5}
+					expectedNew = []uint32{0, 1, 2, 3, 4}
+				} else {
+					// Classic: keyspace 0 is protected, stays in old group
+					expectedOld = []uint32{0, 5}
+					expectedNew = []uint32{1, 2, 3, 4}
+				}
+			}
+
+			re.Equal(expectedOld, old, "test case %d", idx)
+			re.Equal(expectedNew, new, "test case %d", idx)
 		}
 	}
 }
