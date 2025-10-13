@@ -19,8 +19,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -218,7 +220,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStore() {
 		} else {
 			re.NotContains(es.conf.PausedNetworkSlowStores, storeID1)
 		}
-		re.Equal(tc.expectedSlow, !suite.tc.BasicCluster.GetStore(storeID1).AllowLeaderTransferIn())
+		re.Equal(tc.expectedSlow, !suite.tc.BasicCluster.GetStore(storeID1).AllowLeaderTransfer())
 
 		// check the value from storage.
 		var persistValue evictSlowStoreSchedulerConfig
@@ -374,7 +376,7 @@ func (suite *evictSlowStoreTestSuite) TestNetworkSlowStoreReachLimit() {
 		} else {
 			re.NotContains(es.conf.PausedNetworkSlowStores, tc.scheduleStore)
 		}
-		re.Equal(tc.expectedPausedTransfer, !suite.tc.BasicCluster.GetStore(tc.scheduleStore).AllowLeaderTransferIn())
+		re.Equal(tc.expectedPausedTransfer, !suite.tc.BasicCluster.GetStore(tc.scheduleStore).AllowLeaderTransfer())
 
 		// check the value from storage.
 		var persistValue evictSlowStoreSchedulerConfig
@@ -437,7 +439,7 @@ func TestRecoveryTime(t *testing.T) {
 	tc.AddLeaderStore(3, 0)
 
 	// Add regions with leader in store 1
-	for i := range 10 {
+	for i := 0; i < 10; i++ {
 		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 	}
 
@@ -474,7 +476,7 @@ func TestRecoveryTime(t *testing.T) {
 	tc.PutStore(recoveredStore)
 
 	// Should not recover immediately due to recovery time window
-	for range 10 {
+	for i := 0; i < 10; i++ {
 		// trigger recovery check
 		es.Schedule(tc, false)
 		ops, _ = bs.Schedule(tc, false)
@@ -490,7 +492,7 @@ func TestRecoveryTime(t *testing.T) {
 	tc.PutStore(slowStore)
 	time.Sleep(recoveryTime / 2)
 	// Should not recover due to recovery time window recalculation
-	for range 10 {
+	for i := 0; i < 10; i++ {
 		// trigger recovery check
 		es.Schedule(tc, false)
 		ops, _ = bs.Schedule(tc, false)
@@ -506,7 +508,7 @@ func TestRecoveryTime(t *testing.T) {
 	tc.PutStore(recoveredStore)
 
 	// Should not recover immediately due to recovery time window
-	for range 10 {
+	for i := 0; i < 10; i++ {
 		// trigger recovery check
 		es.Schedule(tc, false)
 		ops, _ = bs.Schedule(tc, false)

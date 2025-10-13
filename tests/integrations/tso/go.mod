@@ -12,7 +12,7 @@ replace (
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250807083051-d83f0718696f
+	github.com/pingcap/kvproto v0.0.0-20251011092438-e9bc7a75a484
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
