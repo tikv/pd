@@ -587,9 +587,6 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 		splitSourceKg.SplitState = &endpoint.SplitState{
 			SplitSource: splitSourceKg.ID,
 		}
-		if err = m.store.SaveKeyspaceGroup(txn, splitSourceKg); err != nil {
-			return err
-		}
 		splitTargetKg = &endpoint.KeyspaceGroup{
 			ID: splitTargetID,
 			// Keep the same user kind and members as the old keyspace group.
@@ -600,8 +597,18 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 				SplitSource: splitSourceKg.ID,
 			},
 		}
+		// Save the split target keyspace group first, then save the split source keyspace group.
+		// The order matters: if we save splitSourceKg first (which removes some keyspaces from it),
+		// there will be a brief moment where those keyspaces don't belong to any group, causing
+		// them to fallback to group 0. By saving splitTargetKg first (which contains the split
+		// keyspaces), we ensure the keyspaces always belong to a valid group during the transition.
+
 		// Create the new split keyspace group.
-		return m.store.SaveKeyspaceGroup(txn, splitTargetKg)
+		if err = m.store.SaveKeyspaceGroup(txn, splitTargetKg); err != nil {
+			return err
+		}
+		// Update the source keyspace group.
+		return m.store.SaveKeyspaceGroup(txn, splitSourceKg)
 	}); err != nil {
 		return err
 	}
@@ -612,8 +619,8 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 }
 
 func buildSplitKeyspaces(
-	// `old` is the original keyspace list which will be split out,
-	// `new` is the keyspace list which will be split from the old keyspace list.
+// `old` is the original keyspace list which will be split out,
+// `new` is the keyspace list which will be split from the old keyspace list.
 	old, new []uint32,
 	startKeyspaceID, endKeyspaceID uint32,
 ) (oldSplit, newSplit []uint32, err error) {
