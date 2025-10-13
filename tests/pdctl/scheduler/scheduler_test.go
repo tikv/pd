@@ -187,6 +187,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			"balance-hot-region-scheduler": true,
 			schedulers[idx]:                true,
 		}
+		checkSchedulerCommand(args, expected)
 
 		// check update success
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "3": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}

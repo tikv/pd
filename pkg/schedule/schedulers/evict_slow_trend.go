@@ -110,12 +110,6 @@ func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 	return []core.KeyRange{core.NewKeyRange("", "")}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) hasEvictedStores() bool {
-	conf.RLock()
-	defer conf.RUnlock()
-	return len(conf.EvictedStores) > 0
-}
-
 func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
 	if len(conf.EvictedStores) == 0 {
 		return 0
