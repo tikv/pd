@@ -179,9 +179,9 @@ func (s *gcStateManagerTestSuite) SetupTest() {
 	// In NextGen builds, bootstrapKeyspaceID is SystemKeyspaceID (0xFFFFFE) with KeyspaceLevelGC config, so it's manageable.
 	// In Classic builds, bootstrapKeyspaceID is DefaultKeyspaceID (0) without KeyspaceLevelGC config, so it's unmanageable.
 	if kerneltype.IsNextGen() {
-		// NextGen has no unified GC - all keyspaces use keyspace-level GC
-		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 2}
-		s.keyspacePresets.unmanageable = []uint32{1, 3}
+		// NextGen: all keyspaces default to KeyspaceLevelGC, so most are manageable
+		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 2, 3}
+		s.keyspacePresets.unmanageable = []uint32{}
 		s.keyspacePresets.unifiedGC = []uint32{} // NextGen has no unified GC
 	} else {
 		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
