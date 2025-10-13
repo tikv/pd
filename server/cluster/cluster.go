@@ -1896,7 +1896,7 @@ func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
 	// When store is preparing or serving, we think it is in up.
 	// `checkStore` only may change store state from preparing to serving.
 	// So we don't need to get store again.
-	isInUp = store.IsUp() && store.IsLowSpace(c.opt.GetLowSpaceRatio())
+	isInUp = store.IsUp() && !store.IsLowSpace(c.opt.GetLowSpaceRatio())
 	return isInUp, isInOffline
 }
 
