@@ -139,14 +139,22 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	err = keyspaceManager.Bootstrap()
 	re.NoError(err)
 
-	// keyspaceID 0 exists automatically after bootstrapping.
+	// The bootstrap keyspace (DefaultKeyspaceID or SystemKeyspaceID) exists automatically after bootstrapping.
 	if opt.specifyInitialKeyspaces == nil {
+		// In NextGen, all keyspaces should use keyspace_level GC
+		// In Classic, we can have different GC management types
+		var ks1Config map[string]string
+		if kerneltype.IsNextGen() {
+			ks1Config = map[string]string{"gc_management_type": "keyspace_level"}
+		} else {
+			ks1Config = map[string]string{"gc_management_type": "unified"}
+		}
 		id := new(uint32)
 		*id = 1
 		ks1, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
 			Name:       "ks1",
-			Config:     map[string]string{"gc_management_type": "unified"},
+			Config:     ks1Config,
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
@@ -196,10 +204,21 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 func (s *gcStateManagerTestSuite) SetupTest() {
 	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T(), newGCStateManagerForTestOptions{})
 
-	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, 0, 1, 2, 3}
-	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
-	s.keyspacePresets.unmanageable = []uint32{0, 1, 3}
-	s.keyspacePresets.unifiedGC = []uint32{constant.NullKeyspaceID, 0, 1, 3}
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 2, 3}
+
+	// In NextGen builds, bootstrapKeyspaceID is SystemKeyspaceID (0xFFFFFE) with KeyspaceLevelGC config, so it's manageable.
+	// In Classic builds, bootstrapKeyspaceID is DefaultKeyspaceID (0) without KeyspaceLevelGC config, so it's unmanageable.
+	if kerneltype.IsNextGen() {
+		// NextGen: all keyspaces default to KeyspaceLevelGC
+		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 2, 3}
+		s.keyspacePresets.unmanageable = []uint32{}
+		s.keyspacePresets.unifiedGC = []uint32{} // NextGen has no unified GC
+	} else {
+		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
+		s.keyspacePresets.unmanageable = []uint32{bootstrapKeyspaceID, 1, 3}
+		s.keyspacePresets.unifiedGC = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 3}
+	}
 	s.keyspacePresets.notExisting = []uint32{5, 0xffffff}
 	s.keyspacePresets.nullSynonyms = []uint32{constant.NullKeyspaceID, 0x1000000, 0xfffffffe}
 }
@@ -1883,8 +1902,16 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	})
 	re.NoError(err)
 	re.Equal(uint64(len(s.keyspacePresets.manageable)), txnSafePoint)
-	re.Equal("ks2", keyspaceName)
-	re.Equal(uint32(2), keyspaceID)
+
+	// In NextGen, all keyspaces are manageable, so the max should be ks3
+	// In Classic, only certain keyspaces are manageable, so the max should be ks2
+	if kerneltype.IsNextGen() {
+		re.Equal("ks3", keyspaceName)
+		re.Equal(uint32(3), keyspaceID)
+	} else {
+		re.Equal("ks2", keyspaceName)
+		re.Equal(uint32(2), keyspaceID)
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
