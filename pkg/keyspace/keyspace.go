@@ -1038,7 +1038,12 @@ func (it *Iterator) loadBatch() error {
 
 	var err error
 	it.currentIndex = 0
-	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextID, IteratorLoadingBatchSize)
+	batchSize := IteratorLoadingBatchSize
+	failpoint.Inject("keyspaceIteratorLoadingBatchSize", func(val failpoint.Value) {
+		batchSize = val.(int)
+	})
+	failpoint.InjectCall("keyspaceIteratorOnLoadRange")
+	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextID, batchSize)
 	if err != nil {
 		err = errors.AddStack(err)
 		it.err = err
