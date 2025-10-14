@@ -312,7 +312,7 @@ func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	return nil
 }
 
-func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
+func (s *evictSlowTrendScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	evictedStoreID := s.conf.evictedStore()
 	if evictedStoreID == 0 {
 		return nil
@@ -320,7 +320,7 @@ func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return cluster.SlowTrendEvicted(evictedStoreID)
 }
 
-func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *evictSlowTrendScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 

@@ -232,7 +232,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
+func (s *evictSlowStoreScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
 		return cluster.SlowStoreEvicted(evictStore)
@@ -240,7 +240,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *evictSlowStoreScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 

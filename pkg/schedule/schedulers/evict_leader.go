@@ -227,7 +227,7 @@ func (s *evictLeaderScheduler) ReloadConfig() error {
 	return nil
 }
 
-func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
+func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
 	var res error
@@ -239,7 +239,7 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	return res
 }
 
-func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
