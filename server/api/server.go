@@ -172,8 +172,16 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				constant.SchedulingServiceName,
 				[]string{http.MethodPost}),
 		),
+		addServerNameHeader(svr),
 		negroni.Wrap(r)),
 	)
 
 	return router, group, nil
+}
+
+func addServerNameHeader(svr *server.Server) negroni.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		w.Header().Set(apiutil.XPDHandleHeader, svr.Name())
+		next(w, r)
+	}
 }

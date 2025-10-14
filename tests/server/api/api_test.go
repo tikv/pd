@@ -1032,6 +1032,134 @@ func TestRemovingProgress(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
+type forwardTestSuite struct {
+	suite.Suite
+	env      *tests.SchedulingTestEnvironment
+	leader   *server.Server
+	follower *server.Server
+}
+
+func TestSchedulerTestSuite(t *testing.T) {
+	suite.Run(t, new(forwardTestSuite))
+}
+
+func (suite *forwardTestSuite) SetupSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.PDCount = 3
+	suite.env.RunFunc(func(cluster *tests.TestCluster) {
+		suite.leader = cluster.GetLeaderServer().GetServer()
+		for _, svr := range cluster.GetServers() {
+			if svr.GetAddr() != suite.leader.GetAddr() {
+				suite.follower = svr.GetServer()
+				break
+			}
+		}
+		re.NotNil(suite.follower)
+	})
+}
+
+func (suite *forwardTestSuite) TearDownSuite() {
+	re := suite.Require()
+	suite.env.Cleanup()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+}
+
+func (suite *forwardTestSuite) TestFollowerLocalAPIs() {
+	suite.env.RunTest(suite.checkAdminLog)
+	suite.env.RunTest(suite.checkGetRequest)
+	suite.env.RunTest(suite.checkConfig)
+}
+
+func (suite *forwardTestSuite) checkAdminLog(_ *tests.TestCluster) {
+	re := suite.Require()
+
+	addr := suite.follower.GetAddr() + "/pd/api/v1/admin/log"
+	level := "debug"
+	data, err := json.Marshal(level)
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPost, addr, bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+
+	re.Equal(http.StatusOK, resp.StatusCode)
+	re.Equal(suite.follower.GetConfig().Name, resp.Header.Get(apiutil.XPDHandleHeader), "request should be handled locally")
+}
+
+func (suite *forwardTestSuite) checkGetRequest(_ *tests.TestCluster) {
+	re := suite.Require()
+	followerName := suite.follower.GetConfig().Name
+
+	testPaths := map[string]bool{
+		"/pd/api/v1/ping":                  true,
+		"/pd/api/v1/config":                true, // GET config is handled by local server
+		"/pd/api/v1/version":               true,
+		"/pd/api/v1/status":                true,
+		"/pd/api/v1/health":                true,
+		"/pd/api/v1/debug/pprof/goroutine": true,
+		"/pd/api/v1/debug/pprof/zip":       true,
+		"/pd/api/v1/schedulers":            false,
+		"/pd/api/v1/operators":             false,
+	}
+
+	for path, isLocal := range testPaths {
+		addr := suite.follower.GetAddr() + path
+		req, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Do(req)
+		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		if isLocal {
+			re.Equal(followerName, resp.Header.Get(apiutil.XPDHandleHeader), path+" request should not be redirected")
+		} else {
+			re.NotEqual(followerName, resp.Header.Get(apiutil.XPDHandleHeader), path+" request should not be redirected")
+		}
+		resp.Body.Close()
+	}
+}
+
+func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
+	re := suite.Require()
+	followerURL := suite.follower.GetAddr() + "/pd/api/v1/config"
+	followerName := suite.follower.GetConfig().Name
+	// Test local config
+	var followerCfg config.Config
+	err := testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg,
+		testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(suite.follower.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.NotEqual(suite.leader.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.Equal(suite.follower.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.NotEqual(suite.leader.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.Equal(suite.follower.GetConfig().Name, followerCfg.Name)
+	re.NotEqual(suite.leader.GetConfig().Name, followerCfg.Name)
+	re.Equal(suite.follower.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	re.NotEqual(suite.leader.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	// Test sync config
+	leaderURL := suite.leader.GetAddr() + "/pd/api/v1/config"
+	reqData, err := json.Marshal(map[string]any{
+		"max-replicas": 4,
+	})
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPost, leaderURL, bytes.NewBuffer(reqData))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.NoError(err)
+	re.NotEqual(followerName, resp.Header.Get(apiutil.XPDHandleHeader), "POST /config request should not be redirected")
+	testutil.Eventually(re, func() bool {
+		var followerCfg config.Config
+		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg)
+		re.NoError(err)
+		fmt.Println(followerCfg.Replication.MaxReplicas)
+		return followerCfg.Replication.MaxReplicas == 4.
+	})
+}
+
 func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
