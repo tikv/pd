@@ -519,7 +519,7 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.NoError(err)
 	re.Len(labelRules, 1)
 	re.Equal(labelRule, labelRules[0])
-	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"keyspaces/0", "rule2"})
+	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{expectedKeyspaceID, "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
