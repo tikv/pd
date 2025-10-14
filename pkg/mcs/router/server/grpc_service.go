@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-
 	"io"
 	"net/http"
 	"time"
@@ -81,21 +80,21 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // BatchScanRegions implements the BatchScanRegions RPC method.
 func (s *Service) BatchScanRegions(_ctx context.Context, request *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
-	resp, err := gh.BatchScanRegions(s.GetBasicCluster(), request)
+	resp, err := gh.BatchScanRegions(s.GetBasicCluster(), request, false)
 	gh.IncRegionRequestCounter("BatchScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // ScanRegions implements the ScanRegions RPC method.
 func (s *Service) ScanRegions(_ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
-	resp, err := gh.ScanRegions(s.GetBasicCluster(), request)
+	resp, err := gh.ScanRegions(s.GetBasicCluster(), request, false)
 	gh.IncRegionRequestCounter("ScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetRegion implements the GetRegion RPC method.
 func (s *Service) GetRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	resp, err := gh.GetRegion(s.GetBasicCluster(), request)
+	resp, err := gh.GetRegion(s.GetBasicCluster(), request, false)
 	gh.IncRegionRequestCounter("GetRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
@@ -116,14 +115,14 @@ func (s *Service) GetStore(_ctx context.Context, request *pdpb.GetStoreRequest) 
 
 // GetPrevRegion implements the GetPrevRegion RPC method.
 func (s *Service) GetPrevRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	resp, err := gh.GetPrevRegion(s.GetBasicCluster(), request)
+	resp, err := gh.GetPrevRegion(s.GetBasicCluster(), request, false)
 	gh.IncRegionRequestCounter("GetPrevRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetRegionByID implements the GetRegionByID RPC method.
 func (s *Service) GetRegionByID(_ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
-	resp, err := gh.GetRegionByID(s.GetBasicCluster(), request)
+	resp, err := gh.GetRegionByID(s.GetBasicCluster(), request, false)
 	gh.IncRegionRequestCounter("GetRegionByID", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
