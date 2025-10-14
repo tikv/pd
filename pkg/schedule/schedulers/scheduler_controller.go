@@ -299,7 +299,13 @@ func (c *Controller) ReloadSchedulerConfig(name string) error {
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return c.GetScheduler(name).ReloadConfig()
+	scheduler := c.GetScheduler(name)
+	if scheduler == nil {
+		// Scheduler exists in handlers but not in schedulers map, which means it's a handler-only scheduler
+		// Handler-only schedulers don't have config reloading capability
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return scheduler.ReloadConfig()
 }
 
 // IsSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.
