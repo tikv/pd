@@ -393,3 +393,14 @@ func MakeKeyRanges(keys ...string) []any {
 	}
 	return res
 }
+
+// IterateLableRules iterates the label rules. It will return once the iterator returns false.
+func (l *RegionLabeler) IterateLableRules(iterator func(rule *LabelRule) bool) {
+	l.RLock()
+	defer l.RUnlock()
+	for _, rule := range l.labelRules {
+		if !iterator(rule) {
+			return
+		}
+	}
+}

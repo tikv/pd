@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tests/integrations
 
-go 1.23.0
+go 1.23.12
 
 replace (
 	github.com/tikv/pd => ../../
@@ -14,7 +14,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250922052949-d6cbb9eb8638
+	github.com/pingcap/kvproto v0.0.0-20250923091925-d79d11002599
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
@@ -153,7 +153,7 @@ require (
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20250908031600-468ef95996bb // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20250928152019-e111aaee93f4 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

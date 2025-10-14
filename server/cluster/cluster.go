@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/memory"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
@@ -90,9 +91,6 @@ var (
 	updateSuccessCounter          = bucketEventCounter.WithLabelValues("update_success")
 )
 
-// regionLabelGCInterval is the interval to run region-label's GC work.
-const regionLabelGCInterval = time.Hour
-
 const (
 	// nodeStateCheckJobInterval is the interval to run node state check job.
 	nodeStateCheckJobInterval = 10 * time.Second
@@ -109,6 +107,12 @@ const (
 	persistLimitRetryTimes  = 5
 	persistLimitWaitTime    = 100 * time.Millisecond
 	gcTunerCheckCfgInterval = 10 * time.Second
+	// regionLabelGCInterval is the interval to run region-label's GC work.
+	regionLabelGCInterval = time.Hour
+	// storageSizeCollectorInterval is the interval to run storage size collector.
+	storageSizeCollectorInterval = time.Minute
+	// dfsStatsCollectorInterval is the interval to run store stats collector.
+	dfsStatsCollectorInterval = time.Minute
 
 	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
 	// It should enlarge the limiter if the snapshot's duration is less than this value.
@@ -132,8 +136,10 @@ type Server interface {
 	GetBasicCluster() *core.BasicCluster
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
+	GetKeyspaceManager() *keyspace.Manager
 	GetKeyspaceGroupManager() *keyspace.GroupManager
 	IsKeyspaceGroupEnabled() bool
+	GetMeteringWriter() *metering.Writer
 }
 
 // RaftCluster is used for cluster config management.
@@ -399,7 +405,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 	}
 	c.checkSchedulingService()
-	c.wg.Add(10)
+	c.wg.Add(12)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -410,6 +416,8 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 	go c.startProgressGC()
+	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
+	go c.runDFSStatsCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
 
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -2544,4 +2552,172 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 		c.ResetTriggerNetworkSlowEvict(storeID)
 		storeTriggerNetworkSlowEvict.DeleteLabelValues(strconv.FormatUint(storeID, 10))
 	}
+}
+
+// runStorageSizeCollector runs the storage size collector for the metering.
+func (c *RaftCluster) runStorageSizeCollector(
+	writer *metering.Writer,
+	regionLabeler *labeler.RegionLabeler,
+	keyspaceManager *keyspace.Manager,
+) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	if writer == nil {
+		log.Info("no metering writer provided, the storage size collector will not be started")
+		return
+	}
+	log.Info("running the storage size collector")
+	// Init and register the collector before starting the loop.
+	collector := newStorageSizeCollector()
+	writer.RegisterCollector(collector)
+	// Start the ticker to collect the storage size data periodically.
+	ticker := time.NewTicker(storageSizeCollectorInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("storage size collector has been stopped")
+			return
+		case <-ticker.C:
+			storageSizeInfoList := c.collectStorageSize(regionLabeler, keyspaceManager)
+			// Collect the storage size info list of all keyspaces.
+			collector.Collect(storageSizeInfoList)
+		}
+	}
+}
+
+func (c *RaftCluster) collectStorageSize(
+	regionLabeler *labeler.RegionLabeler,
+	keyspaceManager *keyspace.Manager,
+) []*storageSizeInfo {
+	regionBoundsMap := make(map[string]*keyspace.RegionBound)
+	start := time.Now()
+	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
+	regionLabeler.IterateLableRules(func(rule *labeler.LabelRule) bool {
+		// Try to parse the keyspace ID from the label rule.
+		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
+		if !ok {
+			return true
+		}
+		keyspaceName, err := keyspaceManager.GetKeyspaceNameByID(keyspaceID)
+		if err != nil {
+			// TODO: improve the observability of this error.
+			return true
+		}
+		// Make the region bounds.
+		regionBoundsMap[keyspaceName] = keyspace.MakeRegionBound(keyspaceID)
+		return true
+	})
+	log.Info("iterated the region bounds of all keyspaces",
+		zap.Duration("cost", time.Since(start)),
+		zap.Int("count", len(regionBoundsMap)))
+
+	start = time.Now()
+	storageSizeInfoList := make([]*storageSizeInfo, 0, len(regionBoundsMap))
+	// Observe the region stats of each keyspace.
+	for keyspaceName, regionBounds := range regionBoundsMap {
+		regionStats := c.GetRegionStatsByRange(regionBounds.TxnLeftBound, regionBounds.TxnRightBound)
+		storageSizeInfoList = append(storageSizeInfoList, &storageSizeInfo{
+			keyspaceName:           keyspaceName,
+			rowBasedStorageSize:    uint64(regionStats.StorageSize),
+			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
+		})
+	}
+	log.Info("observed the region stats of all keyspaces",
+		zap.Duration("cost", time.Since(start)),
+		zap.Int("count", len(storageSizeInfoList)))
+	return storageSizeInfoList
+}
+
+// runDFSStatsCollector runs the DFS (Distributed File System) stats collector for the metering.
+func (c *RaftCluster) runDFSStatsCollector(
+	writer *metering.Writer,
+	keyspaceManager *keyspace.Manager,
+) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	if writer == nil {
+		log.Info("no metering writer provided, the dfs stats collector will not be started")
+		return
+	}
+	log.Info("running the dfs stats collector")
+	// Init and register the collector before starting the loop.
+	collector := newDfsStatsCollector()
+	writer.RegisterCollector(collector)
+	// Start the ticker to collect the DFS stats data periodically.
+	ticker := time.NewTicker(dfsStatsCollectorInterval)
+	defer ticker.Stop()
+
+	var start time.Time
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("dfs stats collector has been stopped")
+			return
+		case <-ticker.C:
+			start = time.Now()
+			keyspaceDFSStats, storeCount := c.collectDFSStats(keyspaceManager)
+			log.Info("collected the incremental dfs stats from all stores",
+				zap.Duration("cost", time.Since(start)),
+				zap.Int("keyspace-dfs-stats-count", len(keyspaceDFSStats)),
+				zap.Int("collected-store-count", storeCount))
+			collector.Collect(keyspaceDFSStats)
+		}
+	}
+}
+
+type keyspaceDFSStatsKey struct {
+	keyspaceName string
+	component    string
+}
+
+type keyspaceDFSStatsMap map[keyspaceDFSStatsKey]*core.DFSStats
+
+func (c *RaftCluster) collectDFSStats(keyspaceManager *keyspace.Manager) (keyspaceDFSStatsMap, int) {
+	var (
+		keyspaceDFSStats = make(keyspaceDFSStatsMap, 0)
+		storeCount       = 0
+		keyspaceName     string
+		err              error
+	)
+	for _, store := range c.GetStores() {
+		scopedDFSStats := store.TakeScopedDFSStats()
+		if len(scopedDFSStats) == 0 {
+			continue
+		}
+		storeCount++
+		log.Info("collected the scoped dfs stats from the store",
+			zap.Uint64("store-id", store.GetID()),
+			zap.Int("collected-store-count", storeCount),
+			zap.Int("scoped-dfs-stats-count", len(scopedDFSStats)))
+		// Merge into the keyspace DFS stats.
+		for scope, stats := range scopedDFSStats {
+			// Set the keyspace name to empty string for global scope.
+			if scope.GetIsGlobal() {
+				keyspaceName = ""
+			} else {
+				keyspaceName, err = keyspaceManager.GetKeyspaceNameByID(scope.GetKeyspaceId())
+				if err != nil {
+					continue
+				}
+			}
+			key := keyspaceDFSStatsKey{
+				keyspaceName: keyspaceName,
+				component:    scope.GetComponent(),
+			}
+			dfsStats, ok := keyspaceDFSStats[key]
+			if ok {
+				dfsStats.WrittenBytes += stats.WrittenBytes
+				dfsStats.WriteRequests += stats.WriteRequests
+			} else {
+				keyspaceDFSStats[key] = &core.DFSStats{
+					WrittenBytes:  stats.WrittenBytes,
+					WriteRequests: stats.WriteRequests,
+				}
+			}
+		}
+	}
+	return keyspaceDFSStats, storeCount
 }

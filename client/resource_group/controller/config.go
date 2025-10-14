@@ -16,19 +16,6 @@ package controller
 
 import (
 	"time"
-
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-)
-
-var (
-	requestUnitLimitTypeList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
-		rmpb.RequestUnitType_RU: {},
-	}
-	requestResourceLimitTypeList map[rmpb.RawResourceType]struct{} = map[rmpb.RawResourceType]struct{}{
-		rmpb.RawResourceType_IOReadFlow:  {},
-		rmpb.RawResourceType_IOWriteFlow: {},
-		rmpb.RawResourceType_CPU:         {},
-	}
 )
 
 const (

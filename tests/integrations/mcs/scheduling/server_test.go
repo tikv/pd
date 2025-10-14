@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,10 +28,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -144,7 +148,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
 	})
 	// change primary
 	primary.Close()
@@ -155,7 +159,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
 	})
 }
 
@@ -1499,4 +1503,55 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	// Should have regions IDs for the split operation
 	re.Equal([]uint64{101}, splitResp.GetRegionsId())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+}
+
+func (suite *serverTestSuite) TestRegionBucketsStoreNotFound() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	addr := strings.TrimPrefix(tc.GetPrimaryServer().GetAddr(), "http://")
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	re.NoError(err)
+	defer conn.Close()
+
+	schedulingClient := schedulingpb.NewSchedulingClient(conn)
+	stream, err := schedulingClient.RegionBuckets(suite.ctx)
+	re.NoError(err)
+
+	// Create buckets for a region that doesn't exist in the cluster
+	// This will trigger the store == nil condition because GetLeaderStoreByRegionID returns nil
+	buckets := &metapb.Buckets{
+		RegionId:   999, // Non-existent region ID
+		Version:    1,
+		Keys:       [][]byte{[]byte("key1"), []byte("key2")},
+		PeriodInMs: 1000,
+	}
+
+	bucketsReq := &schedulingpb.RegionBucketsRequest{
+		Header:  &schedulingpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+		Buckets: buckets,
+	}
+
+	// This should not return an error - the server will log a warning and continue
+	err = stream.Send(bucketsReq)
+	re.NoError(err)
+
+	// Send another valid request to ensure the stream is still working after the store == nil case
+	validBuckets := &metapb.Buckets{
+		RegionId:   1000, // Another non-existent region
+		Version:    1,
+		Keys:       [][]byte{[]byte("key3"), []byte("key4")},
+		PeriodInMs: 1000,
+	}
+
+	validReq := &schedulingpb.RegionBucketsRequest{
+		Header:  &schedulingpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+		Buckets: validBuckets,
+	}
+
+	err = stream.Send(validReq)
+	re.NoError(err)
 }

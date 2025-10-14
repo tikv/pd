@@ -686,6 +686,16 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		kgm.metrics.mergeTargetGauge.Dec()
 	}
 
+	failpoint.Inject("delayBeforeCheckingElectionMember", func() {
+		if oldAM == nil && (group.IsSplitTarget() || group.IsSplitSource()) {
+			log.Info("INJECTED DELAY before update the keyspace group",
+				zap.Uint32("target-group-id", group.ID),
+				zap.Uint32("source-group-id", group.SplitState.SplitSource),
+				zap.Int("keyspaces-count", len(group.Keyspaces)))
+			time.Sleep(10 * time.Second) // Adjust this to match client query timing
+		}
+	})
+
 	// If this host is already assigned a replica of this keyspace group, i.e., the member
 	// is already initialized, just update the meta.
 	if oldAM != nil {

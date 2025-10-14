@@ -773,8 +773,7 @@ type groupCostController struct {
 	metaLock sync.RWMutex
 
 	// following fields are used for token limiter.
-	calculators    []ResourceCalculator
-	handleRespFunc func(*rmpb.TokenBucketResponse)
+	calculators []ResourceCalculator
 
 	// metrics
 	metrics *groupMetricsCollection
@@ -820,8 +819,7 @@ type groupCostController struct {
 		// request completes successfully.
 		initialRequestCompleted bool
 
-		resourceTokens    map[rmpb.RawResourceType]*tokenCounter
-		requestUnitTokens map[rmpb.RequestUnitType]*tokenCounter
+		requestUnitTokens *tokenCounter
 	}
 
 	// tombstone is set to true when the resource group is deleted.
@@ -859,7 +857,7 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 }
 
 type tokenCounter struct {
-	getTokenBucketFunc func() *rmpb.TokenBucket
+	fillRate uint64
 
 	// avgRUPerSec is an exponentially-weighted moving average of the RU
 	// consumption per second; used to estimate the RU requirements for the next
@@ -915,13 +913,6 @@ func newGroupCostController(
 		isThrottled:           &atomic.Bool{},
 	}
 
-	switch gc.mode {
-	case rmpb.GroupMode_RUMode:
-		gc.handleRespFunc = gc.handleRUTokenResponse
-	case rmpb.GroupMode_RawMode:
-		gc.handleRespFunc = gc.handleRawResourceTokenResponse
-	}
-
 	gc.mu.consumption = &rmpb.Consumption{}
 	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
 	gc.mu.globalCounter = &rmpb.Consumption{}
@@ -942,13 +933,13 @@ func (gc *groupCostController) initRunState() {
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
 		initialToken := float64(tb.Settings.FillRate)
 		cfg := tokenBucketReconfigureArgs{
-			NewTokens: initialToken,
-			NewBurst:  tb.Settings.BurstLimit,
+			newTokens: initialToken,
+			newBurst:  tb.Settings.BurstLimit,
 			// This is to trigger token requests as soon as resource group start consuming tokens.
-			NotifyThreshold: math.Max(initialToken*tokenReserveFraction, 1),
+			newNotifyThreshold: math.Max(initialToken*tokenReserveFraction, 1),
 		}
-		if cfg.NewBurst >= 0 {
-			cfg.NewBurst = 0
+		if cfg.newBurst >= 0 {
+			cfg.newBurst = 0
 		}
 		if tb.Settings.BurstLimit >= 0 {
 			isBurstable = false
@@ -958,47 +949,36 @@ func (gc *groupCostController) initRunState() {
 
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
-	switch gc.mode {
-	case rmpb.GroupMode_RUMode:
-		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
-		for typ := range requestUnitLimitTypeList {
-			limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(getRUTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
-			counter := &tokenCounter{
-				limiter:     limiter,
-				avgRUPerSec: 0,
-				avgLastTime: now,
-				getTokenBucketFunc: func() *rmpb.TokenBucket {
-					return getRUTokenBucketSetting(gc.meta, typ)
-				},
-			}
-			gc.run.requestUnitTokens[typ] = counter
-		}
-	case rmpb.GroupMode_RawMode:
-		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
-		for typ := range requestResourceLimitTypeList {
-			limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(getRawResourceTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
-			counter := &tokenCounter{
-				limiter:     limiter,
-				avgRUPerSec: 0,
-				avgLastTime: now,
-				getTokenBucketFunc: func() *rmpb.TokenBucket {
-					return getRawResourceTokenBucketSetting(gc.meta, typ)
-				},
-			}
-			gc.run.resourceTokens[typ] = counter
-		}
+	limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(gc.meta.RUSettings.RU), gc.lowRUNotifyChan)
+	counter := &tokenCounter{
+		limiter:     limiter,
+		avgRUPerSec: 0,
+		avgLastTime: now,
+		fillRate:    gc.meta.RUSettings.RU.Settings.FillRate,
 	}
+	gc.run.requestUnitTokens = counter
 	gc.burstable.Store(isBurstable)
 }
 
 // applyDegradedMode is used to apply degraded mode for resource group which is in low-process.
 func (gc *groupCostController) applyDegradedMode() {
-	switch gc.mode {
-	case rmpb.GroupMode_RawMode:
-		gc.applyBasicConfigForRawResourceTokenCounter()
-	case rmpb.GroupMode_RUMode:
-		gc.applyBasicConfigForRUTokenCounters()
+	counter := gc.run.requestUnitTokens
+	if !counter.limiter.IsLowTokens() {
+		return
 	}
+	if counter.inDegradedMode {
+		return
+	}
+	counter.inDegradedMode = true
+	initCounterNotify(counter)
+	var cfg tokenBucketReconfigureArgs
+	cfg.newBurst = int64(counter.fillRate)
+	cfg.newFillRate = float64(counter.fillRate)
+	failpoint.Inject("degradedModeRU", func() {
+		cfg.newFillRate = 99999999
+	})
+	counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
+	log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name))
 }
 
 func (gc *groupCostController) updateRunState() {
@@ -1014,99 +994,41 @@ func (gc *groupCostController) updateRunState() {
 }
 
 func (gc *groupCostController) updateAvgRequestResourcePerSec() {
-	switch gc.mode {
-	case rmpb.GroupMode_RawMode:
-		gc.updateAvgRaWResourcePerSec()
-	case rmpb.GroupMode_RUMode:
-		gc.updateAvgRUPerSec()
+	isBurstable := true
+	counter := gc.run.requestUnitTokens
+	if counter.limiter.GetBurst() >= 0 {
+		isBurstable = false
 	}
+	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
+		return
+	}
+	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
+	gc.burstable.Store(isBurstable)
 }
 
 func (gc *groupCostController) resetEmergencyTokenAcquisition() {
-	switch gc.mode {
-	case rmpb.GroupMode_RawMode:
-		for _, counter := range gc.run.resourceTokens {
-			counter.limiter.ResetRemainingNotifyTimes()
-		}
-	case rmpb.GroupMode_RUMode:
-		for _, counter := range gc.run.requestUnitTokens {
-			counter.limiter.ResetRemainingNotifyTimes()
-		}
-	}
+	gc.run.requestUnitTokens.limiter.ResetRemainingNotifyTimes()
 }
 
 func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context) {
-	switch gc.mode {
-	case rmpb.GroupMode_RawMode:
-		for _, counter := range gc.run.resourceTokens {
-			counter.notify.mu.Lock()
-			ch := counter.notify.setupNotificationCh
-			counter.notify.mu.Unlock()
-			if ch == nil {
-				continue
-			}
-			select {
-			case <-ch:
-				counter.notify.mu.Lock()
-				counter.notify.setupNotificationTimer = nil
-				counter.notify.setupNotificationCh = nil
-				threshold := counter.notify.setupNotificationThreshold
-				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(threshold)
-			case <-ctx.Done():
-				return
-			}
-		}
-
-	case rmpb.GroupMode_RUMode:
-		for _, counter := range gc.run.requestUnitTokens {
-			counter.notify.mu.Lock()
-			ch := counter.notify.setupNotificationCh
-			counter.notify.mu.Unlock()
-			if ch == nil {
-				continue
-			}
-			select {
-			case <-ch:
-				counter.notify.mu.Lock()
-				counter.notify.setupNotificationTimer = nil
-				counter.notify.setupNotificationCh = nil
-				threshold := counter.notify.setupNotificationThreshold
-				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(threshold)
-			case <-ctx.Done():
-				return
-			}
-		}
+	counter := gc.run.requestUnitTokens
+	counter.notify.mu.Lock()
+	ch := counter.notify.setupNotificationCh
+	counter.notify.mu.Unlock()
+	if ch == nil {
+		return
 	}
-}
-
-func (gc *groupCostController) updateAvgRaWResourcePerSec() {
-	isBurstable := true
-	for typ, counter := range gc.run.resourceTokens {
-		if counter.limiter.GetBurst() >= 0 {
-			isBurstable = false
-		}
-		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
-			continue
-		}
-		logControllerTrace("[resource group controller] update avg raw resource per sec", zap.String("name", gc.name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
+	select {
+	case <-ch:
+		counter.notify.mu.Lock()
+		counter.notify.setupNotificationTimer = nil
+		counter.notify.setupNotificationCh = nil
+		threshold := counter.notify.setupNotificationThreshold
+		counter.notify.mu.Unlock()
+		counter.limiter.SetupNotificationThreshold(threshold)
+	case <-ctx.Done():
+		return
 	}
-	gc.burstable.Store(isBurstable)
-}
-
-func (gc *groupCostController) updateAvgRUPerSec() {
-	isBurstable := true
-	for typ, counter := range gc.run.requestUnitTokens {
-		if counter.limiter.GetBurst() >= 0 {
-			isBurstable = false
-		}
-		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
-			continue
-		}
-		logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
-	}
-	gc.burstable.Store(isBurstable)
 }
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
@@ -1143,19 +1065,8 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
 		}
-		switch gc.mode {
-		case rmpb.GroupMode_RUMode:
-			for typ := range requestUnitLimitTypeList {
-				if getRUValueFromConsumption(gc.run.consumption, typ)-getRUValueFromConsumption(gc.run.lastRequestConsumption, typ) >= consumptionsReportingThreshold {
-					return true
-				}
-			}
-		case rmpb.GroupMode_RawMode:
-			for typ := range requestResourceLimitTypeList {
-				if getRawResourceValueFromConsumption(gc.run.consumption, typ)-getRawResourceValueFromConsumption(gc.run.lastRequestConsumption, typ) >= consumptionsReportingThreshold {
-					return true
-				}
-			}
+		if getRUValueFromConsumption(gc.run.consumption)-getRUValueFromConsumption(gc.run.lastRequestConsumption) >= consumptionsReportingThreshold {
+			return true
 		}
 	}
 	return false
@@ -1163,67 +1074,13 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 
 func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketResponse) {
 	gc.run.requestInProgress = false
-	gc.handleRespFunc(resp)
+	gc.handleRUTokenResponse(resp)
 	gc.run.initialRequestCompleted = true
-}
-
-func (gc *groupCostController) handleRawResourceTokenResponse(resp *rmpb.TokenBucketResponse) {
-	for _, grantedTB := range resp.GetGrantedResourceTokens() {
-		typ := grantedTB.GetType()
-		counter, ok := gc.run.resourceTokens[typ]
-		if !ok {
-			log.Warn("[resource group controller] not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
-			continue
-		}
-		gc.modifyTokenCounter(counter, grantedTB.GetGrantedTokens(), grantedTB.GetTrickleTimeMs())
-	}
 }
 
 func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketResponse) {
 	for _, grantedTB := range resp.GetGrantedRUTokens() {
-		typ := grantedTB.GetType()
-		counter, ok := gc.run.requestUnitTokens[typ]
-		if !ok {
-			log.Warn("[resource group controller] not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
-			continue
-		}
-		gc.modifyTokenCounter(counter, grantedTB.GetGrantedTokens(), grantedTB.GetTrickleTimeMs())
-	}
-}
-
-func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
-	for typ, counter := range gc.run.requestUnitTokens {
-		if !counter.limiter.IsLowTokens() {
-			continue
-		}
-		if counter.inDegradedMode {
-			continue
-		}
-		counter.inDegradedMode = true
-		initCounterNotify(counter)
-		var cfg tokenBucketReconfigureArgs
-		fillRate := counter.getTokenBucketFunc().Settings.FillRate
-		cfg.NewBurst = int64(fillRate)
-		cfg.NewRate = float64(fillRate)
-		failpoint.Inject("degradedModeRU", func() {
-			cfg.NewRate = 99999999
-		})
-		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
-		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
-	}
-}
-
-func (gc *groupCostController) applyBasicConfigForRawResourceTokenCounter() {
-	for _, counter := range gc.run.resourceTokens {
-		if !counter.limiter.IsLowTokens() {
-			continue
-		}
-		initCounterNotify(counter)
-		var cfg tokenBucketReconfigureArgs
-		fillRate := counter.getTokenBucketFunc().Settings.FillRate
-		cfg.NewBurst = int64(fillRate)
-		cfg.NewRate = float64(fillRate)
-		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
+		gc.modifyTokenCounter(gc.run.requestUnitTokens, grantedTB.GetGrantedTokens(), grantedTB.GetTrickleTimeMs())
 	}
 }
 
@@ -1240,24 +1097,24 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	initCounterNotify(counter)
 	counter.inDegradedMode = false
 	var cfg tokenBucketReconfigureArgs
-	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
+	cfg.newBurst = bucket.GetSettings().GetBurstLimit()
 	// When trickleTimeMs equals zero, server has enough tokens and does not need to
 	// limit client consume token. So all token is granted to client right now.
 	if trickleTimeMs == 0 {
-		cfg.NewTokens = granted
-		cfg.NewRate = float64(bucket.GetSettings().FillRate)
+		cfg.newTokens = granted
+		cfg.newFillRate = float64(bucket.GetSettings().FillRate)
 		counter.lastDeadline = time.Time{}
-		cfg.NotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
-		if cfg.NewBurst < 0 {
-			cfg.NewTokens = float64(counter.getTokenBucketFunc().Settings.FillRate)
+		cfg.newNotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
+		if cfg.newBurst < 0 {
+			cfg.newTokens = float64(counter.fillRate)
 		}
 		gc.isThrottled.Store(false)
 	} else {
 		// Otherwise the granted token is delivered to the client by fill rate.
-		cfg.NewTokens = 0
+		cfg.newTokens = 0
 		trickleDuration := time.Duration(trickleTimeMs) * time.Millisecond
 		deadline := gc.run.now.Add(trickleDuration)
-		cfg.NewRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
+		cfg.newFillRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
 
 		timerDuration := trickleDuration - trickleReserveDuration
 		if timerDuration <= 0 {
@@ -1279,7 +1136,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		}
 	}
 
-	counter.lastRate = cfg.NewRate
+	counter.lastRate = cfg.newFillRate
 	counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 }
 
@@ -1302,61 +1159,33 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	failpoint.Inject("triggerUpdate", func() {
 		selected = true
 	})
-	switch gc.mode {
-	case rmpb.GroupMode_RawMode:
-		requests := make([]*rmpb.RawResourceItem, 0, len(requestResourceLimitTypeList))
-		for typ, counter := range gc.run.resourceTokens {
-			switch selectTyp {
-			case periodicReport:
-				selected = selected || gc.shouldReportConsumption()
-				fallthrough
-			case lowToken:
-				if counter.limiter.IsLowTokens() {
-					selected = true
-				}
-			}
-			request := &rmpb.RawResourceItem{
-				Type:  typ,
-				Value: gc.calcRequest(counter),
-			}
-			requests = append(requests, request)
+	counter := gc.run.requestUnitTokens
+	switch selectTyp {
+	case periodicReport:
+		selected = selected || gc.shouldReportConsumption()
+		failpoint.Inject("triggerPeriodicReport", func(val failpoint.Value) {
+			selected = gc.name == val.(string)
+		})
+		fallthrough
+	case lowToken:
+		if counter.limiter.IsLowTokens() {
+			selected = true
 		}
-		req.Request = &rmpb.TokenBucketRequest_RawResourceItems{
-			RawResourceItems: &rmpb.TokenBucketRequest_RequestRawResource{
-				RequestRawResource: requests,
-			},
-		}
-	case rmpb.GroupMode_RUMode:
-		requests := make([]*rmpb.RequestUnitItem, 0, len(requestUnitLimitTypeList))
-		for typ, counter := range gc.run.requestUnitTokens {
-			switch selectTyp {
-			case periodicReport:
-				selected = selected || gc.shouldReportConsumption()
-				failpoint.Inject("triggerPeriodicReport", func(val failpoint.Value) {
-					selected = gc.name == val.(string)
-				})
-				fallthrough
-			case lowToken:
-				if counter.limiter.IsLowTokens() {
-					selected = true
-				}
-				failpoint.Inject("triggerLowRUReport", func(val failpoint.Value) {
-					if selectTyp == lowToken {
-						selected = gc.name == val.(string)
-					}
-				})
+		failpoint.Inject("triggerLowRUReport", func(val failpoint.Value) {
+			if selectTyp == lowToken {
+				selected = gc.name == val.(string)
 			}
-			request := &rmpb.RequestUnitItem{
-				Type:  typ,
-				Value: gc.calcRequest(counter),
-			}
-			requests = append(requests, request)
-		}
-		req.Request = &rmpb.TokenBucketRequest_RuItems{
-			RuItems: &rmpb.TokenBucketRequest_RequestRU{
-				RequestRU: requests,
-			},
-		}
+		})
+	}
+	request := &rmpb.RequestUnitItem{
+		Type:  rmpb.RequestUnitType_RU,
+		Value: gc.calcRequest(counter),
+	}
+
+	req.Request = &rmpb.TokenBucketRequest_RuItems{
+		RuItems: &rmpb.TokenBucketRequest_RequestRU{
+			RequestRU: []*rmpb.RequestUnitItem{request},
+		},
 	}
 	if !selected {
 		return nil
@@ -1401,36 +1230,22 @@ func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Co
 retryLoop:
 	for range gc.mainCfg.WaitRetryTimes {
 		now := time.Now()
-		switch gc.mode {
-		case rmpb.GroupMode_RawMode:
-			res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
-			for typ, counter := range gc.run.resourceTokens {
-				if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
-					res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
-				}
+		var res *Reservation
+		counter := gc.run.requestUnitTokens
+		if v := getRUValueFromConsumption(delta); v > 0 {
+			// record the consume token histogram if enable controller debug mode.
+			if enableControllerTraceLog.Load() {
+				gc.metrics.consumeTokenHistogram.Observe(v)
 			}
-			if d, err = WaitReservations(ctx, now, res); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
+			// allow debt for small request or not in throttled. remove tokens directly.
+			if allowDebt {
+				counter.limiter.RemoveTokens(now, v)
 				break retryLoop
 			}
-		case rmpb.GroupMode_RUMode:
-			res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
-			for typ, counter := range gc.run.requestUnitTokens {
-				if v := getRUValueFromConsumption(delta, typ); v > 0 {
-					// record the consume token histogram if enable controller debug mode.
-					if enableControllerTraceLog.Load() {
-						gc.metrics.consumeTokenHistogram.Observe(v)
-					}
-					// allow debt for small request or not in throttled. remove tokens directly.
-					if allowDebt {
-						counter.limiter.RemoveTokens(now, v)
-						break retryLoop
-					}
-					res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
-				}
-			}
-			if d, err = WaitReservations(ctx, now, res); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
-				break retryLoop
-			}
+			res = counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v)
+		}
+		if d, err = WaitReservations(ctx, now, []*Reservation{res}); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
+			break retryLoop
 		}
 		gc.metrics.requestRetryCounter.Inc()
 		time.Sleep(gc.mainCfg.WaitRetryInterval)
@@ -1497,19 +1312,9 @@ func (gc *groupCostController) onResponseImpl(
 		calc.AfterKVRequest(delta, req, resp)
 	}
 	if !gc.burstable.Load() {
-		switch gc.mode {
-		case rmpb.GroupMode_RawMode:
-			for typ, counter := range gc.run.resourceTokens {
-				if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
-					counter.limiter.RemoveTokens(time.Now(), v)
-				}
-			}
-		case rmpb.GroupMode_RUMode:
-			for typ, counter := range gc.run.requestUnitTokens {
-				if v := getRUValueFromConsumption(delta, typ); v > 0 {
-					counter.limiter.RemoveTokens(time.Now(), v)
-				}
-			}
+		counter := gc.run.requestUnitTokens
+		if v := getRUValueFromConsumption(delta); v > 0 {
+			counter.limiter.RemoveTokens(time.Now(), v)
 		}
 	}
 
