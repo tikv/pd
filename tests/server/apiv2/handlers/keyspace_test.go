@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -76,9 +77,9 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
 		re.Equal(created, loaded)
 	}
-	defaultKeyspace := mustLoadKeyspaces(re, suite.server, constant.DefaultKeyspaceName)
-	re.Equal(constant.DefaultKeyspaceName, defaultKeyspace.Name)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, defaultKeyspace.State)
+	bootstrapKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
+	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
 }
 
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspaceByID() {
@@ -88,9 +89,9 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspaceByID() {
 		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
 		re.Equal(created, loaded)
 	}
-	defaultKeyspace := mustLoadKeyspaces(re, suite.server, constant.DefaultKeyspaceName)
-	re.Equal(constant.DefaultKeyspaceName, defaultKeyspace.Name)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, defaultKeyspace.State)
+	bootstrapKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
+	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
@@ -149,13 +150,27 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 50)
 	loadResponse := sendLoadRangeRequest(re, suite.server, "", "")
 	re.Empty(loadResponse.NextPageToken) // Load response should contain no more pages.
-	// Load response should contain all created keyspace and a default.
+	// Load response should contain all created keyspace and a bootstrap keyspace.
 	re.Len(loadResponse.Keyspaces, len(keyspaces)+1)
-	for i, created := range keyspaces {
-		re.Equal(created, loadResponse.Keyspaces[i+1].KeyspaceMeta)
+
+	// Find the bootstrap keyspace in the response
+	var bootstrapKeyspace *handlers.KeyspaceMeta
+	var userKeyspaces []*handlers.KeyspaceMeta
+	for _, ks := range loadResponse.Keyspaces {
+		if ks.Name == keyspace.GetBootstrapKeyspaceName() {
+			bootstrapKeyspace = ks
+		} else {
+			userKeyspaces = append(userKeyspaces, ks)
+		}
 	}
-	re.Equal(constant.DefaultKeyspaceName, loadResponse.Keyspaces[0].Name)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, loadResponse.Keyspaces[0].State)
+
+	// Verify bootstrap keyspace exists and is enabled
+	re.NotNil(bootstrapKeyspace)
+	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
+
+	// Verify we have the correct number of user keyspaces
+	re.Len(userKeyspaces, len(keyspaces))
 }
 
 func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, count int) []*keyspacepb.KeyspaceMeta {
