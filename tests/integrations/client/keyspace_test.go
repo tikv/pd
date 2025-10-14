@@ -73,11 +73,13 @@ func (suite *clientStatelessTestSuite) TestLoadKeyspace() {
 	// Loading non-existing keyspace should result in error.
 	_, err := suite.client.LoadKeyspace(suite.ctx, "non-existing keyspace")
 	re.Error(err)
-	// Loading default keyspace should be successful.
-	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, constant.DefaultKeyspaceName)
+	// Loading bootstrap keyspace should be successful.
+	bootstrapKeyspaceName := keyspace.GetBootstrapKeyspaceName()
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, bootstrapKeyspaceName)
 	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceID, keyspaceDefault.GetId())
-	re.Equal(constant.DefaultKeyspaceName, keyspaceDefault.GetName())
+	re.Equal(bootstrapKeyspaceID, keyspaceDefault.GetId())
+	re.Equal(bootstrapKeyspaceName, keyspaceDefault.GetName())
 }
 
 func (suite *clientStatelessTestSuite) TestGetAllKeyspaces() {
@@ -91,7 +93,15 @@ func (suite *clientStatelessTestSuite) TestGetAllKeyspaces() {
 	// Get all keyspaces.
 	resKeyspaces, err := suite.client.GetAllKeyspaces(suite.ctx, 1, math.MaxUint32)
 	re.NoError(err)
-	re.Len(metas, len(resKeyspaces))
+	if kerneltype.IsNextGen() {
+		// In NextGen, the bootstrap keyspace is SYSTEM, not DEFAULT.
+		// Should have test keyspaces + bootstrap keyspace
+		re.Len(resKeyspaces, len(metas)+1)
+	} else {
+		// In Classic, the bootstrap keyspace is DEFAULT.
+		// Should have test keyspaces
+		re.Len(resKeyspaces, len(metas))
+	}
 	// Check expected keyspaces all in resKeyspaces.
 	for _, expected := range metas {
 		var isExists bool
@@ -219,7 +229,9 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+	// In NextGen build, empty gc_management_type is automatically set to "keyspace_level"
+	// In Classic build, empty gc_management_type remains empty and returns false
+	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
 }
 
 func TestProtectedKeyspace(t *testing.T) {
