@@ -67,6 +67,7 @@ func (suite *evictSlowStoreTestSuite) TearDownTest() {
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
 	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 100
@@ -113,6 +114,8 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	suite.NoError(err)
 	suite.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	suite.Zero(persistValue.evictStore())
+	suite.True(persistValue.readyForRecovery())
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
@@ -124,6 +127,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 
 	es2.conf.setStoreAndPersist(1)
 	suite.Equal(uint64(1), es2.conf.evictStore())
+	suite.False(es2.conf.readyForRecovery())
 	// prepare with evict store.
 	suite.es.Prepare(suite.tc)
 }

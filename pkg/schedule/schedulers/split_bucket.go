@@ -65,15 +65,15 @@ func initSplitBucketConfig() *splitBucketSchedulerConfig {
 }
 
 type splitBucketSchedulerConfig struct {
-	mu         syncutil.RWMutex
+	syncutil.RWMutex
 	storage    endpoint.ConfigStorage
 	Degree     int    `json:"degree"`
 	SplitLimit uint64 `json:"split-limit"`
 }
 
 func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return &splitBucketSchedulerConfig{
 		Degree: conf.Degree,
 	}
@@ -104,8 +104,8 @@ func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) 
 }
 
 func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	h.conf.mu.Lock()
-	defer h.conf.mu.Unlock()
+	h.conf.Lock()
+	defer h.conf.Unlock()
 	rd := render.New(render.Options{IndentJSON: true})
 	oldc, _ := json.Marshal(h.conf)
 	data, err := io.ReadAll(r.Body)
@@ -173,8 +173,8 @@ func (s *splitBucketScheduler) GetType() string {
 }
 
 func (s *splitBucketScheduler) ReloadConfig() error {
-	s.conf.mu.Lock()
-	defer s.conf.mu.Unlock()
+	s.conf.Lock()
+	defer s.conf.Unlock()
 	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
 	if err != nil {
 		return err
@@ -182,7 +182,13 @@ func (s *splitBucketScheduler) ReloadConfig() error {
 	if len(cfgData) == 0 {
 		return nil
 	}
-	return DecodeConfig([]byte(cfgData), s.conf)
+	newCfg := &splitBucketSchedulerConfig{}
+	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	s.conf.SplitLimit = newCfg.SplitLimit
+	s.conf.Degree = newCfg.Degree
+	return nil
 }
 
 // ServerHTTP implement Http server.

@@ -53,7 +53,7 @@ const (
 )
 
 type balanceWitnessSchedulerConfig struct {
-	mu      syncutil.RWMutex
+	syncutil.RWMutex
 	storage endpoint.ConfigStorage
 	Ranges  []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
@@ -61,8 +61,8 @@ type balanceWitnessSchedulerConfig struct {
 }
 
 func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 
 	oldc, _ := json.Marshal(conf)
 
@@ -95,8 +95,8 @@ func (conf *balanceWitnessSchedulerConfig) validate() bool {
 }
 
 func (conf *balanceWitnessSchedulerConfig) Clone() *balanceWitnessSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceWitnessSchedulerConfig{
@@ -205,14 +205,14 @@ func (b *balanceWitnessScheduler) GetType() string {
 }
 
 func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
-	b.conf.mu.RLock()
-	defer b.conf.mu.RUnlock()
+	b.conf.RLock()
+	defer b.conf.RUnlock()
 	return EncodeConfig(b.conf)
 }
 
 func (b *balanceWitnessScheduler) ReloadConfig() error {
-	b.conf.mu.Lock()
-	defer b.conf.mu.Unlock()
+	b.conf.Lock()
+	defer b.conf.Unlock()
 	cfgData, err := b.conf.storage.LoadSchedulerConfig(b.GetName())
 	if err != nil {
 		return err
@@ -238,8 +238,8 @@ func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 }
 
 func (b *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	b.conf.mu.RLock()
-	defer b.conf.mu.RUnlock()
+	b.conf.RLock()
+	defer b.conf.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {

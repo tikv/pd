@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -39,7 +40,7 @@ const (
 // Node simulates a TiKV.
 type Node struct {
 	*metapb.Store
-	sync.RWMutex
+	syncutil.RWMutex
 	stats                    *info.StoreStats
 	tick                     uint64
 	wg                       sync.WaitGroup
@@ -50,7 +51,7 @@ type Node struct {
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
 	limiter                  *ratelimit.RateLimiter
-	sizeMutex                sync.Mutex
+	sizeMutex                syncutil.Mutex
 	hasExtraUsedSpace        bool
 	snapStats                []*pdpb.SnapshotStat
 }
