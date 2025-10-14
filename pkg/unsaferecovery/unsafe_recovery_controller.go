@@ -734,9 +734,22 @@ func (u *Controller) getFailedPeers(region *metapb.Region) []*metapb.Peer {
 		return nil
 	}
 
+	exists := func(peers []*metapb.Peer, peer *metapb.Peer) bool {
+		for _, p := range peers {
+			if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
+				return true
+			}
+		}
+		return false
+	}
+
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
+<<<<<<< HEAD
 		if u.isFailed(peer) {
+=======
+		if u.isFailed(peer) || exists(u.orphanedPeers[region.GetId()], peer) {
+>>>>>>> fc7fee6d3 (Unsafe Recover: Address comments in #9554 (#9656))
 			failedPeers = append(failedPeers, peer)
 		}
 	}
