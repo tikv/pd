@@ -17,10 +17,10 @@ package grpc
 import (
 	"bytes"
 	"fmt"
-	"time"
-
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"math/rand"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -34,10 +34,6 @@ import (
 
 // GetRegion implements the GetRegion RPC method.
 func GetRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest) (resp *pdpb.GetRegionResponse, err error) {
-	defer func() {
-		incRegionRequestCounter("GetRegion", request.Header, resp.Header.Error)
-	}()
-
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: NotBootstrappedHeader()}, nil
 	}
@@ -63,10 +59,6 @@ func GetRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest) (resp *pdp
 
 // GetPrevRegion implements gRPC PDServer
 func GetPrevRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest) (resp *pdpb.GetRegionResponse, err error) {
-	defer func() {
-		incRegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error)
-	}()
-
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: NotBootstrappedHeader()}, nil
 	}
@@ -91,9 +83,6 @@ func GetPrevRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest) (resp 
 
 // GetRegionByID implements gRPC PDServer.
 func GetRegionByID(rc *core.BasicCluster, request *pdpb.GetRegionByIDRequest) (resp *pdpb.GetRegionResponse, err error) {
-	defer func() {
-		incRegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error)
-	}()
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: NotBootstrappedHeader()}, nil
 	}
@@ -118,9 +107,6 @@ func GetRegionByID(rc *core.BasicCluster, request *pdpb.GetRegionByIDRequest) (r
 // ScanRegions implements gRPC PDServer.
 // Deprecated: use BatchScanRegions instead.
 func ScanRegions(rc *core.BasicCluster, request *pdpb.ScanRegionsRequest) (resp *pdpb.ScanRegionsResponse, err error) {
-	defer func() {
-		incRegionRequestCounter("ScanRegions", request.Header, resp.Header.Error)
-	}()
 	if rc == nil {
 		return &pdpb.ScanRegionsResponse{Header: NotBootstrappedHeader()}, nil
 	}
@@ -149,10 +135,6 @@ func ScanRegions(rc *core.BasicCluster, request *pdpb.ScanRegionsRequest) (resp 
 
 // BatchScanRegions implements gRPC PDServer.
 func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsRequest) (resp *pdpb.BatchScanRegionsResponse, err error) {
-	defer func() {
-		incRegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error)
-	}()
-
 	if rc == nil {
 		return &pdpb.BatchScanRegionsResponse{Header: NotBootstrappedHeader()}, nil
 	}
@@ -215,27 +197,21 @@ func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsReque
 
 // QueryRegion provides a stream processing of the region query.
 func QueryRegion(rc *core.BasicCluster, request *pdpb.QueryRegionRequest) *pdpb.QueryRegionResponse {
-	for {
-		needBuckets := request.GetNeedBuckets()
-		start := time.Now()
-		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
-			request.GetKeys(),
-			request.GetPrevKeys(),
-			request.GetIds(),
-			needBuckets,
-		)
-		queryRegionDuration.Observe(time.Since(start).Seconds())
-		// Build the response and send it to the client.
-		response := &pdpb.QueryRegionResponse{
-			Header:       WrapHeader(),
-			KeyIdMap:     keyIDMap,
-			PrevKeyIdMap: prevKeyIDMap,
-			RegionsById:  regionsByID,
-		}
-		incRegionRequestCounter("QueryRegion", request.Header, response.Header.Error)
-		regionRequestCounter.WithLabelValues("QueryRegion", request.Header.CallerId,
-			request.Header.CallerComponent, "").Inc()
+	needBuckets := request.GetNeedBuckets()
+	keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
+		request.GetKeys(),
+		request.GetPrevKeys(),
+		request.GetIds(),
+		needBuckets,
+	)
+	// Build the response and send it to the client.
+	response := &pdpb.QueryRegionResponse{
+		Header:       WrapHeader(),
+		KeyIdMap:     keyIDMap,
+		PrevKeyIdMap: prevKeyIDMap,
+		RegionsById:  regionsByID,
 	}
+	return response
 }
 
 // GetStore implements gRPC PDServer.
@@ -319,4 +295,39 @@ func RegionNotFound() *pdpb.ResponseHeader {
 		Type:    pdpb.ErrorType_REGION_NOT_FOUND,
 		Message: "region not found",
 	})
+}
+
+type requestEvent string
+
+const (
+	requestSuccess requestEvent = "success"
+	requestFailed  requestEvent = "failed"
+)
+
+func IncRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
+	if err == nil && rand.Intn(100) != 0 {
+		// sample 1% region requests to avoid high cardinality
+		return
+	}
+
+	var (
+		event           = requestSuccess
+		callerID        = header.CallerId
+		callerComponent = header.CallerComponent
+	)
+	if err != nil {
+		log.Warn("region request encounter error",
+			zap.String("method", method),
+			zap.String("caller_id", callerID),
+			zap.String("caller_component", callerComponent),
+			zap.Stringer("error", err))
+		event = requestFailed
+	}
+	if callerID == "" {
+		callerID = "unknown"
+	}
+	if callerComponent == "" {
+		callerComponent = "unknown"
+	}
+	counter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
 }

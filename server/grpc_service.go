@@ -1517,7 +1517,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	}
 
 	defer func() {
-		incRegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error)
+		gh.IncRegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
@@ -1548,7 +1548,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}
 
 	defer func() {
-		incRegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error)
+		gh.IncRegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
@@ -1611,8 +1611,10 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		}
 		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 		request.NeedBuckets = needBuckets
+		start := time.Now()
 		resp := gh.QueryRegion(rc.GetBasicCluster(), request)
-
+		queryRegionDuration.Observe(time.Since(start).Seconds())
+		gh.IncRegionRequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
 		if err := stream.Send(resp); err != nil {
 			return errors.WithStack(err)
 		}
@@ -1640,7 +1642,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	}
 
 	defer func() {
-		incRegionRequestCounter("ScanRegions", request.Header, resp.Header.Error)
+		gh.IncRegionRequestCounter("ScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
@@ -1669,7 +1671,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 
 	defer func() {
-		incRegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error)
+		gh.IncRegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {

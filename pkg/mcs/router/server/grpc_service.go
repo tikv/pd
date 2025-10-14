@@ -16,18 +16,24 @@ package server
 
 import (
 	"context"
+
+	"io"
 	"net/http"
+	"time"
 
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // SetUpRestHandler is a hook to sets up the REST service.
@@ -75,40 +81,87 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // BatchScanRegions implements the BatchScanRegions RPC method.
 func (s *Service) BatchScanRegions(_ctx context.Context, request *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
-	return gh.BatchScanRegions(s.GetBasicCluster(), request)
+	resp, err := gh.BatchScanRegions(s.GetBasicCluster(), request)
+	gh.IncRegionRequestCounter("BatchScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	return resp, err
 }
 
 // ScanRegions implements the ScanRegions RPC method.
 func (s *Service) ScanRegions(_ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
-	return gh.ScanRegions(s.GetBasicCluster(), request)
+	resp, err := gh.ScanRegions(s.GetBasicCluster(), request)
+	gh.IncRegionRequestCounter("ScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	return resp, err
 }
 
 // GetRegion implements the GetRegion RPC method.
 func (s *Service) GetRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	return gh.GetRegion(s.GetBasicCluster(), request)
+	resp, err := gh.GetRegion(s.GetBasicCluster(), request)
+	gh.IncRegionRequestCounter("GetRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	return resp, err
 }
 
 // GetAllStores implements the GetAllStores RPC method.
 func (s *Service) GetAllStores(_ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
-	return gh.GetAllStores(s.GetBasicCluster(), request)
+	resp, err := gh.GetAllStores(s.GetBasicCluster(), request)
+	gh.IncRegionRequestCounter("GetAllStores", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	return resp, err
 }
 
 // GetStore implements the GetStore RPC method.
 func (s *Service) GetStore(_ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
-	return gh.GetStore(s.GetBasicCluster(), request)
+	resp, err := gh.GetStore(s.GetBasicCluster(), request)
+	gh.IncRegionRequestCounter("GetStore", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	return resp, err
 }
 
 // GetPrevRegion implements the GetPrevRegion RPC method.
 func (s *Service) GetPrevRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	return gh.GetPrevRegion(s.GetBasicCluster(), request)
+	resp, err := gh.GetPrevRegion(s.GetBasicCluster(), request)
+	gh.IncRegionRequestCounter("GetPrevRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	return resp, err
 }
 
 // GetRegionByID implements the GetRegionByID RPC method.
 func (s *Service) GetRegionByID(_ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
-	return gh.GetRegionByID(s.GetBasicCluster(), request)
+	resp, err := gh.GetRegionByID(s.GetBasicCluster(), request)
+	gh.IncRegionRequestCounter("GetRegionByID", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	return resp, err
 }
 
 // QueryRegion implements the QueryRegion RPC method.
-func (*Service) QueryRegion(routerpb.Router_QueryRegionServer) error {
-	return nil
+func (s *Service) QueryRegion(stream routerpb.Router_QueryRegionServer) error {
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
+			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
+		}
+
+		cluster := s.GetBasicCluster()
+		start := time.Now()
+		needBuckets := request.GetNeedBuckets()
+		keyIDMap, prevKeyIDMap, regionsByID := cluster.QueryRegions(
+			request.GetKeys(),
+			request.GetPrevKeys(),
+			request.GetIds(),
+			needBuckets,
+		)
+		queryRegionDuration.Observe(time.Since(start).Seconds())
+		// Build the response and send it to the client.
+		response := &pdpb.QueryRegionResponse{
+			Header:       gh.WrapHeader(),
+			KeyIdMap:     keyIDMap,
+			PrevKeyIdMap: prevKeyIDMap,
+			RegionsById:  regionsByID,
+		}
+		gh.IncRegionRequestCounter("QueryRegion", request.Header, response.Header.Error, regionRequestCounter)
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
+		}
+	}
 }
