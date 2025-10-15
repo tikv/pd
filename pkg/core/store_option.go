@@ -126,7 +126,7 @@ func SlowStoreEvicted() StoreCreateOption {
 // leader to the store
 func StoppingStoreEvicted() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.rawStats.IsStopping = true
+		store.stoppingStoreEvicted = true
 	}
 }
 
@@ -155,7 +155,7 @@ func SlowStoreRecovered() StoreCreateOption {
 // StoppingStoreRecovered cleans the evicted state of a store.
 func StoppingStoreRecovered() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.rawStats.IsStopping = false
+		store.stoppingStoreEvicted = false
 	}
 }
 

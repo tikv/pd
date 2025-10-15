@@ -51,22 +51,23 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
-	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
-	leaderCount         int
-	regionCount         int
-	learnerCount        int
-	witnessCount        int
-	leaderSize          int64
-	regionSize          int64
-	pendingPeerCount    int
-	lastPersistTime     time.Time
-	leaderWeight        float64
-	regionWeight        float64
-	limiter             storelimit.StoreLimit
-	minResolvedTS       uint64
-	lastAwakenTime      time.Time
+	pauseLeaderTransfer  bool // not allow to be used as source or target of transfer leader
+	slowStoreEvicted     bool // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted     bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	stoppingStoreEvicted bool // this store has been evicted as a stopping store, should not transfer leader to it
+	leaderCount          int
+	regionCount          int
+	learnerCount         int
+	witnessCount         int
+	leaderSize           int64
+	regionSize           int64
+	pendingPeerCount     int
+	lastPersistTime      time.Time
+	leaderWeight         float64
+	regionWeight         float64
+	limiter              storelimit.StoreLimit
+	minResolvedTS        uint64
+	lastAwakenTime       time.Time
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -151,7 +152,7 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 
 // EvictedAsStoppingStore returns if the store should be evicted as a stopping store.
 func (s *StoreInfo) EvictedAsStoppingStore() bool {
-	return s.rawStats.IsStopping
+	return s.stoppingStoreEvicted
 }
 
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
