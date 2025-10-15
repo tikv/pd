@@ -82,11 +82,9 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		mergedCfg.Log = localCfg.Log
 		mergedCfg.Security = localCfg.Security
 		mergedCfg.Metric = localCfg.Metric
-		log.Error("server is not leader")
 		h.rd.JSON(w, http.StatusOK, mergedCfg)
 		return
 	}
-	log.Error("server is leader")
 	cfg := h.svr.GetConfig()
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) != "true" {

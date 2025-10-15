@@ -187,7 +187,6 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	// to return a merged view of local and cluster configurations.
 	// POST /config should still be forwarded to the leader to update cluster-wide config.
 	if r.URL.Path == "/pd/api/v1/config" && r.Method == http.MethodGet {
-		log.Info("get config on follower, server is not leader")
 		next(w, r)
 		return
 	}
