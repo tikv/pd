@@ -569,7 +569,8 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		return err == nil
 	})
 
-	waitFinishSplit(re, leaderServer, 0, 1, []uint32{constant.DefaultKeyspaceID, 1}, []uint32{2})
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	waitFinishSplit(re, leaderServer, 0, 1, []uint32{bootstrapKeyspaceID, 1}, []uint32{2})
 
 	// Then split keyspace group 0 to 2 with keyspace 1.
 	testutil.Eventually(re, func() bool {
@@ -577,13 +578,13 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		return err == nil
 	})
 
-	waitFinishSplit(re, leaderServer, 0, 2, []uint32{constant.DefaultKeyspaceID}, []uint32{1})
+	waitFinishSplit(re, leaderServer, 0, 2, []uint32{bootstrapKeyspaceID}, []uint32{1})
 
 	// Check the keyspace group 0 is split to 1 and 2.
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
 	kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 2)
-	re.Equal([]uint32{0}, kg0.Keyspaces)
+	re.Equal([]uint32{bootstrapKeyspaceID}, kg0.Keyspaces)
 	re.Equal([]uint32{2}, kg1.Keyspaces)
 	re.Equal([]uint32{1}, kg2.Keyspaces)
 	re.False(kg0.IsSplitting())
