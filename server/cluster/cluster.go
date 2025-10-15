@@ -1809,8 +1809,9 @@ func (c *RaftCluster) checkStores() {
 	)
 
 	for _, store := range stores {
-		isInOffline := c.checkStore(store, stores)
-		if store.IsUp() && store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
+		storeID := store.GetID()
+		isInUp, isInOffline := c.checkStore(storeID)
+		if isInUp {
 			upStoreCount++
 		}
 		if isInOffline {
@@ -1826,21 +1827,27 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo) (isInOffline bool) {
-	var (
-		regionSize = float64(store.GetRegionSize())
-		storeID    = store.GetID()
-		threshold  float64
-	)
+func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		log.Warn("store not found when checking, may be deleted", zap.Uint64("store-id", storeID))
+		return false, false
+	}
+
+	var (
+		regionSize = float64(store.GetRegionSize())
+		threshold  float64
+	)
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing:
 		readyToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			kr := keyutil.NewKeyRange("", "")
-			threshold = c.getThreshold(stores, store, &kr)
+			threshold = c.getThreshold(c.GetStores(), store, &kr)
 			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
 				zap.Float64("threshold", threshold),
 				zap.Float64("region-size", regionSize))
@@ -1886,7 +1893,11 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 		}
 	}
 	c.progressManager.UpdateProgress(store, regionSize, threshold)
-	return
+	// When store is preparing or serving, we think it is in up.
+	// `checkStore` only may change store state from preparing to serving.
+	// So we don't need to get store again.
+	isInUp = store.IsUp() && !store.IsLowSpace(c.opt.GetLowSpaceRatio())
+	return isInUp, isInOffline
 }
 
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange) float64 {
