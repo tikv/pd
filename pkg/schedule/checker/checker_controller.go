@@ -35,6 +35,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/preparecheck"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -92,12 +93,12 @@ type Controller struct {
 	// patrolRegionScanLimit is the limit of regions to scan.
 	// It is calculated by the number of regions.
 	patrolRegionScanLimit int
-	prepareChecker        *sche.PrepareChecker
+	prepareChecker        *preparecheck.Checker
 	metrics               *checkerControllerMetrics
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.CheckerCluster, opController *operator.Controller, prepareChecker *sche.PrepareChecker) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, opController *operator.Controller, prepareChecker *preparecheck.Checker) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
 	conf := cluster.GetCheckerConfig()
 	ruleManager := cluster.GetRuleManager()

@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/preparecheck"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -57,11 +58,11 @@ type Controller struct {
 	// which will only be initialized and used in the microservice env now.
 	schedulerHandlers map[string]http.Handler
 	opController      *operator.Controller
-	prepareChecker    *sche.PrepareChecker
+	prepareChecker    *preparecheck.Checker
 }
 
 // NewController creates a scheduler controller.
-func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller, prepareChecker *sche.PrepareChecker) *Controller {
+func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller, prepareChecker *preparecheck.Checker) *Controller {
 	return &Controller{
 		ctx:               ctx,
 		cluster:           cluster,

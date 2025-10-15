@@ -1335,7 +1335,8 @@ func TestDeleteAllRegionCacheScheduling(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return rc.GetCoordinator() != nil
 	})
-	rc.HandleRegionHeartbeat(regionInfo)
+	err = rc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return rc.GetCoordinator().GetPrepareChecker().IsPrepared()
 	})
@@ -1353,7 +1354,8 @@ func TestDeleteAllRegionCacheScheduling(t *testing.T) {
 	re.Equal(0, int(rc.GetOperatorController().OperatorCount(operator.OpSplit)))
 
 	// Simulate continuous heartbeat and verify scheduling recovery
-	rc.HandleRegionHeartbeat(regionInfo)
+	err = rc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
 
 	testutil.Eventually(re, func() bool {
 		count := rc.GetOperatorController().OperatorCount(operator.OpSplit)

@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/preparecheck"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
@@ -46,9 +47,7 @@ import (
 
 const (
 	runSchedulerCheckInterval = 3 * time.Second
-	// collectTimeout is the timeout for collecting regions.
-	collectTimeout       = 5 * time.Minute
-	maxLoadConfigRetries = 10
+	maxLoadConfigRetries      = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
@@ -69,7 +68,7 @@ type Coordinator struct {
 	schedulersInitialized bool
 
 	cluster           sche.ClusterInformer
-	prepareChecker    *prepareChecker
+	prepareChecker    *preparecheck.Checker
 	checkers          *checker.Controller
 	regionScatterer   *scatter.RegionScatterer
 	regionSplitter    *splitter.RegionSplitter
@@ -83,7 +82,7 @@ type Coordinator struct {
 // NewCoordinator creates a new Coordinator.
 func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(parentCtx)
-	prepareChecker := newPrepareChecker(cluster.GetPrepareRegionCount)
+	prepareChecker := preparecheck.NewChecker(cluster.GetPrepareRegionCount)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController, prepareChecker)
 	checkers := checker.NewController(ctx, cluster, opController, prepareChecker)
@@ -641,7 +640,7 @@ func (c *Coordinator) GetRuleChecker() *checker.RuleChecker {
 }
 
 // GetPrepareChecker returns the prepare checker.
-func (c *Coordinator) GetPrepareChecker() *prepareChecker {
+func (c *Coordinator) GetPrepareChecker() *preparecheck.Checker {
 	return c.prepareChecker
 }
 

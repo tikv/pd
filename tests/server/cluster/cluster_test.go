@@ -2064,6 +2064,8 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 		endKey := []byte(strconv.Itoa(i * 2))
 		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
 	}
+	fname := testutil.InitTempFileLogger("debug")
+	defer os.RemoveAll(fname)
 	checkLog(re, fname, "coordinator starts patrol regions")
 
 	// test change patrol region interval
