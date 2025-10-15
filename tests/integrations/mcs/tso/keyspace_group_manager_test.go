@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
@@ -767,11 +768,13 @@ func TestGetTSOImmediately(t *testing.T) {
 		return err == nil
 	})
 
-	waitFinishSplit(re, leaderServer, 0, 1, []uint32{constant.DefaultKeyspaceID, 1}, []uint32{2})
+	// Get the correct bootstrap keyspace ID for the current mode
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	waitFinishSplit(re, leaderServer, 0, 1, []uint32{bootstrapKeyspaceID, 1}, []uint32{2})
 
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
-	re.Equal([]uint32{0, 1}, kg0.Keyspaces)
+	re.Equal([]uint32{bootstrapKeyspaceID, 1}, kg0.Keyspaces)
 	re.Equal([]uint32{2}, kg1.Keyspaces)
 	re.False(kg0.IsSplitting())
 	re.False(kg1.IsSplitting())
