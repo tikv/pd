@@ -364,7 +364,9 @@ func TestGCOperations(t *testing.T) {
 		re.Nil(resp.Header.Error)
 		re.Equal("b1", resp.GetDeletedBarrierInfo().GetBarrierId())
 		re.Equal(uint64(20), resp.GetDeletedBarrierInfo().GetBarrierTs())
-		re.Equal(3600, int(resp.GetDeletedBarrierInfo().GetTtlSeconds()))
+		// The TTL value decreases over time
+		re.Greater(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3595))
+		re.LessOrEqual(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3600))
 	}
 
 	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
