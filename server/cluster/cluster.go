@@ -1786,6 +1786,7 @@ func (c *RaftCluster) checkStores() {
 	stores := c.GetStores()
 
 	for _, store := range stores {
+<<<<<<< HEAD
 		// the store has already been tombstone
 		if store.IsRemoved() {
 			if store.DownTime() > gcTombstoneInterval {
@@ -1800,6 +1801,12 @@ func (c *RaftCluster) checkStores() {
 				}
 			}
 			continue
+=======
+		storeID := store.GetID()
+		isInUp, isInOffline := c.checkStore(storeID)
+		if isInUp {
+			upStoreCount++
+>>>>>>> 90032621cc (cluster: fix store state change problem (part 2) (#9821))
 		}
 
 		storeID := store.GetID()
@@ -1871,7 +1878,84 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
+<<<<<<< HEAD
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
+=======
+func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		log.Warn("store not found when checking, may be deleted", zap.Uint64("store-id", storeID))
+		return false, false
+	}
+
+	var (
+		regionSize = float64(store.GetRegionSize())
+		threshold  float64
+	)
+	switch store.GetNodeState() {
+	case metapb.NodeState_Preparing:
+		readyToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
+			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
+		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
+			kr := keyutil.NewKeyRange("", "")
+			threshold = c.getThreshold(c.GetStores(), store, &kr)
+			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
+				zap.Float64("threshold", threshold),
+				zap.Float64("region-size", regionSize))
+			readyToServe = regionSize >= threshold
+		}
+		if readyToServe {
+			if err := c.ReadyToServeLocked(storeID); err != nil {
+				log.Error("change store to serving failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Int("region-count", c.GetTotalRegionCount()),
+					errs.ZapError(err))
+			}
+		}
+	case metapb.NodeState_Serving:
+	case metapb.NodeState_Removing:
+		// If the store is empty, it can be buried.
+		needBury := regionSize == 0
+		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
+			needBury = false
+		})
+		if needBury {
+			if err := c.BuryStoreLocked(storeID, false); err != nil {
+				log.Error("bury store failed",
+					zap.Stringer("store", store.GetMeta()),
+					errs.ZapError(err))
+			}
+		} else {
+			isInOffline = true
+		}
+	case metapb.NodeState_Removed:
+		if store.DownTime() <= gcTombstoneInterval {
+			break
+		}
+		// the store has already been tombstone
+		err := c.deleteStore(store)
+		if err != nil {
+			log.Error("auto gc the tombstone store failed",
+				zap.Stringer("store", store.GetMeta()),
+				zap.Duration("down-time", store.DownTime()),
+				errs.ZapError(err))
+		} else {
+			log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
+		}
+	}
+	c.progressManager.UpdateProgress(store, regionSize, threshold)
+	// When store is preparing or serving, we think it is in up.
+	// `checkStore` only may change store state from preparing to serving.
+	// So we don't need to get store again.
+	isInUp = store.IsUp() && !store.IsLowSpace(c.opt.GetLowSpaceRatio())
+	return isInUp, isInOffline
+}
+
+func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange) float64 {
+>>>>>>> 90032621cc (cluster: fix store state change problem (part 2) (#9821))
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
 		regionSize := c.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())

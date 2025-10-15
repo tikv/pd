@@ -3802,6 +3802,159 @@ func TestInterval(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
+=======
+func TestConcurrentStoreStats(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	storeCount := uint64(100)
+	replica := cluster.GetReplicationConfig().MaxReplicas
+
+	// Add regions to the cluster.
+	regions := newTestRegions(storeCount+1, storeCount+1, replica)
+	for _, region := range regions {
+		re.NoError(cluster.putRegion(region))
+	}
+	for i := range storeCount {
+		re.NotZero(cluster.GetStoreRegionCount(i + 1))
+	}
+
+	// Add stores to the cluster.
+	for i := uint64(1); i <= storeCount; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			Version:       "2.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Preparing,
+		}
+		err = cluster.PutMetaStore(store)
+		re.NoError(err)
+		// avoid store is buried
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	re.Equal(int(storeCount), cluster.GetStoreCount())
+
+	// Try to remove store and check store state at the same time.
+	// If we remove store first, the store state will be in removing state.
+	// If we check store state first, the store state will be changed to state serving and then removing.
+	wg := sync.WaitGroup{}
+	for i := range storeCount {
+		if len(cluster.getUpStores()) == int(replica) {
+			// it means we can't remove store anymore
+			break
+		}
+		storeID := i + 1
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cluster.UpdateAllStoreStatus()
+			cluster.checkStores()
+		}()
+		re.NoError(cluster.RemoveStore(storeID, false))
+		testutil.Eventually(re, func() bool {
+			return metapb.NodeState_Removing == cluster.GetStore(storeID).GetNodeState()
+		})
+	}
+	wg.Wait()
+}
+
+func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	// Add stores with low space to the cluster.
+	storeCount := uint64(3)
+	for i := uint64(1); i <= storeCount; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			Version:       "2.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Preparing,
+		}
+		err = cluster.PutMetaStore(store)
+		re.NoError(err)
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100 * 1024, // 100 GiB
+			Available:   1 * 1024,   // 1 GiB
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	re.Equal(int(storeCount), cluster.GetStoreCount())
+
+	upStoreCount := 0
+	for _, s := range cluster.GetStores() {
+		isUp, _ := cluster.checkStore(s.GetID())
+		if isUp {
+			upStoreCount++
+		}
+	}
+	re.Equal(0, upStoreCount, "upStoreCount should be 0 when store is low space")
+
+	// Add stores to the cluster.
+	for i := uint64(1); i <= storeCount; i++ {
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100 * 1024, // 100 GiB
+			Available:   50 * 1024,  // 50 GiB
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	for _, s := range cluster.GetStores() {
+		isUp, _ := cluster.checkStore(s.GetID())
+		if isUp {
+			upStoreCount++
+		}
+	}
+	re.Equal(int(storeCount), upStoreCount, "upStoreCount should be 3 when store is not low space")
+}
+
+>>>>>>> 90032621cc (cluster: fix store state change problem (part 2) (#9821))
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
