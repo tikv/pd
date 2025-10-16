@@ -676,3 +676,50 @@ func checkTSO(
 		}()
 	}
 }
+
+func TestTSOServiceDiscovery(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdCluster, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
+
+	_, cleanup1 := tests.StartSingleTSOTestServer(ctx, re, pdLeader.GetAddr(), tempurl.Alloc())
+	defer cleanup1()
+
+	pdClient, err := pd.NewClientWithKeyspace(context.Background(),
+		constant.DefaultKeyspaceID,
+		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+	physical, logical, err := pdClient.GetTS(ctx)
+	re.NoError(err)
+	ts := tsoutil.ComposeTS(physical, logical)
+	re.NotEmpty(ts)
+	checkServiceDiscovery(re, pdClient, 1)
+
+	_, cleanup2 := tests.StartSingleTSOTestServer(ctx, re, pdLeader.GetAddr(), tempurl.Alloc())
+	defer cleanup2()
+	checkServiceDiscovery(re, pdClient, 2)
+}
+
+func checkServiceDiscovery(re *require.Assertions, client pd.Client, urlsLen int) {
+	inner, ok := client.(interface{ GetTSOServiceDiscovery() pd.ServiceDiscovery })
+	if ok {
+		tsoDiscovery := inner.GetTSOServiceDiscovery()
+		err := tsoDiscovery.CheckMemberChanged()
+		re.NoError(err)
+		if tsoDiscovery != nil {
+			urls := tsoDiscovery.(interface{ GetURLs() []string }).GetURLs()
+			re.Len(urls, urlsLen)
+		}
+	}
+}
