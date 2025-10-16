@@ -278,6 +278,15 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 	return krgm.sl
 }
 
+func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	if krgm.sl == nil || krgm.sl.ServiceLimit == 0 {
+		return 0, false
+	}
+	return krgm.sl.ServiceLimit, true
+}
+
 func (krgm *keyspaceResourceGroupManager) getOrCreateRUTracker(name string) *ruTracker {
 	rt := krgm.getRUTracker(name)
 	if rt == nil {
@@ -411,16 +420,16 @@ func (rt *ruTracker) getRUPerSec() float64 {
 // - No group exceeds its configured limits
 // - Inactive groups (no RU consumption) are skipped to avoid unnecessary computation
 func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
-	serviceLimiter := krgm.getServiceLimiter()
+	serviceLimit, isSet := krgm.getServiceLimit()
 	// No need to conciliate if the service limit is not set or is 0.
-	if serviceLimiter == nil || serviceLimiter.ServiceLimit == 0 {
+	if !isSet || serviceLimit == 0 {
 		return
 	}
 	priorityQueues := krgm.getPriorityQueues()
 	if len(priorityQueues) == 0 {
 		return
 	}
-	remainingServiceLimit := serviceLimiter.ServiceLimit
+	remainingServiceLimit := serviceLimit
 	for _, queue := range priorityQueues {
 		if len(queue) == 0 {
 			continue
