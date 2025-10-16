@@ -1155,7 +1155,6 @@ func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
 		var followerCfg config.Config
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg)
 		re.NoError(err)
-		fmt.Println(followerCfg.Replication.MaxReplicas)
 		return followerCfg.Replication.MaxReplicas == 4.
 	})
 }
