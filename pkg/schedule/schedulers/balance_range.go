@@ -284,7 +284,7 @@ func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob)
 		if job.isComplete() {
 			continue
 		}
-		return index, job
+		return index, job.Clone()
 	}
 	return 0, nil
 }
@@ -322,6 +322,24 @@ type balanceRangeSchedulerJob struct {
 	Finish  *time.Time         `json:"finish,omitempty"`
 	Create  time.Time          `json:"create"`
 	Status  JobStatus          `json:"status"`
+}
+
+// Clone clones the job.
+func (job *balanceRangeSchedulerJob) Clone() *balanceRangeSchedulerJob {
+	ranges := make([]keyutil.KeyRange, len(job.Ranges))
+	copy(ranges, job.Ranges)
+	return &balanceRangeSchedulerJob{
+		JobID:   job.JobID,
+		Rule:    job.Rule,
+		Engine:  job.Engine,
+		Timeout: job.Timeout,
+		Ranges:  ranges,
+		Alias:   job.Alias,
+		Start:   job.Start,
+		Finish:  job.Finish,
+		Create:  job.Create,
+		Status:  job.Status,
+	}
 }
 
 func (job *balanceRangeSchedulerJob) expired(dur time.Duration) bool {
