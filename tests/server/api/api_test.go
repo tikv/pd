@@ -1039,13 +1039,14 @@ type forwardTestSuite struct {
 	follower *server.Server
 }
 
-func TestSchedulerTestSuite(t *testing.T) {
+func TestForwardTestSuite(t *testing.T) {
 	suite.Run(t, new(forwardTestSuite))
 }
 
 func (suite *forwardTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/enableAddServerNameHeader", `return`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 	suite.env.PDCount = 3
 	suite.env.RunFunc(func(cluster *tests.TestCluster) {
@@ -1064,6 +1065,7 @@ func (suite *forwardTestSuite) TearDownSuite() {
 	re := suite.Require()
 	suite.env.Cleanup()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/enableAddServerNameHeader"))
 }
 
 func (suite *forwardTestSuite) TestFollowerLocalAPIs() {
