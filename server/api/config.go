@@ -72,16 +72,9 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		mergedCfg := leaderCfg
-		mergedCfg.Name = localCfg.Name
-		mergedCfg.ClientUrls = localCfg.ClientUrls
-		mergedCfg.PeerUrls = localCfg.PeerUrls
-		mergedCfg.AdvertiseClientUrls = localCfg.AdvertiseClientUrls
-		mergedCfg.AdvertisePeerUrls = localCfg.AdvertisePeerUrls
-		mergedCfg.DataDir = localCfg.DataDir
-		mergedCfg.Log = localCfg.Log
-		mergedCfg.Security = localCfg.Security
-		mergedCfg.Metric = localCfg.Metric
+		mergedCfg := localCfg
+		mergedCfg.Replication = leaderCfg.Replication
+		mergedCfg.Schedule = leaderCfg.Schedule
 		h.rd.JSON(w, http.StatusOK, mergedCfg)
 		return
 	}
