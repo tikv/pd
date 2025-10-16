@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -40,7 +41,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 var (
@@ -151,8 +151,8 @@ func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r 
 }
 
 type balanceRangeSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
+	sync.Mutex
 	jobs []*balanceRangeSchedulerJob
 }
 
@@ -200,11 +200,9 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 	return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
 }
 
-func (conf *balanceRangeSchedulerConfig) gc() error {
+func (conf *balanceRangeSchedulerConfig) gcLocked() error {
 	needGC := false
 	gcIdx := 0
-	conf.Lock()
-	defer conf.Unlock()
 	for idx, job := range conf.jobs {
 		if job.isComplete() && job.expired(reserveDuration) {
 			needGC = true
@@ -248,9 +246,7 @@ func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (conf *balanceRangeSchedulerConfig) begin(index int) error {
-	conf.Lock()
-	defer conf.Unlock()
+func (conf *balanceRangeSchedulerConfig) beginLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != pending {
 		return errors.New("the job is not pending")
@@ -262,10 +258,7 @@ func (conf *balanceRangeSchedulerConfig) begin(index int) error {
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) finish(index int) error {
-	conf.Lock()
-	defer conf.Unlock()
-
+func (conf *balanceRangeSchedulerConfig) finishLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != running {
 		return errors.New("the job is not running")
@@ -277,14 +270,12 @@ func (conf *balanceRangeSchedulerConfig) finish(index int) error {
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob) {
-	conf.RLock()
-	defer conf.RUnlock()
+func (conf *balanceRangeSchedulerConfig) peekLocked() (int, *balanceRangeSchedulerJob) {
 	for index, job := range conf.jobs {
 		if job.isComplete() {
 			continue
 		}
-		return index, job.Clone()
+		return index, job
 	}
 	return 0, nil
 }
@@ -324,24 +315,6 @@ type balanceRangeSchedulerJob struct {
 	Status  JobStatus          `json:"status"`
 }
 
-// Clone clones the job.
-func (job *balanceRangeSchedulerJob) Clone() *balanceRangeSchedulerJob {
-	ranges := make([]keyutil.KeyRange, len(job.Ranges))
-	copy(ranges, job.Ranges)
-	return &balanceRangeSchedulerJob{
-		JobID:   job.JobID,
-		Rule:    job.Rule,
-		Engine:  job.Engine,
-		Timeout: job.Timeout,
-		Ranges:  ranges,
-		Alias:   job.Alias,
-		Start:   job.Start,
-		Finish:  job.Finish,
-		Create:  job.Create,
-		Status:  job.Status,
-	}
-}
-
 func (job *balanceRangeSchedulerJob) expired(dur time.Duration) bool {
 	if job == nil {
 		return true
@@ -353,14 +326,18 @@ func (job *balanceRangeSchedulerJob) expired(dur time.Duration) bool {
 	return now.Sub(*job.Finish) > dur
 }
 
+func (job *balanceRangeSchedulerJob) shouldFinished() bool {
+	return time.Since(*job.Start) > job.Timeout
+}
+
 func (job *balanceRangeSchedulerJob) isComplete() bool {
 	return job.Status == finished || job.Status == cancelled
 }
 
 // EncodeConfig serializes the config.
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
-	s.conf.RLock()
-	defer s.conf.RUnlock()
+	s.conf.Lock()
+	defer s.conf.Unlock()
 	return EncodeConfig(s.conf.jobs)
 }
 
@@ -368,7 +345,6 @@ func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
 	if err := s.conf.load(&jobs); err != nil {
 		return err
@@ -442,7 +418,9 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 }
 
 func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
-	if err := s.conf.gc(); err != nil {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	if err := s.conf.gcLocked(); err != nil {
 		log.Error("balance range jobs gc failed", errs.ZapError(err))
 		return false
 	}
@@ -451,21 +429,21 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 		s.cleanJobStatus(cluster, s.job)
 	}
 
-	index, job := s.conf.peek()
+	index, job := s.conf.peekLocked()
 	// all jobs are completed
 	if job == nil {
 		return false
 	}
 
 	if job.Status == pending {
-		if err := s.conf.begin(index); err != nil {
+		if err := s.conf.beginLocked(index); err != nil {
 			return false
 		}
 		km := cluster.GetKeyRangeManager()
 		km.Append(job.Ranges)
 	}
-	if time.Since(*job.Start) > job.Timeout {
-		if err := s.conf.finish(index); err != nil {
+	if job.shouldFinished() {
+		if err := s.conf.finishLocked(index); err != nil {
 			balancePersistFailedCounter.Inc()
 			return false
 		}
@@ -481,7 +459,7 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 		return false
 	}
 	if s.isBalanced() {
-		if err = s.conf.finish(index); err != nil {
+		if err = s.conf.finishLocked(index); err != nil {
 			balancePersistFailedCounter.Inc()
 			return false
 		}
@@ -531,11 +509,12 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
-	_, job := s.conf.peek()
-	if job == nil {
-		balanceRangeNoJobCounter.Inc()
-		return nil, nil
-	}
+	job := s.job
+	//_, job := s.conf.peekLocked()
+	//if job == nil {
+	//	balanceRangeNoJobCounter.Inc()
+	//	return nil, nil
+	//}
 	defer s.filterCounter.Flush()
 
 	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
