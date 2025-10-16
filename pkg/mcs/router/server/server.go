@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -34,6 +35,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
@@ -45,8 +47,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -80,9 +80,10 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+	svcDiscovery    sd.ServiceDiscovery
+	cluster         *Cluster
 
-	cluster *Cluster
-	storage *endpoint.StorageEndpoint
+	regionSyncer *RegionSyncer
 
 	metaWatcher *meta.Watcher
 }
@@ -133,6 +134,7 @@ func (s *Server) Run() (err error) {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
+	s.regionSyncer.StartSyncWithLeader(s.serverLoopCtx, s.svcDiscovery.GetServingURL())
 	// TODO: sync the meta info
 }
 
@@ -252,9 +254,14 @@ func (s *Server) startServer() (err error) {
 
 func (s *Server) startCluster(context.Context) (err error) {
 	s.basicCluster = core.NewBasicCluster()
-	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.basicCluster)
 	if err != nil {
+		return err
+	}
+	s.regionSyncer = NewRegionSyncer(s.basicCluster, s.GetTLSConfig(), s.Name())
+	urls := strings.Split(s.GetBackendEndpoints(), ",")
+	s.svcDiscovery = sd.NewDefaultServiceDiscovery(s.serverLoopCtx, s.serverLoopCancel, urls, s.GetTLSConfig())
+	if err = s.svcDiscovery.Init(); err != nil {
 		return err
 	}
 	s.cluster = NewCluster(s.Context(), s.basicCluster)
