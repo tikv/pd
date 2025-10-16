@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -41,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 var (
@@ -152,7 +152,7 @@ func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r 
 
 type balanceRangeSchedulerConfig struct {
 	schedulerConfig
-	sync.Mutex
+	syncutil.Mutex
 	jobs []*balanceRangeSchedulerJob
 }
 
@@ -432,6 +432,7 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 	index, job := s.conf.peekLocked()
 	// all jobs are completed
 	if job == nil {
+		balanceRangeNoJobCounter.Inc()
 		return false
 	}
 
@@ -510,11 +511,6 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
 	job := s.job
-	//_, job := s.conf.peekLocked()
-	//if job == nil {
-	//	balanceRangeNoJobCounter.Inc()
-	//	return nil, nil
-	//}
 	defer s.filterCounter.Flush()
 
 	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
