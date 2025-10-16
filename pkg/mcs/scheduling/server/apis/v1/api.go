@@ -337,18 +337,10 @@ func getConfig(c *gin.Context) {
 		return
 	}
 
-	finalCfg := primaryCfg
-	finalCfg.Name = localCfg.Name
-	finalCfg.ListenAddr = localCfg.ListenAddr
-	finalCfg.AdvertiseListenAddr = localCfg.AdvertiseListenAddr
-	finalCfg.BackendEndpoints = localCfg.BackendEndpoints
-	finalCfg.Log = localCfg.Log
-	finalCfg.Metric = localCfg.Metric
-	finalCfg.Security = localCfg.Security
-	finalCfg.LeaderLease = localCfg.LeaderLease
-
-	finalCfg.Schedule.MaxMergeRegionKeys = finalCfg.Schedule.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, &finalCfg)
+	mergedCfg := localCfg
+	mergedCfg.Schedule = primaryCfg.Schedule
+	mergedCfg.Replication = primaryCfg.Replication
+	c.IndentedJSON(http.StatusOK, &mergedCfg)
 }
 
 // @Tags     admin
