@@ -2095,13 +2095,21 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 
 func (c *RaftCluster) getRegionStats(startKey, endKey []byte, useHot bool, opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
 	stats := statistics.NewRegionStats()
-	regions := c.ScanRegions(startKey, endKey, -1)
-	for _, region := range regions {
-		if useHot {
-			stats.Observe(region, c, opts...)
-		} else {
-			stats.Observe(region, nil, opts...)
+	for {
+		regions := c.ScanRegions(startKey, endKey, core.ScanRegionLimit)
+
+		for _, region := range regions {
+			if useHot {
+				stats.Observe(region, c, opts...)
+			} else {
+				stats.Observe(region, nil, opts...)
+			}
 		}
+		if len(regions) < core.ScanRegionLimit {
+			break
+		}
+
+		startKey = regions[len(regions)-1].GetEndKey()
 	}
 	return stats
 }
