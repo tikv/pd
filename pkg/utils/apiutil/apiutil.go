@@ -65,6 +65,8 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
+	// XPDHandleHeader is used to mark whether this request is handled by the PD.
+	XPDHandleHeader = "X-PD-Handle-By"
 	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
 	XForbiddenForwardToMicroserviceHeader = "X-Forbidden-Forward-To-Microservice"
 	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
