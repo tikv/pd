@@ -433,6 +433,7 @@ type serviceDiscovery struct {
 
 	updateKeyspaceIDFunc UpdateKeyspaceIDFunc
 	keyspaceID           uint32
+	keyspaceName         string
 	tlsCfg               *tls.Config
 	// Client option.
 	option *opt.Option
@@ -444,7 +445,7 @@ func NewDefaultServiceDiscovery(
 	urls []string, tlsCfg *tls.Config,
 ) ServiceDiscovery {
 	var wg sync.WaitGroup
-	return NewServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
+	return NewServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, constants.DefaultKeyspaceName, urls, tlsCfg, opt.NewOption())
 }
 
 // NewServiceDiscovery returns a new service discovery-based client.
@@ -454,6 +455,7 @@ func NewServiceDiscovery(
 	serviceModeUpdateCb func(pdpb.ServiceMode),
 	updateKeyspaceIDFunc UpdateKeyspaceIDFunc,
 	keyspaceID uint32,
+	keyspaceName string,
 	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	pdsd := &serviceDiscovery{
@@ -465,6 +467,7 @@ func NewServiceDiscovery(
 		callbacks:            newServiceCallbacks(),
 		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
 		keyspaceID:           keyspaceID,
+		keyspaceName:         keyspaceName,
 		tlsCfg:               tlsCfg,
 		option:               option,
 	}
@@ -492,7 +495,7 @@ func (c *serviceDiscovery) Init() error {
 
 	// We need to update the keyspace ID before we discover and update the service mode
 	// so that TSO in PD can be initialized with the correct keyspace ID.
-	if c.keyspaceID == constants.NullKeyspaceID && c.updateKeyspaceIDFunc != nil {
+	if (c.keyspaceID == constants.NullKeyspaceID || c.keyspaceName == constants.NullKeyspaceName) && c.updateKeyspaceIDFunc != nil {
 		if err := c.initRetry(c.updateKeyspaceIDFunc); err != nil {
 			return err
 		}
