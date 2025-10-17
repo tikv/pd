@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -34,6 +35,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
@@ -45,8 +47,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -80,9 +80,9 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+	cluster         *Cluster
 
-	cluster *Cluster
-	storage *endpoint.StorageEndpoint
+	regionSyncer *RegionSyncer
 
 	metaWatcher *meta.Watcher
 }
@@ -131,9 +131,20 @@ func (s *Server) Run() (err error) {
 	return s.startServer()
 }
 
-func (s *Server) startServerLoop() {
+func (s *Server) startServerLoop() error {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	// TODO: sync the meta info
+	urls := strings.Split(s.GetBackendEndpoints(), ",")
+	tls, err := s.GetTLSConfig().ToClientTLSConfig()
+	if err != nil {
+		return err
+	}
+	serviceDiscovery := sd.NewDefaultServiceDiscovery(s.serverLoopCtx, s.serverLoopCancel, urls, tls)
+	if err = serviceDiscovery.Init(); err != nil {
+		return err
+	}
+	s.regionSyncer = NewRegionSyncer(s.serverLoopCtx, s.basicCluster, serviceDiscovery, s.GetTLSConfig(), s.Name(), s.GetAdvertiseListenAddr())
+	s.regionSyncer.Reconnect()
+	return nil
 }
 
 // Close closes the server.
@@ -150,9 +161,10 @@ func (s *Server) Close() {
 	}
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
-	s.GetListener().Close()
+	if err := s.GetListener().Close(); err != nil {
+		log.Error("close listener meet error", errs.ZapError(err))
+	}
 	s.CloseClientConns()
-	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
 	if s.GetClient() != nil {
@@ -232,10 +244,12 @@ func (s *Server) startServer() (err error) {
 
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
-	if err := s.startCluster(s.Context()); err != nil {
+	if err := s.startCluster(); err != nil {
 		return err
 	}
-	s.startServerLoop()
+	if err := s.startServerLoop(); err != nil {
+		return err
+	}
 	s.serverLoopWg.Add(1)
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	<-serverReadyChan
@@ -250,9 +264,8 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startCluster(context.Context) (err error) {
+func (s *Server) startCluster() (err error) {
 	s.basicCluster = core.NewBasicCluster()
-	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.basicCluster)
 	if err != nil {
 		return err
@@ -262,6 +275,9 @@ func (s *Server) startCluster(context.Context) (err error) {
 }
 
 func (s *Server) stopCluster() {
+	if s.serverLoopCancel != nil {
+		s.serverLoopCancel()
+	}
 	s.metaWatcher.Close()
 }
 
