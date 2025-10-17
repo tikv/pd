@@ -821,6 +821,11 @@ func (c *Cluster) SetPrepared() {
 	c.coordinator.GetPrepareChecker().SetPrepared()
 }
 
+// ResetPrepared reset the prepare checker.
+func (c *Cluster) ResetPrepared() {
+	c.coordinator.GetPrepareChecker().ResetPrepared()
+}
+
 // IsSchedulingHalted returns whether the scheduling is halted.
 // Currently, the microservice scheduling is halted when:
 //   - The `HaltScheduling` persist option is set to true.

@@ -1927,9 +1927,12 @@ func TestExternalTimestamp(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
+	fname := testutil.InitTempFileLogger("debug")
+	defer os.RemoveAll(fname)
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()

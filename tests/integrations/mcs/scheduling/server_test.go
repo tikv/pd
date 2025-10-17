@@ -634,7 +634,6 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
 	leaderServer := suite.pdLeader.GetServer()
 	conf := leaderServer.GetReplicationConfig().Clone()

@@ -134,6 +134,7 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	var err error
 	rc := getCluster(r)
 	rc.ResetRegionCache()
+	rc.ResetPrepared()
 	msg := "All regions are removed from server cache."
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer()

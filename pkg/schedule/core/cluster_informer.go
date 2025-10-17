@@ -41,7 +41,6 @@ type SchedulerCluster interface {
 	buckets.BucketStatInformer
 
 	GetSchedulerConfig() sc.SchedulerConfigProvider
-	GetRegionLabeler() *labeler.RegionLabeler
 	GetStoreConfig() sc.StoreConfigProvider
 }
 
@@ -63,6 +62,7 @@ type SharedCluster interface {
 	GetSharedConfig() sc.SharedConfigProvider
 	GetRuleManager() *placement.RuleManager
 	GetKeyRangeManager() *keyrange.Manager
+	GetRegionLabeler() *labeler.RegionLabeler
 	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
 	GetPrepareRegionCount() (int, error)
