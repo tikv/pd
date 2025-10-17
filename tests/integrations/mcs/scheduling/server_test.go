@@ -145,10 +145,11 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
+	expectedSchedulerCount := len(types.DefaultSchedulers)
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
 	})
 	// change primary
 	primary.Close()
@@ -159,7 +160,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
 	})
 }
 
