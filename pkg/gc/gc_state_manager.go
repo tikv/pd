@@ -664,27 +664,39 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 // must be fetched AFTER the beginning of the current invocation, and it never reuses the result of invocations that
 // started earlier than the current one.
 func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint32]GCState, error) {
-	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func() (map[uint32]GCState, error) {
-		result, err := m.getAllKeyspacesGCStatesImpl()
+	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
+		result, err := m.getAllKeyspacesGCStatesImpl(execCtx)
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 		return result, err
 	})
 }
 
-func (m *GCStateManager) getAllKeyspacesGCStatesImpl() (map[uint32]GCState, error) {
+func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[uint32]GCState, error) {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 
-	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
-	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
-	if err != nil {
-		return nil, err
+	mutexLocked := false
+	lock := func() {
+		m.mu.Lock()
+		mutexLocked = true
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	unlock := func() {
+		m.mu.Unlock()
+		mutexLocked = false
+	}
+
+	ensureUnlocked := func() {
+		if mutexLocked {
+			unlock()
+		}
+	}
+	defer ensureUnlocked()
+
+	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
 	// Do not guarantee atomicity among different keyspaces here.
 	results := make(map[uint32]GCState)
-	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	lock()
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
 		if err1 != nil {
 			return err1
@@ -692,11 +704,26 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl() (map[uint32]GCState, erro
 		results[constant.NullKeyspaceID] = nullKeyspaceState
 		return nil
 	})
+	unlock()
 	if err != nil {
 		return nil, err
 	}
 
-	for _, keyspaceMeta := range allKeyspaces {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		keyspaceMeta, ok, err := keyspaceIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			break
+		}
+
 		// Just handle the active keyspace, leave the others up to keyspace management.
 		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
 			continue
@@ -710,6 +737,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl() (map[uint32]GCState, erro
 			continue
 		}
 
+		lock()
 		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
 			if err1 != nil {
@@ -718,6 +746,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl() (map[uint32]GCState, erro
 			results[keyspaceMeta.Id] = state
 			return nil
 		})
+		unlock()
 		if err != nil {
 			return nil, err
 		}
@@ -810,7 +839,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 		var txnSafePoint uint64
 		err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 			var err1 error
-			txnSafePoint, _, _, err1 = m.getAllKeyspacesMaxTxnSafePoint(wb)
+			txnSafePoint, _, _, err1 = m.getMaxTxnSafePointAmongAllKeyspaces(wb)
 			return err1
 		})
 		if err != nil {
@@ -910,16 +939,20 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 	return m.setGlobalGCBarrierImpl(ctx, barrierID, barrierTS, ttl, now)
 }
 
-// getAllKeyspacesMaxTxnSafePoint must be called inside a transaction,
+// getMaxTxnSafePointAmongAllKeyspaces must be called inside a transaction,
 // The WriteBatch parameter in function signature is deliberate to the call safe, do not pass nil.
-func (m *GCStateManager) getAllKeyspacesMaxTxnSafePoint(_ *endpoint.GCStateWriteBatch) (maxTxnSafePoint uint64, keyspaceName string, keyspaceID uint32, err error) {
-	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
-	allKeyspaces, err1 := m.keyspaceManager.LoadRangeKeyspace(0, 0)
-	if err1 != nil {
-		err = err1
-		return
-	}
-	for _, keyspaceMeta := range allKeyspaces {
+func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCStateWriteBatch) (maxTxnSafePoint uint64, keyspaceName string, keyspaceID uint32, err error) {
+	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
+	for {
+		keyspaceMeta, ok, err2 := keyspaceIterator.Next()
+		if err2 != nil {
+			err = err2
+			return
+		}
+		if !ok {
+			break
+		}
+
 		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
 			continue
 		}
@@ -957,7 +990,7 @@ func (m *GCStateManager) setGlobalGCBarrierImpl(_ context.Context, barrierID str
 	newBarrier := endpoint.NewGlobalGCBarrier(barrierID, barrierTS, expirationTime)
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		// Make sure global barrier ts is ahead of txn safe point of all keyspaces.
-		maxTxnSafePoint, keyspaceName, keyspaceID, err := m.getAllKeyspacesMaxTxnSafePoint(wb)
+		maxTxnSafePoint, keyspaceName, keyspaceID, err := m.getMaxTxnSafePointAmongAllKeyspaces(wb)
 		if err != nil {
 			return err
 		}
