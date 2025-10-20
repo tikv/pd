@@ -145,10 +145,16 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			processRegion(first)
 			startIndex := s.history.getNextIndex()
 			s.history.record(first)
+			if first.GetID() == 1 {
+				log.Info("debug region 1 changed", zap.Uint64("version", first.GetRegionEpoch().GetVersion()))
+			}
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
 				case region := <-regionNotifier:
+					if region.GetID() == 1 {
+						log.Info("debug region 1 changed", zap.Uint64("version", region.GetRegionEpoch().GetVersion()))
+					}
 					processRegion(region)
 					s.history.record(region)
 				default:

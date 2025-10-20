@@ -32,7 +32,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0-20251017025558-a27c2e8d8fd0
 	go.etcd.io/etcd/client/pkg/v3 v3.5.15
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.etcd.io/etcd/pkg/v3 v3.5.15

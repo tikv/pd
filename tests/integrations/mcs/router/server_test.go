@@ -16,6 +16,8 @@ package router
 
 import (
 	"context"
+	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/core"
 	"testing"
 	"time"
 
@@ -48,7 +50,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -66,7 +68,7 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cancel()
 }
 
-func (suite *serverTestSuite) TestGRPCAPI() {
+func (suite *serverTestSuite) TestBasicSync() {
 	re := suite.Require()
 	regions := tests.InitRegions(10)
 	for _, region := range regions {
@@ -76,5 +78,45 @@ func (suite *serverTestSuite) TestGRPCAPI() {
 	re.NoError(err)
 	defer cleanup()
 	time.Sleep(3 * time.Second) // wait for region syncer to sync regions
-	re.NotNil(tc.GetBasicCluster().GetRegion(1))
+	// check sync work well
+	testutil.Eventually(re, func() bool {
+		return tc.IsReady()
+	})
+	region := tc.GetBasicCluster().GetRegion(1)
+	epoch := region.GetRegionEpoch()
+	re.Equal(uint64(1), epoch.GetVersion())
+
+	// change region1 and ensure this changes can sync to the router server
+	newRegion := region.Clone(core.WithIncVersion())
+	re.NoError(suite.cluster.HandleRegionHeartbeat(newRegion))
+	testutil.Eventually(re, func() bool {
+		newEpoch := tc.GetBasicCluster().GetRegion(1).GetRegionEpoch()
+		return newEpoch.GetVersion() == newRegion.GetRegionEpoch().GetVersion()
+	})
+
+	// resign pd leader to ensure router can reconnect to new leader
+	re.NoError(suite.cluster.ResignLeader())
+	tc.TriggerLeaderChanged()
+	newRegion = region.Clone(core.WithIncVersion())
+	re.NoError(suite.cluster.HandleRegionHeartbeat(newRegion))
+	testutil.Eventually(re, func() bool {
+		newEpoch := tc.GetBasicCluster().GetRegion(1).GetRegionEpoch()
+		return newEpoch.GetVersion() == newRegion.GetRegionEpoch().GetVersion()
+	})
+
+	// break the client streaming and ensure the router can re-establish the streaming
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/router/server/syncMetError", `1*return(true)`))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/router/server/syncMetError"))
+	newRegion = region.Clone(core.WithIncVersion())
+	re.NoError(suite.cluster.HandleRegionHeartbeat(newRegion))
+	testutil.Eventually(re, func() bool {
+		newEpoch := tc.GetBasicCluster().GetRegion(1).GetRegionEpoch()
+		return newEpoch.GetVersion() == newRegion.GetRegionEpoch().GetVersion()
+	})
+
+	// stop router server and ensure it can not serve requests
+	tc.Close()
+	testutil.Eventually(re, func() bool {
+		return !tc.IsReady()
+	})
 }

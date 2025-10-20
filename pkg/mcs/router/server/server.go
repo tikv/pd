@@ -35,8 +35,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	sd "github.com/tikv/pd/client/servicediscovery"
 
+	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -139,11 +139,19 @@ func (s *Server) startServerLoop() error {
 		return err
 	}
 	serviceDiscovery := sd.NewDefaultServiceDiscovery(s.serverLoopCtx, s.serverLoopCancel, urls, tls)
+	reconnectCh := make(chan struct{}, 1)
+	serviceDiscovery.AddLeaderSwitchedCallback(func(s string) error {
+		log.Warn("leader changed", zap.String("leader", s))
+		reconnectCh <- struct{}{}
+		return nil
+	})
 	if err = serviceDiscovery.Init(); err != nil {
 		return err
 	}
-	s.regionSyncer = NewRegionSyncer(s.serverLoopCtx, s.basicCluster, serviceDiscovery, s.GetTLSConfig(), s.Name(), s.GetAdvertiseListenAddr())
-	s.regionSyncer.Reconnect()
+	s.regionSyncer = NewRegionSyncer(s.serverLoopCtx, s.basicCluster, serviceDiscovery, s.GetTLSConfig(), s.Name(),
+		s.GetAdvertiseListenAddr(), reconnectCh)
+	s.regionSyncer.startSyncWithLeader()
+	go s.regionSyncer.leaderLoop()
 	return nil
 }
 
@@ -197,6 +205,11 @@ func (s *Server) GetCluster() *Cluster {
 // GetBasicCluster returns the basic cluster.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
+}
+
+// IsReady returns whether the server is ready.
+func (s *Server) IsReady() bool {
+	return s.regionSyncer.streamingRunning.Load()
 }
 
 // AddServiceReadyCallback adds a callback function that will be called when the service is ready.
@@ -278,7 +291,15 @@ func (s *Server) stopCluster() {
 	if s.serverLoopCancel != nil {
 		s.serverLoopCancel()
 	}
+	s.regionSyncer.Stop()
 	s.metaWatcher.Close()
+}
+
+// TriggerLeaderChanged triggers the leader changed event, only for test use.
+func (s *Server) TriggerLeaderChanged() {
+	if err := s.regionSyncer.svcDiscovery.CheckMemberChanged(); err != nil {
+		log.Error("failed to check member changed", errs.ZapError(err))
+	}
 }
 
 // CreateServer creates the Server

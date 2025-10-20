@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	sd "github.com/tikv/pd/client/servicediscovery"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +34,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncer"
@@ -43,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
+// RegionSyncer is used to sync region info from leader.
 type RegionSyncer struct {
 	wg        sync.WaitGroup
 	cluster   *core.BasicCluster
@@ -52,23 +53,27 @@ type RegionSyncer struct {
 	streamingRunning atomic.Bool
 	nextSyncIndex    uint64
 	name             string
-	listenUrl        string
+	listenURL        string
 
 	svcDiscovery sd.ServiceDiscovery
 
 	leaderCtx context.Context
 	cancelCtx context.CancelFunc
+
+	reconnectCh chan struct{}
 }
 
 // NewRegionSyncer returns a region syncer.
-func NewRegionSyncer(leaderCtx context.Context, cluster *core.BasicCluster, discovery sd.ServiceDiscovery, tlsConfig *grpcutil.TLSConfig, name, listenUrl string) *RegionSyncer {
+func NewRegionSyncer(leaderCtx context.Context, cluster *core.BasicCluster, discovery sd.ServiceDiscovery,
+	tlsConfig *grpcutil.TLSConfig, name, listenURL string, reconnectCh chan struct{}) *RegionSyncer {
 	return &RegionSyncer{
 		cluster:      cluster,
 		tlsConfig:    tlsConfig,
 		name:         name,
-		listenUrl:    listenUrl,
+		listenURL:    listenURL,
 		svcDiscovery: discovery,
 		leaderCtx:    leaderCtx,
+		reconnectCh:  reconnectCh,
 	}
 }
 
@@ -80,23 +85,38 @@ const (
 )
 
 // Reconnect reconnects to leader.
-func (s *RegionSyncer) Reconnect() {
-	select {
-	case <-s.leaderCtx.Done():
-		log.Warn("server context has been canceled, stop reconnecting to leader", zap.String("server", s.name))
-		return
-	default:
+func (s *RegionSyncer) leaderLoop() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	for {
+		select {
+		case <-s.leaderCtx.Done():
+			log.Warn("server context has been canceled, stop reconnecting to leader", zap.String("server", s.name))
+			return
+		case <-s.reconnectCh:
+			log.Warn("leader changed, need to reconnect", zap.String("server", s.name))
+			s.cancelCtx()
+			s.cancelCtx = nil
+		}
+		s.startSyncWithLeader()
 	}
+}
+
+func (s *RegionSyncer) startSyncWithLeader() {
 	leaderAddr := s.svcDiscovery.GetServingURL()
 	ctx, cancelCtx := context.WithCancel(s.leaderCtx)
 	s.cancelCtx = cancelCtx
-	go s.StartSyncWithLeader(ctx, leaderAddr)
+	log.Warn("region syncer reconnect to leader", zap.String("server", s.name), zap.String("leader", leaderAddr))
+	go s.sync(ctx, leaderAddr)
 }
 
-// StartSyncWithLeader starts to sync with leader.
-func (s *RegionSyncer) StartSyncWithLeader(ctx context.Context, leaderAddr string) {
+// startSyncWithLeader starts to sync with leader.
+func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 	s.wg.Add(1)
-	defer s.Reconnect()
+	defer func() {
+		log.Info("region syncer stopped syncing with leader", zap.String("server", s.name), zap.String("leader", leaderAddr))
+		s.svcDiscovery.ScheduleCheckMemberChanged()
+	}()
 	defer logutil.LogPanic()
 	defer s.wg.Done()
 	defer s.streamingRunning.Store(false)
@@ -156,6 +176,9 @@ func (s *RegionSyncer) StartSyncWithLeader(ctx context.Context, leaderAddr strin
 		log.Info("server starts to synchronize with leader", zap.String("server", s.name), zap.String("leader", leaderAddr), zap.Uint64("request-index", s.nextSyncIndex))
 		for {
 			resp, err := stream.Recv()
+			failpoint.Inject("syncMetError", func() {
+				err = errors.Errorf("recv met stream")
+			})
 			if err != nil {
 				s.streamingRunning.Store(false)
 				log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
@@ -212,7 +235,6 @@ func (s *RegionSyncer) StartSyncWithLeader(ctx context.Context, leaderAddr strin
 					log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 					continue
 				}
-
 				bc.PutRegion(region)
 				if err == nil {
 					s.nextSyncIndex++
@@ -234,7 +256,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (s
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Member: &pdpb.Member{
 			Name:       s.name,
-			ClientUrls: []string{s.listenUrl},
+			ClientUrls: []string{s.listenURL},
 		},
 		StartIndex: s.nextSyncIndex,
 	})
@@ -250,6 +272,7 @@ func (s *RegionSyncer) IsRunning() bool {
 	return s.streamingRunning.Load()
 }
 
+// Stop stops the region syncer.
 func (s *RegionSyncer) Stop() {
 	if s.cancelCtx != nil {
 		s.cancelCtx()
