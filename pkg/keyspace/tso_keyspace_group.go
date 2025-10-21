@@ -423,6 +423,68 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 	return 0, errs.ErrKeyspaceNotInAnyKeyspaceGroup
 }
 
+// RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.
+// If a keyspace is not in the group, it will be skipped (no error).
+// It returns the updated keyspace group and any error encountered.
+func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+	m.Lock()
+	defer m.Unlock()
+
+	var (
+		kg  *endpoint.KeyspaceGroup
+		err error
+	)
+
+	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		// Load the keyspace group
+		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
+		if err != nil {
+			return err
+		}
+		if kg == nil {
+			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID)
+		}
+
+		// Build a set of keyspaces to remove (excluding default keyspace)
+		toRemove := make(map[uint32]struct{})
+		for _, ksID := range keyspaceIDs {
+			// Skip default keyspace
+			if ksID == constant.DefaultKeyspaceID {
+				continue
+			}
+			// Only add if it exists in the group (skip if not present)
+			if slice.Contains(kg.Keyspaces, ksID) {
+				toRemove[ksID] = struct{}{}
+			}
+		}
+
+		// If nothing to remove, return nil to skip update
+		if len(toRemove) == 0 {
+			return nil
+		}
+
+		// Filter out keyspaces to remove
+		newKeyspaces := make([]uint32, 0, len(kg.Keyspaces)-len(toRemove))
+		for _, ks := range kg.Keyspaces {
+			if _, shouldRemove := toRemove[ks]; !shouldRemove {
+				newKeyspaces = append(newKeyspaces, ks)
+			}
+		}
+		kg.Keyspaces = newKeyspaces
+
+		// Save the updated keyspace group
+		return m.store.SaveKeyspaceGroup(txn, kg)
+	}); err != nil {
+		return nil, err
+	}
+
+	// Update the cache
+	userKind := endpoint.StringUserKind(kg.UserKind)
+	m.groups[userKind].Put(kg)
+
+	return kg, nil
+}
+
 var failpointOnce sync.Once
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.

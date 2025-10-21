@@ -21,8 +21,11 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/suite"
-
+	"github.com/tikv/pd/pkg/keyspace"
+	ksconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -265,4 +268,109 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupErrorMessage() {
 	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
 	re.NotEmpty(errorMsg, "Error message should not be empty")
 	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+
+	keyspaceManager := suite.server.GetKeyspaceManager()
+	re.NotNil(keyspaceManager)
+
+	// Create test keyspaces (automatically added to default keyspace group 0)
+	keyspaceMeta1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "test_keyspace_1",
+		CreateTime: 0,
+	})
+	re.NoError(err)
+	keyspaceID1 := keyspaceMeta1.GetId()
+
+	keyspaceMeta2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "test_keyspace_2",
+		CreateTime: 0,
+	})
+	re.NoError(err)
+	keyspaceID2 := keyspaceMeta2.GetId()
+
+	keyspaceMeta3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "test_keyspace_3",
+		CreateTime: 0,
+	})
+	re.NoError(err)
+	keyspaceID3 := keyspaceMeta3.GetId()
+
+	// Verify all keyspaces are in the default group
+	kg := MustLoadKeyspaceGroupByID(re, suite.server, ksconstant.DefaultKeyspaceGroupID)
+	re.Contains(kg.Keyspaces, keyspaceID1)
+	re.Contains(kg.Keyspaces, keyspaceID2)
+	re.Contains(kg.Keyspaces, keyspaceID3)
+
+	// Test 1: Try to remove ENABLED keyspaces (should succeed but nothing removed)
+	kg = MustRemoveKeyspacesFromGroup(re, suite.server, ksconstant.DefaultKeyspaceGroupID,
+		[]uint32{keyspaceID1})
+	// Verify nothing is removed (keyspace is still there because it's ENABLED)
+	re.Contains(kg.Keyspaces, keyspaceID1)
+
+	// Test 2: Update keyspaces to ARCHIVED/TOMBSTONE state and batch remove
+	// Set keyspace1 to ARCHIVED
+	_, err = keyspaceManager.UpdateKeyspaceStateByID(keyspaceID1, keyspacepb.KeyspaceState_DISABLED, 0)
+	re.NoError(err)
+	_, err = keyspaceManager.UpdateKeyspaceStateByID(keyspaceID1, keyspacepb.KeyspaceState_ARCHIVED, 0)
+	re.NoError(err)
+
+	// Set keyspace2 to TOMBSTONE
+	_, err = keyspaceManager.UpdateKeyspaceStateByID(keyspaceID2, keyspacepb.KeyspaceState_DISABLED, 0)
+	re.NoError(err)
+	_, err = keyspaceManager.UpdateKeyspaceStateByID(keyspaceID2, keyspacepb.KeyspaceState_ARCHIVED, 0)
+	re.NoError(err)
+	_, err = keyspaceManager.UpdateKeyspaceStateByID(keyspaceID2, keyspacepb.KeyspaceState_TOMBSTONE, 0)
+	re.NoError(err)
+
+	// Batch remove keyspace1 and keyspace2
+	MustRemoveKeyspacesFromGroup(re, suite.server, ksconstant.DefaultKeyspaceGroupID,
+		[]uint32{keyspaceID1, keyspaceID2})
+
+	// Verify both keyspaces are removed
+	kg = MustLoadKeyspaceGroupByID(re, suite.server, ksconstant.DefaultKeyspaceGroupID)
+	re.NotContains(kg.Keyspaces, keyspaceID1)
+	re.NotContains(kg.Keyspaces, keyspaceID2)
+	re.Contains(kg.Keyspaces, keyspaceID3) // keyspace3 should still be there
+
+	// Test 3: Mix valid and invalid keyspaces
+	// Set keyspace3 to ARCHIVED
+	_, err = keyspaceManager.UpdateKeyspaceStateByID(keyspaceID3, keyspacepb.KeyspaceState_DISABLED, 0)
+	re.NoError(err)
+	_, err = keyspaceManager.UpdateKeyspaceStateByID(keyspaceID3, keyspacepb.KeyspaceState_ARCHIVED, 0)
+	re.NoError(err)
+
+	// Include: valid (keyspace3), already removed (keyspace1), non-existent (99999)
+	// Should only remove keyspace3, others are skipped
+	MustRemoveKeyspacesFromGroup(re, suite.server, ksconstant.DefaultKeyspaceGroupID,
+		[]uint32{keyspaceID3, keyspaceID1, 99999})
+
+	// Verify only keyspace3 is removed
+	kg = MustLoadKeyspaceGroupByID(re, suite.server, ksconstant.DefaultKeyspaceGroupID)
+	re.NotContains(kg.Keyspaces, keyspaceID3)
+
+	// Test 4: Try to remove from non-existent group
+	FailRemoveKeyspacesFromGroupWithCode(re, suite.server, 999,
+		[]uint32{keyspaceID1}, http.StatusInternalServerError)
+
+	// Test 5: Try to remove with empty keyspace list (should fail - empty list)
+	FailRemoveKeyspacesFromGroupWithCode(re, suite.server, ksconstant.DefaultKeyspaceGroupID,
+		[]uint32{}, http.StatusBadRequest)
+
+	// Test 6: All keyspaces in wrong state (should succeed but nothing removed)
+	keyspaceMeta4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "test_keyspace_4",
+		CreateTime: 0,
+	})
+	re.NoError(err)
+	keyspaceID4 := keyspaceMeta4.GetId()
+
+	kg = MustRemoveKeyspacesFromGroup(re, suite.server, ksconstant.DefaultKeyspaceGroupID,
+		[]uint32{keyspaceID4}) // ENABLED state, will be skipped
+	// Verify keyspace4 is still there
+	re.Contains(kg.Keyspaces, keyspaceID4)
 }
