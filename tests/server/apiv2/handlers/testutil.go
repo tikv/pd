@@ -116,14 +116,24 @@ func MustCreateKeyspaceByID(re *require.Assertions, server *tests.TestServer, re
 func checkCreateRequest(re *require.Assertions, request *handlers.CreateKeyspaceParams, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(request.Name, meta.Name)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.Config, meta.Config)
+	checkConfig(re, request.Config, meta.Config)
 }
 
 // checkCreateByIDRequest verifies a keyspace meta matches a create request.
 func checkCreateByIDRequest(re *require.Assertions, request *handlers.CreateKeyspaceByIDParams, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(*request.ID, meta.Id)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.Config, meta.Config)
+	checkConfig(re, request.Config, meta.Config)
+}
+
+// checkConfig verifies that expected config is a subset of actual config
+// This allows for system-generated fields that may be added automatically
+func checkConfig(re *require.Assertions, expected, actual map[string]string) {
+	for key, expectedValue := range expected {
+		actualValue, exists := actual[key]
+		re.True(exists, "Expected config key %s not found in actual config", key)
+		re.Equal(expectedValue, actualValue, "Config value mismatch for key %s", key)
+	}
 }
 
 func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) *keyspacepb.KeyspaceMeta {

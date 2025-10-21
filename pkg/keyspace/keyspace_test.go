@@ -384,7 +384,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 			}
 		}
 	} else {
-		// For legacy: expect keyspaces [0, 1, 2, ..., 100]
+		// For classic: expect keyspaces [0, 1, 2, ..., 100]
 		for i := range keyspaces {
 			re.Equal(uint32(i), keyspaces[i].Id)
 			if i != 0 {

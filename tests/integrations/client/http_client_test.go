@@ -47,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
@@ -467,7 +468,13 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	labelRules, err := client.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
 	re.Len(labelRules, 1)
-	re.Equal("keyspaces/0", labelRules[0].ID)
+
+	// In NextGen, the bootstrap keyspace is SYSTEM with ID 16777214, not DEFAULT with ID 0
+	expectedKeyspaceID := "keyspaces/0"
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceID = "keyspaces/16777214"
+	}
+	re.Equal(expectedKeyspaceID, labelRules[0].ID)
 	// Set a new region label rule.
 	labelRule := &pd.LabelRule{
 		ID:       "rule1",
@@ -512,7 +519,7 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.NoError(err)
 	re.Len(labelRules, 1)
 	re.Equal(labelRule, labelRules[0])
-	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"keyspaces/0", "rule2"})
+	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{expectedKeyspaceID, "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
@@ -965,7 +972,13 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	keyspaceName := constant.DefaultKeyspaceName
+	// Use the correct bootstrap keyspace name based on build type
+	var keyspaceName string
+	if kerneltype.IsNextGen() {
+		keyspaceName = constant.SystemKeyspaceName
+	} else {
+		keyspaceName = constant.DefaultKeyspaceName
+	}
 	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
@@ -1000,8 +1013,16 @@ func (suite *httpClientTestSuite) TestGetKeyspaceMetaByID() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	// Fetch DEFAULT keyspace by name first to get its ID.
-	metaByName, err := client.GetKeyspaceMetaByName(ctx, constant.DefaultKeyspaceName)
+	// Fetch the bootstrap keyspace by name first to get its ID.
+	// In NextGen, it's SYSTEM keyspace; in Classic, it's DEFAULT keyspace.
+	var bootstrapKeyspaceName string
+	if kerneltype.IsNextGen() {
+		bootstrapKeyspaceName = constant.SystemKeyspaceName
+	} else {
+		bootstrapKeyspaceName = constant.DefaultKeyspaceName
+	}
+
+	metaByName, err := client.GetKeyspaceMetaByName(ctx, bootstrapKeyspaceName)
 	re.NoError(err)
 	re.NotNil(metaByName)
 
