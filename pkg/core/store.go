@@ -44,6 +44,9 @@ const (
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
+	// EngineRoleKey is the label key used to indicate engine role.
+	// Only TiFlash write node has this label.
+	EngineRoleKey = "engine_role"
 	// EngineTiFlash is the tiflash value of the engine label.
 	// Classic TiFlash and TiFlash write node will use this value.
 	EngineTiFlash = "tiflash"
