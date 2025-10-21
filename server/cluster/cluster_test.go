@@ -3175,11 +3175,11 @@ func TestAddScheduler(t *testing.T) {
 	defer cleanup()
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), len(sc.DefaultSchedulers))
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
+	// Remove all default schedulers (dynamically adjusts for NextGen vs Classic)
+	for _, schedulerConfig := range sc.DefaultSchedulers {
+		schedulerType := types.ConvertOldStrToType[schedulerConfig.Type]
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3287,11 +3287,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+2)
 
 	// remove all default schedulers
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
+	for _, schedulerConfig := range sc.DefaultSchedulers {
+		schedulerType := types.ConvertOldStrToType[schedulerConfig.Type]
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3401,12 +3400,10 @@ func TestRemoveScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+1)
 
 	// remove all schedulers
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
+	for _, schedulerType := range types.DefaultSchedulers {
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)

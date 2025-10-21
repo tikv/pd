@@ -294,7 +294,7 @@ func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
 }
 
 // GetBootstrapKeyspaceID returns the Keyspace ID used for bootstrapping.
-// Legacy: constant.DefaultKeyspaceID
+// Classic: constant.DefaultKeyspaceID
 // NextGen: constant.SystemKeyspaceID
 func GetBootstrapKeyspaceID() uint32 {
 	if kerneltype.IsNextGen() {
@@ -304,7 +304,7 @@ func GetBootstrapKeyspaceID() uint32 {
 }
 
 // GetBootstrapKeyspaceName returns the Keyspace Name used for bootstrapping.
-// Legacy: constant.DefaultKeyspaceName
+// Classic: constant.DefaultKeyspaceName
 // NextGen: constant.SystemKeyspaceName
 func GetBootstrapKeyspaceName() string {
 	if kerneltype.IsNextGen() {
