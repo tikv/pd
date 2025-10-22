@@ -71,7 +71,7 @@ type pdStreamBuilder struct {
 
 func (b *pdStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
 	done := make(chan struct{})
-	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
+	// TODO: we need to handle a corner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
@@ -90,7 +90,7 @@ func (b *msStreamBuilder) build(
 	ctx context.Context, cancel context.CancelFunc, timeout time.Duration,
 ) (*tsoStream, error) {
 	done := make(chan struct{})
-	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
+	// TODO: we need to handle a corner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}

@@ -344,7 +344,7 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 	return value
 }
 
-// ScheduleDisabled returns true if the region is lablelld with schedule-disabled.
+// ScheduleDisabled returns true if the region is labeled with schedule-disabled.
 func (l *RegionLabeler) ScheduleDisabled(region *core.RegionInfo) bool {
 	v := l.GetRegionLabel(region, scheduleOptionLabel)
 	return strings.EqualFold(v, scheduleOptionValueDeny)
@@ -394,8 +394,8 @@ func MakeKeyRanges(keys ...string) []any {
 	return res
 }
 
-// IterateLableRules iterates the label rules. It will return once the iterator returns false.
-func (l *RegionLabeler) IterateLableRules(iterator func(rule *LabelRule) bool) {
+// IterateLabelRules iterates the label rules. It will return once the iterator returns false.
+func (l *RegionLabeler) IterateLabelRules(iterator func(rule *LabelRule) bool) {
 	l.RLock()
 	defer l.RUnlock()
 	for _, rule := range l.labelRules {

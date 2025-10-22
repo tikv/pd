@@ -85,7 +85,7 @@ type LocalBucketConfig struct {
 }
 
 // BaseConfig is the configuration of the resource manager controller which includes some option for client needed.
-// TODO: unified the configuration for client and server, server side in pkg/mcs/resourcemanger/config.go.
+// TODO: unified the configuration for client and server, server side in pkg/mcs/resourcemanager/config.go.
 type BaseConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	DegradedModeWaitDuration Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`

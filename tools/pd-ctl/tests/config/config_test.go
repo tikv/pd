@@ -616,7 +616,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}}, "--region=1", "--detail")
 
 	// test delete
-	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
+	// need clear up args, so create new a cobra.Command. Otherwise group still exists.
 	rules[0].Count = 0
 	b, err = json.Marshal(rules)
 	re.NoError(err)

@@ -28,7 +28,7 @@ type DoneFunc func()
 
 // DimensionConfig is the limit dimension config of one label
 type DimensionConfig struct {
-	// qps conifg
+	// qps config
 	QPS      float64
 	QPSBurst int
 	// concurrency config

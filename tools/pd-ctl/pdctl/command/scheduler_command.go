@@ -387,7 +387,7 @@ func NewBalanceRangeSchedulerCommand() *cobra.Command {
 	return c
 }
 
-// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-shceudler.
+// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-scheduler.
 func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "transfer-witness-leader-scheduler",
