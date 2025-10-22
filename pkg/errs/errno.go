@@ -260,6 +260,8 @@ var (
 	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
 	ErrKeyspaceGroupNotInMerging = errors.Normalize("keyspace group %v is not in merging state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotInMerging"))
 	// errKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
+	ErrKeyspaceGroupVersionStale = errors.Normalize("keyspace group version is stale", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupVersionStale"))
+	// ErrKeyspaceGroupVersionStale is used to indicate target keyspace group version is stale.
 )
 
 // diagnostic errors
