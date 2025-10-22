@@ -1572,7 +1572,7 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibilityForNativeBR
 		re.Equal(uint64(32), res.NewTxnSafePoint)
 		re.Contains(res.BlockerDescription, `BarrierID: "native_br"`)
 
-		// native_br is not transaformed into barrier
+		// native_br is not transformed into barrier
 		re.Nil(s.getGCBarrier(keyspaceID, "native_br"))
 		allBarriers := s.getAllGCBarriers(keyspaceID)
 		re.Empty(allBarriers)
@@ -1903,7 +1903,7 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	re := s.Require()
 	now := time.Now()
 
-	// When downgrade compatible mode of AdvanceTxnSafePoint is triggerred, the "gc_worker"'s service safe point
+	// When downgrade compatible mode of AdvanceTxnSafePoint is triggered, the "gc_worker"'s service safe point
 	// will be updated synchronized with the txn safe point.
 	s.putLegacyGCWorkerServiceSafePoint(keyspaceID, 0)
 	for _, target := range []uint64{10, 20} {

@@ -2605,7 +2605,7 @@ func (c *RaftCluster) collectStorageSize(
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
 	start := time.Now()
 	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
-	regionLabeler.IterateLableRules(func(rule *labeler.LabelRule) bool {
+	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
 		// Try to parse the keyspace ID from the label rule.
 		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
 		if !ok {

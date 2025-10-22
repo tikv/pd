@@ -187,7 +187,7 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	// By the time this test is writte, only for next-gen deployment we enable keyspace level GC by default.
+	// By the time this test is write, only for next-gen deployment we enable keyspace level GC by default.
 	// Update this test when this
 	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
 

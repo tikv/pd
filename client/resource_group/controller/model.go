@@ -34,12 +34,12 @@ type RequestUnit float64
 type AccessLocationType byte
 
 const (
-	// AccessUnknown means the access type is unknown because there is not "zone" lables in either
+	// AccessUnknown means the access type is unknown because there is not "zone" labels in either
 	// the source or target instance, it is likely the cluster is not cross AZ deployed.
 	AccessUnknown AccessLocationType = iota
 	// AccessLocalZone means the source and target instance are in the same zone.
 	AccessLocalZone
-	// AccessCrossZone means the source and target instance are in differne zones.
+	// AccessCrossZone means the source and target instance are in different zones.
 	AccessCrossZone
 )
 

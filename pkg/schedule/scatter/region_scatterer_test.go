@@ -513,7 +513,7 @@ func TestScattersGroup(t *testing.T) {
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	for id, testCase := range testCases {
-		group := fmt.Sprintf("gourp-%d", id)
+		group := fmt.Sprintf("group-%d", id)
 		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 		regions := map[uint64]*core.RegionInfo{}
