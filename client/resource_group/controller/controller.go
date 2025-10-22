@@ -130,6 +130,13 @@ func WithDegradedModeWaitDuration(d time.Duration) ResourceControlCreateOption {
 	}
 }
 
+// WithDegradedRUSettings is the option to set the degraded RU settings for the resource group.
+func WithDegradedRUSettings(degradedRUSettings *rmpb.GroupRequestUnitSettings) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.degradedRUSettings = degradedRUSettings
+	}
+}
+
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
@@ -164,6 +171,8 @@ type ResourceGroupsController struct {
 
 	// a cache for ru config and make concurrency safe.
 	safeRuConfig atomic.Pointer[RUConfig]
+
+	degradedRUSettings *rmpb.GroupRequestUnitSettings
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -458,6 +467,15 @@ func NewResourceGroupNotExistErr(name string) error {
 	return errors.Errorf("%s does not exist", name)
 }
 
+func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
+	group := &rmpb.ResourceGroup{
+		Name:       resourceGroupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: c.degradedRUSettings,
+	}
+	return group
+}
+
 // tryGetResourceGroupController will try to get the resource group controller from local cache first.
 // If the local cache misses, it will then call gRPC to fetch the resource group info from the remote server.
 // If `useTombstone` is true, it will return the resource group controller even if it is marked as tombstone.
@@ -472,10 +490,17 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		}
 		return gc, nil
 	}
+
+	isUseDegradedResourceGroup := false
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		return nil, err
+		if c.degradedRUSettings != nil {
+			isUseDegradedResourceGroup = true
+			group = c.getDegradedResourceGroup(name)
+		} else {
+			return nil, err
+		}
 	}
 	if group == nil {
 		return nil, NewResourceGroupNotExistErr(name)
@@ -489,11 +514,14 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	if err != nil {
 		return nil, err
 	}
-	// Check again to prevent initializing the same resource group concurrently.
-	gc, loaded := c.loadOrStoreGroupController(name, gc)
-	if !loaded {
-		resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
-		log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
+
+	if !isUseDegradedResourceGroup {
+		// Check again to prevent initializing the same resource group concurrently.
+		_, loaded := c.loadOrStoreGroupController(name, gc)
+		if !loaded {
+			resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
+			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
+		}
 	}
 	return gc, nil
 }
