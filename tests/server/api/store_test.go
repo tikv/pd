@@ -71,6 +71,11 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
 	}
+
+	// Prevent store 6 (offline store) from being auto-tombstoned by adding a region to it
+	// This ensures the store remains offline instead of being converted to tombstone
+	tests.MustPutRegion(re, cluster, 999, 6, []byte("a"), []byte("b"))
+
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
@@ -82,6 +87,7 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 
 	url := fmt.Sprintf("%s/stores", urlPrefix)
 	info := new(response.StoresInfo)
+
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, stores[:3])
