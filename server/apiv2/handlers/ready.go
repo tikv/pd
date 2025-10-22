@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"sort"
 
@@ -28,6 +27,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
@@ -74,7 +74,7 @@ func NewCheckRegistry() *checkRegistry {
 // register adds a new check to the registry.
 func (reg *checkRegistry) register(name string, check checkFunction) {
 	if _, exists := reg.checks[name]; exists {
-		log.Fatal("check function is already registered", zap.String("name", name))
+		log.Warn("check function is already registered", zap.String("name", name))
 	}
 	reg.checks[name] = check
 }
@@ -88,8 +88,7 @@ func (reg *checkRegistry) installHandlers(r *gin.RouterGroup, basePath string) {
 	sort.Strings(checkNames) // ensure consistent order
 
 	rootHandler := reg.createRootHandler(checkNames)
-	r.GET(basePath, rootHandler)     // for /readyz and /livez endpoints
-	r.GET(basePath+"/", rootHandler) // also handle trailing slash
+	r.GET(basePath, rootHandler)
 
 	for _, name := range checkNames {
 		checkName := name
