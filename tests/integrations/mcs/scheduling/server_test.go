@@ -238,7 +238,15 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs.
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 	tc.GetPrimaryServer().Close()
 	// Stop scheduling server. PD will execute scheduling jobs again.
@@ -255,7 +263,15 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs again.
 	testutil.Eventually(re, func() bool {
-		return tc1.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc1.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 }
 
@@ -635,6 +651,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Additional wait to ensure config watcher is ready
+	waitForConfigWatcherReady(re, tc)
 
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
 	leaderServer := suite.pdLeader.GetServer()
@@ -752,9 +770,39 @@ func checkOperatorFail(re *require.Assertions, oc *operator.Controller, op *oper
 	re.False(oc.RemoveOperator(op))
 }
 
+// waitForConfigWatcherReady ensures the config watcher is properly initialized and working
+func waitForConfigWatcherReady(re *require.Assertions, tc *tests.TestSchedulingCluster) {
+	testutil.Eventually(re, func() bool {
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		// Try to get cluster version - if config watcher is working, this should be available
+		sharedConfig := cluster.GetSharedConfig()
+		if sharedConfig == nil {
+			return false
+		}
+		version := sharedConfig.GetClusterVersion()
+		// If we can get a valid cluster version, config watcher is likely working
+		return version != nil && version.String() != ""
+	})
+}
+
 func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ storelimit.Type, expectedLimit float64) {
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
 	})
 }
 
