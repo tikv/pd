@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
@@ -363,12 +364,6 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	keyspaces, err := manager.LoadRangeKeyspace(0, 0)
 	re.NoError(err)
 	re.Len(keyspaces, total+1)
-<<<<<<< HEAD
-	for i := range keyspaces {
-		re.Equal(uint32(i), keyspaces[i].Id)
-		if i != 0 {
-			checkCreateRequest(re, requests[i-1], keyspaces[i])
-=======
 
 	// In next-gen mode, the bootstrap keyspace has SystemKeyspaceID instead of DefaultKeyspaceID (0).
 	// So the keyspaces will be ordered as: [1, 2, 3, ..., 100, SystemKeyspaceID]
@@ -392,7 +387,6 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 			if i != 0 {
 				checkCreateRequest(re, requests[i-1], keyspaces[i])
 			}
->>>>>>> 538a218e0 (tests: fix the rest failed nextgen tests (#9819))
 		}
 	}
 

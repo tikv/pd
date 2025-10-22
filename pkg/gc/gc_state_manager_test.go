@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -126,9 +127,6 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 
 	// The bootstrap keyspace (DefaultKeyspaceID or SystemKeyspaceID) exists automatically after bootstrapping.
 	if opt.specifyInitialKeyspaces == nil {
-<<<<<<< HEAD
-		ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-=======
 		// In NextGen, all keyspaces should use keyspace_level GC
 		// In Classic, we can have different GC management types
 		var ks1Config map[string]string
@@ -141,7 +139,6 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		*id = 1
 		ks1, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			ID:         id,
->>>>>>> 538a218e0 (tests: fix the rest failed nextgen tests (#9819))
 			Name:       "ks1",
 			Config:     ks1Config,
 			CreateTime: time.Now().Unix(),
