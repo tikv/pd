@@ -123,6 +123,65 @@ func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
 	}
 }
 
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestFallback() {
+	// There is only default keyspace group. Any keyspace, which hasn't been assigned to
+	// a keyspace group before, will be served by the default keyspace group.
+	re := suite.Require()
+	testutil.Eventually(re, func() bool {
+		for _, keyspaceID := range []uint32{0, 1, 2} {
+			served := false
+			for _, server := range suite.tsoCluster.GetServers() {
+				if server.IsKeyspaceServingByGroup(keyspaceID, constant.DefaultKeyspaceGroupID) {
+					tam, err := server.GetTSOAllocator(constant.DefaultKeyspaceGroupID)
+					re.NoError(err)
+					re.NotNil(tam)
+					served = true
+					break
+				}
+			}
+			if !served {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Any keyspace that was assigned to a keyspace group before, except default keyspace,
+	// won't be served at this time. Default keyspace will be served by default keyspace group
+	// all the time.
+
+	runDefaultKeyspace := false
+	for _, server := range suite.tsoCluster.GetServers() {
+		if server.IsKeyspaceServingByGroup(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID) {
+			runDefaultKeyspace = true
+		}
+		for _, keyspaceGroupID := range []uint32{1, 2, 3} {
+			re.False(server.IsKeyspaceServingByGroup(constant.DefaultKeyspaceID, keyspaceGroupID))
+			for _, keyspaceID := range []uint32{1, 2, 3} {
+				if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID) {
+					tam, err := server.GetTSOAllocator(keyspaceGroupID)
+					re.NoError(err)
+					re.NotNil(tam)
+				}
+			}
+		}
+	}
+	re.True(runDefaultKeyspace)
+
+	// Create a client for each keyspace and make sure they can successfully discover the service
+	// provided by the default keyspace group.
+	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
+	clients := utils.WaitForMultiKeyspacesTSOAvailable(
+		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
+	re.Len(keyspaceIDs, len(clients))
+	utils.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+		time.Sleep(3 * time.Second)
+	})
+	for _, client := range clients {
+		client.Close()
+	}
+}
+
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {
 	// There is only default keyspace group. Any keyspace, which hasn't been assigned to
 	// a keyspace group before, will be served by the default keyspace group.
