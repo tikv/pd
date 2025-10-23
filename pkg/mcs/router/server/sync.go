@@ -16,11 +16,13 @@ package server
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/docker/go-units"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -34,10 +36,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncer"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -55,37 +57,106 @@ type RegionSyncer struct {
 	name             string
 	listenURL        string
 
-	svcDiscovery sd.ServiceDiscovery
-
 	leaderCtx context.Context
 	cancelCtx context.CancelFunc
 
-	reconnectCh chan struct{}
+	// notify the syncer to reconnect to leader
+	// true means force reconnect, it will stop the current syncing stream, such as leader changed
+	// false means reconnect only when the current streaming is not running
+	reconnectCh       chan bool
+	checkMembershipCh chan struct{}
+	etcdClient        *clientv3.Client
+	pdLeaderAddr      atomic.Value
 }
 
 // NewRegionSyncer returns a region syncer.
-func NewRegionSyncer(leaderCtx context.Context, cluster *core.BasicCluster, discovery sd.ServiceDiscovery,
-	tlsConfig *grpcutil.TLSConfig, name, listenURL string, reconnectCh chan struct{}) *RegionSyncer {
+func NewRegionSyncer(leaderCtx context.Context, cluster *core.BasicCluster, etcdClient *clientv3.Client,
+	tlsConfig *grpcutil.TLSConfig, name, listenURL string) *RegionSyncer {
+	checkMembershipCh := make(chan struct{}, 1)
+	reconnectCh := make(chan bool, 1)
 	return &RegionSyncer{
-		cluster:      cluster,
-		tlsConfig:    tlsConfig,
-		name:         name,
-		listenURL:    listenURL,
-		svcDiscovery: discovery,
-		leaderCtx:    leaderCtx,
-		reconnectCh:  reconnectCh,
+		cluster:           cluster,
+		tlsConfig:         tlsConfig,
+		name:              name,
+		listenURL:         listenURL,
+		leaderCtx:         leaderCtx,
+		checkMembershipCh: checkMembershipCh,
+		etcdClient:        etcdClient,
+		reconnectCh:       reconnectCh,
 	}
 }
 
 const (
-	keepaliveTime    = 10 * time.Second
-	keepaliveTimeout = 3 * time.Second
-	msgSize          = 8 * units.MiB
-	retryInterval    = time.Second
+	keepaliveTime        = 10 * time.Second
+	keepaliveTimeout     = 3 * time.Second
+	msgSize              = 8 * units.MiB
+	retryInterval        = time.Second
+	memberUpdateInterval = time.Minute
 )
 
-// Reconnect reconnects to leader.
-func (s *RegionSyncer) leaderLoop() {
+func (s *RegionSyncer) getClient() *clientv3.Client {
+	return s.etcdClient
+}
+
+func (s *RegionSyncer) updatePDMemberLoop() {
+	s.wg.Add(1)
+	defer logutil.LogPanic()
+	defer s.wg.Done()
+
+	ctx, cancel := context.WithCancel(s.leaderCtx)
+	defer cancel()
+	ticker := time.NewTicker(memberUpdateInterval)
+	failpoint.Inject("speedUpMemberLoop", func() {
+		ticker.Reset(100 * time.Millisecond)
+	})
+	defer ticker.Stop()
+	var curLeader uint64
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("server is closed, exit update member loop")
+			return
+		case <-ticker.C:
+		case <-s.checkMembershipCh:
+		}
+		members, err := etcdutil.ListEtcdMembers(ctx, s.getClient())
+		if err != nil {
+			log.Warn("failed to list members", errs.ZapError(err))
+			continue
+		}
+		for _, ep := range members.Members {
+			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
+				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
+				continue
+			}
+			status, err := s.getClient().Status(ctx, ep.ClientURLs[0])
+			if err != nil {
+				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
+				continue
+			}
+			if status.Leader == ep.ID {
+				leaderAddr := ep.ClientURLs[0]
+				if s.pdLeaderAddr.CompareAndSwap(s.pdLeaderAddr.Load(), leaderAddr) {
+					if status.Leader != curLeader {
+						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						s.reconnectCh <- true
+					}
+					curLeader = ep.ID
+					break
+				}
+			}
+		}
+	}
+}
+
+func (s *RegionSyncer) triggerMembershipCheck() {
+	select {
+	case s.checkMembershipCh <- struct{}{}:
+	default: // avoid blocking
+	}
+}
+
+func (s *RegionSyncer) syncLoop() {
 	s.wg.Add(1)
 	defer s.wg.Done()
 	for {
@@ -93,29 +164,45 @@ func (s *RegionSyncer) leaderLoop() {
 		case <-s.leaderCtx.Done():
 			log.Warn("server context has been canceled, stop reconnecting to leader", zap.String("server", s.name))
 			return
-		case <-s.reconnectCh:
+		case force := <-s.reconnectCh:
 			log.Warn("leader changed, need to reconnect", zap.String("server", s.name))
-			s.cancelCtx()
-			s.cancelCtx = nil
+			if !force && s.streamingRunning.Load() {
+				continue
+			}
+			if s.cancelCtx != nil {
+				s.cancelCtx()
+				s.cancelCtx = nil
+			}
 		}
 		s.startSyncWithLeader()
 	}
 }
 
 func (s *RegionSyncer) startSyncWithLeader() {
-	leaderAddr := s.svcDiscovery.GetServingURL()
+	leaderAddr := s.pdLeaderAddr.Load()
+	if leaderAddr == nil {
+		log.Warn("leader addr is nil", zap.String("server", s.name))
+		time.Sleep(retryInterval)
+		s.reconnectCh <- false
+		return
+	}
 	ctx, cancelCtx := context.WithCancel(s.leaderCtx)
 	s.cancelCtx = cancelCtx
-	log.Warn("region syncer reconnect to leader", zap.String("server", s.name), zap.String("leader", leaderAddr))
-	go s.sync(ctx, leaderAddr)
+	log.Warn("region syncer reconnect to leader", zap.String("server", s.name), zap.Any("leader", leaderAddr))
+	go s.sync(ctx, leaderAddr.(string))
 }
 
 // startSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 	s.wg.Add(1)
 	defer func() {
-		log.Info("region syncer stopped syncing with leader", zap.String("server", s.name), zap.String("leader", leaderAddr))
-		s.svcDiscovery.ScheduleCheckMemberChanged()
+		select {
+		case <-ctx.Done():
+			log.Info("leader context is done, stop syncing regions",
+				zap.String("server", s.name), zap.Uint64("next-index", s.nextSyncIndex))
+		case <-time.After(retryInterval):
+			s.reconnectCh <- false
+		}
 	}()
 	defer logutil.LogPanic()
 	defer s.wg.Done()
@@ -177,10 +264,9 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 		for {
 			resp, err := stream.Recv()
 			failpoint.Inject("syncMetError", func() {
-				err = errors.Errorf("recv met stream")
+				err = errors.Errorf("sync met error")
 			})
 			if err != nil {
-				s.streamingRunning.Store(false)
 				log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 				if err = stream.CloseSend(); err != nil {
 					log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
@@ -193,6 +279,12 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 				case <-time.After(retryInterval):
 				}
 				break
+			}
+			// pd leader expired and needs to reconnect.
+			if e := resp.Header.GetError(); e != nil {
+				log.Warn("server broken the connection, it needs to connect again", zap.String("error-message", e.GetMessage()))
+				s.triggerMembershipCheck()
+				return
 			}
 			if s.nextSyncIndex != resp.GetStartIndex() {
 				log.Warn("server sync index not match the leader",
@@ -229,12 +321,6 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 					opts = append(opts, core.SetBuckets(buckets[i]))
 				}
 				region = core.NewRegionInfo(r, regionLeader, opts...)
-
-				origin, _, err := bc.PreCheckPutRegion(region)
-				if err != nil {
-					log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
-					continue
-				}
 				bc.PutRegion(region)
 				if err == nil {
 					s.nextSyncIndex++

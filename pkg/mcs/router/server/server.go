@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -36,7 +35,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 
-	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -131,28 +129,13 @@ func (s *Server) Run() (err error) {
 	return s.startServer()
 }
 
-func (s *Server) startServerLoop() error {
+func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	urls := strings.Split(s.GetBackendEndpoints(), ",")
-	tls, err := s.GetTLSConfig().ToClientTLSConfig()
-	if err != nil {
-		return err
-	}
-	serviceDiscovery := sd.NewDefaultServiceDiscovery(s.serverLoopCtx, s.serverLoopCancel, urls, tls)
-	reconnectCh := make(chan struct{}, 1)
-	serviceDiscovery.AddLeaderSwitchedCallback(func(s string) error {
-		log.Warn("leader changed", zap.String("leader", s))
-		reconnectCh <- struct{}{}
-		return nil
-	})
-	if err = serviceDiscovery.Init(); err != nil {
-		return err
-	}
-	s.regionSyncer = NewRegionSyncer(s.serverLoopCtx, s.basicCluster, serviceDiscovery, s.GetTLSConfig(), s.Name(),
-		s.GetAdvertiseListenAddr(), reconnectCh)
+	s.regionSyncer = NewRegionSyncer(s.serverLoopCtx, s.basicCluster, s.GetEtcdClient(), s.GetTLSConfig(), s.Name(),
+		s.GetAdvertiseListenAddr())
+	go s.regionSyncer.syncLoop()
+	go s.regionSyncer.updatePDMemberLoop()
 	s.regionSyncer.startSyncWithLeader()
-	go s.regionSyncer.leaderLoop()
-	return nil
 }
 
 // Close closes the server.
@@ -260,9 +243,7 @@ func (s *Server) startServer() (err error) {
 	if err := s.startCluster(); err != nil {
 		return err
 	}
-	if err := s.startServerLoop(); err != nil {
-		return err
-	}
+	s.startServerLoop()
 	s.serverLoopWg.Add(1)
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	<-serverReadyChan
@@ -293,13 +274,6 @@ func (s *Server) stopCluster() {
 	}
 	s.regionSyncer.Stop()
 	s.metaWatcher.Close()
-}
-
-// TriggerLeaderChanged triggers the leader changed event, only for test use.
-func (s *Server) TriggerLeaderChanged() {
-	if err := s.regionSyncer.svcDiscovery.CheckMemberChanged(); err != nil {
-		log.Error("failed to check member changed", errs.ZapError(err))
-	}
 }
 
 // CreateServer creates the Server

@@ -138,6 +138,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		select {
 		case <-ctx.Done():
 			log.Info("region syncer has been stopped")
+			s.closeAllClient()
 			return
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
@@ -399,5 +400,22 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 	select {
 	case <-broadcastDone:
 	case <-ctx.Done():
+	}
+}
+
+func (s *RegionSyncer) closeAllClient() {
+	for _, sender := range s.mu.streams {
+		resp := &pdpb.SyncRegionResponse{
+			Header: &pdpb.ResponseHeader{
+				ClusterId: keypath.ClusterID(),
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: "server stopped, close the region syncer client",
+				},
+			},
+		}
+		if err := sender.Send(resp); err != nil {
+			log.Warn("region syncer send close message meet error", errs.ZapError(errs.ErrGRPCSend, err))
+		}
 	}
 }
