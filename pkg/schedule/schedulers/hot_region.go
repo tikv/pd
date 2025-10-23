@@ -257,6 +257,44 @@ func (h *hotScheduler) EncodeConfig() ([]byte, error) {
 	return h.conf.EncodeConfig()
 }
 
+func (h *hotScheduler) ReloadConfig() error {
+	h.conf.Lock()
+	defer h.conf.Unlock()
+	cfgData, err := h.conf.storage.LoadSchedulerConfig(h.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &hotRegionSchedulerConfig{}
+	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	h.conf.MinHotByteRate = newCfg.MinHotByteRate
+	h.conf.MinHotKeyRate = newCfg.MinHotKeyRate
+	h.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	h.conf.MaxZombieRounds = newCfg.MaxZombieRounds
+	h.conf.MaxPeerNum = newCfg.MaxPeerNum
+	h.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
+	h.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
+	h.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	h.conf.CountRankStepRatio = newCfg.CountRankStepRatio
+	h.conf.GreatDecRatio = newCfg.GreatDecRatio
+	h.conf.MinorDecRatio = newCfg.MinorDecRatio
+	h.conf.SrcToleranceRatio = newCfg.SrcToleranceRatio
+	h.conf.DstToleranceRatio = newCfg.DstToleranceRatio
+	h.conf.WriteLeaderPriorities = newCfg.WriteLeaderPriorities
+	h.conf.WritePeerPriorities = newCfg.WritePeerPriorities
+	h.conf.ReadPriorities = newCfg.ReadPriorities
+	h.conf.StrictPickingStore = newCfg.StrictPickingStore
+	h.conf.EnableForTiFlash = newCfg.EnableForTiFlash
+	h.conf.RankFormulaVersion = newCfg.RankFormulaVersion
+	h.conf.ForbidRWType = newCfg.ForbidRWType
+	h.conf.SplitThresholds = newCfg.SplitThresholds
+	return nil
+}
+
 func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
