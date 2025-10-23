@@ -148,6 +148,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 
 		*id = 2
 		ks2, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
 			Name:       "ks2",
 			Config:     map[string]string{"gc_management_type": "keyspace_level"},
 			CreateTime: time.Now().Unix(),
@@ -157,6 +158,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 
 		*id = 3
 		ks3, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
 			Name:       "ks3",
 			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
@@ -164,8 +166,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.NoError(err)
 		re.Equal(uint32(3), ks3.Id)
 
-		*id = 5
+		*id = 4
 		ks4, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
 			Name:       "ks4",
 			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
