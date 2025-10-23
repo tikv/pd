@@ -17,6 +17,7 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"net/http"
 	"reflect"
 	"strings"
@@ -97,10 +98,22 @@ func (suite *serverTestSuite) TestAllocID() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	id, _, err := tc.GetPrimaryServer().GetCluster().AllocID(1)
-	re.NoError(err)
+	id := retryAllocID(re, tc.GetPrimaryServer().GetCluster())
 	re.NotEqual(uint64(0), id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+}
+
+func retryAllocID(re *require.Assertions, cluster *scheduling.Cluster) uint64 {
+	var allocID uint64
+	testutil.Eventually(re, func() bool {
+		id, _, err := cluster.AllocID(1)
+		if err != nil {
+			return false
+		}
+		allocID = id
+		return true
+	})
+	return allocID
 }
 
 func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
@@ -116,8 +129,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 	cluster := tc.GetPrimaryServer().GetCluster()
-	id, _, err := cluster.AllocID(1)
-	re.NoError(err)
+	id := retryAllocID(re, cluster)
 	re.NotEqual(uint64(0), id)
 	err = suite.cluster.ResignLeader()
 	re.NoError(err)
@@ -126,8 +138,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	time.Sleep(time.Second)
-	id1, _, err := cluster.AllocID(1)
-	re.NoError(err)
+	id1 := retryAllocID(re, cluster)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 	// Update the pdLeader in test suite.
