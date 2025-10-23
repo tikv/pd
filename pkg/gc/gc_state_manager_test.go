@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -89,7 +90,7 @@ func TestGCStateManager(t *testing.T) {
 type newGCStateManagerForTestOptions struct {
 	// Nil for generating initial keyspaces by the default preset
 	// Non-nil (including empty) for generating specified keyspaces
-	specifyInitialKeyspaces []*keyspace.CreateKeyspaceRequest
+	specifyInitialKeyspaces []*keyspace.CreateKeyspaceByIDRequest
 	etcdServerCfgModifier   func(cfg *embed.Config)
 }
 
@@ -124,17 +125,30 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	err = keyspaceManager.Bootstrap()
 	re.NoError(err)
 
-	// keyspaceID 0 exists automatically after bootstrapping.
+	// The bootstrap keyspace (DefaultKeyspaceID or SystemKeyspaceID) exists automatically after bootstrapping.
 	if opt.specifyInitialKeyspaces == nil {
-		ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		// In NextGen, all keyspaces should use keyspace_level GC
+		// In Classic, we can have different GC management types
+		var ks1Config map[string]string
+		if kerneltype.IsNextGen() {
+			ks1Config = map[string]string{"gc_management_type": "keyspace_level"}
+		} else {
+			ks1Config = map[string]string{"gc_management_type": "unified"}
+		}
+		id := new(uint32)
+		*id = 1
+		ks1, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
 			Name:       "ks1",
-			Config:     map[string]string{"gc_management_type": "unified"},
+			Config:     ks1Config,
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
 		re.Equal(uint32(1), ks1.Id)
 
-		ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		*id = 2
+		ks2, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
 			Name:       "ks2",
 			Config:     map[string]string{"gc_management_type": "keyspace_level"},
 			CreateTime: time.Now().Unix(),
@@ -142,7 +156,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.NoError(err)
 		re.Equal(uint32(2), ks2.Id)
 
-		ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		*id = 3
+		ks3, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
 			Name:       "ks3",
 			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
@@ -150,7 +166,9 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.NoError(err)
 		re.Equal(uint32(3), ks3.Id)
 
-		ks4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		*id = 4
+		ks4, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
 			Name:       "ks4",
 			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
@@ -161,7 +179,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.Equal(uint32(4), ks4.Id)
 	} else {
 		for _, req := range opt.specifyInitialKeyspaces {
-			_, err := keyspaceManager.CreateKeyspace(req)
+			_, err := keyspaceManager.CreateKeyspaceByID(req)
 			re.NoError(err)
 		}
 	}
@@ -172,10 +190,21 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 func (s *gcStateManagerTestSuite) SetupTest() {
 	s.storage, s.provider, s.manager, s.clean, s.cancel = newGCStateManagerForTest(s.T(), newGCStateManagerForTestOptions{})
 
-	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, 0, 1, 2, 3}
-	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
-	s.keyspacePresets.unmanageable = []uint32{0, 1, 3}
-	s.keyspacePresets.unifiedGC = []uint32{constant.NullKeyspaceID, 0, 1, 3}
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 2, 3}
+
+	// In NextGen builds, bootstrapKeyspaceID is SystemKeyspaceID (0xFFFFFE) with KeyspaceLevelGC config, so it's manageable.
+	// In Classic builds, bootstrapKeyspaceID is DefaultKeyspaceID (0) without KeyspaceLevelGC config, so it's unmanageable.
+	if kerneltype.IsNextGen() {
+		// NextGen: all keyspaces default to KeyspaceLevelGC
+		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 2, 3}
+		s.keyspacePresets.unmanageable = []uint32{}
+		s.keyspacePresets.unifiedGC = []uint32{} // NextGen has no unified GC
+	} else {
+		s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
+		s.keyspacePresets.unmanageable = []uint32{bootstrapKeyspaceID, 1, 3}
+		s.keyspacePresets.unifiedGC = []uint32{constant.NullKeyspaceID, bootstrapKeyspaceID, 1, 3}
+	}
 	s.keyspacePresets.notExisting = []uint32{5, 0xffffff}
 	s.keyspacePresets.nullSynonyms = []uint32{constant.NullKeyspaceID, 0x1000000, 0xfffffffe}
 }
@@ -1859,8 +1888,16 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	})
 	re.NoError(err)
 	re.Equal(uint64(len(s.keyspacePresets.manageable)), txnSafePoint)
-	re.Equal("ks2", keyspaceName)
-	re.Equal(uint32(2), keyspaceID)
+
+	// In NextGen, all keyspaces are manageable, so the max should be ks3
+	// In Classic, only certain keyspaces are manageable, so the max should be ks2
+	if kerneltype.IsNextGen() {
+		re.Equal("ks3", keyspaceName)
+		re.Equal(uint32(3), keyspaceID)
+	} else {
+		re.Equal("ks2", keyspaceName)
+		re.Equal(uint32(2), keyspaceID)
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
@@ -2036,16 +2073,21 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, para
 	defer os.Remove(fname)
 
 	opt := newGCStateManagerForTestOptions{
-		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceRequest, 0, keyspacesCount),
+		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, keyspacesCount),
 		etcdServerCfgModifier: func(cfg *embed.Config) {
 			cfg.LogOutputs = []string{fname}
 		},
 	}
+
+	createTime := time.Now().Unix()
 	for i := range keyspacesCount {
-		opt.specifyInitialKeyspaces = append(opt.specifyInitialKeyspaces, &keyspace.CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("ks%d", i),
+		id := new(uint32)
+		*id = uint32(i + 1)
+		opt.specifyInitialKeyspaces = append(opt.specifyInitialKeyspaces, &keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
+			Name:       fmt.Sprintf("ks%d", *id),
 			Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
-			CreateTime: time.Now().Unix(),
+			CreateTime: createTime,
 		})
 	}
 
