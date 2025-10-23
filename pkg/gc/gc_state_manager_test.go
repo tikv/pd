@@ -90,7 +90,7 @@ func TestGCStateManager(t *testing.T) {
 type newGCStateManagerForTestOptions struct {
 	// Nil for generating initial keyspaces by the default preset
 	// Non-nil (including empty) for generating specified keyspaces
-	specifyInitialKeyspaces []*keyspace.CreateKeyspaceRequest
+	specifyInitialKeyspaces []*keyspace.CreateKeyspaceByIDRequest
 	etcdServerCfgModifier   func(cfg *embed.Config)
 }
 
@@ -146,7 +146,8 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.NoError(err)
 		re.Equal(uint32(1), ks1.Id)
 
-		ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		*id = 2
+		ks2, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			Name:       "ks2",
 			Config:     map[string]string{"gc_management_type": "keyspace_level"},
 			CreateTime: time.Now().Unix(),
@@ -154,7 +155,8 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.NoError(err)
 		re.Equal(uint32(2), ks2.Id)
 
-		ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		*id = 3
+		ks3, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			Name:       "ks3",
 			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
@@ -162,7 +164,8 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.NoError(err)
 		re.Equal(uint32(3), ks3.Id)
 
-		ks4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		*id = 5
+		ks4, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
 			Name:       "ks4",
 			Config:     map[string]string{},
 			CreateTime: time.Now().Unix(),
@@ -173,7 +176,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.Equal(uint32(4), ks4.Id)
 	} else {
 		for _, req := range opt.specifyInitialKeyspaces {
-			_, err := keyspaceManager.CreateKeyspace(req)
+			_, err := keyspaceManager.CreateKeyspaceByID(req)
 			re.NoError(err)
 		}
 	}
@@ -2067,16 +2070,21 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, para
 	defer os.Remove(fname)
 
 	opt := newGCStateManagerForTestOptions{
-		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceRequest, 0, keyspacesCount),
+		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, keyspacesCount),
 		etcdServerCfgModifier: func(cfg *embed.Config) {
 			cfg.LogOutputs = []string{fname}
 		},
 	}
+
+	createTime := time.Now().Unix()
 	for i := range keyspacesCount {
-		opt.specifyInitialKeyspaces = append(opt.specifyInitialKeyspaces, &keyspace.CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("ks%d", i),
+		id := new(uint32)
+		*id = uint32(i + 1)
+		opt.specifyInitialKeyspaces = append(opt.specifyInitialKeyspaces, &keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
+			Name:       fmt.Sprintf("ks%d", *id),
 			Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
-			CreateTime: time.Now().Unix(),
+			CreateTime: createTime,
 		})
 	}
 

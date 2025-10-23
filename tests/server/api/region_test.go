@@ -106,6 +106,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", "return(true)"))
 	suite.env.RunTest(suite.checkAccelerateRegionsScheduleInRanges)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 }
@@ -135,11 +136,15 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body),
 		testutil.StatusOK(re))
 	re.NoError(err)
-	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
-	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
-	}
-	re.Len(idList, 4)
+
+	// Wait for the accelerate schedule operation to complete
+	testutil.Eventually(re, func() bool {
+		idList := leader.GetRaftCluster().GetPendingProcessedRegions()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
+		}
+		return len(idList) == 4
+	})
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
