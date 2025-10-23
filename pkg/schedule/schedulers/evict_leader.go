@@ -239,7 +239,7 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	return res
 }
 
-func (s *evictLeaderScheduler) CleanupConfig(cluster sche.SchedulerCluster) {
+func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {

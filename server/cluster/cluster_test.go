@@ -3135,6 +3135,9 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
+	sches, _, err = storage.LoadAllSchedulerConfigs()
+	re.NoError(err)
+	re.Len(sches, 2)
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3148,6 +3151,10 @@ func TestPersistScheduler(t *testing.T) {
 	shuffle, err := schedulers.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedulers.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(shuffle))
+	sches, _, err = storage.LoadAllSchedulerConfigs()
+	re.NoError(err)
+	re.Len(sches, 3)
+	re.Len(controller.GetSchedulerNames(), 3)
 	// suppose we add a new default enable scheduler
 	sc.DefaultSchedulers = append(sc.DefaultSchedulers, sc.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {

@@ -153,7 +153,7 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return err
 	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	return nil
+	return scheduler.PrepareConfig(c.cluster)
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
@@ -180,6 +180,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
+	s.(Scheduler).CleanConfig(c.cluster)
 	delete(c.schedulerHandlers, name)
 
 	return nil
@@ -340,7 +341,7 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 func (c *Controller) runScheduler(s *ScheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	defer s.Scheduler.CleanupConfig(c.cluster)
+	defer s.Scheduler.CleanConfig(c.cluster)
 
 	ticker := time.NewTicker(s.GetInterval())
 	defer ticker.Stop()

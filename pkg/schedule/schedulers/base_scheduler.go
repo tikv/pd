@@ -98,4 +98,4 @@ func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 func (s *BaseScheduler) PrepareConfig(cluster sche.SchedulerCluster) error { return nil }
 
 // Cleanup does some cleanup work
-func (s *BaseScheduler) CleanupConfig(cluster sche.SchedulerCluster) {}
+func (s *BaseScheduler) CleanConfig(cluster sche.SchedulerCluster) {}
