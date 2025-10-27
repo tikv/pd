@@ -1691,10 +1691,12 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 			redirected, keyspaceName, err := s.manager.redirectKeyspace(keyspaceID, isUserAPI)
 			re.NoError(err, "keyspaceID: %d, isUserAPI: %v", keyspaceID, isUserAPI)
 			re.Equal(keyspaceID, redirected, "keyspaceID: %d, isUserAPI: %v", keyspaceID, isUserAPI)
-			if keyspaceID != constant.NullKeyspaceID {
-				re.Equal(fmt.Sprintf("ks%d", keyspaceID), keyspaceName)
-			} else {
+			if keyspaceID == constant.NullKeyspaceID {
 				re.Equal("<null_keyspace>", keyspaceName)
+			} else if keyspaceID == constant.SystemKeyspaceID {
+				re.Equal("SYSTEM", keyspaceName)
+			} else {
+				re.Equal(fmt.Sprintf("ks%d", keyspaceID), keyspaceName)
 			}
 		}
 	}
