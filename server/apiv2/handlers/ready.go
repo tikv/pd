@@ -100,7 +100,11 @@ func (reg *checkRegistry) installHandlers(r *gin.RouterGroup, basePath string) {
 				c.String(http.StatusServiceUnavailable, "[-]%s failed: %v\n", checkName, err)
 				return
 			}
-			c.String(http.StatusOK, "[+]%s ok\n", checkName)
+			c.Status(http.StatusOK)
+			if _, verbose := c.GetQuery("verbose"); verbose {
+				fmt.Fprintf(c.Writer, "[+]%s ok\n", checkName)
+			}
+			fmt.Fprintf(c.Writer, "ok\n")
 		})
 	}
 }
@@ -141,11 +145,11 @@ func (reg *checkRegistry) createRootHandler(allChecks []string) gin.HandlerFunc 
 			return
 		}
 
+		c.Status(http.StatusOK)
 		if _, verbose := c.GetQuery("verbose"); verbose {
-			c.String(http.StatusOK, output.String())
-		} else {
-			c.String(http.StatusOK, "ok\n")
+			fmt.Fprint(c.Writer, output.String())
 		}
+		fmt.Fprintf(c.Writer, "ok\n")
 	}
 }
 
