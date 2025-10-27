@@ -135,7 +135,7 @@ func TestReadyCheckAPI(t *testing.T) {
 			targetURL:          leaderURL,
 			path:               "/livez?verbose",
 			expectCode:         http.StatusOK,
-			expectBodyContains: []string{"[+]etcd-serializable-read ok"},
+			expectBodyContains: []string{"[+]etcd-serializable-read ok", "ok\n"},
 		},
 		{
 			name:      "livez: unhealthy due to serializable read error",
@@ -157,7 +157,7 @@ func TestReadyCheckAPI(t *testing.T) {
 			targetURL:          leaderURL,
 			path:               "/readyz?verbose",
 			expectCode:         http.StatusOK,
-			expectBodyContains: []string{"[+]leader-promotion ok", "[+]etcd-data-corruption ok"},
+			expectBodyContains: []string{"[+]leader-promotion ok", "[+]etcd-data-corruption ok", "ok\n"},
 		},
 		{
 			name:      "readyz: unhealthy when regions are not loaded (leader-promotion fails)",
@@ -277,7 +277,7 @@ func TestReadyCheckAPI(t *testing.T) {
 		{
 			name:      "subpath: individual check works independently",
 			targetURL: leaderURL,
-			path:      "/readyz/leader-promotion",
+			path:      "/readyz/leader-promotion?verbose",
 			setup: func() {
 				// inject unrelated failure
 				re.NoError(failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/etcdIsLearner", `return("`+leader.GetAddr()+`")`))
@@ -286,7 +286,7 @@ func TestReadyCheckAPI(t *testing.T) {
 				re.NoError(failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/etcdIsLearner"))
 			},
 			expectCode:         http.StatusOK,
-			expectBodyContains: []string{"[+]leader-promotion ok"},
+			expectBodyContains: []string{"[+]leader-promotion ok", "ok\n"},
 		},
 		// --- follower specific tests ---
 		{
