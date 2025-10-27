@@ -141,7 +141,6 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 
 	// The bootstrap keyspace (DefaultKeyspaceID or SystemKeyspaceID) exists automatically after bootstrapping.
 	if opt.specifyInitialKeyspaces == nil {
-<<<<<<< HEAD
 		// In NextGen, all keyspaces should use keyspace_level GC
 		// In Classic, we can have different GC management types
 		var ks1Config map[string]string
@@ -150,8 +149,6 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		} else {
 			ks1Config = map[string]string{"gc_management_type": "unified"}
 		}
-=======
->>>>>>> 7cbc3821d (gc: Optimize GetAllKeyspacesGCStates for scenarios where there are too many keyspaces (#9777))
 		id := new(uint32)
 		*id = 1
 		ks1, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
@@ -2177,10 +2174,7 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, para
 			cfg.LogOutputs = []string{fname}
 		},
 	}
-<<<<<<< HEAD
 
-=======
->>>>>>> 7cbc3821d (gc: Optimize GetAllKeyspacesGCStates for scenarios where there are too many keyspaces (#9777))
 	createTime := time.Now().Unix()
 	for i := range keyspacesCount {
 		id := new(uint32)
