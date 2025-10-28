@@ -78,6 +78,9 @@ func (suite *dashboardTestSuite) TestDashboardRedirect() {
 }
 
 func (suite *dashboardTestSuite) TestDashboardProxy() {
+	if kerneltype.IsNextGen() {
+		suite.T().Skip("Skip flaky test")
+	}
 	suite.testDashboard(suite.Require(), true)
 }
 

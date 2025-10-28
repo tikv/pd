@@ -423,7 +423,7 @@ trying to set a GC barrier on ts %d which is already behind the txn safe point %
 
 ["PD:gc:ErrGCOnInvalidKeyspace"]
 error = '''
-trying to manage GC in keyspace %v where keyspace level GC is not enabled
+trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled
 '''
 
 ["PD:gc:ErrGCSafePointExceedsTxnSafePoint"]
