@@ -111,11 +111,12 @@ func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) 
 func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 
 	var etcdClusterOpt etcdutil.TestEtcdClusterOptions
 	etcdClusterOpt.ServerCfgModifier = opt.etcdServerCfgModifier
 
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, &etcdClusterOpt)
+	_, client, etcdClean := etcdutil.NewTestEtcdCluster(t, 1, &etcdClusterOpt)
 	kvBase := kv.NewEtcdKVBase(client)
 
 	// Simulate a member which id.Allocator may need to check.
@@ -198,6 +199,10 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		}
 	}
 
+	clean = func() {
+		etcdClean()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}
 	return s, s.GetGCStateProvider(), gcStateManager, clean, cancel
 }
 
