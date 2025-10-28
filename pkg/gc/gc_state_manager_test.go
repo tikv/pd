@@ -237,7 +237,7 @@ func (s *gcStateManagerTestSuite) checkTxnSafePoint(keyspaceID uint32, expectedT
 
 func (s *gcStateManagerTestSuite) setTiDBMinStartTS(keyspaceID uint32, instance string, ts uint64) {
 	re := s.Require()
-	keyspaceID, err := s.manager.redirectKeyspace(keyspaceID, true)
+	keyspaceID, _, err := s.manager.redirectKeyspace(keyspaceID, true)
 	re.NoError(err)
 	prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
 	key := prefix + instance
@@ -247,7 +247,7 @@ func (s *gcStateManagerTestSuite) setTiDBMinStartTS(keyspaceID uint32, instance 
 
 func (s *gcStateManagerTestSuite) deleteTiDBMinStartTS(keyspaceID uint32, instance string) {
 	re := s.Require()
-	keyspaceID, err := s.manager.redirectKeyspace(keyspaceID, true)
+	keyspaceID, _, err := s.manager.redirectKeyspace(keyspaceID, true)
 	re.NoError(err)
 	prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
 	key := prefix + instance
@@ -257,7 +257,7 @@ func (s *gcStateManagerTestSuite) deleteTiDBMinStartTS(keyspaceID uint32, instan
 
 func (s *gcStateManagerTestSuite) putLegacyGCWorkerServiceSafePoint(keyspaceID uint32, initialValue uint64) {
 	re := s.Require()
-	redirectedKeyspaceID, err := s.manager.redirectKeyspace(keyspaceID, false)
+	redirectedKeyspaceID, _, err := s.manager.redirectKeyspace(keyspaceID, false)
 	re.NoError(err)
 	re.Equal(keyspaceID, redirectedKeyspaceID, "legacy service safe point is not applicable for non-null keyspaces configured in unified GC mode")
 	key := keypath.ServiceGCSafePointPath(keypath.GCWorkerServiceSafePointID)
@@ -1688,25 +1688,34 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		for _, isUserAPI := range []bool{true, false} {
-			redirected, err := s.manager.redirectKeyspace(keyspaceID, isUserAPI)
+			redirected, keyspaceName, err := s.manager.redirectKeyspace(keyspaceID, isUserAPI)
 			re.NoError(err, "keyspaceID: %d, isUserAPI: %v", keyspaceID, isUserAPI)
 			re.Equal(keyspaceID, redirected, "keyspaceID: %d, isUserAPI: %v", keyspaceID, isUserAPI)
+			switch keyspaceID {
+			case constant.NullKeyspaceID:
+				re.Equal("<null_keyspace>", keyspaceName)
+			case constant.SystemKeyspaceID:
+				re.Equal("SYSTEM", keyspaceName)
+			default:
+				re.Equal(fmt.Sprintf("ks%d", keyspaceID), keyspaceName)
+			}
 		}
 	}
 
 	for _, keyspaceID := range s.keyspacePresets.unmanageable {
-		redirected, err := s.manager.redirectKeyspace(keyspaceID, true)
+		redirected, keyspaceName, err := s.manager.redirectKeyspace(keyspaceID, true)
 		re.NoError(err, "keyspaceID: %d", keyspaceID)
 		re.Equal(constant.NullKeyspaceID, redirected, "keyspaceID: %d", keyspaceID)
+		re.Equal("<null_keyspace>", keyspaceName)
 
-		_, err = s.manager.redirectKeyspace(keyspaceID, false)
+		_, _, err = s.manager.redirectKeyspace(keyspaceID, false)
 		re.Error(err, "keyspaceID: %d", keyspaceID)
 		re.ErrorIs(err, errs.ErrGCOnInvalidKeyspace, "keyspaceID: %d", keyspaceID)
 	}
 
 	for _, keyspaceID := range s.keyspacePresets.notExisting {
 		for _, isUserAPI := range []bool{true, false} {
-			_, err := s.manager.redirectKeyspace(keyspaceID, isUserAPI)
+			_, _, err := s.manager.redirectKeyspace(keyspaceID, isUserAPI)
 			re.Error(err, "keyspaceID: %d, isUserAPI: %v", keyspaceID, isUserAPI)
 			re.ErrorIs(err, errs.ErrKeyspaceNotFound, "keyspaceID: %d, isUserAPI: %v", keyspaceID, isUserAPI)
 		}
@@ -1714,9 +1723,10 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 
 	for _, keyspaceID := range s.keyspacePresets.nullSynonyms {
 		for _, isUserAPI := range []bool{true, false} {
-			redirected, err := s.manager.redirectKeyspace(keyspaceID, isUserAPI)
+			redirected, keyspaceName, err := s.manager.redirectKeyspace(keyspaceID, isUserAPI)
 			re.NoError(err)
 			re.Equal(constant.NullKeyspaceID, redirected)
+			re.Equal("<null_keyspace>", keyspaceName)
 		}
 	}
 

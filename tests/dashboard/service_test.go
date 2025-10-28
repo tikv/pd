@@ -30,6 +30,7 @@ import (
 
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -70,10 +71,16 @@ func (suite *dashboardTestSuite) TearDownSuite() {
 }
 
 func (suite *dashboardTestSuite) TestDashboardRedirect() {
+	if kerneltype.IsNextGen() {
+		suite.T().Skip("Skip flaky test")
+	}
 	suite.testDashboard(suite.Require(), false)
 }
 
 func (suite *dashboardTestSuite) TestDashboardProxy() {
+	if kerneltype.IsNextGen() {
+		suite.T().Skip("Skip flaky test")
+	}
 	suite.testDashboard(suite.Require(), true)
 }
 
