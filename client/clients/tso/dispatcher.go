@@ -178,7 +178,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 				zap.Duration("extended-timeout", timeoutToUse))
 		}
 	})
-
+	log.Info("test-yjy : tso dispatcher timeout", zap.Duration("timeout", timeoutToUse))
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(timeoutToUse)
 	defer streamLoopTimer.Stop()

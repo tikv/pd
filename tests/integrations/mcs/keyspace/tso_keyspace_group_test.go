@@ -668,15 +668,15 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 
 	// Step 4: Enable failpoints for verification and timeout extension
 	// assertNotReachLegacyPath: ensures we don't fallback to legacy path (will panic if we do)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/assertNotReachLegacyPath", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/assertNotReachLegacyPath"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath"))
 	}()
 	// tsoDispatcherExtendTimeout: prevents GetTS from timing out while waiting for node restart
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherExtendTimeout",
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/client/clients/tso/tsoDispatcherExtendTimeout",
 		fmt.Sprintf("return(%d)", tsoDispatcherTimeoutSeconds)))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/tsoDispatcherExtendTimeout"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/client/clients/tso/tsoDispatcherExtendTimeout"))
 	}()
 
 	// Step 5: Start async GetTS call - it will wait for TSO service to recover
