@@ -15,8 +15,9 @@
 package tso
 
 import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 const (

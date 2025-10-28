@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -35,6 +34,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client"
 	bs "github.com/tikv/pd/pkg/basicserver"
