@@ -626,8 +626,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 	}
 }
 
-// TestTSOFallbackIssue tests the fix for issue #6770
-// This test verifies that in TSO microservice mode (API_SVC_MODE), when all TSO nodes
+// TestUpdateMemberWhenRecovery verifies that in TSO microservice mode (API_SVC_MODE), when all TSO nodes
 // become temporarily unavailable and then recover, the client should NOT fallback to
 // the legacy path (group 0), but should wait and successfully get TSO after nodes restart.
 //
@@ -639,7 +638,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 // 5. Start async GetTS call (will wait for TSO service to recover)
 // 6. Restart one TSO node while GetTS is waiting
 // 7. Verify GetTS succeeds after node restart (assertNotReachLegacyPath ensures no fallback)
-func (suite *keyspaceGroupTestSuite) TestTSOFallbackIssue() {
+func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	re := suite.Require()
 
 	// Test configuration constants
