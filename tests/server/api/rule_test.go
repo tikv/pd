@@ -1274,7 +1274,6 @@ func (suite *regionRuleTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
 		conf.Replication.EnablePlacementRules = true
 		conf.Replication.MaxReplicas = 1
-		conf.Keyspace.WaitRegionSplit = false
 	})
 }
 

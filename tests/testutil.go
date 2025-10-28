@@ -63,6 +63,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -362,6 +363,12 @@ type SchedulingTestEnvironment struct {
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
 func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *SchedulingTestEnvironment {
+	// Skip region split wait in tests by default in next-gen.
+	if kerneltype.IsNextGen() {
+		opts = append(opts, func(conf *config.Config, _ string) {
+			conf.Keyspace.WaitRegionSplit = false
+		})
+	}
 	return &SchedulingTestEnvironment{
 		t:        t,
 		opts:     opts,
