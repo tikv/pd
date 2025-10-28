@@ -94,6 +94,20 @@ type newGCStateManagerForTestOptions struct {
 	etcdServerCfgModifier   func(cfg *embed.Config)
 }
 
+func (opt *newGCStateManagerForTestOptions) generateKeyspacesByCount(count int) {
+	createTime := time.Now().Unix()
+	for i := range count {
+		id := new(uint32)
+		*id = uint32(i + 1)
+		opt.specifyInitialKeyspaces = append(opt.specifyInitialKeyspaces, &keyspace.CreateKeyspaceByIDRequest{
+			ID:         id,
+			Name:       fmt.Sprintf("ks%d", *id),
+			Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
+			CreateTime: createTime,
+		})
+	}
+}
+
 func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func(), cancel context.CancelFunc) {
 	cfg := config.NewConfig()
 	re := require.New(t)
@@ -1868,7 +1882,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	var keyspaceID uint32
 	err := s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getMaxTxnSafePointAmongAllKeyspaces(wb)
 		return err1
 	})
 	re.NoError(err)
@@ -1883,7 +1897,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
 	}
 	err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getAllKeyspacesMaxTxnSafePoint(wb)
+		txnSafePoint, keyspaceName, keyspaceID, err1 = s.manager.getMaxTxnSafePointAmongAllKeyspaces(wb)
 		return err1
 	})
 	re.NoError(err)
@@ -2065,6 +2079,88 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	}
 
 	re.Equal(int64(2), executionCount.Load())
+}
+
+func TestGetAllKeysapcesGCStatesOnTooManyKeyspaces(t *testing.T) {
+	re := require.New(t)
+
+	const totalKeyspaces = keyspace.IteratorLoadingBatchSize * 3
+
+	opt := newGCStateManagerForTestOptions{
+		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, totalKeyspaces),
+	}
+	opt.generateKeyspacesByCount(totalKeyspaces)
+
+	_, _, gcStateManager, clean, cancel := newGCStateManagerForTest(t, opt)
+	defer func() {
+		cancel()
+		clean()
+	}()
+
+	gcStates, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+	re.Len(gcStates, totalKeyspaces+2) // Including the null keyspace, the default keyspace or the system keyspace.
+
+	re.NoError(err)
+	keyspaceIDs := make([]uint32, 0, len(gcStates))
+	for keyspaceID, gcState := range gcStates {
+		re.Equal(keyspaceID, gcState.KeyspaceID)
+		keyspaceIDs = append(keyspaceIDs, keyspaceID)
+	}
+	slices.Sort(keyspaceIDs)
+
+	expectedKeyspaceIDs := make([]uint32, 0, len(gcStates))
+	if !kerneltype.IsNextGen() {
+		expectedKeyspaceIDs = append(expectedKeyspaceIDs, constant.DefaultKeyspaceID)
+	}
+	for i := range totalKeyspaces {
+		expectedKeyspaceIDs = append(expectedKeyspaceIDs, uint32(i+1))
+	}
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceIDs = append(expectedKeyspaceIDs, constant.SystemKeyspaceID)
+	}
+	expectedKeyspaceIDs = append(expectedKeyspaceIDs, constant.NullKeyspaceID)
+	re.Equal(expectedKeyspaceIDs, keyspaceIDs)
+}
+
+func TestGetMaxTxnSafePointAmongAllKeyspacesOnTooManyKeyspaces(t *testing.T) {
+	re := require.New(t)
+
+	const totalKeyspaces = keyspace.IteratorLoadingBatchSize * 2
+
+	opt := newGCStateManagerForTestOptions{
+		specifyInitialKeyspaces: make([]*keyspace.CreateKeyspaceByIDRequest, 0, totalKeyspaces),
+	}
+	opt.generateKeyspacesByCount(totalKeyspaces)
+
+	_, _, gcStateManager, clean, cancel := newGCStateManagerForTest(t, opt)
+	defer func() {
+		cancel()
+		clean()
+	}()
+
+	now := time.Now()
+	// Test around the boundary of two loading batches, so that it's likely to detect incorrectness when loading
+	// multiple batches.
+	for i := keyspace.IteratorLoadingBatchSize - 5; i <= keyspace.IteratorLoadingBatchSize+5; i++ {
+		keyspaceID := uint32(i)
+		newTxnSafePoint := uint64(i)
+		res, err := gcStateManager.AdvanceTxnSafePoint(keyspaceID, newTxnSafePoint, now)
+		re.NoError(err)
+		re.Equal(newTxnSafePoint, res.NewTxnSafePoint)
+
+		var maxTxnSafePoint uint64
+		var keyspaceIDWithMaxTxnSafePoint uint32
+		var keyspaceNameWithMaxTxnSafePoint string
+		err = gcStateManager.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			var err1 error
+			maxTxnSafePoint, keyspaceNameWithMaxTxnSafePoint, keyspaceIDWithMaxTxnSafePoint, err1 = gcStateManager.getMaxTxnSafePointAmongAllKeyspaces(wb)
+			return err1
+		})
+		re.NoError(err)
+		re.Equal(newTxnSafePoint, maxTxnSafePoint)
+		re.Equal(keyspaceID, keyspaceIDWithMaxTxnSafePoint)
+		re.Equal(fmt.Sprintf("ks%d", keyspaceID), keyspaceNameWithMaxTxnSafePoint)
+	}
 }
 
 func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, parallelism int) {
