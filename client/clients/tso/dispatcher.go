@@ -166,8 +166,21 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		streamURL string
 		stream    *tsoStream
 	)
+
+	// Inject a failpoint to override the timeout for testing purposes
+	// This allows us to extend the timeout when testing scenarios like TSO node restart
+	timeoutToUse := option.Timeout
+	failpoint.Inject("tsoDispatcherExtendTimeout", func(val failpoint.Value) {
+		if seconds, ok := val.(int); ok {
+			timeoutToUse = time.Duration(seconds) * time.Second
+			log.Info("[failpoint] extending tso dispatcher timeout",
+				zap.Duration("original-timeout", option.Timeout),
+				zap.Duration("extended-timeout", timeoutToUse))
+		}
+	})
+
 	// Loop through each batch of TSO requests and send them for processing.
-	streamLoopTimer := time.NewTimer(option.Timeout)
+	streamLoopTimer := time.NewTimer(timeoutToUse)
 	defer streamLoopTimer.Stop()
 
 	// Create a not-started-timer to be used for collecting batches for concurrent RPC.

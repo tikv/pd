@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -423,11 +424,32 @@ func (c *tsoServiceDiscovery) updateMember() error {
 			return err
 		}
 	} else {
-		// There is no error but no tso server URL found, which means
-		// the server side hasn't been upgraded to the version that
-		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
-		// we fall back to the old way of discovering the tso primary URL
-		// from etcd directly.
+		// Check the current service mode from PD to determine if fallback is appropriate
+		// Note: tsoServiceDiscovery is only created in API_SVC_MODE (microservice mode)
+		// If we are in API_SVC_MODE and tsoServerURL is empty, it means all TSO microservices
+		// are unavailable. In this case, falling back to default group may cause issues like
+		// timestamp fallback (issue #6770), so we should return an error instead.
+
+		clusterInfo, err := c.serviceDiscovery.(*serviceDiscovery).getClusterInfo(
+			c.ctx, c.serviceDiscovery.GetServingURL(), UpdateMemberTimeout)
+		if err != nil {
+			log.Error("[tso] failed to get cluster info to check service mode",
+				zap.Uint32("keyspace-id", keyspaceID),
+				errs.ZapError(err))
+			return err
+		}
+
+		// If we are in API_SVC_MODE (microservice mode), don't fallback
+		if len(clusterInfo.ServiceModes) > 0 && clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
+			log.Error("[tso] in API service mode but no TSO server available - cannot fallback to group 0",
+				zap.Uint32("keyspace-id", keyspaceID),
+				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
+			return errors.New("no TSO microservice available in API service mode")
+		}
+
+		// Only fallback to legacy path if we are in PD_SVC_MODE
+		// This means the server hasn't been upgraded to the version that supports
+		// independent TSO microservice, and we should use the PD's built-in TSO (group 0)
 		c.printFallbackLogOnce.Do(func() {
 			log.Warn("[tso] no tso server URL found,"+
 				" fallback to the legacy path to discover from etcd directly",
@@ -435,6 +457,15 @@ func (c *tsoServiceDiscovery) updateMember() error {
 				zap.String("tso-server-url", tsoServerURL),
 				zap.String("discovery-key", c.defaultDiscoveryKey))
 		})
+
+		// Inject a failpoint to verify that in TSO MCS mode, we should NOT reach discoverWithLegacyPath
+		// This failpoint is used in tests to ensure proper code path execution
+		failpoint.Inject("assertNotReachLegacyPath", func(val failpoint.Value) {
+			if shouldPanic, ok := val.(bool); ok && shouldPanic {
+				panic("BUG: In TSO MCS mode, should not fallback to discoverWithLegacyPath when TSO server is temporarily unavailable")
+			}
+		})
+
 		urls, err := c.discoverWithLegacyPath()
 		if err != nil {
 			return err
