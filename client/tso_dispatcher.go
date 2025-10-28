@@ -280,9 +280,20 @@ tsoBatchLoop:
 			default:
 			}
 		}
+		// Inject a failpoint to override the timeout for testing purposes
+		// This allows us to extend the timeout when testing scenarios like TSO node restart
+		timeoutToUse := option.timeout
+		failpoint.Inject("tsoDispatcherExtendTimeout", func(val failpoint.Value) {
+			if seconds, ok := val.(int); ok {
+				timeoutToUse = time.Duration(seconds) * time.Second
+				log.Info("[failpoint] extending tso dispatcher timeout",
+					zap.Duration("original-timeout", option.timeout),
+					zap.Duration("extended-timeout", timeoutToUse))
+			}
+		})
 		// We need be careful here, see more details in the comments of Timer.Reset.
 		// https://pkg.go.dev/time@master#Timer.Reset
-		streamLoopTimer.Reset(option.timeout)
+		streamLoopTimer.Reset(timeoutToUse)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
