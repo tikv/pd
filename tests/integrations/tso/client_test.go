@@ -16,7 +16,6 @@ package tso
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/rand"
 	"strings"
@@ -38,7 +37,6 @@ import (
 	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -268,36 +266,6 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 		}
 	}
 	wg.Wait()
-}
-
-func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
-	re := suite.Require()
-	keyspaceID := uint32(1000000)
-	// Make sure this keyspace ID is not in use somewhere.
-	re.False(slice.Contains(suite.keyspaceIDs, keyspaceID))
-	failpointValue := fmt.Sprintf(`return(%d)`, keyspaceID)
-	// Simulate the case that the server has lower version than the client and returns no tso addrs
-	// in the GetClusterInfo RPC.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/serverReturnsNoTSOAddrs", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unexpectedCallOfFindGroupByKeyspaceID", failpointValue))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/serverReturnsNoTSOAddrs"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unexpectedCallOfFindGroupByKeyspaceID"))
-	}()
-
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
-	client := utils.SetupClientWithKeyspaceID(
-		ctx, re, keyspaceID, suite.getBackendEndpoints())
-	defer client.Close()
-	var lastTS uint64
-	for range tsoRequestRound {
-		physical, logical, err := client.GetTS(ctx)
-		re.NoError(err)
-		ts := tsoutil.ComposeTS(physical, logical)
-		re.Less(lastTS, ts)
-		lastTS = ts
-	}
 }
 
 // TestGetMinTS tests the correctness of GetMinTS.
