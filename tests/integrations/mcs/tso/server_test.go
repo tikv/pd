@@ -158,6 +158,10 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
 	checkTSOPath(re, true /*isKeyspaceGroupEnabled*/)
 	checkTSOPath(re, false /*isKeyspaceGroupEnabled*/)
 }

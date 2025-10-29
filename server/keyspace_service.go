@@ -22,6 +22,7 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -61,6 +62,12 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
+	failpoint.Inject("skipKeyspaceRegionCheck", func() {
+		failpoint.Return(&keyspacepb.LoadKeyspaceResponse{
+			Header:   wrapHeader(),
+			Keyspace: meta,
+		}, nil)
+	})
 	isSplit, err := manager.CheckKeyspaceRegionBound(meta.GetId())
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
