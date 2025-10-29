@@ -474,53 +474,14 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	}()
 
 	if waitRegionSplit {
-		ranges := keyspaceRule.Data.([]*labeler.KeyRangeRule)
-		if len(ranges) < 2 {
-			log.Warn("[keyspace] failed to split keyspace region with insufficient range", logutil.ZapRedactString("label-rule", keyspaceRule.String()))
-			return errs.ErrRegionSplitFailed
+		err = manager.waitKeyspaceRegionSplit(id)
+		if err != nil {
+			log.Warn("[keyspace] wait region split meets error",
+				zap.Uint32("keyspace-id", id),
+				zap.Error(err),
+			)
 		}
-		rawLeftBound, rawRightBound := ranges[0].StartKey, ranges[0].EndKey
-		txnLeftBound, txnRightBound := ranges[1].StartKey, ranges[1].EndKey
-
-		ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
-		timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
-		defer func() {
-			ticker.Stop()
-			timer.Stop()
-		}()
-		for {
-			select {
-			case <-ticker.C:
-				c := manager.cluster.GetBasicCluster()
-				region := c.GetRegionByKey(rawLeftBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), rawLeftBound) {
-					continue
-				}
-				region = c.GetRegionByKey(rawRightBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), rawRightBound) {
-					continue
-				}
-				region = c.GetRegionByKey(txnLeftBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), txnLeftBound) {
-					continue
-				}
-				region = c.GetRegionByKey(txnRightBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), txnRightBound) {
-					continue
-				}
-				// Note: we reset the ticker here to support updating configuration dynamically.
-				ticker.Reset(manager.config.GetCheckRegionSplitInterval())
-			case <-timer.C:
-				log.Warn("[keyspace] wait region split timeout",
-					zap.Uint32("keyspace-id", id),
-					zap.Error(err),
-				)
-				err = errs.ErrRegionSplitTimeout
-				return
-			}
-			log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
-			break
-		}
+		return err
 	}
 
 	log.Info("[keyspace] added region label for keyspace",
@@ -529,6 +490,61 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		zap.Duration("takes", time.Since(start)),
 	)
 	return
+}
+
+func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
+	ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
+	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
+	defer func() {
+		ticker.Stop()
+		timer.Stop()
+	}()
+	for {
+		select {
+		case <-ticker.C:
+			isSplit, err := manager.CheckKeyspaceRegionBound(id)
+			if err != nil {
+				log.Debug("[keyspace] error checking keyspace region bound, will retry",
+					zap.Uint32("keyspace-id", id),
+					zap.Error(err))
+				continue
+			}
+			if isSplit {
+				log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
+				return nil
+			}
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(manager.config.GetCheckRegionSplitInterval())
+		case <-timer.C:
+			err := errs.ErrRegionSplitTimeout
+			return err
+		}
+	}
+}
+
+// CheckKeyspaceRegionBound checks whether the keyspace region has been split.
+func (manager *Manager) CheckKeyspaceRegionBound(id uint32) (bool, error) {
+	regionBound := MakeRegionBound(id)
+	if regionBound == nil {
+		log.Warn("[keyspace] failed to find region bound", zap.Uint32("keyspace-id", id))
+		return false, errs.ErrRegionSplitFailed
+	}
+	if !manager.checkBound(regionBound.RawLeftBound) ||
+		!manager.checkBound(regionBound.RawRightBound) ||
+		!manager.checkBound(regionBound.TxnLeftBound) ||
+		!manager.checkBound(regionBound.TxnRightBound) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (manager *Manager) checkBound(key []byte) bool {
+	c := manager.cluster.GetBasicCluster()
+	region := c.GetRegionByKey(key)
+	if region == nil || !bytes.Equal(region.GetStartKey(), key) {
+		return false
+	}
+	return true
 }
 
 // LoadKeyspace returns the keyspace specified by name.

@@ -61,6 +61,16 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
+	isSplit, err := manager.CheckKeyspaceRegionBound(meta.GetId())
+	if err != nil {
+		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
+	}
+	if !isSplit {
+		// If the keyspace region is not split yet, we treat it as not found.
+		// To avoid clients using the keyspace before region split is done.
+		err = errs.ErrKeyspaceNotFound
+		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
+	}
 	return &keyspacepb.LoadKeyspaceResponse{
 		Header:   wrapHeader(),
 		Keyspace: meta,
