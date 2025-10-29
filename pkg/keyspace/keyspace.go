@@ -504,14 +504,7 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 		case <-manager.ctx.Done():
 			return errors.New("[keyspace] wait region split canceled")
 		case <-ticker.C:
-			isSplit, err := manager.CheckKeyspaceRegionBound(id)
-			if err != nil {
-				log.Debug("[keyspace] error checking keyspace region bound, will retry",
-					zap.Uint32("keyspace-id", id),
-					zap.Error(err))
-				continue
-			}
-			if isSplit {
+			if manager.CheckKeyspaceRegionBound(id) {
 				log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
 				return nil
 			}
@@ -525,15 +518,12 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 }
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
-func (manager *Manager) CheckKeyspaceRegionBound(id uint32) (bool, error) {
+func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
 	regionBound := MakeRegionBound(id)
-	if !manager.checkBound(regionBound.RawLeftBound) ||
-		!manager.checkBound(regionBound.RawRightBound) ||
-		!manager.checkBound(regionBound.TxnLeftBound) ||
-		!manager.checkBound(regionBound.TxnRightBound) {
-		return false, nil
-	}
-	return true, nil
+	return manager.checkBound(regionBound.RawLeftBound) &&
+		manager.checkBound(regionBound.RawRightBound) &&
+		manager.checkBound(regionBound.TxnLeftBound) &&
+		manager.checkBound(regionBound.TxnRightBound)
 }
 
 func (manager *Manager) checkBound(key []byte) bool {
