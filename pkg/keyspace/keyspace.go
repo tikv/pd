@@ -501,6 +501,8 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 	}()
 	for {
 		select {
+		case <-manager.ctx.Done():
+			return errors.New("[keyspace] wait region split canceled")
 		case <-ticker.C:
 			isSplit, err := manager.CheckKeyspaceRegionBound(id)
 			if err != nil {
@@ -525,10 +527,6 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
 func (manager *Manager) CheckKeyspaceRegionBound(id uint32) (bool, error) {
 	regionBound := MakeRegionBound(id)
-	if regionBound == nil {
-		log.Warn("[keyspace] failed to find region bound", zap.Uint32("keyspace-id", id))
-		return false, errs.ErrRegionSplitFailed
-	}
 	if !manager.checkBound(regionBound.RawLeftBound) ||
 		!manager.checkBound(regionBound.RawRightBound) ||
 		!manager.checkBound(regionBound.TxnLeftBound) ||
@@ -539,6 +537,9 @@ func (manager *Manager) CheckKeyspaceRegionBound(id uint32) (bool, error) {
 }
 
 func (manager *Manager) checkBound(key []byte) bool {
+	if manager.cluster == nil {
+		return false
+	}
 	c := manager.cluster.GetBasicCluster()
 	region := c.GetRegionByKey(key)
 	if region == nil || !bytes.Equal(region.GetStartKey(), key) {
