@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -54,9 +53,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.WaitRegionSplit = false
-	})
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	suite.cluster = cluster
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
