@@ -44,6 +44,9 @@ const (
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
+	// EngineRoleKey is the label key used to indicate engine role.
+	// Only TiFlash write node has this label.
+	EngineRoleKey = "engine_role"
 	// EngineTiFlash is the tiflash value of the engine label.
 	// Classic TiFlash and TiFlash write node will use this value.
 	EngineTiFlash = "tiflash"
@@ -63,6 +66,7 @@ type StoreInfo struct {
 	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
 	slowStoreEvicted       atomic.Int64 // this store has been evicted as a slow store, should not transfer leader to it
 	slowTrendEvicted       atomic.Int64 // this store has been evicted as a slow store by trend, should not transfer leader to it
+	stoppingStoreEvicted   atomic.Int64 // this store has been evicted as a stopping store, should not transfer leader to it
 	leaderCount            int
 	regionCount            int
 	learnerCount           int
@@ -137,6 +141,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
 	store.slowStoreEvicted.Store(s.slowStoreEvicted.Load())
 	store.slowTrendEvicted.Store(s.slowTrendEvicted.Load())
+	store.stoppingStoreEvicted.Store(s.stoppingStoreEvicted.Load())
 	for _, opt := range opts {
 		if opt != nil {
 			opt(store)
@@ -183,6 +188,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
 	store.slowStoreEvicted.Store(s.slowStoreEvicted.Load())
 	store.slowTrendEvicted.Store(s.slowTrendEvicted.Load())
+	store.stoppingStoreEvicted.Store(s.stoppingStoreEvicted.Load())
 	for _, opt := range opts {
 		opt(store)
 	}
@@ -208,7 +214,7 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 
 // EvictedAsStoppingStore returns if the store should be evicted as a stopping store.
 func (s *StoreInfo) EvictedAsStoppingStore() bool {
-	return s.rawStats.IsStopping
+	return s.stoppingStoreEvicted.Load() > 0
 }
 
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.

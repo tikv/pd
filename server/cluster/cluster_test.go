@@ -3175,11 +3175,11 @@ func TestAddScheduler(t *testing.T) {
 	defer cleanup()
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), len(sc.DefaultSchedulers))
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
+	// Remove all default schedulers (dynamically adjusts for NextGen vs Classic)
+	for _, schedulerConfig := range sc.DefaultSchedulers {
+		schedulerType := types.ConvertOldStrToType[schedulerConfig.Type]
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3287,11 +3287,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+2)
 
 	// remove all default schedulers
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
+	for _, schedulerConfig := range sc.DefaultSchedulers {
+		schedulerType := types.ConvertOldStrToType[schedulerConfig.Type]
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3401,12 +3400,10 @@ func TestRemoveScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+1)
 
 	// remove all schedulers
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
+	for _, schedulerType := range types.DefaultSchedulers {
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
@@ -3919,6 +3916,78 @@ func TestConcurrentStoreStats(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	// Add stores with low space to the cluster.
+	storeCount := uint64(3)
+	for i := uint64(1); i <= storeCount; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			Version:       "2.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Preparing,
+		}
+		err = cluster.PutMetaStore(store)
+		re.NoError(err)
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100 * 1024, // 100 GiB
+			Available:   1 * 1024,   // 1 GiB
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	re.Equal(int(storeCount), cluster.GetStoreCount())
+
+	upStoreCount := 0
+	for _, s := range cluster.GetStores() {
+		isUp, _ := cluster.checkStore(s.GetID())
+		if isUp {
+			upStoreCount++
+		}
+	}
+	re.Equal(0, upStoreCount, "upStoreCount should be 0 when store is low space")
+
+	// Add stores to the cluster.
+	for i := uint64(1); i <= storeCount; i++ {
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100 * 1024, // 100 GiB
+			Available:   50 * 1024,  // 50 GiB
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	for _, s := range cluster.GetStores() {
+		isUp, _ := cluster.checkStore(s.GetID())
+		if isUp {
+			upStoreCount++
+		}
+	}
+	re.Equal(int(storeCount), upStoreCount, "upStoreCount should be 3 when store is not low space")
 }
 
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {

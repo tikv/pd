@@ -172,7 +172,7 @@ func TestProtectedKeyspace(t *testing.T) {
 		gcConfig              string
 	}{
 		{
-			name:                  "legacy_default_keyspace",
+			name:                  "classic_default_keyspace",
 			nextGenFlag:           classic,
 			protectedKeyspaceID:   constant.DefaultKeyspaceID,
 			protectedKeyspaceName: constant.DefaultKeyspaceName,

@@ -73,6 +73,43 @@ type GCStatesClient interface {
 	// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 	// the NullKeyspace.
 	GetGCState(ctx context.Context) (GCState, error)
+	// SetGlobalGCBarrier sets a global GC barrier, which blocks GC like how GC barriers do, but is effective for all
+	// keyspaces. This API is designed for some special needs to block GC of all keyspaces.
+	//
+	// The usage is the similar to SetGCBarrier, but is not affected by the keyspace context of the current GCStatesClient
+	// instance. Note that normal GC barriers and global GC barriers are separated.
+	// One can not use SetGCBarrier and DeleteGCBarrier to operate a global GC barrier set by SetGlobalGCBarrier, and vice
+	// versa.
+	//
+	// Once a global GC barrier is set, it will block the txn safe points of all keyspaces from being advanced over the
+	// barrierTS, until the global GC barrier is expired (defined by ttl) or manually deleted (by calling
+	// DeleteGlobalGCBarrier).
+	//
+	// When this method is called on an existing global GC barrier, it updates the barrierTS and ttl of the existing global
+	// GC barrier and the expiration time will become the current time plus the ttl.
+	// This means that calling this method on an existing global GC barrier can extend its lifetime arbitrarily.
+	//
+	// Passing non-positive value to ttl is not allowed. Passing `time.Duration(math.MaxInt64)` to ttl indicates that the
+	// global GC barrier should never expire. The ttl might be rounded up, and the actual ttl is guaranteed no less than the
+	// specified duration.
+	//
+	// The barrierID must be non-empty.
+	//
+	// The given barrierTS must be greater than or equal to the current txn safe points of all keyspaces,
+	// otherwise an error will be returned.
+	//
+	// Currently, the caller is responsible for guaranteeing the given barrierTS does not exceed any of the max allocated
+	// timestamps of all TSOs in the cluster. Note that a cluster might have multiple TSOs for different keyspaces.
+	//
+	// When this function executes successfully, its result is never nil.
+	SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*GlobalGCBarrierInfo, error)
+	// DeleteGlobalGCBarrier deletes a global GC barrier.
+	DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*GlobalGCBarrierInfo, error)
+	// Get the GC states from all keyspaces.
+	// The return value includes both GC states and global GC barriers information.
+	// If a keyspace's state is not ENABLED(like DISABLE/ARCHIVED/TOMBSTONE), that keyspace is skipped.
+	// If a keyspace is not configured with keyspace level GC, its GCState data is missing.
+	GetAllKeyspacesGCStates(ctx context.Context) (ClusterGCStates, error)
 }
 
 // InternalController is the interface for controlling GC execution.
@@ -141,6 +178,16 @@ type GCBarrierInfo struct {
 	getReqStartTime time.Time
 }
 
+// GlobalGCBarrierInfo represents the information of a global GC barrier.
+type GlobalGCBarrierInfo struct {
+	BarrierID string
+	BarrierTS uint64
+	TTL       time.Duration
+	// The time when the RPC that fetches the GC barrier info.
+	// It will be used as the basis for determining whether the barrier is expired.
+	getReqStartTime time.Time
+}
+
 // TTLNeverExpire is a special value for TTL that indicates the barrier never expires.
 const TTLNeverExpire = time.Duration(math.MaxInt64)
 
@@ -171,6 +218,28 @@ func (b *GCBarrierInfo) isExpiredImpl(now time.Time) bool {
 	return now.Sub(b.getReqStartTime) > b.TTL
 }
 
+// NewGlobalGCBarrierInfo creates a new GCBarrierInfo instance.
+func NewGlobalGCBarrierInfo(barrierID string, barrierTS uint64, ttl time.Duration, getReqStartTime time.Time) *GlobalGCBarrierInfo {
+	return &GlobalGCBarrierInfo{
+		BarrierID:       barrierID,
+		BarrierTS:       barrierTS,
+		TTL:             ttl,
+		getReqStartTime: getReqStartTime,
+	}
+}
+
+// IsExpired checks whether the barrier is expired.
+func (b *GlobalGCBarrierInfo) IsExpired() bool {
+	return b.isExpiredImpl(time.Now())
+}
+
+func (b *GlobalGCBarrierInfo) isExpiredImpl(now time.Time) bool {
+	if b.TTL == TTLNeverExpire {
+		return false
+	}
+	return now.Sub(b.getReqStartTime) > b.TTL
+}
+
 // GCState represents the information of the GC state.
 //
 //nolint:revive
@@ -180,4 +249,12 @@ type GCState struct {
 	TxnSafePoint uint64
 	GCSafePoint  uint64
 	GCBarriers   []*GCBarrierInfo
+}
+
+// ClusterGCStates represents the information of the GC state for all keyspaces.
+type ClusterGCStates struct {
+	// Maps from keyspace id to GC state of that keyspace.
+	GCStates map[uint32]GCState
+	// All existing global GC barriers.
+	GlobalGCBarriers []*GlobalGCBarrierInfo
 }
