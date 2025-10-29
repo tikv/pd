@@ -189,10 +189,7 @@ func (manager *Manager) Bootstrap() error {
 
 func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	// Split Keyspace Region for default/system keyspace.
-	// We need to wait region split for system keyspace in next gen
-	// to avoid https://github.com/pingcap/tidb/issues/63959
-	waitRegionSplit := (id == constant.SystemKeyspaceID) && manager.config.ToWaitRegionSplit()
-	if err := manager.splitKeyspaceRegion(id, waitRegionSplit); err != nil {
+	if err := manager.splitKeyspaceRegion(id, false); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
