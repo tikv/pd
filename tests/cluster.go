@@ -44,7 +44,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -518,15 +517,9 @@ func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int
 
 func createTestCluster(ctx context.Context, initialServerCount int, services []string, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
-	clusterConfig := newClusterConfig(initialServerCount)
+	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
-	// Skip region split wait in tests by default in next-gen.
-	if kerneltype.IsNextGen() {
-		opts = append(opts, func(conf *config.Config, _ string) {
-			conf.Keyspace.WaitRegionSplit = false
-		})
-	}
-	for _, cfg := range clusterConfig.InitialServers {
+	for _, cfg := range config.InitialServers {
 		serverConf, err := cfg.Generate(opts...)
 		if err != nil {
 			return nil, err
@@ -538,7 +531,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		servers[cfg.Name] = s
 	}
 	return &TestCluster{
-		config:  clusterConfig,
+		config:  config,
 		servers: servers,
 		tsPool: struct {
 			syncutil.Mutex

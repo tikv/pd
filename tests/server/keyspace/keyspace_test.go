@@ -186,9 +186,8 @@ func TestProtectedKeyspace(t *testing.T) {
 			gcConfig:              keyspace.KeyspaceLevelGC,
 		},
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
 	}()
 	for _, c := range cases {
