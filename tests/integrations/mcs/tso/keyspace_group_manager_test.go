@@ -451,9 +451,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re.NoError(err)
 	re.NotNil(primary)
 	// Prepare the client for keyspace.
-	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx,
-		caller.TestComponent,
-		keyspaceID, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
+
+	tsoClient := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceID, []string{suite.pdLeaderServer.GetAddr()})
 	re.NoError(err)
 	re.NotNil(tsoClient)
 	var (
@@ -736,6 +735,13 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
 
 	// Init PD config but not start.
 	keyspaces := []string{
@@ -802,10 +808,6 @@ func TestGetTSOImmediately(t *testing.T) {
 		re.NoError(err)
 		cli.Close()
 	}
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault() {
