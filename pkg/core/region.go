@@ -448,7 +448,7 @@ func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetDownLearner returns the down learner with soecified peer id.
+// GetDownLearner returns the down learner with specified peer id.
 func (r *RegionInfo) GetDownLearner(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
 		if down.GetPeer().GetId() == peerID && IsLearner(down.GetPeer()) {
