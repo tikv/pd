@@ -26,3 +26,4 @@ coverage
 *.txt
 go.work*
 *.bin
+.github/instructions/**
