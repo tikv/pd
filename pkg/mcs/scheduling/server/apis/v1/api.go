@@ -302,6 +302,7 @@ func deleteAllRegionCache(c *gin.Context) {
 		return
 	}
 	cluster.ResetRegionCache()
+	cluster.ResetPrepared()
 	c.String(http.StatusOK, "All regions are removed from server cache.")
 }
 

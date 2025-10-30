@@ -222,7 +222,7 @@ func (s *Server) updatePDMemberLoop() {
 				}
 				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
-						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						log.Info("switch PD leader", zap.String("current-leader", strconv.FormatUint(curLeader, 16)), zap.String("new-leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
 					}
 					curLeader = ep.ID
 					break

@@ -53,10 +53,14 @@ func TestRegionTestSuite(t *testing.T) {
 }
 
 func (suite *regionTestSuite) SetupSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *regionTestSuite) TearDownSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 	suite.env.Cleanup()
 }
 

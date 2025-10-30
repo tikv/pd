@@ -109,6 +109,7 @@ const (
 type cluster interface {
 	core.StoreSetInformer
 
+	ResetPrepared()
 	ResetRegionCache()
 	AllocID(uint32) (uint64, uint32, error)
 	BuryStore(storeID uint64, forceBury bool) error
@@ -554,6 +555,7 @@ func (u *Controller) changeStage(stage stage) {
 		if u.step > 1 {
 			// == 1 means no operation has done, no need to invalid cache
 			u.cluster.ResetRegionCache()
+			u.cluster.ResetPrepared()
 		}
 		output.Info = "Unsafe recovery Finished"
 		output.Details = u.getAffectedTableDigest()

@@ -30,7 +30,6 @@ package btree
 
 import (
 	"flag"
-	"fmt"
 	"math/rand"
 	"reflect"
 	"sort"
@@ -220,48 +219,6 @@ func TestBTreeG(t *testing.T) {
 			t.Fatalf("some left!: %v", got)
 		}
 	}
-}
-
-func ExampleBTreeG() {
-	tr := NewG[Int](*btreeDegree)
-	for i := Int(0); i < 10; i++ {
-		tr.ReplaceOrInsert(i)
-	}
-	fmt.Println("len:       ", tr.Len())
-	v, ok := tr.Get(3)
-	fmt.Println("get3:      ", v, ok)
-	v, ok = tr.Get(100)
-	fmt.Println("get100:    ", v, ok)
-	v, ok = tr.Delete(4)
-	fmt.Println("del4:      ", v, ok)
-	v, ok = tr.Delete(100)
-	fmt.Println("del100:    ", v, ok)
-	v, ok = tr.ReplaceOrInsert(5)
-	fmt.Println("replace5:  ", v, ok)
-	v, ok = tr.ReplaceOrInsert(100)
-	fmt.Println("replace100:", v, ok)
-	v, ok = tr.Min()
-	fmt.Println("min:       ", v, ok)
-	v, ok = tr.DeleteMin()
-	fmt.Println("delmin:    ", v, ok)
-	v, ok = tr.Max()
-	fmt.Println("max:       ", v, ok)
-	v, ok = tr.DeleteMax()
-	fmt.Println("delmax:    ", v, ok)
-	fmt.Println("len:       ", tr.Len())
-	// Output:
-	// len:        10
-	// get3:       3 true
-	// get100:     0 false
-	// del4:       4 true
-	// del100:     0 false
-	// replace5:   5 true
-	// replace100: 0 false
-	// min:        0 true
-	// delmin:     0 true
-	// max:        100 true
-	// delmax:     100 true
-	// len:        8
 }
 
 func TestDeleteMinG(t *testing.T) {

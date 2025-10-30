@@ -66,6 +66,7 @@ func (s *storeTestSuite) TearDownTest() {
 func (s *storeTestSuite) TestStoreLimitV2() {
 	s.env.RunTest(s.checkStoreLimitV2)
 }
+
 func (s *storeTestSuite) checkStoreLimitV2(cluster *pdTests.TestCluster) {
 	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
