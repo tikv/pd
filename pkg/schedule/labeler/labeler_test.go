@@ -315,7 +315,12 @@ func TestLabelerRuleTTL(t *testing.T) {
 	checkRuleInMemoryAndStoage(re, labeler, "rule2", true)
 	re.Nil(labeler.GetLabelRule("rule2"))
 	// rule2 should be physically clear.
+<<<<<<< HEAD
 	checkRuleInMemoryAndStoage(re, labeler, "rule2", false)
+=======
+	labeler.checkAndClearExpiredLabels()
+	checkRuleInMemoryAndStorage(re, labeler, "rule2", false)
+>>>>>>> 36f78362b (schedule/labeler: Optimize locking to fix high-concurrency goroutine surge (#9857))
 
 	re.Equal("", labeler.GetRegionLabel(region, "k2"))
 
