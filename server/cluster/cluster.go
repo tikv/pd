@@ -2640,8 +2640,9 @@ func (c *RaftCluster) collectStorageSize(
 	for keyspaceName, regionBounds := range regionBoundsMap {
 		regionStats := c.GetRegionStatsByRange(regionBounds.TxnLeftBound, regionBounds.TxnRightBound)
 		storageSizeInfoList = append(storageSizeInfoList, &storageSizeInfo{
-			keyspaceName:           keyspaceName,
-			rowBasedStorageSize:    uint64(regionStats.StorageSize),
+			keyspaceName: keyspaceName,
+			// Use the user storage size to record the logical storage size.
+			rowBasedStorageSize:    uint64(regionStats.UserStorageSize),
 			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
 		})
 	}
