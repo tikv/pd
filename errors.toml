@@ -566,6 +566,11 @@ error = '''
 keyspace group %v does not exist
 '''
 
+["PD:keyspace:ErrKeyspaceGroupVersionStale"]
+error = '''
+keyspace group version is stale
+'''
+
 ["PD:keyspace:ErrKeyspaceGroupNotInMerging"]
 error = '''
 keyspace group %v is not in merging state
