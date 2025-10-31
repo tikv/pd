@@ -17,9 +17,7 @@ package grpc
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
@@ -309,40 +307,4 @@ func RegionNotFound() *pdpb.ResponseHeader {
 		Type:    pdpb.ErrorType_REGION_NOT_FOUND,
 		Message: "region not found",
 	})
-}
-
-type requestEvent string
-
-const (
-	requestSuccess requestEvent = "success"
-	requestFailed  requestEvent = "failed"
-)
-
-// IncRegionRequestCounter increments the region request counter with the given method, header, error, and counter.
-func IncRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
-	if err == nil && rand.Intn(100) != 0 {
-		// sample 1% region requests to avoid high cardinality
-		return
-	}
-
-	var (
-		event           = requestSuccess
-		callerID        = header.CallerId
-		callerComponent = header.CallerComponent
-	)
-	if err != nil {
-		log.Warn("region request encounter error",
-			zap.String("method", method),
-			zap.String("caller_id", callerID),
-			zap.String("caller_component", callerComponent),
-			zap.Stringer("error", err))
-		event = requestFailed
-	}
-	if callerID == "" {
-		callerID = "unknown"
-	}
-	if callerComponent == "" {
-		callerComponent = "unknown"
-	}
-	counter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
 }
