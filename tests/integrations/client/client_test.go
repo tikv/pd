@@ -54,7 +54,9 @@ import (
 	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/assertutil"
@@ -63,6 +65,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -2376,7 +2379,7 @@ func (s *clientStatefulTestSuite) TestAdvanceGCSafePoint() {
 		res, err = c.AdvanceGCSafePoint(ctx, 11)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrGCSafePointExceedsTxnSafePoint")
-		// Do not chagne the current value in this case.
+		// Do not change the current value in this case.
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Allows advancing exactly to the txn safe point.
@@ -2711,4 +2714,81 @@ func TestDecodeHttpKeyRange(t *testing.T) {
 	ret, err := keyutil.DecodeHTTPKeyRanges(input)
 	re.NoError(err)
 	re.Equal([]string{"100", "200", "300", "400"}, ret)
+}
+func TestCreateClientWithKeyspaceCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	defer tc.Destroy()
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	leaderName := tc.WaitLeader()
+	pdLeaderServer := tc.GetServer(leaderName)
+	re.NoError(pdLeaderServer.BootstrapCluster())
+
+	// Case 1 :There is no region split for the system keyspace yet, so the client creation should fail.
+	pdAddr := pdLeaderServer.GetAddr()
+	apiCtx := pd.NewAPIContextV2(constant.SystemKeyspaceName)
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
+		caller.TestComponent,
+		[]string{pdAddr}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.Error(err)
+	re.ErrorContains(err, errs.ErrKeyspaceNotFound.Error())
+	re.Nil(cli)
+
+	// Case 2: After manually inserting region splits for the system keyspace, the client creation should succeed.
+	// System keyspace is created automatically in the next gen, so we need to skip that step.
+	id := constant.SystemKeyspaceID
+	if !kerneltype.IsNextGen() {
+		req := &keyspace.CreateKeyspaceRequest{
+			Name:       constant.SystemKeyspaceName,
+			CreateTime: time.Now().Unix(),
+		}
+		meta, err := pdLeaderServer.GetKeyspaceManager().CreateKeyspace(req)
+		re.NoError(err)
+		id = meta.GetId()
+	}
+
+	regionBound := keyspace.MakeRegionBound(id)
+	heartbeatRequests := []*pdpb.RegionHeartbeatRequest{
+		createHeartbeatRequest(regionBound.RawLeftBound, regionBound.RawRightBound),
+		createHeartbeatRequest(regionBound.RawRightBound, regionBound.TxnLeftBound),
+		createHeartbeatRequest(regionBound.TxnLeftBound, regionBound.TxnRightBound),
+		createHeartbeatRequest(regionBound.TxnRightBound, []byte{}),
+	}
+	raftCluster := pdLeaderServer.GetRaftCluster()
+	re.NotNil(raftCluster)
+	for _, req := range heartbeatRequests {
+		regionInfo := core.RegionFromHeartbeat(req, 1)
+		err := raftCluster.HandleRegionHeartbeat(regionInfo)
+		re.NoError(err)
+	}
+	re.Len(raftCluster.GetRegions(), 4)
+
+	cli, err = pd.NewClientWithAPIContext(ctx, apiCtx,
+		caller.TestComponent,
+		[]string{pdAddr}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	re.NotNil(cli)
+	cli.Close()
+}
+
+func createHeartbeatRequest(startKey []byte, endKey []byte) *pdpb.RegionHeartbeatRequest {
+	regionID := regionIDAllocator.alloc()
+	region := &metapb.Region{
+		Id:          regionID,
+		StartKey:    startKey,
+		EndKey:      endKey,
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers:       peers,
+	}
+	return &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(),
+		Region: region,
+		Leader: peers[0],
+	}
 }

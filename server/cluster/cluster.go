@@ -172,7 +172,7 @@ type RaftCluster struct {
 	externalTS             atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
-	prevStoreLimit map[uint64]map[storelimit.Type]float64
+	prevStoreLimit sync.Map // map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
 	id  id.Allocator
@@ -320,7 +320,6 @@ func (c *RaftCluster) InitCluster(
 	failpoint.Inject("syncRegionChannelFull", func() {
 		c.changedRegions = make(chan *core.RegionInfo, 100)
 	})
-	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
@@ -1493,7 +1492,7 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
-		if key == core.EngineKey {
+		if key == core.EngineKey || key == core.EngineRoleKey {
 			continue
 		}
 		if _, ok := keysSet[key]; !ok {
@@ -1546,10 +1545,10 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	}
 
 	// record the current store limit in memory
-	c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
+	c.prevStoreLimit.Store(storeID, map[storelimit.Type]float64{
 		storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
 		storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
-	}
+	})
 	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 	// And considering the store state has changed, RemoveStore is actually successful.
 	_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
@@ -1643,7 +1642,7 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 	c.OnStoreVersionChange()
 	if err == nil {
 		// clean up the residual information.
-		delete(c.prevStoreLimit, storeID)
+		c.prevStoreLimit.Delete(storeID)
 		c.RemoveStoreLimit(storeID)
 		addr := store.GetAddress()
 		storeIDStr := strconv.FormatUint(storeID, 10)
@@ -1707,8 +1706,11 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 
 	options := []core.StoreCreateOption{core.SetStoreState(metapb.StoreState_Up)}
 	// get the previous store limit recorded in memory
-	limiter, exist := c.prevStoreLimit[storeID]
-	if exist {
+	var limiter map[storelimit.Type]float64
+	var exist bool
+	if value, ok := c.prevStoreLimit.Load(storeID); ok {
+		limiter = value.(map[storelimit.Type]float64)
+		exist = true
 		options = append(options,
 			core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer]),
 			core.ResetStoreLimit(storelimit.RemovePeer, limiter[storelimit.RemovePeer]),
@@ -2093,13 +2095,21 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 
 func (c *RaftCluster) getRegionStats(startKey, endKey []byte, useHot bool, opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
 	stats := statistics.NewRegionStats()
-	regions := c.ScanRegions(startKey, endKey, -1)
-	for _, region := range regions {
-		if useHot {
-			stats.Observe(region, c, opts...)
-		} else {
-			stats.Observe(region, nil, opts...)
+	for {
+		regions := c.ScanRegions(startKey, endKey, core.ScanRegionLimit)
+
+		for _, region := range regions {
+			if useHot {
+				stats.Observe(region, c, opts...)
+			} else {
+				stats.Observe(region, nil, opts...)
+			}
 		}
+		if len(regions) < core.ScanRegionLimit {
+			break
+		}
+
+		startKey = regions[len(regions)-1].GetEndKey()
 	}
 	return stats
 }
@@ -2605,7 +2615,7 @@ func (c *RaftCluster) collectStorageSize(
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
 	start := time.Now()
 	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
-	regionLabeler.IterateLableRules(func(rule *labeler.LabelRule) bool {
+	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
 		// Try to parse the keyspace ID from the label rule.
 		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
 		if !ok {
@@ -2630,8 +2640,9 @@ func (c *RaftCluster) collectStorageSize(
 	for keyspaceName, regionBounds := range regionBoundsMap {
 		regionStats := c.GetRegionStatsByRange(regionBounds.TxnLeftBound, regionBounds.TxnRightBound)
 		storageSizeInfoList = append(storageSizeInfoList, &storageSizeInfo{
-			keyspaceName:           keyspaceName,
-			rowBasedStorageSize:    uint64(regionStats.StorageSize),
+			keyspaceName: keyspaceName,
+			// Use the user storage size to record the logical storage size.
+			rowBasedStorageSize:    uint64(regionStats.UserStorageSize),
 			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
 		})
 	}

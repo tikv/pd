@@ -384,7 +384,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 			}
 		}
 	} else {
-		// For legacy: expect keyspaces [0, 1, 2, ..., 100]
+		// For classic: expect keyspaces [0, 1, 2, ..., 100]
 		for i := range keyspaces {
 			re.Equal(uint32(i), keyspaces[i].Id)
 			if i != 0 {
@@ -658,6 +658,104 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 			re.NotContains(defaultKeyspaceGroup.Keyspaces, keyspaceID)
 		}
 	}
+}
+
+func TestIterateKeyspaces(t *testing.T) {
+	re := require.New(t)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	testWithKeyspaces := func(keyspaceIDs []uint32, keyspaceNames []string, expectedLoadRangeCount int) {
+		re.Len(keyspaceNames, len(keyspaceIDs))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+		allocator := mockid.NewIDAllocator()
+		kgm := NewKeyspaceGroupManager(ctx, store, nil)
+		manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm)
+
+		re.NoError(kgm.Bootstrap(ctx))
+		re.NoError(manager.Bootstrap())
+
+		now := time.Now().Unix()
+		for i, id := range keyspaceIDs {
+			name := keyspaceNames[i]
+			_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+				ID:   &id,
+				Name: name,
+				Config: map[string]string{
+					"test_cfg": strconv.FormatUint(uint64(id), 10),
+				},
+				CreateTime: now,
+			})
+			re.NoError(err)
+		}
+
+		// Add the reserved keyspace to the keyspace list for later check.
+		if kerneltype.IsNextGen() {
+			keyspaceIDs = append(keyspaceIDs, constant.SystemKeyspaceID)
+			keyspaceNames = append(keyspaceNames, constant.SystemKeyspaceName)
+		} else {
+			keyspaceIDs = append([]uint32{constant.DefaultKeyspaceID}, keyspaceIDs...)
+			keyspaceNames = append([]string{constant.DefaultKeyspaceName}, keyspaceNames...)
+		}
+
+		loadRangeCounter := 0
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange", func() {
+			loadRangeCounter++
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange"))
+		}()
+
+		it := manager.IterateKeyspaces()
+		i := 0
+		for ; ; i++ {
+			meta, ok, err := it.Next()
+			re.NoError(err)
+			if !ok {
+				break
+			}
+			re.Equal(keyspaceIDs[i], meta.Id)
+			re.Equal(keyspaceNames[i], meta.Name)
+			if meta.Id != constant.DefaultKeyspaceID && meta.Id != constant.SystemKeyspaceID {
+				re.Equal(strconv.FormatUint(uint64(meta.Id), 10), meta.Config["test_cfg"])
+			}
+		}
+		re.Equal(len(keyspaceIDs), i)
+		re.Equal(expectedLoadRangeCount, loadRangeCounter)
+	}
+
+	testWithNKeyspaces := func(idStart int, n int, idStep int, expectedLoadRangeCount int) {
+		keyspaceIDs := make([]uint32, n)
+		keyspaceNames := make([]string, n)
+		for i := range n {
+			id := uint32(idStart + i*idStep)
+			keyspaceIDs[i] = id
+			keyspaceNames[i] = fmt.Sprintf("ks%d", id)
+		}
+		testWithKeyspaces(keyspaceIDs, keyspaceNames, expectedLoadRangeCount)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize", "return(5)"))
+
+	testWithKeyspaces([]uint32{}, []string{}, 2)
+	testWithKeyspaces([]uint32{1, 2}, []string{"ks1", "ks2"}, 2)
+	testWithKeyspaces([]uint32{1, 2, 3, 4, 5, 6}, []string{"ks1", "ks2", "ks3", "ks4", "ks5", "ks6"}, 3)
+	testWithKeyspaces([]uint32{10, 20, 30, 40, 50, 60}, []string{"ks10", "ks20", "ks30", "ks40", "ks50", "ks60"}, 3)
+	testWithNKeyspaces(1, 18, 1, 5)
+	testWithNKeyspaces(1, 19, 2, 5)
+	testWithNKeyspaces(100, 20, 2, 6)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize"))
+
+	testWithNKeyspaces(1, 999, 1, 11)
+	testWithNKeyspaces(1, 1000, 10, 12)
 }
 
 // Benchmark the keyspace assignment patrol.

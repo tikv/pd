@@ -1141,6 +1141,11 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
 	}
 	testutil.Eventually(re, func() bool {
+		if leader == nil {
+			re.NotEmpty(cluster.WaitLeader())
+			leader = cluster.GetLeaderServer()
+			return false
+		}
 		return leader.GetRaftCluster().GetTotalRegionCount() == core.InitClusterRegionThreshold
 	})
 
@@ -1159,8 +1164,16 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
+	re.NotEmpty(cluster.WaitLeader())
+	leader = cluster.GetLeaderServer()
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
+			leader = cluster.GetLeaderServer()
+			if leader == nil {
+				re.NotEmpty(cluster.WaitLeader())
+				leader = cluster.GetLeaderServer()
+				return false
+			}
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}
@@ -1177,6 +1190,12 @@ func TestPreparingProgress(t *testing.T) {
 	var p api.Progress
 	testutil.Eventually(re, func() bool {
 		defer triggerCheckStores()
+		leader = cluster.GetLeaderServer()
+		if leader == nil {
+			re.NotEmpty(cluster.WaitLeader())
+			leader = cluster.GetLeaderServer()
+			return false
+		}
 		// wait for cluster prepare
 		if !leader.GetRaftCluster().IsPrepared() {
 			leader.GetRaftCluster().SetPrepared()

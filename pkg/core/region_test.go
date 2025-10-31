@@ -1163,21 +1163,20 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 func TestScanRegion(t *testing.T) {
 	var (
 		re                   = require.New(t)
-		r                    = NewRegionsInfo()
+		tree                 = newRegionTree()
 		needContainAllRanges = true
 		regions              []*RegionInfo
 		err                  error
 	)
 	scanError := func(startKey, endKey []byte, limit int) {
-		regions, err = r.scanRegion(&keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = r.scanRegion(&keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
-	tree := r.tree
 	// region1
 	// [a, b)
 	updateNewItem(tree, NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
@@ -1348,45 +1347,6 @@ func TestCodecRule(t *testing.T) {
 		var rule2 Rule
 		re.NoError(json.Unmarshal(body, &rule2))
 		re.Equal(rule.String(), rule2.String())
-	}
-}
-
-func TestStatsRegions(t *testing.T) {
-	re := require.New(t)
-	regions := NewRegionsInfo()
-	count := 10000
-	for i := range count {
-		endKey := []byte(fmt.Sprintf("%20d", i+1))
-		if i == count-1 {
-			endKey = nil
-		}
-		regions.CheckAndPutRegion(NewTestRegionInfo(uint64(i), 1, []byte(fmt.Sprintf("%20d", i)), endKey))
-	}
-	startKey := []byte(fmt.Sprintf("%20d", 0))
-	for _, l := range []int{-1, MaxScanRegionLimit - 1, MaxScanRegionLimit, MaxScanRegionLimit + 1, count} {
-		rs := regions.ScanRegions(startKey, nil, l)
-		limit := l
-		if limit <= 0 {
-			limit = count
-		}
-		re.Len(rs, limit)
-		endKey := []byte(fmt.Sprintf("%20d", limit))
-		if limit == count {
-			endKey = nil
-		}
-		re.Equal(endKey, rs[len(rs)-1].GetEndKey())
-		re.Equal(startKey, rs[0].GetStartKey())
-	}
-
-	for _, startIdx := range []int{count - MaxScanRegionLimit - 1, count - MaxScanRegionLimit, count - MaxScanRegionLimit + 1} {
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		startKey = []byte(fmt.Sprintf("%20d", startIdx))
-		expectLen := count - startIdx
-		rs := regions.ScanRegions(startKey, []byte(""), -1)
-		re.Len(rs, expectLen)
-		re.Equal(startKey, rs[0].GetStartKey())
 	}
 }
 

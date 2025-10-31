@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs/utils"
@@ -157,6 +158,10 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
 	checkTSOPath(re, true /*isKeyspaceGroupEnabled*/)
 	checkTSOPath(re, false /*isKeyspaceGroupEnabled*/)
 }
@@ -194,14 +199,16 @@ func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
 	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
-	defer cli.Close()
-	physical, logical, err := cli.GetTS(ctx)
-	re.NoError(err)
-	ts := tsoutil.ComposeTS(physical, logical)
-	re.NotEmpty(ts)
-	// After we request the tso server, etcd still has only one key related to the timestamp.
-	re.Equal(1, getEtcdTimestampKeyNum(re, client))
+	if !kerneltype.IsNextGen() {
+		cli := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
+		defer cli.Close()
+		physical, logical, err := cli.GetTS(ctx)
+		re.NoError(err)
+		ts := tsoutil.ComposeTS(physical, logical)
+		re.NotEmpty(ts)
+		// After we request the tso server, etcd still has only one key related to the timestamp.
+		re.Equal(1, getEtcdTimestampKeyNum(re, client))
+	}
 }
 
 func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int {
