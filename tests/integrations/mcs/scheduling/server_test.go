@@ -17,7 +17,6 @@ package scheduling
 import (
 	"context"
 	"fmt"
-	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"net/http"
 	"reflect"
 	"strings"
@@ -38,6 +37,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
