@@ -20,7 +20,7 @@ require (
 	github.com/prometheus/client_model v0.6.1
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0-20251017025558-a27c2e8d8fd0
 	go.etcd.io/etcd/client/pkg/v3 v3.5.15
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
