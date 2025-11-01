@@ -15,6 +15,7 @@
 package scheduling
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +31,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/handler"
@@ -42,8 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
-
-	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 )
 
 type apiTestSuite struct {
@@ -759,4 +760,117 @@ func (suite *apiTestSuite) checkHealth(cluster *tests.TestCluster) {
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
+}
+
+// schedulingForwardingTestSuite is a test suite for testing the forwarding behavior of Scheduling APIs.
+type schedulingForwardingTestSuite struct {
+	suite.Suite
+	ctx         context.Context
+	cancel      context.CancelFunc
+	cluster     *tests.TestCluster
+	scheCluster *tests.TestSchedulingCluster
+	primary     *server.Server
+	follower    *server.Server
+}
+
+func TestSchedulingForwarding(t *testing.T) {
+	suite.Run(t, new(schedulingForwardingTestSuite))
+}
+
+func (suite *schedulingForwardingTestSuite) SetupTest() {
+	var err error
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := suite.cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+
+	suite.scheCluster, err = tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
+	re.NoError(err)
+
+	suite.primary = suite.scheCluster.WaitForPrimaryServing(re)
+	re.NotNil(suite.primary)
+	for _, srv := range suite.scheCluster.GetServers() {
+		if srv.GetAddr() != suite.primary.GetAddr() {
+			suite.follower = srv
+			break
+		}
+	}
+	re.NotNil(suite.follower, "follower should not be nil")
+	re.False(suite.follower.IsServing(), "follower should not be serving")
+}
+
+func (suite *schedulingForwardingTestSuite) TearDownTest() {
+	suite.cancel()
+	suite.scheCluster.Destroy()
+	suite.cluster.Destroy()
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+}
+
+// TestForwardingAndLocalBehavior tests the API behaviors.
+func (suite *schedulingForwardingTestSuite) TestForwardingAndLocalBehavior() {
+	re := suite.Require()
+	followerAddr := suite.follower.GetAdvertiseListenAddr()
+	followerURL := func(path string) string {
+		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
+	}
+	leader := suite.cluster.GetLeaderServer()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leader.GetAddr())
+
+	// Case 1: PUT /admin/log will be handled locally
+	logURL := followerURL("/admin/log")
+	level := "debug"
+	logPayload, err := json.Marshal(level)
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
+	re.NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	// Case 2: GET /config will be handled locally
+	var followerCfg config.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL("/config"), &followerCfg,
+		testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(suite.follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(suite.follower.GetConfig().Name, followerCfg.Name)
+	re.Equal(suite.follower.GetConfig().LeaderLease, followerCfg.LeaderLease)
+	re.NotEqual(suite.primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(level, followerCfg.Log.Level)
+
+	// Case 3: Test sync config from pd server.
+	configURL := urlPrefix + "/config"
+	reqData, err := json.Marshal(map[string]any{
+		"max-replicas": 4,
+	})
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, configURL, reqData, testutil.StatusOK(re))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		var followerCfg config.Config
+		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL("/config"), &followerCfg)
+		re.NoError(err)
+		fmt.Println(followerCfg.Replication.MaxReplicas)
+		return followerCfg.Replication.MaxReplicas == 4.
+	})
+
+	// Case 4: GET /schedulers will be handled by primary
+	schedulersURL := followerURL("/schedulers")
+	var schedulers []string
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, schedulersURL, &schedulers,
+		testutil.StatusOK(re))
+	re.NoError(err)
 }
