@@ -228,10 +228,16 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	defer etcd2.Close()
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
-	// scale in etcd1
-	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	// Create a client connected to etcd2 to perform the removal
+	cfg2 := etcd2.Config()
+	client3, err := CreateEtcdClient(nil, cfg2.ListenClientUrls)
 	re.NoError(err)
-	checkMembers(re, client2, []*embed.Etcd{etcd2})
+	defer client3.Close()
+
+	// scale in etcd1 using client3 (connected to etcd2)
+	_, err = RemoveEtcdMember(client3, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	checkMembers(re, client3, []*embed.Etcd{etcd2})
 }
 
 func TestRandomKillEtcd(t *testing.T) {
