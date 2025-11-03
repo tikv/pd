@@ -231,15 +231,18 @@ func (c *tsoClient) GetTSOAllocatorServingURLByDCLocation(dcLocation string) (st
 
 // GetTSOAllocatorClientConnByDCLocation returns the TSO allocator gRPC client connection of the given dcLocation.
 func (c *tsoClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
-	url, ok := c.tsoAllocators.Load(dcLocation)
+	u, ok := c.tsoAllocators.Load(dcLocation)
 	if !ok {
 		log.Fatal("[tso] the allocator leader should exist", zap.String("dc-location", dcLocation))
 	}
-	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
-	if !ok {
-		return nil, url.(string)
+
+	url := u.(string)
+	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(url)
+	if err != nil {
+		log.Warn("[tso] fail to dial gRPC connection to tso allocator", zap.Error(err))
+		return nil, ""
 	}
-	return cc.(*grpc.ClientConn), url.(string)
+	return cc, url
 }
 
 // AddTSOAllocatorServingURLSwitchedCallback adds callbacks which will be called

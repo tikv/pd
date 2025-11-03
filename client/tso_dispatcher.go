@@ -452,9 +452,13 @@ func (td *tsoDispatcher) handleProcessRequestError(ctx context.Context, bo *retr
 		zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 	// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 	td.connectionCtxs.Delete(streamURL)
+	if errs.ShouldRedial(err) {
+		svcDiscovery.RemoveClientConn(streamURL)
+	}
 	streamCancelFunc()
 	// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 	if errs.IsLeaderChange(err) {
+		tsoLeaderChangedCounter.Inc()
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
 			select {
 			case <-ctx.Done():

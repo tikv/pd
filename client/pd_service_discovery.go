@@ -105,6 +105,8 @@ type ServiceDiscovery interface {
 	GetAllServiceClients() []ServiceClient
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given url.
 	GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error)
+	// RemoveClientConn removes the grpc client connection of the given url from the connection pools.
+	RemoveClientConn(url string)
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
@@ -1127,6 +1129,11 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *pdServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
+}
+
+// RemoveClientConn removes the grpc client connection of the given url from the connection pools.
+func (c *pdServiceDiscovery) RemoveClientConn(url string) {
+	c.clientConns.Delete(url)
 }
 
 func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
