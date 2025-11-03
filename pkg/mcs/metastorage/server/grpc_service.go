@@ -110,7 +110,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {
-				log.Error("watch channel failed", zap.Error(res.Err()))
+				log.Warn("watch channel failed", zap.Error(res.Err()))
 				var resp meta_storagepb.WatchResponse
 				if startRevision < res.CompactRevision {
 					resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_DATA_COMPACTED,
@@ -121,7 +121,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 				}
 				if err := server.Send(&resp); err != nil {
-					log.Error("failed to send watch error response", zap.Error(err))
+					log.Warn("failed to send watch error response", zap.Error(err))
 					return err
 				}
 				// Err() indicates that this WatchResponse holds a channel-closing error.
@@ -147,7 +147,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 				if err := server.Send(&meta_storagepb.WatchResponse{
 					Header: &meta_storagepb.ResponseHeader{ClusterId: keypath.ClusterID(), Revision: res.Header.GetRevision()},
 					Events: events, CompactRevision: res.CompactRevision}); err != nil {
-					log.Error("failed to send watch response", zap.Error(err))
+					log.Warn("failed to send watch response", zap.Error(err))
 					return err
 				}
 			}
