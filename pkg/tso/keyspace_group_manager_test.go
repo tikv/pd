@@ -28,12 +28,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -438,43 +443,43 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.NoError(err)
 
 	// Should be able to get AM for the default/null keyspace and keyspace 1, 2 in keyspace group 0.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should still succeed even keyspace 3 isn't explicitly assigned to any
 	// keyspace group. It will be assigned to the default keyspace group.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should succeed and get the meta of keyspace group 0, because keyspace 0
 	// belongs to group 0, though the specified group 1 doesn't exist.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should fail because keyspace 3 isn't explicitly assigned to any keyspace
 	// group, and the specified group isn't the default keyspace group.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100, mgr)
 	re.Error(err)
 	re.Equal(uint32(100), kgid)
 	re.Nil(am)
@@ -515,7 +520,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 
 	// Should be able to get AM for keyspace 0 in keyspace group 0.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
@@ -535,13 +540,13 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	time.Sleep(1 * time.Second)
 	// Should still be able to get AM for keyspace 0 in keyspace group 0.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should succeed and return the keyspace group meta from the default keyspace group
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
@@ -587,7 +592,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 
 	// Should be able to get AM for keyspace 10 in keyspace group 0.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
@@ -600,7 +605,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 	// Wait until the keyspace 10 is served by keyspace group 1.
 	testutil.Eventually(re, func() bool {
-		_, _, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+		_, _, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1, mgr)
 		return err == nil && kgid == 1
 	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
@@ -613,7 +618,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	// it will cause random failure.
 	time.Sleep(1 * time.Second)
 	// Should still be able to get AM for keyspace 10 in keyspace group 1.
-	_, _, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+	_, _, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1, mgr)
 	re.NoError(err)
 	re.Equal(uint32(1), kgid)
 }
@@ -1216,4 +1221,95 @@ func waitForPrimariesServing(
 		}
 		return true
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+// TestCheckKeyspaceGroupFallback tests the fallback logic when keyspace is not found in lookup table.
+// It covers four scenarios:
+// 1. Null keyspace (ID=0xFFFFFFFF) - should ALWAYS fallback to default group
+// 2. Keyspace has configured group in metadata - should NOT fallback to default group
+// 3. Keyspace has no configured group (legacy keyspace) - should fallback to default group
+// 4. Keyspace not found in storage - should fallback to default group
+func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
+	re := suite.Require()
+
+	mgr := suite.newUniqueKeyspaceGroupManager(0)
+	re.NotNil(mgr)
+	defer mgr.Close()
+	err := mgr.Initialize()
+	re.NoError(err)
+
+	// Wait for the default keyspace group to be initialized and ready
+	testutil.Eventually(re, func() bool {
+		am, err := mgr.GetAllocatorManager(constant.DefaultKeyspaceGroupID)
+		return err == nil && am != nil
+	})
+
+	keyspaceID1 := uint32(100)
+	keyspaceID2 := uint32(200)
+	configuredGroupID := uint32(5)
+
+	// Scenario 1: Null keyspace (ID=0xFFFFFFFF) should always fallback
+	am, kg, groupID, err := mgr.state.getKeyspaceGroupMetaWithCheck(
+		constant.NullKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
+	re.NoError(err)
+	re.NotNil(am)
+	re.NotNil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
+
+	// Scenario 2: Keyspace has configured group in metadata
+	// Save keyspace metadata with group configuration
+	meta1 := &keyspacepb.KeyspaceMeta{
+		Id:   keyspaceID1,
+		Name: "test_keyspace_1",
+		Config: map[string]string{
+			"tso_keyspace_group_id": strconv.FormatUint(uint64(configuredGroupID), 10),
+		},
+	}
+	err = mgr.legacySvcStorage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return mgr.legacySvcStorage.SaveKeyspaceMeta(txn, meta1)
+	})
+	re.NoError(err)
+
+	// Try to get keyspace group meta, it should NOT fallback to default group
+	// because keyspace has configured group in metadata
+	am, kg, groupID, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+		keyspaceID1, constant.DefaultKeyspaceGroupID, mgr)
+	re.Nil(am)
+	re.Nil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Error(err)
+	re.True(errors.ErrorEqual(err, errs.ErrKeyspaceNotAssigned.FastGenByArgs()))
+
+	// Scenario 3: Keyspace has no configured group (legacy keyspace)
+	// Save keyspace metadata WITHOUT group configuration
+	meta2 := &keyspacepb.KeyspaceMeta{
+		Id:     keyspaceID2,
+		Name:   "test_keyspace_2",
+		Config: map[string]string{}, // No tso_keyspace_group_id configured
+	}
+	err = mgr.legacySvcStorage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return mgr.legacySvcStorage.SaveKeyspaceMeta(txn, meta2)
+	})
+	re.NoError(err)
+
+	// Try to get keyspace group meta, it should fallback to default group
+	// because keyspace has no configured group
+	am, kg, groupID, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+		keyspaceID2, constant.DefaultKeyspaceGroupID, mgr)
+	re.NoError(err)
+	re.NotNil(am)
+	re.NotNil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
+
+	// Scenario 4: Keyspace not found in storage (also should fallback)
+	keyspaceID3 := uint32(300)
+	am, kg, groupID, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
+	re.NoError(err)
+	re.NotNil(am)
+	re.NotNil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 }
