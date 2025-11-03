@@ -456,12 +456,12 @@ func TestJobGC(t *testing.T) {
 	}
 	re.NoError(conf.addJob(job))
 	re.NoError(conf.deleteJob(1))
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Len(conf.jobs, 1)
 
 	expiredTime := now.Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &expiredTime
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Empty(conf.jobs)
 }
 
@@ -493,16 +493,16 @@ func TestPersistFail(t *testing.T) {
 	re.ErrorContains(conf.deleteJob(1), errMsg)
 	re.NotEqual(cancelled, conf.jobs[0].Status)
 
-	re.ErrorContains(conf.begin(0), errMsg)
+	re.ErrorContains(conf.beginLocked(0), errMsg)
 	re.NotEqual(running, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = running
-	re.ErrorContains(conf.finish(0), errMsg)
+	re.ErrorContains(conf.finishLocked(0), errMsg)
 	re.NotEqual(finished, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = cancelled
 	finishedTime := time.Now().Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &finishedTime
-	re.ErrorContains(conf.gc(), errMsg)
+	re.ErrorContains(conf.gcLocked(), errMsg)
 	re.Len(conf.jobs, 1)
 }
