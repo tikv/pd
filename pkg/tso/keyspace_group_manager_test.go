@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
@@ -34,12 +36,12 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
-	"github.com/pingcap/failpoint"
-
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -428,43 +430,43 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.NoError(err)
 
 	// Should be able to get the allocators for the default/null keyspace and keyspace 1, 2 in keyspace group 0.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should still succeed even keyspace 3 isn't explicitly assigned to any
 	// keyspace group. It will be assigned to the default keyspace group.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should succeed and get the meta of keyspace group 0, because keyspace 0
 	// belongs to group 0, though the specified group 1 doesn't exist.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should fail because keyspace 3 isn't explicitly assigned to any keyspace
 	// group, and the specified group isn't the default keyspace group.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100, mgr)
 	re.Error(err)
 	re.Equal(uint32(100), kgid)
 	re.Nil(allocator)
@@ -509,7 +511,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 
 	// Should be able to get the allocator for keyspace 0 in keyspace group 0.
 	allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
@@ -531,7 +533,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	// Behavior differs between Classic and NextGen modes
 	if kerneltype.IsNextGen() {
 		// In NextGen mode, keyspace 0 should be allowed to move to keyspace group 3
-		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3, mgr)
 		re.NoError(err)
 		re.Equal(uint32(3), kgid) // Should be in group 3
 		re.NotNil(allocator)
@@ -540,13 +542,13 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	} else {
 		// In Classic mode, keyspace 0 should stay in the default keyspace group 0
 		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
-			constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+			constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
 		re.NoError(err)
 		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 		re.NotNil(allocator)
 		re.NotNil(kg)
 		// Should succeed and return the keyspace group meta from the default keyspace group
-		allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3, mgr)
 		re.NoError(err)
 		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 		re.NotNil(allocator)
@@ -595,7 +597,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 
 	// Should be able to get the allocator for keyspace 10 in keyspace group 0.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
@@ -608,7 +610,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 	// Wait until the keyspace 10 is served by keyspace group 1.
 	testutil.Eventually(re, func() bool {
-		_, _, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+		_, _, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1, mgr)
 		return err == nil && kgid == 1
 	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
@@ -621,7 +623,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	// it will cause random failure.
 	time.Sleep(1 * time.Second)
 	// Should still be able to get the allocator for keyspace 10 in keyspace group 1.
-	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1, mgr)
 	re.NoError(err)
 	re.Equal(uint32(1), kgid)
 	re.NotNil(allocator)
@@ -1435,4 +1437,79 @@ func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
 		re.True(ok, id)
 		re.Equal(groupID, groupID1)
 	}
+}
+
+// TestCheckKeyspaceGroupFallback tests the fallback logic when keyspace is not found in lookup table.
+func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
+	re := suite.Require()
+
+	mgr := suite.newUniqueKeyspaceGroupManager(0)
+	re.NotNil(mgr)
+	defer mgr.Close()
+	err := mgr.Initialize()
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		allocator, _, _, _, err := mgr.getKeyspaceGroupMetaWithCheck(
+			constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
+		return err == nil && allocator != nil
+	})
+
+	keyspaceID1 := uint32(100)
+	keyspaceID2 := uint32(200)
+	configuredGroupID := uint32(5)
+
+	allocator, kg, groupID, _, err := mgr.state.getKeyspaceGroupMetaWithCheck(
+		constant.NullKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
+	re.NoError(err)
+	re.NotNil(allocator)
+	re.NotNil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
+
+	meta1 := &keyspacepb.KeyspaceMeta{
+		Id:   keyspaceID1,
+		Name: "test_keyspace_1",
+		Config: map[string]string{
+			"tso_keyspace_group_id": strconv.FormatUint(uint64(configuredGroupID), 10),
+		},
+	}
+	err = mgr.storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return mgr.storage.SaveKeyspaceMeta(txn, meta1)
+	})
+	re.NoError(err)
+
+	allocator, kg, groupID, _, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+		keyspaceID1, constant.DefaultKeyspaceGroupID, mgr)
+	re.Nil(allocator)
+	re.Nil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Error(err)
+
+	meta2 := &keyspacepb.KeyspaceMeta{
+		Id:     keyspaceID2,
+		Name:   "test_keyspace_2",
+		Config: map[string]string{},
+	}
+	err = mgr.storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return mgr.storage.SaveKeyspaceMeta(txn, meta2)
+	})
+	re.NoError(err)
+
+	allocator, kg, groupID, _, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+		keyspaceID2, constant.DefaultKeyspaceGroupID, mgr)
+	re.NoError(err)
+	re.NotNil(allocator)
+	re.NotNil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
+
+	keyspaceID3 := uint32(300)
+	allocator, kg, groupID, _, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
+	re.NoError(err)
+	re.NotNil(allocator)
+	re.NotNil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 }

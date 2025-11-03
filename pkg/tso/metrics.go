@@ -89,6 +89,14 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{typeLabel})
 
+	keyspaceFallbackCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: tsoNamespace,
+			Subsystem: "keyspace",
+			Name:      "fallback_events",
+			Help:      "Counter of keyspace fallback events.",
+		}, []string{typeLabel})
+
 	// keyspaceGroupKeyspaceCountGauge records the keyspace list length of each keyspace group.
 	keyspaceGroupKeyspaceCountGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -111,6 +119,7 @@ func init() {
 	prometheus.MustRegister(keyspaceGroupStateGauge)
 	prometheus.MustRegister(keyspaceGroupOpDuration)
 	prometheus.MustRegister(keyspaceGroupKeyspaceCountGauge)
+	prometheus.MustRegister(keyspaceFallbackCounter)
 }
 
 type tsoMetrics struct {
@@ -186,30 +195,34 @@ func newTSOMetrics(groupID string) *tsoMetrics {
 }
 
 type keyspaceGroupMetrics struct {
-	splitSourceGauge        prometheus.Gauge
-	splitTargetGauge        prometheus.Gauge
-	mergeSourceGauge        prometheus.Gauge
-	mergeTargetGauge        prometheus.Gauge
-	splitDuration           prometheus.Observer
-	mergeDuration           prometheus.Observer
-	finishSplitSendDuration prometheus.Observer
-	finishSplitDuration     prometheus.Observer
-	finishMergeSendDuration prometheus.Observer
-	finishMergeDuration     prometheus.Observer
+	splitSourceGauge                 prometheus.Gauge
+	splitTargetGauge                 prometheus.Gauge
+	mergeSourceGauge                 prometheus.Gauge
+	mergeTargetGauge                 prometheus.Gauge
+	splitDuration                    prometheus.Observer
+	mergeDuration                    prometheus.Observer
+	finishSplitSendDuration          prometheus.Observer
+	finishSplitDuration              prometheus.Observer
+	finishMergeSendDuration          prometheus.Observer
+	finishMergeDuration              prometheus.Observer
+	keyspaceFallbackRejectedCounter  prometheus.Counter
+	keyspaceFallbackToDefaultCounter prometheus.Counter
 }
 
 func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 	return &keyspaceGroupMetrics{
-		splitSourceGauge:        keyspaceGroupStateGauge.WithLabelValues("split-source"),
-		splitTargetGauge:        keyspaceGroupStateGauge.WithLabelValues("split-target"),
-		mergeSourceGauge:        keyspaceGroupStateGauge.WithLabelValues("merge-source"),
-		mergeTargetGauge:        keyspaceGroupStateGauge.WithLabelValues("merge-target"),
-		splitDuration:           keyspaceGroupOpDuration.WithLabelValues("split"),
-		mergeDuration:           keyspaceGroupOpDuration.WithLabelValues("merge"),
-		finishSplitSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-split-send"),
-		finishSplitDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-split"),
-		finishMergeSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
-		finishMergeDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
+		splitSourceGauge:                 keyspaceGroupStateGauge.WithLabelValues("split-source"),
+		splitTargetGauge:                 keyspaceGroupStateGauge.WithLabelValues("split-target"),
+		mergeSourceGauge:                 keyspaceGroupStateGauge.WithLabelValues("merge-source"),
+		mergeTargetGauge:                 keyspaceGroupStateGauge.WithLabelValues("merge-target"),
+		splitDuration:                    keyspaceGroupOpDuration.WithLabelValues("split"),
+		mergeDuration:                    keyspaceGroupOpDuration.WithLabelValues("merge"),
+		finishSplitSendDuration:          keyspaceGroupOpDuration.WithLabelValues("finish-split-send"),
+		finishSplitDuration:              keyspaceGroupOpDuration.WithLabelValues("finish-split"),
+		finishMergeSendDuration:          keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
+		finishMergeDuration:              keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
+		keyspaceFallbackRejectedCounter:  keyspaceFallbackCounter.WithLabelValues("rejected"),
+		keyspaceFallbackToDefaultCounter: keyspaceFallbackCounter.WithLabelValues("to_default"),
 	}
 }
 
