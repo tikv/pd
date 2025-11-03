@@ -428,7 +428,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	var version uint64
 	curVersion := c.keyspaceGroupSD.getVersion()
 	if len(tsoServerURL) > 0 {
-		keyspaceGroup, version, err = c.FindGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getVersion())
+		keyspaceGroup, version, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getVersion())
 		if err != nil {
 			log.Error("[tso] failed to find the keyspace group",
 				zap.Uint32("keyspace-id-in-request", keyspaceID),
@@ -529,16 +529,15 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	return nil
 }
 
-// FindGroupByKeyspaceID find group by keyspace id
 // Query the keyspace group info from the tso server by the keyspace ID. The server side will return
 // the info of the keyspace group to which this keyspace belongs.
-func (c *tsoServiceDiscovery) FindGroupByKeyspaceID(
+func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	keyspaceID uint32, tsoSrvURL string, timeout time.Duration, version uint64,
 ) (*tsopb.KeyspaceGroup, uint64, error) {
 	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
 		keyspaceToCheck, ok := val.(int)
 		if ok && keyspaceID == uint32(keyspaceToCheck) {
-			panic("FindGroupByKeyspaceID is called unexpectedly")
+			panic("findGroupByKeyspaceID is called unexpectedly")
 		}
 	})
 	ctx, cancel := context.WithTimeout(c.ctx, timeout)
