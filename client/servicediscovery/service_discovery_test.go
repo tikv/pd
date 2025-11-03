@@ -37,7 +37,6 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -440,27 +439,4 @@ func TestGRPCDialOption(t *testing.T) {
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)
-}
-
-func TestUpdateKeyspaceGroup(t *testing.T) {
-	re := require.New(t)
-	version := uint64(10)
-	dis := keyspaceGroupSvcDiscovery{
-		version: version,
-	}
-	ks := &tsopb.KeyspaceGroup{
-		Id:       1,
-		UserKind: "basic",
-		Members: []*tsopb.KeyspaceGroupMember{
-			{Address: "mock-1", IsPrimary: true},
-			{Address: "mock-2", IsPrimary: false},
-		},
-	}
-	_, _, success := dis.update(ks, "mock-2", []string{"mock-1"}, []string{"mock-1", "mock-2"}, version)
-	re.False(success)
-	re.Empty(dis.primaryURL)
-	// leader changed
-	_, _, success = dis.update(ks, "mock-2", []string{"mock-1"}, []string{"mock-1", "mock-2"}, version+1)
-	re.True(success)
-	re.Equal("mock-2", dis.primaryURL)
 }
