@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build with_fail
-// +build with_fail
 
 package api
 
