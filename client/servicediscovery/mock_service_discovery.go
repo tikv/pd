@@ -77,6 +77,13 @@ func (*mockServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn { r
 // GetClientConns implements the ServiceDiscovery interface.
 func (*mockServiceDiscovery) GetClientConns() *sync.Map { return nil }
 
+// RemoveClientConn implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) RemoveClientConn(string) {}
+
+// SetClientConn implements the ServiceDiscovery interface.
+// Only for test purpose.
+func (*mockServiceDiscovery) SetClientConn(string, *grpc.ClientConn) {}
+
 // GetServingURL implements the ServiceDiscovery interface.
 func (*mockServiceDiscovery) GetServingURL() string { return "" }
 
