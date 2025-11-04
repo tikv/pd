@@ -433,7 +433,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		clusterInfo, err := c.serviceDiscovery.(*serviceDiscovery).getClusterInfo(
 			c.ctx, c.serviceDiscovery.GetServingURL(), UpdateMemberTimeout)
 		if err != nil {
-			log.Error("[tso] failed to get cluster info to check service mode",
+			log.Warn("[tso] failed to get cluster info to check service mode",
 				zap.Uint32("keyspace-id", keyspaceID),
 				errs.ZapError(err))
 			return err
@@ -441,7 +441,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 		// If we are in API_SVC_MODE (microservice mode), don't fallback
 		if len(clusterInfo.ServiceModes) > 0 && clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
-			log.Error("[tso] in API service mode but no TSO server available - cannot fallback to group 0",
+			log.Warn("[tso] in API service mode but no TSO server available - cannot fallback to group 0",
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
 			return errors.New("no TSO microservice available in API service mode")
