@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -562,7 +563,7 @@ type tsoTestSetup struct {
 }
 
 // setupTSONodesAndClient creates TSO nodes, keyspace group, and returns initialized client
-func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertions, nodeCount int, keyspaceGroupID uint32) *tsoTestSetup {
+func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertions, nodeCount int, keyspaceGroupID uint32, opts ...opt.ClientOption) *tsoTestSetup {
 	// Create TSO nodes
 	nodes := make(map[string]bs.Server)
 	var cleanups []func()
@@ -601,7 +602,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 
 	// Create client and get initial TSO
 	keyspaceID := keyspaceGroupID // Use same ID for simplicity
-	client := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceID, []string{suite.backendEndpoints})
+	client := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceID, []string{suite.backendEndpoints}, opts...)
 	utils.WaitForTSOServiceAvailable(suite.ctx, re, client)
 
 	physical, logical, err := client.GetTS(suite.ctx)
@@ -645,11 +646,11 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 		// TSO dispatcher timeout extension to prevent timeout
 		tsoDispatcherTimeoutSeconds = 30
 		// Time to wait for GetTS to start
-		waitForGetTSStart = 2 * time.Second
+		waitForGetTSStart = 1 * time.Second
 	)
 
 	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
-	setup := suite.setupTSONodesAndClient(re, 2, 1)
+	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(30*time.Second))
 	defer func() {
 		for _, cleanup := range setup.cleanups {
 			cleanup()
@@ -671,12 +672,6 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath"))
 	}()
-	// tsoDispatcherExtendTimeout: prevents GetTS from timing out while waiting for node restart
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/client/clients/tso/tsoDispatcherExtendTimeout",
-		fmt.Sprintf("return(%d)", tsoDispatcherTimeoutSeconds)))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/client/clients/tso/tsoDispatcherExtendTimeout"))
-	}()
 
 	// Step 5: Start async GetTS call - it will wait for TSO service to recover
 	type getTSResult struct {
@@ -686,15 +681,11 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	}
 	resultCh := make(chan getTSResult, 1)
 
-	getTSStarted := make(chan struct{})
 	go func() {
-		close(getTSStarted) // Signal that GetTS call has started
 		physicalTS, logicalTS, getErr := client.GetTS(suite.ctx)
 		resultCh <- getTSResult{physicalTS: physicalTS, logicalTS: logicalTS, err: getErr}
 	}()
 
-	// Wait for GetTS goroutine to start
-	<-getTSStarted
 	time.Sleep(waitForGetTSStart) // Give it time to begin execution
 
 	// Step 6: Restart one TSO node while GetTS is waiting
