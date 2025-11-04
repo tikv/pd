@@ -1492,7 +1492,7 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
-		if key == core.EngineKey {
+		if key == core.EngineKey || key == core.EngineRoleKey {
 			continue
 		}
 		if _, ok := keysSet[key]; !ok {
@@ -2615,7 +2615,7 @@ func (c *RaftCluster) collectStorageSize(
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
 	start := time.Now()
 	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
-	regionLabeler.IterateLableRules(func(rule *labeler.LabelRule) bool {
+	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
 		// Try to parse the keyspace ID from the label rule.
 		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
 		if !ok {
@@ -2640,8 +2640,9 @@ func (c *RaftCluster) collectStorageSize(
 	for keyspaceName, regionBounds := range regionBoundsMap {
 		regionStats := c.GetRegionStatsByRange(regionBounds.TxnLeftBound, regionBounds.TxnRightBound)
 		storageSizeInfoList = append(storageSizeInfoList, &storageSizeInfo{
-			keyspaceName:           keyspaceName,
-			rowBasedStorageSize:    uint64(regionStats.StorageSize),
+			keyspaceName: keyspaceName,
+			// Use the user storage size to record the logical storage size.
+			rowBasedStorageSize:    uint64(regionStats.UserStorageSize),
 			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
 		})
 	}

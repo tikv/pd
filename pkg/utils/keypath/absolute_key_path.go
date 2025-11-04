@@ -58,7 +58,7 @@ const (
 	// ruleConfigPrefixFormat is used to watch rulePathFormat and ruleGroupPathFormat, so it should be the parent directory of them.
 	ruleCommonPrefixFormat  = "/pd/%d/rule"            // "/pd/{cluster_id}/rule"
 	ruleGroupPathFormat     = "/pd/%d/rule_group/%s"   // "/pd/{cluster_id}/rule_group/{group_id}"
-	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
+	regionLabelPathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
 	// Maintenance task path format
@@ -110,9 +110,9 @@ const (
 	// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
 	// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
 	// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-	msExpectedPrimaryPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
-	msTsoDefaultExpectedPrimaryPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msExpectedPrimaryPathFormat            = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
+	msTsoDefaultExpectedPrimaryPathFormat  = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKeyspaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
 	// resource group path
 	keyspaceResourceGroupSettingsPathPrefixFormat = "resource_group/keyspace/settings/"      // "resource_group/keyspace/settings/"

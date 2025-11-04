@@ -287,7 +287,7 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(100+i), strconv.Itoa(100+i+1),
 			1, uint64(follower1), uint64(follower2))
 	}
-	// case1: store 1 has 100 peers, the others has 50 peer, it suiter for the location label setting.
+	// case1: store 1 has 100 peers, the others has 50 peer, it suited for the location label setting.
 	re.False(scheduler.IsScheduleAllowed(tc))
 	op, _ := scheduler.Schedule(tc, true)
 	re.Empty(op)
@@ -456,12 +456,12 @@ func TestJobGC(t *testing.T) {
 	}
 	re.NoError(conf.addJob(job))
 	re.NoError(conf.deleteJob(1))
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Len(conf.jobs, 1)
 
 	expiredTime := now.Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &expiredTime
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Empty(conf.jobs)
 }
 
@@ -493,16 +493,16 @@ func TestPersistFail(t *testing.T) {
 	re.ErrorContains(conf.deleteJob(1), errMsg)
 	re.NotEqual(cancelled, conf.jobs[0].Status)
 
-	re.ErrorContains(conf.begin(0), errMsg)
+	re.ErrorContains(conf.beginLocked(0), errMsg)
 	re.NotEqual(running, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = running
-	re.ErrorContains(conf.finish(0), errMsg)
+	re.ErrorContains(conf.finishLocked(0), errMsg)
 	re.NotEqual(finished, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = cancelled
 	finishedTime := time.Now().Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &finishedTime
-	re.ErrorContains(conf.gc(), errMsg)
+	re.ErrorContains(conf.gcLocked(), errMsg)
 	re.Len(conf.jobs, 1)
 }

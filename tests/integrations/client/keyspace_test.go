@@ -64,6 +64,10 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start 
 
 func (suite *clientStatelessTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
 	metas := mustMakeTestKeyspaces(re, suite.srv, 0)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
@@ -84,6 +88,10 @@ func (suite *clientStatelessTestSuite) TestLoadKeyspace() {
 
 func (suite *clientStatelessTestSuite) TestGetAllKeyspaces() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
 	metas := mustMakeTestKeyspaces(re, suite.srv, 20)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
@@ -197,7 +205,7 @@ func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	// By the time this test is writte, only for next-gen deployment we enable keyspace level GC by default.
+	// By the time this test is write, only for next-gen deployment we enable keyspace level GC by default.
 	// Update this test when this
 	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
 

@@ -542,7 +542,7 @@ var (
 
 // GC errors
 var (
-	ErrGCOnInvalidKeyspace                 = errors.Normalize("trying to manage GC in keyspace %v where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
+	ErrGCOnInvalidKeyspace                 = errors.Normalize("trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
 	ErrDecreasingGCSafePoint               = errors.Normalize("trying to update GC safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingGCSafePoint"))
 	ErrGCSafePointExceedsTxnSafePoint      = errors.Normalize("trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v", errors.RFCCodeText("PD:gc:ErrGCSafePointExceedsTxnSafePoint"))
 	ErrDecreasingTxnSafePoint              = errors.Normalize("trying to update txn safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingTxnSafePoint"))
