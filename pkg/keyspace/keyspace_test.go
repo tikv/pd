@@ -140,6 +140,10 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 		re.NoError(err)
 		re.Equal(created.Name, name)
 
+		name, err = manager.GetEnabledKeyspaceNameByID(created.Id)
+		re.NoError(err)
+		re.Equal(created.Name, name)
+
 		loaded, err := manager.LoadKeyspace(request.Name)
 		re.NoError(err)
 		re.Equal(uint32(i+1), loaded.Id)
@@ -319,15 +323,33 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
 		re.NoError(err)
+		meta, err := manager.LoadKeyspace(createRequest.Name)
+		re.NoError(err)
+		re.Equal(createRequest.Name, meta.GetName())
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
+		id := meta.GetId()
+
 		oldTime := time.Now().Unix()
 		// Archiving an ENABLED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, oldTime)
 		re.Error(err)
+		state, err := manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, state)
+		name, err := manager.GetEnabledKeyspaceNameByID(id)
+		re.NoError(err)
+		re.Equal(createRequest.Name, name)
 		// Disabling an ENABLED keyspace is allowed. Should update StateChangedAt.
 		updated, err := manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, oldTime)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
 		re.Equal(oldTime, updated.StateChangedAt)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.Error(err)
+		re.Empty(name)
 
 		newTime := time.Now().Unix()
 		// Disabling an DISABLED keyspace is allowed. Should NOT update StateChangedAt.
@@ -335,18 +357,43 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
 		re.Equal(oldTime, updated.StateChangedAt)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.Error(err)
+		re.Empty(name)
 		// Archiving a DISABLED keyspace is allowed. Should update StateChangeAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, newTime)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, updated.State)
 		re.Equal(newTime, updated.StateChangedAt)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.Error(err)
+		re.Empty(name)
 		// Changing state of an ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.Error(err)
+		re.Empty(name)
 		// Changing state of bootstrap keyspace is not allowed.
 		bootstrapKeyspaceName := GetBootstrapKeyspaceName()
 		_, err = manager.UpdateKeyspaceState(bootstrapKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.Error(err)
+		id = GetBootstrapKeyspaceID()
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.NoError(err)
+		re.Equal(bootstrapKeyspaceName, name)
 	}
 }
 
