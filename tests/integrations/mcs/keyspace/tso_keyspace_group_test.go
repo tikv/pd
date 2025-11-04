@@ -99,7 +99,6 @@ func (suite *keyspaceGroupTestSuite) getTSOServerURLs() ([]string, error) {
 	// Remove "http://" or "https://" prefix if present, as gRPC Dial expects address without scheme
 	addr := suite.backendEndpoints
 	addr = strings.TrimPrefix(addr, "http://")
-	addr = strings.TrimPrefix(addr, "https://")
 
 	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
