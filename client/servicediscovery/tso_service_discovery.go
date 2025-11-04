@@ -444,7 +444,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 			log.Warn("[tso] in API service mode but no TSO server available - cannot fallback to group 0",
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
-			return errors.New("no TSO microservice available in API service mode")
+			return errors.New("no TSO microservice available in microservice mode")
 		}
 
 		// Only fallback to legacy path if we are in PD_SVC_MODE
