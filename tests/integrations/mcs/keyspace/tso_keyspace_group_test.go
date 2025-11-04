@@ -643,8 +643,6 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 
 	// Test configuration constants
 	const (
-		// TSO dispatcher timeout extension to prevent timeout
-		tsoDispatcherTimeoutSeconds = 30
 		// Time to wait for GetTS to start
 		waitForGetTSStart = 1 * time.Second
 	)
