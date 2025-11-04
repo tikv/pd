@@ -28,9 +28,9 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/gc"
-	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -67,7 +67,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateGCSafePointResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.UpdateGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	newSafePoint := request.GetSafePoint()
@@ -87,7 +87,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	}
 
 	return &pdpb.UpdateGCSafePointResponse{
-		Header:       gh.WrapHeader(),
+		Header:       grpcutil.WrapHeader(),
 		NewSafePoint: newSafePoint,
 	}, nil
 }
@@ -124,7 +124,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetGCSafePointResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
@@ -133,7 +133,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 	}
 
 	return &pdpb.GetGCSafePointResponse{
-		Header:    gh.WrapHeader(),
+		Header:    grpcutil.WrapHeader(),
 		SafePoint: safePoint,
 	}, nil
 }
@@ -183,7 +183,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateServiceGCSafePointResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.UpdateServiceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	nowTSO, err := s.getGlobalTSO(ctx)
 	if err != nil {
@@ -202,7 +202,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			zap.Uint64("safepoint", request.GetSafePoint()))
 	}
 	return &pdpb.UpdateServiceGCSafePointResponse{
-		Header:       gh.WrapHeader(),
+		Header:       grpcutil.WrapHeader(),
 		ServiceId:    []byte(min.ServiceID),
 		TTL:          min.ExpiredAt - now.Unix(),
 		MinSafePoint: min.SafePoint,
@@ -241,19 +241,19 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetGCSafePointV2Response{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetGCSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(request.GetKeyspaceId())
 
 	if err != nil {
 		return &pdpb.GetGCSafePointV2Response{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, err
 	}
 
 	return &pdpb.GetGCSafePointV2Response{
-		Header:    gh.WrapHeader(),
+		Header:    grpcutil.WrapHeader(),
 		SafePoint: safePoint,
 	}, nil
 }
@@ -290,7 +290,7 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateGCSafePointV2Response{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.UpdateGCSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	newSafePoint := request.GetSafePoint()
@@ -312,7 +312,7 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 	}
 
 	return &pdpb.UpdateGCSafePointV2Response{
-		Header:       gh.WrapHeader(),
+		Header:       grpcutil.WrapHeader(),
 		NewSafePoint: newSafePoint,
 	}, nil
 }
@@ -365,7 +365,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateServiceSafePointV2Response{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.UpdateServiceSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	nowTSO, err := s.getGlobalTSO(ctx)
@@ -381,7 +381,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return nil, err
 	}
 	return &pdpb.UpdateServiceSafePointV2Response{
-		Header:       gh.WrapHeader(),
+		Header:       grpcutil.WrapHeader(),
 		ServiceId:    []byte(min.ServiceID),
 		Ttl:          min.ExpiredAt - now.Unix(),
 		MinSafePoint: min.SafePoint,
@@ -429,13 +429,13 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetAllGCSafePointV2Response{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetAllGCSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx)
 	if err != nil {
 		return &pdpb.GetAllGCSafePointV2Response{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
@@ -453,7 +453,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 	}
 
 	return &pdpb.GetAllGCSafePointV2Response{
-		Header:       gh.WrapHeader(),
+		Header:       grpcutil.WrapHeader(),
 		GcSafePoints: gcSafePoints,
 		Revision:     0,
 	}, nil
@@ -540,17 +540,17 @@ func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.Advan
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.AdvanceGCSafePointResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.AdvanceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	oldGCSafePoint, newGCSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget())
 	if err != nil {
 		return &pdpb.AdvanceGCSafePointResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.AdvanceGCSafePointResponse{
-		Header:         gh.WrapHeader(),
+		Header:         grpcutil.WrapHeader(),
 		OldGcSafePoint: oldGCSafePoint,
 		NewGcSafePoint: newGCSafePoint,
 	}, nil
@@ -576,18 +576,18 @@ func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.Adva
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.AdvanceTxnSafePointResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.AdvanceTxnSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	res, err := s.gcStateManager.AdvanceTxnSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget(), time.Now())
 	if err != nil {
 		return &pdpb.AdvanceTxnSafePointResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.AdvanceTxnSafePointResponse{
-		Header:             gh.WrapHeader(),
+		Header:             grpcutil.WrapHeader(),
 		OldTxnSafePoint:    res.OldTxnSafePoint,
 		NewTxnSafePoint:    res.NewTxnSafePoint,
 		BlockerDescription: res.BlockerDescription,
@@ -614,7 +614,7 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.SetGCBarrierResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.SetGCBarrierResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	now := time.Now()
@@ -625,12 +625,12 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	newBarrier, err := s.gcStateManager.SetGCBarrier(keyspaceID, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGCBarrierResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.SetGCBarrierResponse{
-		Header:         gh.WrapHeader(),
+		Header:         grpcutil.WrapHeader(),
 		NewBarrierInfo: gcBarrierToProto(newBarrier, now),
 	}, nil
 }
@@ -655,7 +655,7 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.DeleteGCBarrierResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.DeleteGCBarrierResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	now := time.Now()
@@ -663,12 +663,12 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(getKeyspaceID(request.GetKeyspaceScope()), request.GetBarrierId())
 	if err != nil {
 		return &pdpb.DeleteGCBarrierResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.DeleteGCBarrierResponse{
-		Header:             gh.WrapHeader(),
+		Header:             grpcutil.WrapHeader(),
 		DeletedBarrierInfo: gcBarrierToProto(deletedBarrier, now),
 	}, nil
 }
@@ -693,18 +693,18 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetGCStateResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetGCStateResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	gcState, err := s.gcStateManager.GetGCState(getKeyspaceID(request.GetKeyspaceScope()))
 	if err != nil {
 		return &pdpb.GetGCStateResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.GetGCStateResponse{
-		Header:  gh.WrapHeader(),
+		Header:  grpcutil.WrapHeader(),
 		GcState: gcStateToProto(gcState, time.Now()),
 	}, nil
 }
@@ -729,13 +729,13 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetAllKeyspacesGCStatesResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetAllKeyspacesGCStatesResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx)
 	if err != nil {
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	now := time.Now()
@@ -747,7 +747,7 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 	globalBarriers, err := s.gcStateManager.LoadAllGlobalGCBarriers()
 	if err != nil {
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	gcBarriersPb := make([]*pdpb.GlobalGCBarrierInfo, 0, len(globalBarriers))
@@ -756,7 +756,7 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 	}
 
 	return &pdpb.GetAllKeyspacesGCStatesResponse{
-		Header:           gh.WrapHeader(),
+		Header:           grpcutil.WrapHeader(),
 		GcStates:         gcStatesPb,
 		GlobalGcBarriers: gcBarriersPb,
 	}, nil
@@ -782,7 +782,7 @@ func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGl
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.SetGlobalGCBarrierResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.SetGlobalGCBarrierResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	now := time.Now()
@@ -792,12 +792,12 @@ func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGl
 	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGlobalGCBarrierResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.SetGlobalGCBarrierResponse{
-		Header:         gh.WrapHeader(),
+		Header:         grpcutil.WrapHeader(),
 		NewBarrierInfo: globalGCBarrierToProto(newBarrier, now),
 	}, nil
 }
@@ -822,7 +822,7 @@ func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.De
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.DeleteGlobalGCBarrierResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.DeleteGlobalGCBarrierResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	now := time.Now()
@@ -831,12 +831,12 @@ func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.De
 	deletedBarrier, err := s.gcStateManager.DeleteGlobalGCBarrier(ctx, barrierID)
 	if err != nil {
 		return &pdpb.DeleteGlobalGCBarrierResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.DeleteGlobalGCBarrierResponse{
-		Header:             gh.WrapHeader(),
+		Header:             grpcutil.WrapHeader(),
 		DeletedBarrierInfo: globalGCBarrierToProto(deletedBarrier, now),
 	}, nil
 }

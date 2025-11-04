@@ -29,10 +29,9 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
-	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -81,50 +80,50 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // BatchScanRegions implements the BatchScanRegions RPC method.
 func (s *Service) BatchScanRegions(_ctx context.Context, request *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
-	resp, err := gh.BatchScanRegions(s.GetBasicCluster(), request, false)
-	metering.IncRegionRequestCounter("BatchScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	resp, err := grpcutil.BatchScanRegions(s.GetBasicCluster(), request, false)
+	grpcutil.RegionRequestCounter("BatchScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // ScanRegions implements the ScanRegions RPC method.
 func (s *Service) ScanRegions(_ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
-	resp, err := gh.ScanRegions(s.GetBasicCluster(), request, false)
-	metering.IncRegionRequestCounter("ScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	resp, err := grpcutil.ScanRegions(s.GetBasicCluster(), request, false)
+	grpcutil.RegionRequestCounter("ScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetRegion implements the GetRegion RPC method.
 func (s *Service) GetRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	resp, err := gh.GetRegion(s.GetBasicCluster(), request, false)
-	metering.IncRegionRequestCounter("GetRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	resp, err := grpcutil.GetRegion(s.GetBasicCluster(), request, false)
+	grpcutil.RegionRequestCounter("GetRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetAllStores implements the GetAllStores RPC method.
 func (s *Service) GetAllStores(_ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
-	resp, err := gh.GetAllStores(s.GetBasicCluster(), request)
-	metering.IncRegionRequestCounter("GetAllStores", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	resp, err := grpcutil.GetAllStores(s.GetBasicCluster(), request)
+	grpcutil.RegionRequestCounter("GetAllStores", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetStore implements the GetStore RPC method.
 func (s *Service) GetStore(_ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
-	resp, err := gh.GetStore(s.GetBasicCluster(), request)
-	metering.IncRegionRequestCounter("GetStore", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	resp, err := grpcutil.GetStore(s.GetBasicCluster(), request)
+	grpcutil.RegionRequestCounter("GetStore", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetPrevRegion implements the GetPrevRegion RPC method.
 func (s *Service) GetPrevRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	resp, err := gh.GetPrevRegion(s.GetBasicCluster(), request, false)
-	metering.IncRegionRequestCounter("GetPrevRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	resp, err := grpcutil.GetPrevRegion(s.GetBasicCluster(), request, false)
+	grpcutil.RegionRequestCounter("GetPrevRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetRegionByID implements the GetRegionByID RPC method.
 func (s *Service) GetRegionByID(_ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
-	resp, err := gh.GetRegionByID(s.GetBasicCluster(), request, false)
-	metering.IncRegionRequestCounter("GetRegionByID", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	resp, err := grpcutil.GetRegionByID(s.GetBasicCluster(), request, false)
+	grpcutil.RegionRequestCounter("GetRegionByID", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
@@ -154,12 +153,12 @@ func (s *Service) QueryRegion(stream routerpb.Router_QueryRegionServer) error {
 		queryRegionDuration.Observe(time.Since(start).Seconds())
 		// Build the response and send it to the client.
 		response := &pdpb.QueryRegionResponse{
-			Header:       gh.WrapHeader(),
+			Header:       grpcutil.WrapHeader(),
 			KeyIdMap:     keyIDMap,
 			PrevKeyIdMap: prevKeyIDMap,
 			RegionsById:  regionsByID,
 		}
-		gh.IncRegionRequestCounter("QueryRegion", request.Header, response.Header.Error, regionRequestCounter)
+		grpcutil.RegionRequestCounter("QueryRegion", request.Header, response.Header.Error, regionRequestCounter)
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}

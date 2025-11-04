@@ -41,9 +41,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -252,7 +250,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetClusterInfoResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 
@@ -266,7 +264,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	}
 
 	return &pdpb.GetClusterInfoResponse{
-		Header:       gh.WrapHeader(),
+		Header:       grpcutil.WrapHeader(),
 		ServiceModes: svcModes,
 		TsoUrls:      tsoServiceAddrs,
 	}, nil
@@ -307,13 +305,13 @@ func (s *GrpcServer) GetMinTS(
 	}
 	if err != nil {
 		return &pdpb.GetMinTSResponse{
-			Header:    gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header:    grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			Timestamp: minTS,
 		}, nil
 	}
 
 	return &pdpb.GetMinTSResponse{
-		Header:    gh.WrapHeader(),
+		Header:    grpcutil.WrapHeader(),
 		Timestamp: minTS,
 	}, nil
 }
@@ -441,13 +439,13 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetMembersResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 	members, err := cluster.GetMembers(s.GetClient())
 	if err != nil {
 		return &pdpb.GetMembersResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
@@ -469,7 +467,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	return &pdpb.GetMembersResponse{
-		Header:     gh.WrapHeader(),
+		Header:     grpcutil.WrapHeader(),
 		Members:    members,
 		Leader:     pdLeader,
 		EtcdLeader: etcdLeader,
@@ -594,7 +592,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errs.ErrUnknown(err)
 		}
 		response := &pdpb.TsoResponse{
-			Header:    gh.WrapHeader(),
+			Header:    grpcutil.WrapHeader(),
 			Timestamp: &ts,
 			Count:     count,
 		}
@@ -629,18 +627,18 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 			Message: "cluster is already bootstrapped",
 		}
 		return &pdpb.BootstrapResponse{
-			Header: gh.ErrorHeader(err),
+			Header: grpcutil.ErrorHeader(err),
 		}, nil
 	}
 
 	res, err := s.bootstrapCluster(request)
 	if err != nil {
 		return &pdpb.BootstrapResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
-	res.Header = gh.WrapHeader()
+	res.Header = grpcutil.WrapHeader()
 	return res, nil
 }
 
@@ -664,7 +662,7 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 
 	rc := s.GetRaftCluster()
 	return &pdpb.IsBootstrappedResponse{
-		Header:       gh.WrapHeader(),
+		Header:       grpcutil.WrapHeader(),
 		Bootstrapped: rc != nil,
 	}, nil
 }
@@ -699,12 +697,12 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	id, count, err := s.idAllocator.Alloc(reqCount)
 	if err != nil {
 		return &pdpb.AllocIDResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	resp := &pdpb.AllocIDResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 		Id:     id,
 	}
 	if count > 1 {
@@ -731,11 +729,11 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 	marked, err := s.Server.IsSnapshotRecovering(ctx)
 	if err != nil {
 		return &pdpb.IsSnapshotRecoveringResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	return &pdpb.IsSnapshotRecoveringResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 		Marked: marked,
 	}, nil
 }
@@ -759,19 +757,19 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetStoreResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetStoreResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	storeID := request.GetStoreId()
 	store := rc.GetStore(storeID)
 	if store == nil {
 		return &pdpb.GetStoreResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("invalid store ID %d, not found", storeID)),
 		}, nil
 	}
 	return &pdpb.GetStoreResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 		Store:  store.GetMeta(),
 		Stats:  store.GetStoreStats(),
 	}, nil
@@ -812,27 +810,27 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.PutStoreResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.PutStoreResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	store := request.GetStore()
 	if pberr := checkStore(rc, store.GetId()); pberr != nil {
 		return &pdpb.PutStoreResponse{
-			Header: gh.ErrorHeader(pberr),
+			Header: grpcutil.ErrorHeader(pberr),
 		}, nil
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
 	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		return &pdpb.PutStoreResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				"placement rules is disabled"),
 		}, nil
 	}
 
 	if err := rc.PutMetaStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
@@ -840,7 +838,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 
 	return &pdpb.PutStoreResponse{
-		Header:            gh.WrapHeader(),
+		Header:            grpcutil.WrapHeader(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 	}, nil
 }
@@ -865,7 +863,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetAllStoresResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetAllStoresResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	// Don't return tombstone stores.
@@ -881,7 +879,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 	}
 
 	return &pdpb.GetAllStoresResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 		Stores: stores,
 	}, nil
 }
@@ -909,24 +907,24 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.StoreHeartbeatResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.StoreHeartbeatResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
 		return &pdpb.StoreHeartbeatResponse{
-			Header: gh.ErrorHeader(pberr),
+			Header: grpcutil.ErrorHeader(pberr),
 		}, nil
 	}
 	storeID := request.GetStats().GetStoreId()
 	store := rc.GetStore(storeID)
 	if store == nil {
 		return &pdpb.StoreHeartbeatResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("store %v not found", storeID)),
 		}, nil
 	}
 
-	resp := &pdpb.StoreHeartbeatResponse{Header: gh.WrapHeader()}
+	resp := &pdpb.StoreHeartbeatResponse{Header: grpcutil.WrapHeader()}
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
 		storeAddress := store.GetAddress()
@@ -936,7 +934,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		err := rc.HandleStoreHeartbeat(request, resp)
 		if err != nil {
 			return &pdpb.StoreHeartbeatResponse{
-				Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					err.Error()),
 			}, nil
 		}
@@ -1123,7 +1121,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			resp := &pdpb.ReportBucketsResponse{
-				Header: gh.NotBootstrappedHeader(),
+				Header: grpcutil.NotBootstrappedHeader(),
 			}
 			err := server.send(resp)
 			return errors.WithStack(err)
@@ -1302,7 +1300,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			resp := &pdpb.RegionHeartbeatResponse{
-				Header: gh.NotBootstrappedHeader(),
+				Header: grpcutil.NotBootstrappedHeader(),
 			}
 			err := server.Send(resp)
 			return errors.WithStack(err)
@@ -1473,7 +1471,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
 	defer func() {
-		metering.IncRegionRequestCounter("GetRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RegionRequestCounter("GetRegion", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	failpoint.Inject("delayProcess", nil)
 	rc, header := s.getRaftCluster(*followerHandle)
@@ -1481,7 +1479,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return &pdpb.GetRegionResponse{Header: header}, nil
 	}
 	request.NeedBuckets = !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
-	return gh.GetRegion(rc.GetBasicCluster(), request, *followerHandle)
+	return grpcutil.GetRegion(rc.GetBasicCluster(), request, *followerHandle)
 }
 
 // GetPrevRegion implements gRPC PDServer
@@ -1504,14 +1502,14 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	}
 
 	defer func() {
-		metering.IncRegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
 		return &pdpb.GetRegionResponse{Header: header}, nil
 	}
 	request.NeedBuckets = !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
-	return gh.GetPrevRegion(rc.GetBasicCluster(), request, *followerHandle)
+	return grpcutil.GetPrevRegion(rc.GetBasicCluster(), request, *followerHandle)
 }
 
 // GetRegionByID implements gRPC PDServer.
@@ -1534,14 +1532,14 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}
 
 	defer func() {
-		metering.IncRegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
 		return &pdpb.GetRegionResponse{Header: header}, nil
 	}
 	request.NeedBuckets = !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
-	return gh.GetRegionByID(rc.GetBasicCluster(), request, *followerHandle)
+	return grpcutil.GetRegionByID(rc.GetBasicCluster(), request, *followerHandle)
 }
 
 // QueryRegion provides a stream processing of the region query.
@@ -1573,7 +1571,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			rc = s.GetRaftCluster()
 			if rc == nil {
 				resp := &pdpb.QueryRegionResponse{
-					Header: gh.NotBootstrappedHeader(),
+					Header: grpcutil.NotBootstrappedHeader(),
 				}
 				if err = stream.Send(resp); err != nil {
 					return errors.WithStack(err)
@@ -1584,7 +1582,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			rc = s.cluster
 			if !rc.GetRegionSyncer().IsRunning() {
 				resp := &pdpb.QueryRegionResponse{
-					Header: gh.RegionNotFound(),
+					Header: grpcutil.RegionNotFound(),
 				}
 				if err = stream.Send(resp); err != nil {
 					return errors.WithStack(err)
@@ -1594,9 +1592,9 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		}
 		start := time.Now()
 		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
-		resp := gh.QueryRegion(rc.GetBasicCluster(), request)
+		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)
 		queryRegionDuration.Observe(time.Since(start).Seconds())
-		metering.IncRegionRequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RegionRequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
 		if err := stream.Send(resp); err != nil {
 			return errors.WithStack(err)
 		}
@@ -1624,13 +1622,13 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	}
 
 	defer func() {
-		metering.IncRegionRequestCounter("ScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RegionRequestCounter("ScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
 		return &pdpb.ScanRegionsResponse{Header: header}, nil
 	}
-	return gh.ScanRegions(rc.GetBasicCluster(), request, *followerHandle)
+	return grpcutil.ScanRegions(rc.GetBasicCluster(), request, *followerHandle)
 }
 
 // BatchScanRegions implements gRPC PDServer.
@@ -1653,14 +1651,14 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 
 	defer func() {
-		metering.IncRegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
 		return &pdpb.BatchScanRegionsResponse{Header: header}, nil
 	}
 	request.NeedBuckets = !*followerHandle && request.GetNeedBuckets() && rc.GetStoreConfig().IsEnableRegionBucket()
-	return gh.BatchScanRegions(rc.GetBasicCluster(), request, *followerHandle)
+	return grpcutil.BatchScanRegions(rc.GetBasicCluster(), request, *followerHandle)
 }
 
 // AskSplit implements gRPC PDServer.
@@ -1683,23 +1681,23 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.AskSplitResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.AskSplitResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	if request.GetRegion() == nil {
 		return &pdpb.AskSplitResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 				"missing region for split"),
 		}, nil
 	}
 	split, err := rc.HandleAskSplit(request)
 	if err != nil {
 		return &pdpb.AskSplitResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.AskSplitResponse{
-		Header:      gh.WrapHeader(),
+		Header:      grpcutil.WrapHeader(),
 		NewRegionId: split.NewRegionId,
 		NewPeerIds:  split.NewPeerIds,
 	}, nil
@@ -1717,14 +1715,14 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.AskBatchSplitResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.AskBatchSplitResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.AskBatchSplitResponse{
-				Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -1760,19 +1758,19 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	}
 	if request.GetRegion() == nil {
 		return &pdpb.AskBatchSplitResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 				"missing region for split"),
 		}, nil
 	}
 	split, err := rc.HandleAskBatchSplit(request)
 	if err != nil {
 		return &pdpb.AskBatchSplitResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.AskBatchSplitResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 		Ids:    split.Ids,
 	}, nil
 }
@@ -1797,17 +1795,17 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ReportSplitResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.ReportSplitResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	_, err = rc.HandleReportSplit(request)
 	if err != nil {
 		return &pdpb.ReportSplitResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.ReportSplitResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 	}, nil
 }
 
@@ -1831,18 +1829,18 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ReportBatchSplitResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.ReportBatchSplitResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	_, err = rc.HandleBatchReportSplit(request)
 	if err != nil {
 		return &pdpb.ReportBatchSplitResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				err.Error()),
 		}, nil
 	}
 
 	return &pdpb.ReportBatchSplitResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 	}, nil
 }
 
@@ -1866,10 +1864,10 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetClusterConfigResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetClusterConfigResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	return &pdpb.GetClusterConfigResponse{
-		Header:  gh.WrapHeader(),
+		Header:  grpcutil.WrapHeader(),
 		Cluster: rc.GetMetaCluster(),
 	}, nil
 }
@@ -1894,12 +1892,12 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.PutClusterConfigResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.PutClusterConfigResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	conf := request.GetCluster()
 	if err := rc.PutMetaCluster(conf); err != nil {
 		return &pdpb.PutClusterConfigResponse{
-			Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				err.Error()),
 		}, nil
 	}
@@ -1907,7 +1905,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 	log.Info("put cluster config ok", zap.Reflect("config", conf))
 
 	return &pdpb.PutClusterConfigResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 	}, nil
 }
 
@@ -1923,14 +1921,14 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ScatterRegionResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.ScatterRegionResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.ScatterRegionResponse{
-				Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -1984,7 +1982,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			return nil, err
 		}
 		return &pdpb.ScatterRegionResponse{
-			Header:             gh.WrapHeader(),
+			Header:             grpcutil.WrapHeader(),
 			FinishedPercentage: uint64(percentage),
 			FailedRegionsId:    failedRegionsID,
 		}, nil
@@ -1995,7 +1993,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	if region == nil {
 		if request.GetRegion() == nil {
 			return &pdpb.ScatterRegionResponse{
-				Header: gh.WrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 					"region %d not found"),
 			}, nil
 		}
@@ -2010,14 +2008,14 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	if op != nil {
 		if !rc.GetOperatorController().AddOperator(op) {
 			return &pdpb.ScatterRegionResponse{
-				Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					"operator canceled because cannot add an operator to the execute queue"),
 			}, nil
 		}
 	}
 
 	return &pdpb.ScatterRegionResponse{
-		Header:             gh.WrapHeader(),
+		Header:             grpcutil.WrapHeader(),
 		FinishedPercentage: 100,
 	}, nil
 }
@@ -2053,14 +2051,14 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetOperatorResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.GetOperatorResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.GetOperatorResponse{
-				Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -2095,7 +2093,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	requestID := request.GetRegionId()
 	r := opController.GetOperatorStatus(requestID)
 	if r == nil {
-		header := gh.ErrorHeader(&pdpb.Error{
+		header := grpcutil.ErrorHeader(&pdpb.Error{
 			Type:    pdpb.ErrorType_REGION_NOT_FOUND,
 			Message: "Not Found",
 		})
@@ -2103,7 +2101,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	}
 
 	return &pdpb.GetOperatorResponse{
-		Header:   gh.WrapHeader(),
+		Header:   grpcutil.WrapHeader(),
 		RegionId: requestID,
 		Desc:     []byte(r.Desc()),
 		Kind:     []byte(r.Kind().String()),
@@ -2140,14 +2138,14 @@ func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.Req
 
 func (s *GrpcServer) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.persistOptions.GetClusterVersion())
-	return gh.ErrorHeader(&pdpb.Error{
+	return grpcutil.ErrorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,
 	})
 }
 
 func invalidValue(msg string) *pdpb.ResponseHeader {
-	return gh.ErrorHeader(&pdpb.Error{
+	return grpcutil.ErrorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INVALID_VALUE,
 		Message: msg,
 	})
@@ -2214,7 +2212,7 @@ func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.Ask
 // Deprecated.
 func (*GrpcServer) SyncMaxTS(_ context.Context, _ *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	return &pdpb.SyncMaxTSResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 	}, nil
 }
 
@@ -2230,14 +2228,14 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.SplitRegionsResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.SplitRegionsResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.SplitRegionsResponse{
-				Header: gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -2272,7 +2270,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 	finishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
-		Header:             gh.WrapHeader(),
+		Header:             grpcutil.WrapHeader(),
 		RegionsId:          newRegionIDs,
 		FinishedPercentage: uint64(finishedPercentage),
 	}, nil
@@ -2299,7 +2297,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.SplitAndScatterRegionsResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.SplitAndScatterRegionsResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	scatterFinishedPercentage, _, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
@@ -2307,7 +2305,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		return nil, err
 	}
 	return &pdpb.SplitAndScatterRegionsResponse{
-		Header:                    gh.WrapHeader(),
+		Header:                    grpcutil.WrapHeader(),
 		RegionsId:                 newRegionIDs,
 		SplitFinishedPercentage:   uint64(splitFinishedPercentage),
 		ScatterFinishedPercentage: uint64(scatterFinishedPercentage),
@@ -2343,7 +2341,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 // Deprecated
 func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	return &pdpb.GetDCLocationInfoResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 	}, nil
 }
 
@@ -2476,10 +2474,10 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			if res.Err() != nil {
 				var resp pdpb.WatchGlobalConfigResponse
 				if revision < res.CompactRevision {
-					resp.Header = gh.WrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+					resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
 						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
 				} else {
-					resp.Header = gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+					resp.Header = grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 				}
 				if err := server.Send(&resp); err != nil {
@@ -2568,7 +2566,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ReportMinResolvedTsResponse{Header: gh.NotBootstrappedHeader()}, nil
+		return &pdpb.ReportMinResolvedTsResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
 	storeID := request.GetStoreId()
@@ -2580,7 +2578,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		zap.Uint64("store", storeID),
 		zap.Uint64("min-resolved-ts", minResolvedTS))
 	return &pdpb.ReportMinResolvedTsResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 	}, nil
 }
 
@@ -2614,7 +2612,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		return &pdpb.SetExternalTimestampResponse{Header: invalidValue(err.Error())}, nil
 	}
 	return &pdpb.SetExternalTimestampResponse{
-		Header: gh.WrapHeader(),
+		Header: grpcutil.WrapHeader(),
 	}, nil
 }
 
@@ -2638,7 +2636,7 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 
 	timestamp := s.GetExternalTS()
 	return &pdpb.GetExternalTimestampResponse{
-		Header:    gh.WrapHeader(),
+		Header:    grpcutil.WrapHeader(),
 		Timestamp: timestamp,
 	}, nil
 }
@@ -2667,12 +2665,12 @@ func (s *GrpcServer) getRaftCluster(isFollower bool) (*cluster.RaftCluster, *pdp
 	if isFollower {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return nil, gh.RegionNotFound()
+			return nil, grpcutil.RegionNotFound()
 		}
 	} else {
 		rc = s.GetRaftCluster()
 		if rc == nil {
-			return nil, gh.NotBootstrappedHeader()
+			return nil, grpcutil.NotBootstrappedHeader()
 		}
 	}
 	return rc, nil

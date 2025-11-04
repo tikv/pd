@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
-	grpc2 "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -386,7 +385,7 @@ func forwardRegionBucketsToScheduling(forwardStream schedulingpb.Scheduling_Regi
 			// TODO: handle more error types if needed.
 			if schedulingpbErr.Type == schedulingpb.ErrorType_NOT_BOOTSTRAPPED {
 				response := &pdpb.ReportBucketsResponse{
-					Header: grpc2.NotBootstrappedHeader(),
+					Header: grpcutil.NotBootstrappedHeader(),
 				}
 				if err := server.send(response); err != nil {
 					errCh <- errors.WithStack(err)

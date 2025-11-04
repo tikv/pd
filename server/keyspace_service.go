@@ -27,8 +27,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
-	gh "github.com/tikv/pd/pkg/grpc"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -41,11 +41,11 @@ type KeyspaceServer struct {
 func getErrorHeader(err error) *pdpb.ResponseHeader {
 	switch err {
 	case errs.ErrKeyspaceExists:
-		return gh.WrapErrorToHeader(pdpb.ErrorType_DUPLICATED_ENTRY, err.Error())
+		return grpcutil.WrapErrorToHeader(pdpb.ErrorType_DUPLICATED_ENTRY, err.Error())
 	case errs.ErrKeyspaceNotFound:
-		return gh.WrapErrorToHeader(pdpb.ErrorType_ENTRY_NOT_FOUND, err.Error())
+		return grpcutil.WrapErrorToHeader(pdpb.ErrorType_ENTRY_NOT_FOUND, err.Error())
 	default:
-		return gh.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())
+		return grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())
 	}
 }
 
@@ -65,7 +65,7 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	}
 	failpoint.Inject("skipKeyspaceRegionCheck", func() {
 		failpoint.Return(&keyspacepb.LoadKeyspaceResponse{
-			Header:   wrapHeader(),
+			Header:   grpcutil.WrapHeader(),
 			Keyspace: meta,
 		}, nil)
 	})
@@ -76,7 +76,7 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
 	return &keyspacepb.LoadKeyspaceResponse{
-		Header:   gh.WrapHeader(),
+		Header:   grpcutil.WrapHeader(),
 		Keyspace: meta,
 	}, nil
 }
@@ -112,7 +112,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			keyspaces = keyspaces[:0]
 		}()
 		err := stream.Send(&keyspacepb.WatchKeyspacesResponse{
-			Header:    gh.WrapHeader(),
+			Header:    grpcutil.WrapHeader(),
 			Keyspaces: keyspaces})
 		if err != nil {
 			defer cancel() // cancel context to stop watcher
@@ -155,7 +155,7 @@ func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspac
 		return &keyspacepb.UpdateKeyspaceStateResponse{Header: getErrorHeader(err)}, nil
 	}
 	return &keyspacepb.UpdateKeyspaceStateResponse{
-		Header:   gh.WrapHeader(),
+		Header:   grpcutil.WrapHeader(),
 		Keyspace: meta,
 	}, nil
 }
@@ -173,7 +173,7 @@ func (s *KeyspaceServer) GetAllKeyspaces(_ context.Context, request *keyspacepb.
 	}
 
 	return &keyspacepb.GetAllKeyspacesResponse{
-		Header:    gh.WrapHeader(),
+		Header:    grpcutil.WrapHeader(),
 		Keyspaces: keyspaces,
 	}, nil
 }
