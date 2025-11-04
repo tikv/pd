@@ -566,11 +566,6 @@ error = '''
 keyspace group %v does not exist
 '''
 
-["PD:keyspace:ErrKeyspaceGroupVersionStale"]
-error = '''
-keyspace group version is stale
-'''
-
 ["PD:keyspace:ErrKeyspaceGroupNotInMerging"]
 error = '''
 keyspace group %v is not in merging state
@@ -584,6 +579,11 @@ keyspace group %v is not in split state
 ["PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"]
 error = '''
 primary of keyspace group does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceGroupVersionStale"]
+error = '''
+keyspace group version is stale
 '''
 
 ["PD:keyspace:ErrKeyspaceGroupWithEmptyKeyspace"]

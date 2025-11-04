@@ -165,8 +165,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		},
 	})
 	suite.waitKeyspaceReady([]uint32{keyspaceGroupID}, keyspaceIDs)
-
-	checkFn := func(groupID uint32, keyspaceID uint32, addr string) {
+	var version uint64
+	checkFn := func(groupID uint32, keyspaceID uint32, addr string, terr *tsopb.Error) {
 		conn, err := cli.GetServiceDiscovery().GetOrCreateGRPCConn(addr)
 		re.NoError(err)
 		req := tsopb.FindGroupByKeyspaceIDRequest{
@@ -176,15 +176,22 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
 			},
 			KeyspaceId: keyspaceID,
+			Version:    version,
 		}
 		resp, err := tsopb.NewTSOClient(conn).FindGroupByKeyspaceID(suite.ctx, &req)
+		if terr != nil {
+			re.Equal(terr, resp.GetHeader().GetError())
+			return
+		}
 		re.NoError(err)
 		re.Nil(resp.GetHeader().GetError())
 		re.Len(resp.KeyspaceGroup.Members, 2)
 		re.Equal(groupID, resp.KeyspaceGroup.Id)
+		re.GreaterOrEqual(resp.GetVersion(), version)
+		version = resp.GetVersion()
 	}
 
-	checkFn(keyspaceGroupID, keyspaceIDs[0], serverList[0].GetAddr())
+	checkFn(keyspaceGroupID, keyspaceIDs[0], serverList[0].GetAddr(), nil)
 	// split keyspaceID-0 into new keyspace group
 	newGroupID := suite.allocID()
 	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, keyspaceGroupID, &handlers.SplitKeyspaceGroupByIDParams{
@@ -194,9 +201,13 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 	suite.waitKeyspaceReady([]uint32{newGroupID}, []uint32{keyspaceIDs[0]})
 	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, newGroupID)
 
-	checkFn(newGroupID, keyspaceIDs[0], serverList[0].GetAddr())
+	checkFn(newGroupID, keyspaceIDs[0], serverList[0].GetAddr(), nil)
 	// tso-1 can't fetch the latest changes, so it should backport to the default keyspace group.
-	checkFn(constants.DefaultKeyspaceGroupID, keyspaceIDs[0], serverList[1].GetAddr())
+	terr := &tsopb.Error{
+		Type:    tsopb.ErrorType_INVALID_VALUE,
+		Message: "[PD:keyspace:ErrKeyspaceGroupVersionStale]keyspace group version is stale",
+	}
+	checkFn(constants.DefaultKeyspaceGroupID, keyspaceIDs[0], serverList[1].GetAddr(), terr)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {

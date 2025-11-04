@@ -542,6 +542,12 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			delete(kgm.groupUpdateRetryList, id)
 			kgm.updateKeyspaceGroup(group)
 		}
+		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
+			addr, ok := val.(string)
+			if ok && addr == kgm.electionNamePrefix {
+				failpoint.Return(nil)
+			}
+		})
 		if len(event) > 0 {
 			last := event[len(event)-1]
 			kgm.SetModVersion(uint64(last.Kv.ModRevision))
