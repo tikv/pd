@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -232,6 +233,48 @@ func (s *state) checkGroupMerge(
 	return errs.ErrKeyspaceGroupIsMerging.FastGenByArgs(groupID)
 }
 
+// checkKeyspaceHasConfiguredGroup checks if the keyspace has configured a group in its metadata.
+// This is used to determine if we should allow fallback to default group.
+func checkKeyspaceHasConfiguredGroup(storage *endpoint.StorageEndpoint, keyspaceID uint32) bool {
+	// Null keyspace is always allowed to fallback to default group
+	// NullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic
+	if keyspaceID == constant.NullKeyspaceID {
+		log.Debug("[tso] null keyspace, allow fallback to default group",
+			zap.Uint32("keyspace-id", keyspaceID))
+		return false
+	}
+
+	log.Info("[tso] checking keyspace meta for group configuration before fallback",
+		zap.Uint32("keyspace-id", keyspaceID))
+
+	// Load keyspace metadata from storage
+	var meta *keyspacepb.KeyspaceMeta
+	err := storage.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		var err error
+		meta, err = storage.LoadKeyspaceMeta(txn, keyspaceID)
+		return err
+	})
+
+	if err != nil || meta == nil {
+		// If can't load or not found, assume no group configured (legacy keyspace)
+		log.Info("[tso] keyspace meta not found or failed to load, assume legacy keyspace",
+			zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+		return false
+	}
+
+	// Check if Config has TSOKeyspaceGroupIDKey
+	_, hasGroup := meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]
+	if hasGroup {
+		log.Info("[tso] keyspace has configured group in meta, should not fallback to default group",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("configured-group-id", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]))
+	} else {
+		log.Info("[tso] keyspace has no group configuration in meta, can fallback to default group",
+			zap.Uint32("keyspace-id", keyspaceID))
+	}
+	return hasGroup
+}
+
 // getKeyspaceGroupMetaWithCheck returns the keyspace group meta of the given keyspace.
 // It also checks if the keyspace is served by the given keyspace group. If not, it returns the meta
 // of the keyspace group to which the keyspace currently belongs and returns NotServed (by the given
@@ -240,6 +283,7 @@ func (s *state) checkGroupMerge(
 // keyspace movement between keyspace groups.
 func (s *state) getKeyspaceGroupMetaWithCheck(
 	keyspaceID, keyspaceGroupID uint32,
+	kgm *KeyspaceGroupManager,
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, error) {
 	s.RLock()
 	defer s.RUnlock()
@@ -274,6 +318,20 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 		return nil, nil, constant.DefaultKeyspaceGroupID,
 			errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
+
+	// Before fallback to default group, check if the keyspace has configured a group in its metadata.
+	// If it has, don't fallback to avoid incorrect switching when state is inconsistent (e.g., after split).
+	if kgm != nil && checkKeyspaceHasConfiguredGroup(kgm.storage, keyspaceID) {
+		log.Debug("[tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.Uint32("requested-group-id", keyspaceGroupID))
+		return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+	}
+	// Legacy keyspace without group configuration, fallback to default group.
+	log.Debug("[tso] keyspace not found in any group, fallback to default group for legacy keyspace",
+		zap.Uint32("keyspace-id", keyspaceID),
+		zap.Uint32("requested-group-id", keyspaceGroupID))
+
 	return s.allocators[constant.DefaultKeyspaceGroupID],
 		s.kgs[constant.DefaultKeyspaceGroupID],
 		constant.DefaultKeyspaceGroupID, nil
@@ -994,7 +1052,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	keyspaceID uint32,
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, error) {
 	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, err :=
-		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
+		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID, kgm)
 	if err != nil {
 		return nil, nil, curKeyspaceGroupID, err
 	}
@@ -1008,7 +1066,7 @@ func (kgm *KeyspaceGroupManager) GetMember(
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	allocator, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
+	allocator, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID, kgm)
 	if err != nil {
 		return nil, err
 	}
@@ -1038,7 +1096,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
-	allocator, _, curKeyspaceGroupID, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
+	allocator, _, curKeyspaceGroupID, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID, kgm)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
