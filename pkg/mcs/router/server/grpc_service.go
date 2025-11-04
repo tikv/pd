@@ -81,49 +81,49 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 // BatchScanRegions implements the BatchScanRegions RPC method.
 func (s *Service) BatchScanRegions(_ctx context.Context, request *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
 	resp, err := grpcutil.BatchScanRegions(s.GetBasicCluster(), request, false)
-	grpcutil.RegionRequestCounter("BatchScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	grpcutil.RequestCounter("BatchScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // ScanRegions implements the ScanRegions RPC method.
 func (s *Service) ScanRegions(_ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
 	resp, err := grpcutil.ScanRegions(s.GetBasicCluster(), request, false)
-	grpcutil.RegionRequestCounter("ScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	grpcutil.RequestCounter("ScanRegions", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetRegion implements the GetRegion RPC method.
 func (s *Service) GetRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
 	resp, err := grpcutil.GetRegion(s.GetBasicCluster(), request, false)
-	grpcutil.RegionRequestCounter("GetRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	grpcutil.RequestCounter("GetRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetAllStores implements the GetAllStores RPC method.
 func (s *Service) GetAllStores(_ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
 	resp, err := grpcutil.GetAllStores(s.GetBasicCluster(), request)
-	grpcutil.RegionRequestCounter("GetAllStores", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	grpcutil.RequestCounter("GetAllStores", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetStore implements the GetStore RPC method.
 func (s *Service) GetStore(_ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	resp, err := grpcutil.GetStore(s.GetBasicCluster(), request)
-	grpcutil.RegionRequestCounter("GetStore", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	grpcutil.RequestCounter("GetStore", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetPrevRegion implements the GetPrevRegion RPC method.
 func (s *Service) GetPrevRegion(_ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
 	resp, err := grpcutil.GetPrevRegion(s.GetBasicCluster(), request, false)
-	grpcutil.RegionRequestCounter("GetPrevRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	grpcutil.RequestCounter("GetPrevRegion", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
 // GetRegionByID implements the GetRegionByID RPC method.
 func (s *Service) GetRegionByID(_ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
 	resp, err := grpcutil.GetRegionByID(s.GetBasicCluster(), request, false)
-	grpcutil.RegionRequestCounter("GetRegionByID", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
+	grpcutil.RequestCounter("GetRegionByID", request.GetHeader(), resp.GetHeader().GetError(), regionRequestCounter)
 	return resp, err
 }
 
@@ -158,7 +158,7 @@ func (s *Service) QueryRegion(stream routerpb.Router_QueryRegionServer) error {
 			PrevKeyIdMap: prevKeyIDMap,
 			RegionsById:  regionsByID,
 		}
-		grpcutil.RegionRequestCounter("QueryRegion", request.Header, response.Header.Error, regionRequestCounter)
+		grpcutil.RequestCounter("QueryRegion", request.Header, response.Header.Error, regionRequestCounter)
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}

@@ -31,8 +31,8 @@ const (
 	requestFailed  requestEvent = "failed"
 )
 
-// RegionRequestCounter increments the region request counter with the given method, header, error, and counter.
-func RegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
+// RequestCounter increments the region request counter with the given method, header, error, and counter.
+func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
 	if err == nil && rand.Intn(100) != 0 {
 		// sample 1% region requests to avoid high cardinality
 		return

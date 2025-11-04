@@ -1471,7 +1471,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
 	defer func() {
-		grpcutil.RegionRequestCounter("GetRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RequestCounter("GetRegion", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	failpoint.Inject("delayProcess", nil)
 	rc, header := s.getRaftCluster(*followerHandle)
@@ -1502,7 +1502,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	}
 
 	defer func() {
-		grpcutil.RegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RequestCounter("GetPrevRegion", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
@@ -1532,7 +1532,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}
 
 	defer func() {
-		grpcutil.RegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
@@ -1594,7 +1594,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)
 		queryRegionDuration.Observe(time.Since(start).Seconds())
-		grpcutil.RegionRequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
 		if err := stream.Send(resp); err != nil {
 			return errors.WithStack(err)
 		}
@@ -1622,7 +1622,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	}
 
 	defer func() {
-		grpcutil.RegionRequestCounter("ScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RequestCounter("ScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
@@ -1651,7 +1651,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 
 	defer func() {
-		grpcutil.RegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
+		grpcutil.RequestCounter("BatchScanRegions", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
