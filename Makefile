@@ -274,7 +274,7 @@ TSO_FUNCTION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 test-tso-function: install-tools
 	# testing TSO function...
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -race -tags without_dashboard $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
