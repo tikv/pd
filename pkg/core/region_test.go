@@ -22,6 +22,7 @@ import (
 	mrand "math/rand"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,8 +33,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -836,7 +835,9 @@ const (
 	keyLength = 100
 )
 
-func newRegionInfoIDRandom(re *require.Assertions, idAllocator id.Allocator) *RegionInfo {
+var baseID = atomic.Uint64{}
+
+func newRegionInfoIDRandom() *RegionInfo {
 	var (
 		peers  []*metapb.Peer
 		leader *metapb.Peer
@@ -844,8 +845,7 @@ func newRegionInfoIDRandom(re *require.Assertions, idAllocator id.Allocator) *Re
 	// Randomly select a peer as the leader.
 	leaderIdx := mrand.Intn(peerNum)
 	for i := range peerNum {
-		id, _, err := idAllocator.Alloc(1)
-		re.NoError(err)
+		id := baseID.Add(1)
 		// Randomly distribute the peers to different stores.
 		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
 		if i == leaderIdx {
@@ -853,8 +853,7 @@ func newRegionInfoIDRandom(re *require.Assertions, idAllocator id.Allocator) *Re
 		}
 		peers = append(peers, p)
 	}
-	regionID, _, err := idAllocator.Alloc(1)
-	re.NoError(err)
+	regionID := baseID.Add(1)
 	return NewRegionInfo(
 		&metapb.Region{
 			Id:       regionID,
@@ -878,10 +877,8 @@ func randomBytes(n int) []byte {
 }
 
 func BenchmarkAddRegion(b *testing.B) {
-	re := require.New(b)
 	regions := NewRegionsInfo()
-	idAllocator := mockid.NewIDAllocator()
-	items := generateRegionItems(re, idAllocator, 10000000)
+	items := generateRegionItems(10000000)
 	b.ResetTimer()
 	for i := range b.N {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
@@ -890,11 +887,9 @@ func BenchmarkAddRegion(b *testing.B) {
 }
 
 func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
-	re := require.New(b)
-	idAllocator := mockid.NewIDAllocator()
 	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
 		regions := NewRegionsInfo()
-		items := generateRegionItems(re, idAllocator, size)
+		items := generateRegionItems(size)
 		// Update the subtrees from an empty `*RegionsInfo`.
 		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -919,7 +914,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// Update the subtrees from a non-empty `*RegionsInfo` with different regions,
 		// which means the regions are most likely overlapped.
 		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
-			items = generateRegionItems(re, idAllocator, size)
+			items = generateRegionItems(size)
 			b.ResetTimer()
 			for range b.N {
 				for idx := range items {
@@ -930,10 +925,10 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 	}
 }
 
-func generateRegionItems(re *require.Assertions, idAllocator *mockid.IDAllocator, size int) []*RegionInfo {
+func generateRegionItems(size int) []*RegionInfo {
 	items := make([]*RegionInfo, size)
 	for i := range size {
-		items[i] = newRegionInfoIDRandom(re, idAllocator)
+		items[i] = newRegionInfoIDRandom()
 	}
 	return items
 }
