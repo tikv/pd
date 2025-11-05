@@ -35,11 +35,15 @@ func environmentCheck(addr string) bool {
 }
 
 func checkAddr(addr string) (bool, error) {
+	// Check via netstat if there are any sockets on this address
+	// We only check LocalAddr since we only care if something is binding/listening on this port
+	// Note: We only allocate IPv4 addresses (127.0.0.1), so no need to check IPv6
 	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
-		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
+		return s.LocalAddr.String() == addr
 	})
 	if err != nil {
 		return false, errs.ErrNetstatTCPSocks.Wrap(err)
 	}
+	// If any sockets exist (LISTEN, ESTABLISHED, TIME_WAIT, etc.), the port is not available
 	return len(tabs) < 1, nil
 }
