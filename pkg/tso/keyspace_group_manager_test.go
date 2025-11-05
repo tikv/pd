@@ -732,7 +732,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	re *require.Assertions,
 	numberOfKeyspaceGroupsToAdd int,
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
-	probabilityAssignToMe int, // percentage of assigning keyspace groups to this host/pod
+	probabilityAssignToMe int,         // percentage of assigning keyspace groups to this host/pod
 ) {
 	expectedGroupIDs := []uint32{}
 	mgr := suite.newUniqueKeyspaceGroupManager(loadKeyspaceGroupsBatchSize)
@@ -1243,7 +1243,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheckFal
 	configuredGroupID := uint32(5)
 
 	// Scenario 1: Null keyspace (ID=0xFFFFFFFF) should always fallback
-	am, kg, groupID, err := mgr.state.getKeyspaceGroupMetaWithCheck(
+	am, kg, groupID, err := mgr.getKeyspaceGroupMetaWithCheck(
 		constant.NullKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.NotNil(am)
@@ -1267,7 +1267,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheckFal
 
 	// Try to get keyspace group meta, it should NOT fallback to default group
 	// because keyspace has configured group in metadata
-	am, kg, groupID, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+	am, kg, groupID, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID1, constant.DefaultKeyspaceGroupID, mgr)
 	re.Nil(am)
 	re.Nil(kg)
@@ -1289,7 +1289,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheckFal
 
 	// Try to get keyspace group meta, it should fallback to default group
 	// because keyspace has no configured group
-	am, kg, groupID, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+	am, kg, groupID, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID2, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.NotNil(am)
@@ -1299,7 +1299,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheckFal
 
 	// Scenario 4: Keyspace not found in storage (also should fallback)
 	keyspaceID3 := uint32(300)
-	am, kg, groupID, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+	am, kg, groupID, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.NotNil(am)
