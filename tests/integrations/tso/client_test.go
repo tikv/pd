@@ -770,11 +770,8 @@ func TestStaleConnectionDueToDNSCache(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 
-	// Create a client with forwarding enabled
-	// This allows non-leader nodes to forward TSO requests to the leader
-	client, err := pd.NewClientWithContext(ctx,
-		caller.TestComponent,
-		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithForwardingOption(true))
+	// Create a client
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, []string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	defer client.Close()
 
