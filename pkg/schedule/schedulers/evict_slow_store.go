@@ -113,7 +113,7 @@ func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfi
 	}
 }
 
-func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
+func (conf *evictSlowStoreSchedulerConfig) save() error {
 	name := EvictSlowStoreName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
@@ -226,7 +226,7 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
 	conf.isRecovered = false
-	return conf.persistLocked()
+	return conf.save()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bool) error {
@@ -244,7 +244,7 @@ func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bo
 	}
 	conf.lastSlowStoreCaptureTS = time.Now()
 	conf.isRecovered = isRecovered
-	return conf.persistLocked()
+	return conf.save()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldID uint64, err error) {
@@ -255,15 +255,9 @@ func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldID uint6
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
 		conf.isRecovered = false
-		err = conf.persistLocked()
+		err = conf.save()
 	}
 	return
-}
-
-func (conf *evictSlowStoreSchedulerConfig) save() error {
-	conf.Lock()
-	defer conf.Unlock()
-	return conf.persistLocked()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) load(target *evictSlowStoreSchedulerConfig) error {
