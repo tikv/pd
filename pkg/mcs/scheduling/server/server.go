@@ -220,9 +220,9 @@ func (s *Server) updatePDMemberLoop() {
 					// double check
 					break
 				}
-				cluster := s.cluster.Load()
+				cluster := s.GetCluster()
 				if cluster != nil {
-					if cluster.(*Cluster).SwitchPDLeader(pdpb.NewPDClient(cc)) {
+					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
 						if status.Leader != curLeader {
 							log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
 						}
@@ -524,9 +524,9 @@ func (s *Server) startCluster(context.Context) error {
 }
 
 func (s *Server) stopCluster() {
-	cluster := s.cluster.Load()
+	cluster := s.GetCluster()
 	if cluster != nil {
-		cluster.(*Cluster).StopBackgroundJobs()
+		cluster.StopBackgroundJobs()
 	}
 	s.stopWatcher()
 }
