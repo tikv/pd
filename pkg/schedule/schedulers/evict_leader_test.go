@@ -182,7 +182,7 @@ func TestEvictLeaderDeleteWithFailedCallback(t *testing.T) {
 	// When deleting the last store, if removeSchedulerCb fails,
 	// the scheduler should be able to rollback correctly.
 	callbackIsCalled := false
-	removeSchedulerCb := func(name string) error {
+	removeSchedulerCb := func(string) error {
 		callbackIsCalled = true
 		// Simulate removeSchedulerCb failure
 		return errors.New("failed to remove scheduler")
@@ -222,7 +222,7 @@ func TestEvictLeaderDeleteWithSaveFailure(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
 	}()
 
-	removeSchedulerCb := func(name string) error {
+	removeSchedulerCb := func(string) error {
 		return nil
 	}
 
