@@ -188,7 +188,9 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 
 func addServerNameHeader(svr *server.Server) negroni.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-		w.Header().Set(apiutil.XPDHandleHeader, svr.Name())
+		if w.Header().Get(apiutil.XPDHandleHeader) == "" {
+			w.Header().Set(apiutil.XPDHandleHeader, svr.Name())
+		}
 		next(w, r)
 	}
 }
