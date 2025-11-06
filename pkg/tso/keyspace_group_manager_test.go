@@ -1222,7 +1222,7 @@ func waitForPrimariesServing(
 // 1. Null keyspace (ID=0xFFFFFFFF) - should ALWAYS fallback to default group
 // 2. Keyspace has configured group in metadata - should NOT fallback to default group
 // 3. Keyspace has no configured group (legacy keyspace) - should fallback to default group
-// 4. Keyspace not found in storage - should fallback to default group
+// 4. Keyspace not found in storage - should return error instead of fallback
 func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheckFallBack() {
 	re := suite.Require()
 
@@ -1297,13 +1297,12 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheckFal
 	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
 	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 
-	// Scenario 4: Keyspace not found in storage (also should fallback)
+	// Scenario 4: Keyspace not found in storage (should return error instead of fallback)
 	keyspaceID3 := uint32(300)
 	am, kg, groupID, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
-	re.NoError(err)
-	re.NotNil(am)
-	re.NotNil(kg)
-	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
-	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
+	re.Error(err)
+	re.True(errors.ErrorEqual(err, errs.ErrKeyspaceNotFound.FastGenByArgs()))
+	re.Nil(am)
+	re.Nil(kg)
 }

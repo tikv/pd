@@ -235,16 +235,16 @@ func (s *state) checkGroupMerge(
 
 // checkKeyspaceHasConfiguredGroup checks if the keyspace has configured a group in its metadata.
 // This is used to determine if we should allow fallback to default group.
-func checkKeyspaceHasConfiguredGroup(storage *endpoint.StorageEndpoint, keyspaceID uint32) bool {
+func checkKeyspaceHasConfiguredGroup(storage *endpoint.StorageEndpoint, keyspaceID uint32) (bool, error) {
 	// Null keyspace is always allowed to fallback to default group
 	// NullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic
 	if keyspaceID == constant.NullKeyspaceID {
 		log.Debug("[tso] null keyspace, allow fallback to default group",
 			zap.Uint32("keyspace-id", keyspaceID))
-		return false
+		return false, nil
 	}
 
-	log.Info("[tso] checking keyspace meta for group configuration before fallback",
+	log.Debug("[tso] checking keyspace meta for group configuration before fallback",
 		zap.Uint32("keyspace-id", keyspaceID))
 
 	// Load keyspace metadata from storage
@@ -255,24 +255,30 @@ func checkKeyspaceHasConfiguredGroup(storage *endpoint.StorageEndpoint, keyspace
 		return err
 	})
 
-	if err != nil || meta == nil {
-		// If can't load or not found, assume no group configured (legacy keyspace)
-		log.Info("[tso] keyspace meta not found or failed to load, assume legacy keyspace",
+	if err != nil {
+		// Failed to load keyspace meta, return error instead of allowing fallback
+		log.Debug("[tso] failed to load keyspace meta, return error to prevent fallback",
 			zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
-		return false
+		return false, err
+	}
+	if meta == nil {
+		// meta is nil means keyspace not found
+		log.Debug("[tso] keyspace meta not found, return error to prevent fallback",
+			zap.Uint32("keyspace-id", keyspaceID))
+		return false, errs.ErrKeyspaceNotFound.FastGenByArgs(keyspaceID)
 	}
 
 	// Check if Config has TSOKeyspaceGroupIDKey
 	_, hasGroup := meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]
 	if hasGroup {
-		log.Info("[tso] keyspace has configured group in meta, should not fallback to default group",
+		log.Debug("[tso] keyspace has configured group in meta, should not fallback to default group",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("configured-group-id", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]))
 	} else {
-		log.Info("[tso] keyspace has no group configuration in meta, can fallback to default group",
+		log.Debug("[tso] keyspace has no group configuration in meta, can fallback to default group",
 			zap.Uint32("keyspace-id", keyspaceID))
 	}
-	return hasGroup
+	return hasGroup, nil
 }
 
 // getKeyspaceGroupMetaWithCheck returns the keyspace group meta of the given keyspace.
@@ -321,11 +327,22 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 
 	// Before fallback to default group, check if the keyspace has configured a group in its metadata.
 	// If it has, don't fallback to avoid incorrect switching when state is inconsistent (e.g., after split).
-	if kgm != nil && checkKeyspaceHasConfiguredGroup(kgm.storage, keyspaceID) {
-		log.Debug("[tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
-			zap.Uint32("keyspace-id", keyspaceID),
-			zap.Uint32("requested-group-id", keyspaceGroupID))
-		return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+	if kgm != nil {
+		hasConfiguredGroup, err := checkKeyspaceHasConfiguredGroup(kgm.storage, keyspaceID)
+		if err != nil {
+			// Failed to load keyspace meta, return error instead of allowing fallback
+			log.Debug("[tso] failed to check keyspace group configuration, cannot fallback",
+				zap.Uint32("keyspace-id", keyspaceID),
+				zap.Uint32("requested-group-id", keyspaceGroupID),
+				zap.Error(err))
+			return nil, nil, keyspaceGroupID, err
+		}
+		if hasConfiguredGroup {
+			log.Debug("[tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
+				zap.Uint32("keyspace-id", keyspaceID),
+				zap.Uint32("requested-group-id", keyspaceGroupID))
+			return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+		}
 	}
 	// Legacy keyspace without group configuration, fallback to default group.
 	log.Debug("[tso] keyspace not found in any group, fallback to default group for legacy keyspace",
