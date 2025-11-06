@@ -718,7 +718,11 @@ func (c *serviceDiscovery) GetClientConns() *sync.Map {
 
 // RemoveClientConn removes the grpc client connection of the given url from the connection pools.
 func (c *serviceDiscovery) RemoveClientConn(url string) {
-	c.clientConns.Delete(url)
+	cc, ok := c.clientConns.LoadAndDelete(url)
+	if !ok {
+		return
+	}
+	_ = cc.(*grpc.ClientConn).Close()
 }
 
 // SetClientConn sets the grpc client connection of the given url in the connection pools.
