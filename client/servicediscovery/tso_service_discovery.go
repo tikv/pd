@@ -17,7 +17,10 @@ package servicediscovery
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -403,6 +406,73 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 	return nil
 }
 
+// getKeyspaceConfig gets the keyspace config from PD HTTP API and returns the config map.
+// Returns nil if failed to get the config.
+func (c *tsoServiceDiscovery) getKeyspaceConfig(keyspaceID uint32, pdURL string, timeout time.Duration) map[string]string {
+	ctx, cancel := context.WithTimeout(c.ctx, timeout)
+	defer cancel()
+
+	// Construct the HTTP request URL
+	url := fmt.Sprintf("%s/pd/api/v2/keyspaces/id/%d", pdURL, keyspaceID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		log.Warn("[tso] failed to create HTTP request for keyspace config",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("url", url),
+			errs.ZapError(err))
+		return nil
+	}
+
+	var httpClient *http.Client
+	if c.tlsCfg != nil {
+		httpClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: c.tlsCfg,
+			},
+		}
+	} else {
+		httpClient = http.DefaultClient
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		log.Warn("[tso] failed to get keyspace config",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("url", url),
+			errs.ZapError(err))
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Warn("[tso] failed to get keyspace config with non-OK status",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("url", url),
+			zap.Int("status-code", resp.StatusCode))
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Warn("[tso] failed to read keyspace config response",
+			zap.Uint32("keyspace-id", keyspaceID),
+			errs.ZapError(err))
+		return nil
+	}
+
+	var keyspaceMeta struct {
+		Config map[string]string `json:"config"`
+	}
+	if err := json.Unmarshal(body, &keyspaceMeta); err != nil {
+		log.Warn("[tso] failed to parse keyspace config response",
+			zap.Uint32("keyspace-id", keyspaceID),
+			errs.ZapError(err))
+		return nil
+	}
+
+	return keyspaceMeta.Config
+}
+
 func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving URL of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
@@ -441,10 +511,25 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 		// If we are in API_SVC_MODE (microservice mode), don't fallback
 		if len(clusterInfo.ServiceModes) > 0 && clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
-			log.Warn("[tso] in API service mode but no TSO server available - cannot fallback to group 0",
+			// Check if the keyspace has been assigned a keyspace group
+			// Only keyspaces with tso_keyspace_group_id in their config should not fallback
+			// This is to support backward compatibility for keyspaces that have not been assigned
+			// to any keyspace group yet (they should still use the default group 0)
+			keyspaceConfig := c.getKeyspaceConfig(keyspaceID, c.serviceDiscovery.GetServingURL(), UpdateMemberTimeout)
+			if keyspaceConfig != nil {
+				if _, hasTSOKeyspaceGroupID := keyspaceConfig["tso_keyspace_group_id"]; hasTSOKeyspaceGroupID {
+					// This keyspace has been assigned to a keyspace group, don't fallback
+					log.Warn("[tso] in API service mode but no TSO server available - cannot fallback to group 0",
+						zap.Uint32("keyspace-id", keyspaceID),
+						zap.String("service-mode", clusterInfo.ServiceModes[0].String()),
+						zap.String("tso-keyspace-group-id", keyspaceConfig["tso_keyspace_group_id"]))
+					return errors.New("no TSO microservice available in microservice mode")
+				}
+			}
+			// If keyspace config is not available or doesn't have tso_keyspace_group_id, allow fallback
+			log.Info("[tso] keyspace has no tso_keyspace_group_id config, allowing fallback to group 0",
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
-			return errors.New("no TSO microservice available in microservice mode")
 		}
 
 		// Only fallback to legacy path if we are in PD_SVC_MODE
