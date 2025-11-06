@@ -849,6 +849,13 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 // GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.
 // If not found, it will try to get it from the storage.
 func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceState, error) {
+	if id == constant.NullKeyspaceID {
+		return keyspacepb.KeyspaceState_DISABLED, nil
+	}
+	state, ok := manager.keyspaceStateLookup.Load(id)
+	if ok {
+		return state.(keyspacepb.KeyspaceState), nil
+	}
 	var loadedState keyspacepb.KeyspaceState
 	// If the keyspace state is not in the cache, try to get it from the storage.
 	meta, err := manager.LoadKeyspaceByID(id)
