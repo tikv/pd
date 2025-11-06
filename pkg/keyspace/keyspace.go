@@ -97,8 +97,9 @@ type Manager struct {
 	kgm *GroupManager
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
-	// cached keyspace name for each keyspace ID.
-	keyspaceNameLookup sync.Map // store as ID(uint32) -> name(string)
+	// cached keyspace meta info for each keyspace ID.
+	keyspaceNameLookup  sync.Map // store as ID(uint32) -> name(string)
+	keyspaceStateLookup sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -716,7 +717,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = updateKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -759,7 +760,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = updateKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -780,8 +781,8 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	return meta, nil
 }
 
-// updateKeyspaceState updates keyspace meta and record the update time.
-func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+// transformKeyspaceState transforms the keyspace state to the target state and record the update time.
+func (manager *Manager) transformKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
 	// If already in the target state, do nothing and return.
 	if meta.GetState() == newState {
 		return nil
@@ -793,6 +794,8 @@ func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.Keys
 	// If the operation is legal, update keyspace state and change time.
 	meta.State = newState
 	meta.StateChangedAt = now
+	// Update the keyspace state to the cache.
+	manager.keyspaceStateLookup.Store(meta.GetId(), newState)
 	return nil
 }
 
@@ -841,6 +844,42 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	// Load or store the keyspace name to the cache.
 	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
 	return actual.(string), nil
+}
+
+// GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.
+// If not found, it will try to get it from the storage.
+func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceState, error) {
+	if id == constant.NullKeyspaceID {
+		return keyspacepb.KeyspaceState_DISABLED, nil
+	}
+	state, ok := manager.keyspaceStateLookup.Load(id)
+	if ok {
+		return state.(keyspacepb.KeyspaceState), nil
+	}
+	var loadedState keyspacepb.KeyspaceState
+	// If the keyspace state is not in the cache, try to get it from the storage.
+	meta, err := manager.LoadKeyspaceByID(id)
+	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
+	if meta == nil {
+		return keyspacepb.KeyspaceState_DISABLED, err
+	}
+	loadedState = meta.GetState()
+	// Load or store the keyspace state to the cache.
+	actual, _ := manager.keyspaceStateLookup.LoadOrStore(id, loadedState)
+	return actual.(keyspacepb.KeyspaceState), nil
+}
+
+// GetEnabledKeyspaceNameByID gets the enabled keyspace name by ID. If the state is not enabled, it will return an error.
+// This method is useful for getting the keyspace name while checking whether the keyspace is enabled.
+func (manager *Manager) GetEnabledKeyspaceNameByID(id uint32) (string, error) {
+	state, err := manager.GetKeyspaceStateByID(id)
+	if err != nil {
+		return "", err
+	}
+	if state != keyspacepb.KeyspaceState_ENABLED {
+		return "", errors.Errorf("keyspace %d is not enabled, current state is %s", id, state.String())
+	}
+	return manager.GetKeyspaceNameByID(id)
 }
 
 // IterateKeyspaces returns an iterator that yields all keyspaces starting from startID.
