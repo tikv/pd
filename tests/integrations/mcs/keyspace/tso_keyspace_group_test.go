@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/keyspace"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -46,6 +47,7 @@ import (
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs/utils"
+	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
 
 func TestMain(m *testing.M) {
@@ -72,6 +74,7 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
@@ -92,6 +95,7 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cleanupFunc()
 	suite.cluster.Destroy()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 // getTSOServerURLs gets the TSO server URLs from PD, mimicking the client's getTSOServer logic
@@ -576,7 +580,13 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 	}
 	tests.WaitForPrimaryServing(re, nodes)
 
-	// Create keyspace group
+	// Enable failpoint to assign keyspace to the specified keyspace group instead of default group 0
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/assignToSpecificKeyspaceGroup", fmt.Sprintf("return(%d)", keyspaceGroupID)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/assignToSpecificKeyspaceGroup"))
+	}()
+
+	// Create keyspace group and assign the keyspace to it
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
 			ID:       keyspaceGroupID,
@@ -600,9 +610,20 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		return code == http.StatusOK && kg != nil && len(kg.Members) == nodeCount
 	})
 
-	// Create client and get initial TSO
+	// Create keyspace (will be assigned to keyspaceGroupID via failpoint)
 	keyspaceID := keyspaceGroupID // Use same ID for simplicity
-	client := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceID, []string{suite.backendEndpoints}, opts...)
+	keyspaceName := fmt.Sprintf("keyspace_%d", keyspaceID)
+	handlersutil.MustCreateKeyspaceByID(re, suite.server, &handlers.CreateKeyspaceByIDParams{
+		ID:   &keyspaceID,
+		Name: keyspaceName,
+		Config: map[string]string{
+			keyspace.UserKindKey: endpoint.Standard.String(), // 与 keyspace group 的 UserKind 保持一致
+		},
+	})
+	//	time.Sleep(1000 * time.Second)
+	// Create client using keyspace name (not ID) to ensure keyspace meta is loaded and passed to tsoServiceDiscovery
+	apiCtx := pd.NewAPIContextV2(keyspaceName)
+	client := utils.SetupClientWithAPIContext(suite.ctx, re, apiCtx, []string{suite.backendEndpoints}, opts...)
 	utils.WaitForTSOServiceAvailable(suite.ctx, re, client)
 
 	physical, logical, err := client.GetTS(suite.ctx)
@@ -644,7 +665,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	// Test configuration constants
 	const (
 		// Time to wait for GetTS to start
-		waitForGetTSStart = 1 * time.Second
+		waitForGetTSStart = 3 * time.Second
 	)
 
 	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
