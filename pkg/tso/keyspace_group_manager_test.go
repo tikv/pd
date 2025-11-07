@@ -26,8 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/errs"
@@ -36,7 +34,9 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -1299,7 +1299,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheckFal
 
 	// Scenario 4: Keyspace not found in storage (should return error instead of fallback)
 	keyspaceID3 := uint32(300)
-	am, kg, groupID, err = mgr.getKeyspaceGroupMetaWithCheck(
+	am, kg, _, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
 	re.Error(err)
 	re.True(errors.ErrorEqual(err, errs.ErrKeyspaceNotFound.FastGenByArgs()))
