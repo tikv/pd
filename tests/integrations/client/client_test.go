@@ -2212,7 +2212,7 @@ func TestCircuitBreaker(t *testing.T) {
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
@@ -2222,7 +2222,7 @@ func TestCircuitBreaker(t *testing.T) {
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
 
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
@@ -2267,7 +2267,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
@@ -2283,7 +2283,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	})
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
 }
 
 func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
@@ -2316,7 +2316,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
@@ -2331,7 +2331,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	defer os.RemoveAll(fname)
 	// wait for cooldown
 	time.Sleep(time.Second)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
 	// trigger circuit breaker state to be half open
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
@@ -2343,7 +2343,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	})
 
 	// The state is half open
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
 	// change settings to always closed
 	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
 		*config = cb.AlwaysClosedSettings
@@ -2353,5 +2353,5 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
 }
