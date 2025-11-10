@@ -344,7 +344,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 			return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 		}
 	}
-	// Legacy keyspace without group configuration, fallback to default group.
+	// The keyspace without group configuration, fallback to default group.
 	log.Debug("[tso] keyspace not found in any group, fallback to default group for legacy keyspace",
 		zap.Uint32("keyspace-id", keyspaceID),
 		zap.Uint32("requested-group-id", keyspaceGroupID))
