@@ -63,6 +63,9 @@ func tryAllocTestURL() string {
 	}
 
 	_, port, err := net.SplitHostPort(l.Addr().String())
+	if err != nil {
+		log.Fatal("split host port failed", errs.ZapError(err))
+	}
 	testPortMutex.Lock()
 	defer testPortMutex.Unlock()
 	if _, ok := testPortMap[port]; ok {
