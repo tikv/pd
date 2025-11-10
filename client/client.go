@@ -26,6 +26,8 @@ import (
 	"time"
 
 	cb "github.com/tikv/pd/client/circuitbreaker"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
@@ -53,6 +55,9 @@ const (
 	// We also reserved 0 for the keyspace group for the same purpose.
 	defaultKeySpaceGroupID = uint32(0)
 	defaultKeyspaceName    = "DEFAULT"
+
+	dispatchRetryDelay = 50 * time.Millisecond
+	dispatchRetryCount = 2
 )
 
 // Region contains information of a region's meta and its peers.
@@ -214,10 +219,11 @@ func (k *serviceModeKeeper) close() {
 }
 
 type client struct {
-	keyspaceID      uint32
-	svrUrls         []string
-	pdSvcDiscovery  *pdServiceDiscovery
-	tokenDispatcher *tokenDispatcher
+	keyspaceID               uint32
+	svrUrls                  []string
+	pdSvcDiscovery           *pdServiceDiscovery
+	tokenDispatcher          *tokenDispatcher
+	regionMetaCircuitBreaker *cb.CircuitBreaker[*pdpb.GetRegionResponse]
 
 	// For service mode switching.
 	serviceModeKeeper
@@ -661,17 +667,13 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 		if !ok {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
-<<<<<<< HEAD
 		c.option.setTSOClientRPCConcurrency(value)
-=======
-		c.inner.option.SetTSOClientRPCConcurrency(value)
-	case opt.RegionMetadataCircuitBreakerSettings:
+	case RegionMetadataCircuitBreakerSettings:
 		applySettingsChange, ok := value.(func(config *cb.Settings))
 		if !ok {
 			return errors.New("[pd] invalid value type for RegionMetadataCircuitBreakerSettings option, it should be pd.Settings")
 		}
-		c.inner.regionMetaCircuitBreaker.ChangeSettings(applySettingsChange)
->>>>>>> 1e76110a1 (client: introduce circuit breaker for region calls (#8856))
+		c.regionMetaCircuitBreaker.ChangeSettings(applySettingsChange)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -739,11 +741,6 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 
 	return c.dispatchTSORequestWithRetry(ctx, dcLocation)
 }
-
-const (
-	dispatchRetryDelay = 50 * time.Millisecond
-	dispatchRetryCount = 2
-)
 
 func (c *client) dispatchTSORequestWithRetry(ctx context.Context, dcLocation string) TSFuture {
 	var (
@@ -918,7 +915,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
+	resp, err := c.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
 		return region, isOverloaded(err), err
 	})
@@ -960,7 +957,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
+	resp, err := c.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
 		return resp, isOverloaded(err), err
 	})
@@ -1002,7 +999,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
+	resp, err := c.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
 		return resp, isOverloaded(err), err
 	})
@@ -1630,4 +1627,13 @@ func (c *client) GetTSOAllocators() *sync.Map {
 		return nil
 	}
 	return tsoClient.GetTSOAllocators()
+}
+
+func isOverloaded(err error) cb.Overloading {
+	switch status.Code(errors.Cause(err)) {
+	case codes.DeadlineExceeded, codes.Unavailable, codes.ResourceExhausted:
+		return cb.Yes
+	default:
+		return cb.No
+	}
 }
