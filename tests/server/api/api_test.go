@@ -718,16 +718,8 @@ func (suite *redirectorTestSuite) TestRedirect() {
 
 func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	re := suite.Require()
-	// Find a follower.
-	var follower *server.Server
-	leader := suite.cluster.GetLeaderServer()
-	for _, svr := range suite.cluster.GetServers() {
-		if svr != leader {
-			follower = svr.GetServer()
-			break
-		}
-	}
-
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
+	re.NotNil(follower)
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	re.NoError(err)
@@ -743,15 +735,8 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 
 func (suite *redirectorTestSuite) TestPing() {
 	re := suite.Require()
-	// Find a follower.
-	var follower *server.Server
-	leader := suite.cluster.GetLeaderServer()
-	for _, svr := range suite.cluster.GetServers() {
-		if svr != leader {
-			follower = svr.GetServer()
-			break
-		}
-	}
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower()).GetServer()
+	re.NotNil(follower)
 
 	for _, svr := range suite.cluster.GetServers() {
 		if svr.GetServer() != follower {
@@ -780,17 +765,9 @@ func (suite *redirectorTestSuite) TestPing() {
 
 func (suite *redirectorTestSuite) TestNotLeader() {
 	re := suite.Require()
-	// Find a follower.
-	var follower *server.Server
-	leader := suite.cluster.GetLeaderServer()
-	for _, svr := range suite.cluster.GetServers() {
-		if svr != leader {
-			follower = svr.GetServer()
-			break
-		}
-	}
-
-	addr := follower.GetAddr() + "/pd/api/v1/version"
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
+	re.NotNil(follower)
+	addr := follower.GetAddr() + "/pd/api/v1/members"
 	// Request to follower without redirectorHeader is OK.
 	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	re.NoError(err)
