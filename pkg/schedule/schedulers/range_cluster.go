@@ -117,7 +117,7 @@ func (r *rangeCluster) GetAverageRegionSize() int64 {
 
 // GetAvgNetworkSlowScore returns the average network slow score.
 func (r *rangeCluster) GetAvgNetworkSlowScore(id uint64) uint64 {
-	return r.subCluster.Stores.GetAvgNetworkSlowScore(id)
+	return r.subCluster.GetAvgNetworkSlowScore(id)
 }
 
 // GetRegionStores returns all stores that contains the region's peer.

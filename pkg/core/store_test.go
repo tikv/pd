@@ -308,7 +308,7 @@ func TestGetAvgNetworkSlowScore(t *testing.T) {
 			for id, scores := range tc.args.scores {
 				store := NewStoreInfo(&metapb.Store{Id: id})
 				store.rawStats.NetworkSlowScores = scores
-				storesInfo.SetStore(store)
+				storesInfo.PutStore(store)
 			}
 			for _, w := range tc.want {
 				re.Equal(w.avg, storesInfo.GetAvgNetworkSlowScore(w.storeID))
