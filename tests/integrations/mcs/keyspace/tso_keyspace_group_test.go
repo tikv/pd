@@ -25,9 +25,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -628,7 +630,53 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 			return false
 		}
 		defer resp.Body.Close()
-		return resp.StatusCode == http.StatusOK
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		
+		// Parse response body to verify keyspace details
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Info("test-yjy failed to read response body", zap.Error(err))
+			return false
+		}
+		
+		var keyspaceMeta handlers.KeyspaceMeta
+		if err := json.Unmarshal(body, &keyspaceMeta); err != nil {
+			log.Info("test-yjy failed to unmarshal response", zap.Error(err))
+			return false
+		}
+		
+		// Verify keyspace name
+		if keyspaceMeta.Name != keyspaceName {
+			log.Info("test-yjy keyspace name mismatch", 
+				zap.String("expected", keyspaceName), 
+				zap.String("actual", keyspaceMeta.Name))
+			return false
+		}
+		
+		// Verify keyspace config contains correct UserKind
+		if keyspaceMeta.Config == nil {
+			log.Info("test-yjy keyspace config is nil")
+			return false
+		}
+		userKind, exists := keyspaceMeta.Config[keyspace.UserKindKey]
+		if !exists {
+			log.Info("test-yjy UserKind not found in config", zap.Any("config", keyspaceMeta.Config))
+			return false
+		}
+		if userKind != endpoint.Standard.String() {
+			log.Info("test-yjy UserKind mismatch",
+				zap.String("expected", endpoint.Standard.String()),
+				zap.String("actual", userKind))
+			return false
+		}
+		
+		log.Info("test-yjy keyspace verified successfully",
+			zap.String("name", keyspaceMeta.Name),
+			zap.Any("config", keyspaceMeta.Config),
+			zap.Uint32("id", keyspaceMeta.Id))
+		return true
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
 	// Create client using keyspace name (not ID) to ensure keyspace meta is loaded and passed to tsoServiceDiscovery
