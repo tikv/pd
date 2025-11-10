@@ -2819,6 +2819,6 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 }
 
 // GetAvgNetworkSlowScore returns the average network slow score.
-func (r *RaftCluster) GetAvgNetworkSlowScore(id uint64) uint64 {
-	return r.core.Stores.GetAvgNetworkSlowScore(id)
+func (c *RaftCluster) GetAvgNetworkSlowScore(id uint64) uint64 {
+	return c.core.Stores.GetAvgNetworkSlowScore(id)
 }

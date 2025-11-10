@@ -258,6 +258,13 @@ func (bc *BasicCluster) UpdateAllStoreStatus() {
 	}
 }
 
+// GetAvgNetworkSlowScore returns the average network slow score.
+func (bc *BasicCluster) GetAvgNetworkSlowScore(id uint64) uint64 {
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.RUnlock()
+	return bc.Stores.GetAvgNetworkSlowScore(id)
+}
+
 // RegionSetInformer provides access to a shared informer of regions.
 type RegionSetInformer interface {
 	GetTotalRegionCount() int
