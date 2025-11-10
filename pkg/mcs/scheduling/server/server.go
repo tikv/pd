@@ -526,10 +526,10 @@ func (s *Server) startCluster(context.Context) error {
 func (s *Server) stopCluster() {
 	cluster := s.GetCluster()
 	if cluster != nil {
+		s.cluster.Store((*Cluster)(nil))
 		cluster.StopBackgroundJobs()
 	}
 	s.stopWatcher()
-	s.cluster.Store((*Cluster)(nil))
 }
 
 func (s *Server) startMetaConfWatcher() (err error) {
