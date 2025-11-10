@@ -529,7 +529,7 @@ func (s *Server) stopCluster() {
 		cluster.StopBackgroundJobs()
 	}
 	s.stopWatcher()
-	s.cluster.Store(nil)
+	s.cluster.Store((*Cluster)(nil))
 }
 
 func (s *Server) startMetaConfWatcher() (err error) {
