@@ -34,6 +34,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
@@ -469,7 +470,7 @@ func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *g
 // NewResourceGroupNotExistErr returns a new error that indicates the resource group does not exist.
 // It's exported for testing.
 func NewResourceGroupNotExistErr(name string) error {
-	return errors.Errorf("%s does not exist", name)
+	return &errs.ErrClientGetResourceGroup{ResourceGroupName: name, Cause: "resource group does not exist"}
 }
 
 func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
