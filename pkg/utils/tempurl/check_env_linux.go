@@ -18,6 +18,8 @@
 package tempurl
 
 import (
+	"net"
+
 	"github.com/cakturk/go-netstat/netstat"
 
 	"github.com/pingcap/log"
@@ -25,8 +27,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-func environmentCheck(addr string) bool {
-	valid, err := checkAddr(addr[len("http://"):])
+func environmentCheck(port string) bool {
+	valid, err := checkPort(port)
 	if err != nil {
 		log.Error("check port status failed", errs.ZapError(err))
 		return false
@@ -34,12 +36,13 @@ func environmentCheck(addr string) bool {
 	return valid
 }
 
-func checkAddr(addr string) (bool, error) {
-	// Check via netstat if there are any sockets on this address
-	// We only check LocalAddr since we only care if something is binding/listening on this port
-	// Note: We only allocate IPv4 addresses (127.0.0.1), so no need to check IPv6
+func checkPort(port string) (bool, error) {
 	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
-		return s.LocalAddr.String() == addr
+		_, p, err := net.SplitHostPort(s.LocalAddr.String())
+		if err != nil {
+			return false
+		}
+		return p == port
 	})
 	if err != nil {
 		return false, errs.ErrNetstatTCPSocks.Wrap(err)
