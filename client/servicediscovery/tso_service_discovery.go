@@ -441,7 +441,7 @@ func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceI
 		// Only keyspaces with tso_keyspace_group_id configured should not fallback
 		if c.hasKeyspaceGroupIDConfig() {
 			// This keyspace has been assigned to a keyspace group, don't fallback
-			log.Warn("[tso] in API service mode but no TSO server available - cannot fallback to group 0",
+			log.Warn("[tso] in microservice mode but no TSO server available - cannot fallback to group 0",
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
 			return errors.New("no TSO microservice available in microservice mode")
