@@ -809,8 +809,8 @@ func TestStaleConnectionDueToDNSCache(t *testing.T) {
 		client.GetServiceDiscovery().SetClientConn(newLeaderURL, staleConn)
 	}))
 	for range 3 {
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		_, _, err = client.GetTS(ctx)
+		timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _, err = client.GetTS(timeoutCtx)
 		if err != nil {
 			t.Logf("GetTS failed due to stale DNS cache: %v", err)
 		} else {
