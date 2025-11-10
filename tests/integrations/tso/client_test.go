@@ -809,15 +809,15 @@ func TestStaleConnectionDueToDNSCache(t *testing.T) {
 		client.GetServiceDiscovery().SetClientConn(newLeaderURL, staleConn)
 	}))
 	for range 3 {
-		timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		_, _, err = client.GetTS(timeoutCtx)
+		cctx, ccancel := context.WithCancel(ctx)
+		_, _, err = client.GetTS(cctx)
 		if err != nil {
 			t.Logf("GetTS failed due to stale DNS cache: %v", err)
 		} else {
 			t.Logf("GetTS succeeded")
 		}
 		time.Sleep(300 * time.Millisecond)
-		cancel()
+		ccancel()
 	}
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/staleDNS"))
