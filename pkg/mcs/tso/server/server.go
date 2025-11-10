@@ -212,6 +212,10 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 	// It is necessary because checkKeyspaceGroupLeadership will correct the keyspace group ID automatically if keyspace serves.
 	_, _, expected, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if keyspaceGroupID != expected || err != nil {
+
+		if err != nil {
+			log.Info("test-yjy IsKeyspaceServingByGroup err", zap.Error(err))
+		}
 		return false
 	}
 	return s.checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID)

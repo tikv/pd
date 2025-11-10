@@ -732,6 +732,17 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
 
+	// Create keyspace 100 in storage without group configuration (legacy keyspace)
+	meta := &keyspacepb.KeyspaceMeta{
+		Id:     100,
+		Name:   "test_keyspace_100",
+		Config: map[string]string{}, // No tso_keyspace_group_id configured
+	}
+	err = mgr.storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return mgr.storage.SaveKeyspaceMeta(txn, meta)
+	})
+	re.NoError(err)
+
 	// Should succeed because keyspace 100 doesn't belong to any keyspace group, so it will
 	// be served by the default keyspace group 0, and keyspace group 0 is returned in the response.
 	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 0, 1)
