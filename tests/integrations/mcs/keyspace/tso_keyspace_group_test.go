@@ -620,7 +620,17 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 			keyspace.UserKindKey: endpoint.Standard.String(), // Keep UserKind consistent with keyspace group
 		},
 	})
-	//	time.Sleep(1000 * time.Second)
+
+	// Wait for keyspace to be fully created and available
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Get(suite.server.GetAddr() + "/pd/api/v2/keyspaces/" + keyspaceName)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
 	// Create client using keyspace name (not ID) to ensure keyspace meta is loaded and passed to tsoServiceDiscovery
 	apiCtx := pd.NewAPIContextV2(keyspaceName)
 	client := utils.SetupClientWithAPIContext(suite.ctx, re, apiCtx, []string{suite.backendEndpoints}, opts...)
