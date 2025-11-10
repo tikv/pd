@@ -617,7 +617,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		ID:   &keyspaceID,
 		Name: keyspaceName,
 		Config: map[string]string{
-			keyspace.UserKindKey: endpoint.Standard.String(), // 与 keyspace group 的 UserKind 保持一致
+			keyspace.UserKindKey: endpoint.Standard.String(), // Keep UserKind consistent with keyspace group
 		},
 	})
 	//	time.Sleep(1000 * time.Second)
