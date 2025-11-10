@@ -510,13 +510,7 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 
 // Close gracefully shuts down all servers/listeners.
 func (m *Member) Close() {
-	etcd := m.Etcd()
-	if etcd != nil {
-		etcd.Close()
-		// Wait for etcd server to shut down completely and release resources (ports, etc.)
-		// This is crucial for tests that quickly create and destroy servers
-		<-etcd.Server.StopNotify()
-	}
+	m.Etcd().Close()
 }
 
 // Leader is the leader in the election group backed by the embedded etcd.
