@@ -240,7 +240,6 @@ func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStoreLocked(storeID uin
 			zap.Uint64("store-id", storeID),
 			zap.Error(err))
 		cluster.ResumeLeaderTransfer(storeID)
-		return
 	}
 	evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Set(1)
 }
@@ -262,7 +261,6 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	return conf.persistLocked(func() {
 		conf.EvictedStores = []uint64{id}
 		conf.lastSlowStoreCaptureTS = time.Now()
-		conf.isRecovered = false
 	})
 }
 
