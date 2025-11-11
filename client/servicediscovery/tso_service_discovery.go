@@ -68,6 +68,10 @@ type keyspaceGroupSvcDiscovery struct {
 	urls []string
 
 	// version is used to avoid updating stale info
+	// this version is provided by etcd watcher on the server side
+	// and increases monotonically.
+	// If the new version is less than the current version, it means that the requested tso service hasn't applied the
+	// latest, we should ignore the update and try to another tso service.
 	version uint64
 }
 
