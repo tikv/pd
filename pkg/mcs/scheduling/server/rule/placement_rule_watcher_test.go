@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 
@@ -100,7 +101,7 @@ func (s *placementRuleWatcherTestSuite) TestEvents() {
 	}
 	rule1JSON, err := json.Marshal(rule1)
 	re.NoError(err)
-	rule1Key := keypath.RuleKeyPath(rule1.GroupID + "-" + rule1.ID)
+	rule1Key := encodeKeyToHex(rule1.GroupID, rule1.ID)
 	_, err = s.client.Put(s.ctx, rule1Key, string(rule1JSON))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
@@ -136,7 +137,7 @@ func (s *placementRuleWatcherTestSuite) TestInvalidDeleteKey() {
 	}
 	canaryJSON, err := json.Marshal(ruleCanary)
 	re.NoError(err)
-	canaryKey := keypath.RuleKeyPath(ruleCanary.GroupID + "-" + ruleCanary.ID)
+	canaryKey := encodeKeyToHex(ruleCanary.GroupID, ruleCanary.ID)
 
 	// Put the canary rule
 	_, err = s.client.Put(s.ctx, canaryKey, string(canaryJSON))
@@ -186,7 +187,7 @@ func (s *placementRuleWatcherTestSuite) TestInitialLoad() {
 	}
 	rule1JSON, err := json.Marshal(rule1)
 	re.NoError(err)
-	rule1Key := keypath.RuleKeyPath(rule1.GroupID + "-" + rule1.ID)
+	rule1Key := encodeKeyToHex(rule1.GroupID, rule1.ID)
 	_, err = s.client.Put(s.ctx, rule1Key, string(rule1JSON))
 	re.NoError(err)
 
@@ -230,7 +231,7 @@ func (s *placementRuleWatcherTestSuite) TestInvalidJSONValue() {
 	}
 	canaryJSON, err := json.Marshal(ruleCanary)
 	re.NoError(err)
-	canaryKey := keypath.RuleKeyPath(ruleCanary.GroupID + "-" + ruleCanary.ID)
+	canaryKey := encodeKeyToHex(ruleCanary.GroupID, ruleCanary.ID)
 	_, err = s.client.Put(s.ctx, canaryKey, string(canaryJSON))
 	re.NoError(err)
 
@@ -239,4 +240,10 @@ func (s *placementRuleWatcherTestSuite) TestInvalidJSONValue() {
 	})
 	re.Nil(s.manager.GetRule("pd", "invalid-rule"))
 	re.Nil(s.manager.GetRuleGroup("invalid-group"))
+}
+
+func encodeKeyToHex(groupID, ruleID string) string {
+	hexGroupID := hex.EncodeToString([]byte(groupID))
+	hexRuleID := hex.EncodeToString([]byte(ruleID))
+	return keypath.RuleKeyPath(hexGroupID + "-" + hexRuleID)
 }

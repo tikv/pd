@@ -202,7 +202,7 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 	return rw.ruleWatcher.WaitLoad()
 }
 
-func (rw *PlacementRuleWatcher) parseGroupIDAndRuleIDFromKey(key string) (string, string, error) {
+func (rw *PlacementRuleWatcher) parseGroupIDAndRuleIDFromKey(key string) (groupID string, ruleID string, err error) {
 	ruleKey := strings.TrimPrefix(key, rw.rulesPathPrefix)
 	parts := strings.SplitN(ruleKey, "-", 2)
 	if len(parts) != 2 {
