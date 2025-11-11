@@ -69,7 +69,7 @@ func TestReconnect(t *testing.T) {
 	re.NotEmpty(leader)
 	for name, s := range cluster.GetServers() {
 		if name != leader {
-			res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+			res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 			re.NoError(err)
 			res.Body.Close()
 			re.Equal(http.StatusOK, res.StatusCode)
@@ -86,7 +86,7 @@ func TestReconnect(t *testing.T) {
 	for name, s := range cluster.GetServers() {
 		if name != leader {
 			testutil.Eventually(re, func() bool {
-				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 				re.NoError(err)
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusOK
@@ -101,7 +101,7 @@ func TestReconnect(t *testing.T) {
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
 			testutil.Eventually(re, func() bool {
-				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 				re.NoError(err)
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusServiceUnavailable
@@ -702,7 +702,7 @@ func (suite *redirectorTestSuite) TestRedirect() {
 	err := leader.ResignLeaderWithRetry()
 	re.NoError(err)
 	for _, svr := range suite.cluster.GetServers() {
-		url := fmt.Sprintf("%s/pd/api/v1/version", svr.GetServer().GetAddr())
+		url := fmt.Sprintf("%s/pd/api/v1/members", svr.GetServer().GetAddr())
 		testutil.Eventually(re, func() bool {
 			resp, err := tests.TestDialClient.Get(url)
 			re.NoError(err)
