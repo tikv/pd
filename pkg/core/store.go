@@ -790,6 +790,8 @@ func (s *StoresInfo) putStoreLocked(store *StoreInfo) {
 
 // GetAvgNetworkSlowScore returns the average network slow score of a store.
 func (s *StoresInfo) GetAvgNetworkSlowScore(storeID uint64) uint64 {
+	s.RLock()
+	defer s.RUnlock()
 	store, ok := s.stores[storeID]
 	if !ok {
 		return 0
