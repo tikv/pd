@@ -316,13 +316,17 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 	// Before fallback to default group, check if the keyspace has configured a group in its metadata.
 	// If it has, don't fallback to avoid incorrect switching when state is inconsistent (e.g., after split).
 	if kgm != nil && checkKeyspaceHasConfiguredGroup(kgm.legacySvcStorage, keyspaceID) {
-		log.Info("[tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
+		kgm.metrics.keyspaceFallbackRejectedCounter.Inc()
+		log.Debug("[tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Uint32("requested-group-id", keyspaceGroupID))
 		return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
-	// Legacy keyspace without group configuration, fallback to default group.
-	log.Info("[tso] keyspace not found in any group, fallback to default group for legacy keyspace",
+	// The keyspace without group configuration, fallback to default group.
+	if kgm != nil {
+		kgm.metrics.keyspaceFallbackToDefaultCounter.Inc()
+	}
+	log.Debug("[tso] keyspace not found in any group, fallback to default group for legacy keyspace",
 		zap.Uint32("keyspace-id", keyspaceID),
 		zap.Uint32("requested-group-id", keyspaceGroupID))
 	return s.ams[constant.DefaultKeyspaceGroupID],

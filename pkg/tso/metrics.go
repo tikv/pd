@@ -84,6 +84,14 @@ var (
 			Help:      "Bucketed histogram of processing time(s) of the Keyspace Group operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{typeLabel})
+
+	keyspaceFallbackCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: tsoNamespace,
+			Subsystem: "keyspace",
+			Name:      "fallback_events",
+			Help:      "Counter of keyspace fallback events",
+		}, []string{typeLabel})
 )
 
 func init() {
@@ -94,6 +102,7 @@ func init() {
 	prometheus.MustRegister(tsoAllocatorRole)
 	prometheus.MustRegister(keyspaceGroupStateGauge)
 	prometheus.MustRegister(keyspaceGroupOpDuration)
+	prometheus.MustRegister(keyspaceFallbackCounter)
 }
 
 type tsoMetrics struct {
@@ -179,6 +188,9 @@ type keyspaceGroupMetrics struct {
 	finishSplitDuration     prometheus.Observer
 	finishMergeSendDuration prometheus.Observer
 	finishMergeDuration     prometheus.Observer
+
+	keyspaceFallbackRejectedCounter  prometheus.Counter
+	keyspaceFallbackToDefaultCounter prometheus.Counter
 }
 
 func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
@@ -193,5 +205,8 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 		finishSplitDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-split"),
 		finishMergeSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
 		finishMergeDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
+
+		keyspaceFallbackRejectedCounter:  keyspaceFallbackCounter.WithLabelValues("rejected"),
+		keyspaceFallbackToDefaultCounter: keyspaceFallbackCounter.WithLabelValues("to_default"),
 	}
 }
