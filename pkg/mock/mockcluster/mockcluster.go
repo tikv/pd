@@ -139,11 +139,6 @@ func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
 	return mc.HotStat.GetStoresLoads()
 }
 
-// GetStore gets a store with a given store ID.
-func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
-	return mc.Stores.GetStore(storeID)
-}
-
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
@@ -753,7 +748,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	pendingPeerCount := mc.GetStorePendingPeerCount(id)
 	leaderSize := mc.GetStoreLeaderRegionSize(id)
 	regionSize := mc.GetStoreRegionSize(id)
-	store := mc.Stores.GetStore(id)
+	store := mc.GetStore(id)
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity
 	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*units.MiB)
@@ -944,4 +939,9 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 func (mc *Cluster) ObserveRegionsStats() {
 	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
 	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
+}
+
+// GetAvgNetworkSlowScore returns the average network slow score of a store.
+func (mc *Cluster) GetAvgNetworkSlowScore(storeID uint64) uint64 {
+	return 0
 }

@@ -131,11 +131,6 @@ error = '''
 store %v is paused for leader transfer
 '''
 
-["PD:core:ErrSlowStoreEvicted"]
-error = '''
-store %v is evicted as a slow store
-'''
-
 ["PD:core:ErrSlowTrendEvicted"]
 error = '''
 store %v is evicted as a slow store by trend

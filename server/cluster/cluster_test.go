@@ -1832,7 +1832,7 @@ func TestStores(t *testing.T) {
 		id := store.GetID()
 		re.Nil(cache.GetStore(id))
 		re.Error(cache.PauseLeaderTransfer(id))
-		cache.SetStore(store)
+		cache.PutStore(store)
 		re.Equal(store, cache.GetStore(id))
 		re.Equal(i+1, cache.GetStoreCount())
 		re.NoError(cache.PauseLeaderTransfer(id))

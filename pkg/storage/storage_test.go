@@ -100,7 +100,7 @@ func TestLoadStores(t *testing.T) {
 
 	n := 10
 	stores := mustSaveStores(re, storage, n)
-	re.NoError(storage.LoadStores(cache.SetStore))
+	re.NoError(storage.LoadStores(cache.PutStore))
 
 	re.Equal(n, cache.GetStoreCount())
 	for _, store := range cache.GetMetaStores() {
@@ -117,7 +117,7 @@ func TestStoreWeight(t *testing.T) {
 	mustSaveStores(re, storage, n)
 	re.NoError(storage.SaveStoreWeight(1, 2.0, 3.0))
 	re.NoError(storage.SaveStoreWeight(2, 0.2, 0.3))
-	re.NoError(storage.LoadStores(cache.SetStore))
+	re.NoError(storage.LoadStores(cache.PutStore))
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
 	for i := 0; i < n; i++ {
