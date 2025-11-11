@@ -16,6 +16,8 @@ package rule
 
 import (
 	"context"
+	"encoding/hex"
+	"errors"
 	"strings"
 	"sync"
 
@@ -136,15 +138,13 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
 			log.Debug("delete placement rule", zap.String("key", key))
 			// Parse groupID and ruleID from the key.
-			ruleKey := strings.TrimPrefix(key, rw.rulesPathPrefix)
-			parts := strings.SplitN(ruleKey, "-", 2)
-			if len(parts) != 2 {
-				log.Error("invalid rule key format, cannot parse groupID and ruleID",
+			groupID, ruleID, err := rw.parseGroupIDAndRuleIDFromKey(key)
+			if err != nil {
+				log.Error("failed to parse group id and rule id from key",
 					zap.String("key", key),
-					zap.String("ruleKey", ruleKey))
-				return nil
+					zap.Error(err))
+				return err
 			}
-			groupID, ruleID := parts[0], parts[1]
 			// Get the rule from the manager to get its key range.
 			// The manager is already locked in preEventsFn.
 			rule := rw.ruleManager.GetRuleLocked(groupID, ruleID)
@@ -200,6 +200,23 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 	)
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
+}
+
+func (rw *PlacementRuleWatcher) parseGroupIDAndRuleIDFromKey(key string) (string, string, error) {
+	ruleKey := strings.TrimPrefix(key, rw.rulesPathPrefix)
+	parts := strings.SplitN(ruleKey, "-", 2)
+	if len(parts) != 2 {
+		return "", "", errors.New("invalid rule key format")
+	}
+	groupIDBytes, errG := hex.DecodeString(parts[0])
+	if errG != nil {
+		return "", "", errors.New("failed to decode groupID from rule key")
+	}
+	ruleIDBytes, errR := hex.DecodeString(parts[1])
+	if errR != nil {
+		return "", "", errors.New("failed to decode ruleID from rule key")
+	}
+	return string(groupIDBytes), string(ruleIDBytes), nil
 }
 
 // Close closes the watcher.
