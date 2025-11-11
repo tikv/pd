@@ -59,7 +59,7 @@ func GenerateConfig(c *config.Config) (*config.Config, error) {
 	return cfg, nil
 }
 
-// NewTestServer creates a resource manager server for testing.
+// NewTestServer creates a router server for testing.
 func NewTestServer(ctx context.Context, re *require.Assertions, cfg *config.Config) (*Server, testutil.CleanupFunc, error) {
 	// New zap logger
 	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
