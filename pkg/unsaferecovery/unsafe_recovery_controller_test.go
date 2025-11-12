@@ -2013,7 +2013,7 @@ func TestSelectLeader(t *testing.T) {
 			Value: core.EngineTiFlash,
 		},
 	}
-	stores[5].IsTiFlash()
+	re.True(stores[5].IsTiFlashWrite())
 	core.SetStoreLabels(labels)(stores[5])
 	for _, store := range stores {
 		cluster.PutStore(store)

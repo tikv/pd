@@ -234,7 +234,7 @@ func TestTiFlashComputeExcludedFromExpectation(t *testing.T) {
 	// Verify that all returned details are TiFlash Write nodes
 	for _, detail := range details {
 		re.True(detail.GetID() >= 1 && detail.GetID() <= 3, "Should only include TiFlash Write nodes (ID 1-3)")
-		re.True(detail.IsTiFlash())
+		re.True(detail.IsTiFlashWrite())
 	}
 
 	// Verify expectation is calculated based only on TiFlash Write nodes
@@ -315,7 +315,7 @@ func TestTiKVNotAffectedByTiFlashCompute(t *testing.T) {
 	// Verify that all returned details are TiKV nodes
 	for _, detail := range tikvDetails {
 		re.True(detail.GetID() >= 1 && detail.GetID() <= 3, "Should only include TiKV nodes (ID 1-3)")
-		re.False(detail.IsTiFlash(), "TiKV nodes should not be marked as TiFlash")
+		re.True(detail.IsTiKV(), "TiKV nodes should not be marked as TiFlash")
 	}
 
 	// Verify TiKV expectation is calculated based only on TiKV nodes

@@ -41,8 +41,7 @@ func (tikvCollector) engine() string {
 }
 
 func (tikvCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
-	// Exclude all TiFlash nodes (both Write and Compute)
-	if info.IsTiFlash() {
+	if !info.IsTiKV() {
 		return false
 	}
 	switch kind {

@@ -813,10 +813,10 @@ func (r *regionItem) isRaftStale(origin *regionItem, u *Controller) bool {
 			return int(a.report.GetRaftState().GetHardState().GetCommit()) - int(b.report.GetRaftState().GetHardState().GetCommit())
 		},
 		func(a, b *regionItem) int {
-			if u.cluster.GetStore(a.storeID).IsTiFlash() {
+			if !u.cluster.GetStore(a.storeID).IsTiKV() {
 				return -1
 			}
-			if u.cluster.GetStore(b.storeID).IsTiFlash() {
+			if !u.cluster.GetStore(b.storeID).IsTiKV() {
 				return 1
 			}
 			// better use voter rather than learner
@@ -1027,7 +1027,7 @@ func (u *Controller) generateTombstoneTiFlashLearnerPlan(newestRegionTree *regio
 				return false
 			}
 			storeID := leader.storeID
-			if u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
 				// tombstone the tiflash learner, as it can't be leader
 				storeRecoveryPlan := u.getRecoveryPlan(storeID)
 				storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, region.GetId())
@@ -1209,7 +1209,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 
 	getRandomStoreID := func() uint64 {
 		for storeID := range u.storeReports {
-			if !u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiKV() {
 				return storeID
 			}
 		}
@@ -1225,7 +1225,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 		region := item.region()
 		storeID := item.storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
-			if u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
 				storeID = getRandomStoreID()
 				// can't create new region on tiflash store, choose a random one
 				if storeID == 0 {
