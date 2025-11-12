@@ -138,6 +138,9 @@ func (c *Controller) PatrolRegions() {
 	for {
 		select {
 		case <-ticker.C:
+			failpoint.Inject("skipPatrolRegions", func() {
+				failpoint.Continue()
+			})
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
 			if c.cluster.IsSchedulingHalted() {
