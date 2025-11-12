@@ -97,7 +97,7 @@ func (tiflashCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKin
 	case constant.RegionKind:
 		// Only TiFlash write nodes should be included in hot region scheduling.
 		// TiFlash compute nodes don't store data and shouldn't be scheduled.
-		return info.StoreInfo.IsTiFlashWrite()
+		return info.IsTiFlashWrite()
 	}
 	return false
 }
