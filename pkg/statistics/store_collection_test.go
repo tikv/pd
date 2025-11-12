@@ -174,3 +174,87 @@ func TestSummaryStoreInfos(t *testing.T) {
 		}
 	}
 }
+
+func TestTiFlashComputeExcludedFromExpectation(t *testing.T) {
+	re := require.New(t)
+	rw := utils.Write
+	kind := constant.RegionKind
+	// Use isTraceRegionFlow=true to use StoreRegionsWriteBytes instead of peerLoadSum
+	collector := newTiFlashCollector(true)
+	storeHistoryLoad := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval)
+	storeInfos := make(map[uint64]*StoreSummaryInfo)
+	storeLoads := make(map[uint64]StoreKindLoads)
+
+	// Create 3 TiFlash Write nodes with 5 MB/s each
+	for _, storeID := range []uint64{1, 2, 3} {
+		storeInfos[storeID] = &StoreSummaryInfo{
+			isTiFlash: true,
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{
+					Id:      storeID,
+					Address: fmt.Sprintf("mock://tiflash-%d:%d", storeID, storeID),
+					Labels:  []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
+				},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
+		}
+		// Simulate 5 MB/s write load
+		storeLoads[storeID] = StoreKindLoads{
+			utils.StoreWriteBytes:        5 * units.MiB,
+			utils.StoreWriteKeys:         1000,
+			utils.StoreRegionsWriteBytes: 5 * units.MiB,
+			utils.StoreRegionsWriteKeys:  1000,
+		}
+	}
+
+	// Create 2 TiFlash Compute nodes with 0 MB/s (or very low load)
+	for _, storeID := range []uint64{4, 5} {
+		storeInfos[storeID] = &StoreSummaryInfo{
+			isTiFlash: true,
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{
+					Id:      storeID,
+					Address: fmt.Sprintf("mock://tiflash-compute-%d:%d", storeID, storeID),
+					Labels:  []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlashCompute}},
+				},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
+		}
+		// TiFlash Compute has no write load
+		storeLoads[storeID] = StoreKindLoads{
+			utils.StoreWriteBytes:        0,
+			utils.StoreWriteKeys:         0,
+			utils.StoreRegionsWriteBytes: 0,
+			utils.StoreRegionsWriteKeys:  0,
+		}
+	}
+
+	details := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
+
+	// Should only include 3 TiFlash Write nodes, not the 2 TiFlash Compute nodes
+	re.Len(details, 3, "Should only include TiFlash Write nodes, not TiFlash Compute nodes")
+
+	// Verify that all returned details are TiFlash Write nodes
+	for _, detail := range details {
+		re.True(detail.GetID() >= 1 && detail.GetID() <= 3, "Should only include TiFlash Write nodes (ID 1-3)")
+		re.True(detail.IsTiFlash())
+	}
+
+	// Verify expectation is calculated based only on TiFlash Write nodes
+	// Expected byte load should be (5+5+5)/3 = 5 MB/s, NOT (5+5+5+0+0)/5 = 3 MB/s
+	for _, detail := range details {
+		expectByteLoad := detail.LoadPred.Expect.Loads[utils.ByteDim]
+		// Should be close to 5 MB/s (average of the 3 TiFlash Write nodes)
+		re.InDelta(5*units.MiB, expectByteLoad, 0.1*units.MiB,
+			"Expectation should be 5 MB/s (average of TiFlash Write nodes only), not lowered by TiFlash Compute nodes")
+
+		// Verify current load for TiFlash Write nodes
+		currentByteLoad := detail.LoadPred.Current.Loads[utils.ByteDim]
+		re.InDelta(5*units.MiB, currentByteLoad, 0.1*units.MiB,
+			"TiFlash Write nodes should have 5 MB/s load")
+	}
+
+	// Verify expectation count should be based on 3 stores, not 5
+	expectCount := details[0].LoadPred.Expect.HotPeerCount
+	re.Equal(0.0, expectCount, "No hot peers in this test, expect count should be 0")
+}
