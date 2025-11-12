@@ -303,12 +303,14 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 		}
 	}
 
+	log.Info("test-yjy keyspaceLookupTable", zap.Any("s.keyspaceLookupTable", s.keyspaceLookupTable))
 	// The keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
 	// keyspace groups, and return the correct keyspace group meta to the client.
 	if kgid, ok := s.keyspaceLookupTable[keyspaceID]; ok {
 		if s.allocators[kgid] != nil {
 			return s.allocators[kgid], s.kgs[kgid], kgid, nil
 		}
+		log.Info("test-yjy keyspace not in global keyspaceLookupTable", zap.Uint32("keyspace-id", keyspaceID))
 		return nil, s.kgs[kgid], kgid, genNotServedErr(errs.ErrGetAllocator, keyspaceGroupID)
 	}
 
@@ -331,14 +333,14 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 		hasConfiguredGroup, err := checkKeyspaceHasConfiguredGroup(kgm.storage, keyspaceID)
 		if err != nil {
 			// Failed to load keyspace meta, return error instead of allowing fallback
-			log.Debug("[tso] failed to check keyspace group configuration, cannot fallback",
+			log.Info("test-yjy [tso] failed to check keyspace group configuration, cannot fallback",
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.Uint32("requested-group-id", keyspaceGroupID),
 				zap.Error(err))
 			return nil, nil, keyspaceGroupID, err
 		}
 		if hasConfiguredGroup {
-			log.Debug("[tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
+			log.Info("test-yjy [tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.Uint32("requested-group-id", keyspaceGroupID))
 			return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)

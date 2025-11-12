@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -214,7 +215,7 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 	if keyspaceGroupID != expected || err != nil {
 
 		if err != nil {
-			log.Info("test-yjy IsKeyspaceServingByGroup err", zap.Error(err))
+			log.Info("test-yjy IsKeyspaceServingByGroup err", zap.Error(err), zap.String("stack", string(debug.Stack())))
 		}
 		return false
 	}

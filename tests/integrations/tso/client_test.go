@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -135,6 +136,36 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			suite.keyspaceIDs = append(suite.keyspaceIDs, keyspaceGroup.keyspaceIDs...)
 		}
 
+		//// Create keyspaces before creating keyspace groups
+		//re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+		//id10 := uint32(10)
+		//id1 := uint32(1)
+		//id2 := uint32(2)
+		//id11 := uint32(11)
+		//// keyspace 10 is a legacy keyspace without group configuration
+		//handlersutil.MustCreateKeyspaceByID(re, suite.pdLeaderServer, &handlers.CreateKeyspaceByIDParams{
+		//	ID:     &id10,
+		//	Name:   "keyspace_10",
+		//	Config: map[string]string{}, // No tso_keyspace_group_id configured
+		//})
+		//// keyspace 1, 2, 11 will be assigned to specific keyspace groups
+		//handlersutil.MustCreateKeyspaceByID(re, suite.pdLeaderServer, &handlers.CreateKeyspaceByIDParams{
+		//	ID:     &id1,
+		//	Name:   "keyspace_1",
+		//	Config: map[string]string{},
+		//})
+		//handlersutil.MustCreateKeyspaceByID(re, suite.pdLeaderServer, &handlers.CreateKeyspaceByIDParams{
+		//	ID:     &id2,
+		//	Name:   "keyspace_2",
+		//	Config: map[string]string{},
+		//})
+		//handlersutil.MustCreateKeyspaceByID(re, suite.pdLeaderServer, &handlers.CreateKeyspaceByIDParams{
+		//	ID:     &id11,
+		//	Name:   "keyspace_11",
+		//	Config: map[string]string{},
+		//})
+		//re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+		log.Info("test-yjy create keyspace end")
 		for _, param := range suite.keyspaceGroups {
 			if param.keyspaceGroupID == 0 {
 				// we have already created default keyspace group, so we can skip it.
