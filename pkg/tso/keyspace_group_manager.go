@@ -92,6 +92,8 @@ type state struct {
 	// Being merged will cause the group to be removed from this map eventually if the merge is successful.
 	requestedGroups map[uint32]struct{}
 
+	// modVersion is the modification version of keyspace space.
+	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
 	modVersion uint64
 }
 
@@ -138,11 +140,11 @@ func (s *state) getKeyspaceGroupMeta(
 // SetModVersion sets the modification version of the keyspace group state.
 // return true if the version is updated.
 // It only allows increasing the version.
-func (s *state) SetModVersion(version uint64) bool {
+func (s *state) SetModVersion(modVersion uint64) bool {
 	s.Lock()
 	defer s.Unlock()
-	if s.modVersion < version {
-		s.modVersion = version
+	if s.modVersion < modVersion {
+		s.modVersion = modVersion
 		return true
 	}
 	return false
@@ -550,7 +552,12 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		})
 		if len(event) > 0 {
 			last := event[len(event)-1]
-			kgm.SetModVersion(uint64(last.Kv.ModRevision))
+			if !kgm.SetModVersion(uint64(last.Kv.ModRevision)) {
+				log.Warn("watch keyspace group met mod version not increased",
+					zap.Uint32("current-mod-version", uint32(kgm.modVersion)),
+					zap.Uint64("new-mod-version", uint64(last.Kv.ModRevision)),
+				)
+			}
 		}
 		return nil
 	}

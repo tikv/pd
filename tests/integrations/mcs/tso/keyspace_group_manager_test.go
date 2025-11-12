@@ -33,7 +33,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/constants"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -133,7 +132,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 	re := suite.Require()
 
 	keyspaceGroupID := suite.allocID()
-	keyspaceIDs := []uint32{suite.allocID(), suite.allocID()}
+	keyspaceIDs := []uint32{suite.allocID(), suite.allocID(), suite.allocID()}
 	cli := utils.SetupClientWithKeyspaceID(suite.ctx, re, 2000, []string{suite.pdLeaderServer.GetAddr()},
 		opt.WithForwardingOption(true))
 	re.NotNil(cli)
@@ -147,13 +146,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		serverList = append(serverList, s)
 	}
 
-	// make tso-1 can't update keyspace group update
-	point := fmt.Sprintf("return(\"%s\")", serverList[1].GetAddr())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch", point))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch"))
-	}()
-
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
@@ -165,49 +157,76 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		},
 	})
 	suite.waitKeyspaceReady([]uint32{keyspaceGroupID}, keyspaceIDs)
-	var version uint64
-	checkFn := func(groupID uint32, keyspaceID uint32, addr string, terr *tsopb.Error) {
+	var modVersion uint64
+	checkFn := func(groupID uint32, keyspaceID uint32, addr string, terr *tsopb.Error) (string, string) {
 		conn, err := cli.GetServiceDiscovery().GetOrCreateGRPCConn(addr)
 		re.NoError(err)
 		req := tsopb.FindGroupByKeyspaceIDRequest{
 			Header: &tsopb.RequestHeader{
 				ClusterId:       clusterID,
 				KeyspaceId:      keyspaceID,
-				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
+				KeyspaceGroupId: groupID,
 			},
 			KeyspaceId: keyspaceID,
-			Version:    version,
+			ModVersion: modVersion,
 		}
 		resp, err := tsopb.NewTSOClient(conn).FindGroupByKeyspaceID(suite.ctx, &req)
 		if terr != nil {
 			re.Equal(terr, resp.GetHeader().GetError())
-			return
+			return "", ""
 		}
 		re.NoError(err)
 		re.Nil(resp.GetHeader().GetError())
 		re.Len(resp.KeyspaceGroup.Members, 2)
 		re.Equal(groupID, resp.KeyspaceGroup.Id)
-		re.GreaterOrEqual(resp.GetVersion(), version)
-		version = resp.GetVersion()
+		re.GreaterOrEqual(resp.GetModVersion(), modVersion)
+		modVersion = resp.GetModVersion()
+		var (
+			primaryAddress string
+			secondAddress  string
+		)
+		for _, groupMember := range resp.KeyspaceGroup.Members {
+			if groupMember.IsPrimary {
+				primaryAddress = groupMember.Address
+			} else {
+				secondAddress = groupMember.Address
+			}
+		}
+		return primaryAddress, secondAddress
 	}
-
-	checkFn(keyspaceGroupID, keyspaceIDs[0], serverList[0].GetAddr(), nil)
-	// split keyspaceID-0 into new keyspace group
+	checkFn(keyspaceGroupID, keyspaceIDs[0], serverList[1].GetAddr(), nil)
+	primaryAddress, secondAddress := checkFn(keyspaceGroupID, keyspaceIDs[0], serverList[0].GetAddr(), nil)
+	re.NotEmpty(secondAddress)
+	// make the second tso can't fetch the latest changes
+	point := fmt.Sprintf("return(\"%s\")", secondAddress)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch", point))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch"))
+	}()
+	// split keyspaceID-1 and keyspaceID-2 into new keyspace group
 	newGroupID := suite.allocID()
 	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, keyspaceGroupID, &handlers.SplitKeyspaceGroupByIDParams{
 		NewID:     newGroupID,
-		Keyspaces: []uint32{keyspaceIDs[0]},
+		Keyspaces: []uint32{keyspaceIDs[1], keyspaceIDs[2]},
 	})
-	suite.waitKeyspaceReady([]uint32{newGroupID}, []uint32{keyspaceIDs[0]})
+	suite.waitKeyspaceReady([]uint32{newGroupID}, []uint32{keyspaceIDs[1], keyspaceIDs[2]})
 	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, newGroupID)
+	checkFn(newGroupID, keyspaceIDs[1], primaryAddress, nil)
 
-	checkFn(newGroupID, keyspaceIDs[0], serverList[0].GetAddr(), nil)
-	// tso-1 can't fetch the latest changes, so it should backport to the default keyspace group.
+	// split again
+	newGroupID2 := suite.allocID()
+	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, newGroupID, &handlers.SplitKeyspaceGroupByIDParams{
+		NewID:     newGroupID2,
+		Keyspaces: []uint32{keyspaceIDs[1]},
+	})
+	suite.waitKeyspaceReady([]uint32{newGroupID2}, []uint32{keyspaceIDs[1]})
+	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, newGroupID2)
+
 	terr := &tsopb.Error{
 		Type:    tsopb.ErrorType_INVALID_VALUE,
 		Message: "[PD:keyspace:ErrKeyspaceGroupVersionStale]keyspace group version is stale",
 	}
-	checkFn(constants.DefaultKeyspaceGroupID, keyspaceIDs[0], serverList[1].GetAddr(), terr)
+	checkFn(newGroupID, keyspaceIDs[1], secondAddress, terr)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {
