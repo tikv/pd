@@ -777,7 +777,7 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, othe
 		}
 		if store.IsTiFlashWrite() {
 			learnerStoreIDs = append(learnerStoreIDs, storeID)
-		} else if !store.IsTiFlash() {
+		} else if store.IsTiKV() {
 			followerStoreIDs = append(followerStoreIDs, storeID)
 		}
 	}

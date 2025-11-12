@@ -373,7 +373,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
 		srcToleranceRatio := confSrcToleranceRatio
-		if detail.IsTiFlash() {
+		if !detail.IsTiKV() {
 			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
@@ -616,7 +616,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 	for _, detail := range candidates {
 		store := detail.StoreInfo
 		dstToleranceRatio := confDstToleranceRatio
-		if detail.IsTiFlash() {
+		if !detail.IsTiKV() {
 			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
