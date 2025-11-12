@@ -251,7 +251,6 @@ func TestTiFlashComputeExcludedFromExpectation(t *testing.T) {
 			"TiFlash Write nodes should have 5 MB/s load")
 	}
 
-	// Verify expectation count should be based on 3 stores, not 5
 	expectCount := details[0].LoadPred.Expect.HotPeerCount
 	re.Equal(0.0, expectCount, "No hot peers in this test, expect count should be 0")
 }
