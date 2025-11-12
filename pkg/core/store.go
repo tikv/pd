@@ -226,9 +226,9 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type, level constant.Priori
 	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, level)
 }
 
-// IsTiFlash returns true if the store is TiFlash
-func (s *StoreInfo) IsTiFlash() bool {
-	return s.IsTiFlashWrite() || s.IsTiFlashCompute()
+// IsTiKV returns true if the store is TiKV store.
+func (s *StoreInfo) IsTiKV() bool {
+	return !s.IsTiFlashWrite() && !s.IsTiFlashCompute()
 }
 
 // IsTiFlashWrite returns true if the store is TiFlash write node or TiFlash classic node.
@@ -1099,5 +1099,5 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && s.IsTiKV() && s.GetLeaderCount() != 0
 }

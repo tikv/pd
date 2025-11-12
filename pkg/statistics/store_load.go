@@ -94,7 +94,6 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 // StoreSummaryInfo records the summary information of store.
 type StoreSummaryInfo struct {
 	*core.StoreInfo
-	isTiFlash  bool
 	PendingSum *Influence
 }
 
@@ -110,7 +109,6 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
 			StoreInfo:  store,
-			isTiFlash:  store.IsTiFlash(),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info
@@ -133,16 +131,6 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 		s.PendingSum.Loads[i] += load * w
 	}
 	s.PendingSum.HotPeerCount += infl.HotPeerCount * w
-}
-
-// IsTiFlash returns true if the store is TiFlash.
-func (s *StoreSummaryInfo) IsTiFlash() bool {
-	return s.isTiFlash
-}
-
-// SetEngineAsTiFlash set whether store is TiFlash, it is only used in tests.
-func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
-	s.isTiFlash = true
 }
 
 // Loads is a vector that contains different dimensions of loads.

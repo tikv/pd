@@ -158,7 +158,7 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
 	var statistics *storeStatusStatistics
-	if store.IsTiFlash() {
+	if !store.IsTiKV() {
 		statistics = s.engineStatistics[core.EngineTiFlash]
 		if statistics == nil {
 			s.engineStatistics[core.EngineTiFlash] = &storeStatusStatistics{opt: s.opt}
