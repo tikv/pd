@@ -1417,7 +1417,7 @@ func TestStoreConfigUpdate(t *testing.T) {
 		re.NoError(tc.setStore(s))
 	}
 	re.Len(tc.getUpStores(func(store *core.StoreInfo) bool {
-		return store.IsTiFlash()
+		return store.IsTiKV()
 	}), 5)
 	// Case1: big region.
 	{
@@ -1536,7 +1536,7 @@ func TestStoreConfigSync(t *testing.T) {
 		re.NoError(tc.setStore(s))
 	}
 	re.Len(tc.getUpStores(func(store *core.StoreInfo) bool {
-		return store.IsTiFlash()
+		return store.IsTiKV()
 	}), 5)
 
 	re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
@@ -3904,7 +3904,7 @@ func TestConcurrentStoreStats(t *testing.T) {
 	wg := sync.WaitGroup{}
 	for i := range storeCount {
 		if len(cluster.getUpStores(func(store *core.StoreInfo) bool {
-			return store.IsTiFlash()
+			return store.IsTiKV()
 		})) == int(replica) {
 			// it means we can't remove store anymore
 			break
