@@ -113,7 +113,6 @@ func TestSummaryStoreInfos(t *testing.T) {
 	storeLoads := make(map[uint64]StoreKindLoads)
 	for _, storeID := range []uint64{1, 3} {
 		storeInfos[storeID] = &StoreSummaryInfo{
-			isTiFlash: false,
 			StoreInfo: core.NewStoreInfo(
 				&metapb.Store{
 					Id:      storeID,
@@ -188,7 +187,6 @@ func TestTiFlashComputeExcludedFromExpectation(t *testing.T) {
 	// Create 3 TiFlash Write nodes with 5 MB/s each
 	for _, storeID := range []uint64{1, 2, 3} {
 		storeInfos[storeID] = &StoreSummaryInfo{
-			isTiFlash: true,
 			StoreInfo: core.NewStoreInfo(
 				&metapb.Store{
 					Id:      storeID,
@@ -210,7 +208,6 @@ func TestTiFlashComputeExcludedFromExpectation(t *testing.T) {
 	// Create 2 TiFlash Compute nodes with 0 MB/s (or very low load)
 	for _, storeID := range []uint64{4, 5} {
 		storeInfos[storeID] = &StoreSummaryInfo{
-			isTiFlash: true,
 			StoreInfo: core.NewStoreInfo(
 				&metapb.Store{
 					Id:      storeID,
@@ -257,4 +254,85 @@ func TestTiFlashComputeExcludedFromExpectation(t *testing.T) {
 	// Verify expectation count should be based on 3 stores, not 5
 	expectCount := details[0].LoadPred.Expect.HotPeerCount
 	re.Equal(0.0, expectCount, "No hot peers in this test, expect count should be 0")
+}
+
+func TestTiKVNotAffectedByTiFlashCompute(t *testing.T) {
+	re := require.New(t)
+	rw := utils.Write
+	// Use RegionKind for TiKV to use StoreWriteBytes instead of peerLoadSum
+	kind := constant.RegionKind
+	tikvCollector := newTikvCollector()
+	tiflashCollector := newTiFlashCollector(true)
+	storeHistoryLoad := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval)
+	storeInfos := make(map[uint64]*StoreSummaryInfo)
+	storeLoads := make(map[uint64]StoreKindLoads)
+
+	// Create 3 TiKV nodes with 10 MB/s each
+	for _, storeID := range []uint64{1, 2, 3} {
+		storeInfos[storeID] = &StoreSummaryInfo{
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{
+					Id:      storeID,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", storeID, storeID),
+				},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
+		}
+		// Simulate 10 MB/s write load
+		storeLoads[storeID] = StoreKindLoads{
+			utils.StoreWriteBytes: 10 * units.MiB,
+			utils.StoreWriteKeys:  2000,
+			utils.StoreWriteQuery: 100,
+		}
+	}
+
+	// Create 2 TiFlash Compute nodes with 0 MB/s
+	for _, storeID := range []uint64{4, 5} {
+		storeInfos[storeID] = &StoreSummaryInfo{
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{
+					Id:      storeID,
+					Address: fmt.Sprintf("mock://tiflash-compute-%d:%d", storeID, storeID),
+					Labels:  []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlashCompute}},
+				},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
+		}
+		// TiFlash Compute has no write load
+		storeLoads[storeID] = StoreKindLoads{
+			utils.StoreWriteBytes:        0,
+			utils.StoreWriteKeys:         0,
+			utils.StoreRegionsWriteBytes: 0,
+			utils.StoreRegionsWriteKeys:  0,
+		}
+	}
+
+	// Test TiKV expectation calculation
+	tikvDetails := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, tikvCollector)
+
+	// Should only include 3 TiKV nodes
+	re.Len(tikvDetails, 3, "Should only include TiKV nodes")
+
+	// Verify that all returned details are TiKV nodes
+	for _, detail := range tikvDetails {
+		re.True(detail.GetID() >= 1 && detail.GetID() <= 3, "Should only include TiKV nodes (ID 1-3)")
+		re.False(detail.IsTiFlash(), "TiKV nodes should not be marked as TiFlash")
+	}
+
+	// Verify TiKV expectation is calculated based only on TiKV nodes
+	// Expected byte load should be (10+10+10)/3 = 10 MB/s
+	// Should NOT be affected by TiFlash Compute nodes
+	for _, detail := range tikvDetails {
+		expectByteLoad := detail.LoadPred.Expect.Loads[utils.ByteDim]
+		re.InDelta(10*units.MiB, expectByteLoad, 0.1*units.MiB,
+			"TiKV expectation should be 10 MB/s (average of TiKV nodes only), not affected by TiFlash Compute")
+
+		currentByteLoad := detail.LoadPred.Current.Loads[utils.ByteDim]
+		re.InDelta(10*units.MiB, currentByteLoad, 0.1*units.MiB,
+			"TiKV nodes should have 10 MB/s load")
+	}
+
+	// Test TiFlash expectation calculation - should get empty result because no TiFlash Write nodes
+	tiflashDetails := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, constant.RegionKind, tiflashCollector)
+	re.Empty(tiflashDetails)
 }
