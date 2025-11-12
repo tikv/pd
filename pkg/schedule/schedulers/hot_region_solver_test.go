@@ -254,11 +254,16 @@ func TestMaxZombieDuration(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		src := &statistics.StoreLoadDetail{
-			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
-		}
+		var src *statistics.StoreLoadDetail
 		if testCase.isTiFlash {
-			src.SetEngineAsTiFlash()
+			store := core.NewStoreInfoWithLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+			}
+		} else {
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{},
+			}
 		}
 		bs := &balanceSolver{
 			sche:          hb.(*hotScheduler),
