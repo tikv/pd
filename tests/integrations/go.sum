@@ -952,8 +952,8 @@ github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch h1:KLE/YeX+9FNaGVW5MtImRVPhjDpf
 github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch/go.mod h1:KjBLriHXe7L6fGceqWzTod8HUB/TP1WWDtfuSYtYXaI=
 github.com/brianvoe/gofakeit/v6 v6.26.3 h1:3ljYrjPwsUNAUFdUIr2jVg5EhKdcke/ZLop7uVg1Er8=
 github.com/brianvoe/gofakeit/v6 v6.26.3/go.mod h1:Xj58BMSnFqcn/fAQeSK+/PLtC5kSb7FJIq4JyGa8vEs=
-github.com/bufferflies/kvproto v0.0.0-20251021115503-c6971b425f60 h1:TF0BW0SIJho0sM7d7OK7aHvwUO1YeEVFqQgUnzNP+9Q=
-github.com/bufferflies/kvproto v0.0.0-20251021115503-c6971b425f60/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
+github.com/bufferflies/kvproto v0.0.0-20251112045547-63bf61c9039b h1:siI5y1MfUdTSj9QI4MN2bdFgQL1N3cSqNUoRlvCCchc=
+github.com/bufferflies/kvproto v0.0.0-20251112045547-63bf61c9039b/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
 github.com/bytedance/sonic v1.11.6 h1:oUp34TzMlL+OY1OUWxHqsdkgC/Zfc85zGqw9siXjrc0=
 github.com/bytedance/sonic v1.11.6/go.mod h1:LysEHSvpvDySVdC2f87zGWf6CIKJcAvqab1ZaiQtds4=
 github.com/bytedance/sonic/loader v0.1.1 h1:c+e5Pt1k/cy5wMveRDyk2X4B9hF4g7an8N3zCYjJFNM=

@@ -92,6 +92,8 @@ type state struct {
 	// Being merged will cause the group to be removed from this map eventually if the merge is successful.
 	requestedGroups map[uint32]struct{}
 
+	// modVersion is the modification version of keyspace space.
+	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
 	modVersion uint64
 }
 
