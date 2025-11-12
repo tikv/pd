@@ -109,8 +109,10 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	infos := make(map[uint64]*StoreSummaryInfo, len(stores))
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
-			StoreInfo:  store,
-			isTiFlash:  store.IsTiFlash(),
+			StoreInfo: store,
+			// Only mark TiFlash write nodes, not compute nodes.
+			// Compute nodes don't store data and shouldn't be included in hot region scheduling.
+			isTiFlash:  store.IsTiFlashWrite(),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info
