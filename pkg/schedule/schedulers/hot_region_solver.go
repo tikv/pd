@@ -279,9 +279,19 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		return false
 	}
 	isSplit := bs.ops[0].Kind() == operator.OpSplit
-	if !isSplit && bs.best.srcStore.IsTiFlash() != bs.best.dstStore.IsTiFlash() {
-		hotSchedulerNotSameEngineCounter.Inc()
-		return false
+	// Ensure source and destination stores have the exact same engine type.
+	// We need to distinguish between TiKV, TiFlash Write, and TiFlash Compute nodes.
+	if !isSplit {
+		srcIsTiFlashWrite := bs.best.srcStore.IsTiFlashWrite()
+		dstIsTiFlashWrite := bs.best.dstStore.IsTiFlashWrite()
+		srcIsTiFlashCompute := bs.best.srcStore.IsTiFlashCompute()
+		dstIsTiFlashCompute := bs.best.dstStore.IsTiFlashCompute()
+
+		// Check if engine types match exactly
+		if srcIsTiFlashWrite != dstIsTiFlashWrite || srcIsTiFlashCompute != dstIsTiFlashCompute {
+			hotSchedulerNotSameEngineCounter.Inc()
+			return false
+		}
 	}
 	maxZombieDur := bs.calcMaxZombieDur()
 
@@ -344,7 +354,9 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 		}
 		return bs.sche.conf.getRegionsStatZombieDuration()
 	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
+		// TiFlash Write nodes (TiFlash Compute nodes are filtered out in filterSrcStores)
+		// use RegionsStatZombieDuration, while TiKV uses StoreStatZombieDuration.
+		if bs.best.srcStore.IsTiFlashWrite() {
 			return bs.sche.conf.getRegionsStatZombieDuration()
 		}
 		return bs.sche.conf.getStoreStatZombieDuration()
@@ -362,7 +374,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	for id, detail := range bs.stLoadDetail {
 		srcToleranceRatio := confSrcToleranceRatio
 		if detail.IsTiFlash() {
-			if !confEnableForTiFlash {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
@@ -605,7 +617,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		store := detail.StoreInfo
 		dstToleranceRatio := confDstToleranceRatio
 		if detail.IsTiFlash() {
-			if !confEnableForTiFlash {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
