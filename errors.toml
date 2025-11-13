@@ -581,6 +581,11 @@ error = '''
 primary of keyspace group does not exist
 '''
 
+["PD:keyspace:ErrKeyspaceGroupVersionStale"]
+error = '''
+keyspace group version is stale
+'''
+
 ["PD:keyspace:ErrKeyspaceGroupWithEmptyKeyspace"]
 error = '''
 keyspace group with empty keyspace

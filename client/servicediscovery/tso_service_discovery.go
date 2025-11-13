@@ -66,16 +66,30 @@ type keyspaceGroupSvcDiscovery struct {
 	secondaryURLs []string
 	// urls are the primary/secondary serving URL
 	urls []string
+
+	// modVersion is used to avoid updating stale info, it is provided by etcd watcher on the server side and increases
+	// monotonically.
+	// If the tso response version is less than the client version, it means that the keyspace group information of
+	// the request tso server is stale, we should ignore the update and try to another tso service.
+	modVersion atomic.Uint64
+}
+
+func (k *keyspaceGroupSvcDiscovery) getModVersion() uint64 {
+	return k.modVersion.Load()
 }
 
 func (k *keyspaceGroupSvcDiscovery) update(
 	keyspaceGroup *tsopb.KeyspaceGroup,
 	newPrimaryURL string,
 	secondaryURLs, urls []string,
-) (oldPrimaryURL string, primarySwitched, secondaryChanged bool) {
+	modVersion uint64,
+) (oldPrimaryURL string, primarySwitched, success bool) {
 	k.Lock()
 	defer k.Unlock()
-
+	if k.getModVersion() > modVersion {
+		return "", false, false
+	}
+	success = true
 	// If the new primary URL is empty, we don't switch the primary URL.
 	oldPrimaryURL = k.primaryURL
 	if len(newPrimaryURL) > 0 {
@@ -85,11 +99,11 @@ func (k *keyspaceGroupSvcDiscovery) update(
 
 	if !reflect.DeepEqual(k.secondaryURLs, secondaryURLs) {
 		k.secondaryURLs = secondaryURLs
-		secondaryChanged = true
 	}
 
 	k.group = keyspaceGroup
 	k.urls = urls
+	k.modVersion.Store(modVersion)
 	return
 }
 
@@ -160,6 +174,7 @@ func NewTSOServiceDiscovery(
 		primaryURL:    "",
 		secondaryURLs: make([]string, 0),
 		urls:          make([]string, 0),
+		modVersion:    atomic.Uint64{},
 	}
 	c.tsoServerDiscovery = &tsoServerDiscovery{urls: make([]string, 0)}
 	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
@@ -413,12 +428,16 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
+	var version uint64
+	curVersion := c.keyspaceGroupSD.getModVersion()
 	if len(tsoServerURL) > 0 {
-		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout)
+		keyspaceGroup, version, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getModVersion())
 		if err != nil {
 			log.Error("[tso] failed to find the keyspace group",
 				zap.Uint32("keyspace-id-in-request", keyspaceID),
 				zap.String("tso-server-url", tsoServerURL),
+				zap.Uint64("response-version", version),
+				zap.Uint64("current-version", curVersion),
 				errs.ZapError(err))
 			return err
 		}
@@ -488,8 +507,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
-	oldPrimary, primarySwitched, _ :=
-		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls)
+	oldPrimary, primarySwitched, success :=
+		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls, version)
+	if !success {
+		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("version", version))
+		return errors.Errorf("keyspace group version is stale, current version: %d, new version: %d", c.keyspaceGroupSD.getModVersion(), version)
+	}
 	if primarySwitched {
 		log.Info("[tso] updated keyspace group service discovery info",
 			zap.Uint32("keyspace-id-in-request", keyspaceID),
@@ -505,15 +528,14 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	if len(primaryURL) == 0 {
 		return errors.New("no primary URL found")
 	}
-
 	return nil
 }
 
 // Query the keyspace group info from the tso server by the keyspace ID. The server side will return
 // the info of the keyspace group to which this keyspace belongs.
 func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
-	keyspaceID uint32, tsoSrvURL string, timeout time.Duration,
-) (*tsopb.KeyspaceGroup, error) {
+	keyspaceID uint32, tsoSrvURL string, timeout time.Duration, modVersion uint64,
+) (*tsopb.KeyspaceGroup, uint64, error) {
 	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
 		keyspaceToCheck, ok := val.(int)
 		if ok && keyspaceID == uint32(keyspaceToCheck) {
@@ -525,7 +547,7 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 
 	cc, err := c.GetOrCreateGRPCConn(tsoSrvURL)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	resp, err := tsopb.NewTSOClient(cc).FindGroupByKeyspaceID(
@@ -536,24 +558,30 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
 			},
 			KeyspaceId: keyspaceID,
+			ModVersion: modVersion,
 		})
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			err, cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 	if resp.GetHeader().GetError() != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 	if resp.KeyspaceGroup == nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			"no keyspace group found", cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.ModVersion < modVersion {
+		attachErr := errors.Errorf("error:%s target:%s response version:%d current version:%d",
+			"response version less than the given version", cc.Target(), resp.ModVersion, modVersion)
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 
-	return resp.KeyspaceGroup, nil
+	return resp.KeyspaceGroup, resp.GetModVersion(), nil
 }
 
 func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
