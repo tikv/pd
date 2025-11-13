@@ -98,6 +98,7 @@ ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
 	PD_SERVER_DEP += dashboard-replace-distro-info
 endif
 PD_SERVER_DEP += dashboard-ui
+PD_SERVER_DEP += generate-easyjson
 
 pre-build: ${PD_SERVER_DEP}
 
@@ -217,6 +218,10 @@ generate-errdoc: install-tools
 check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
+
+generate-easyjson: install-tools
+	@echo "generating easyjson..."
+	easyjson -all ./pkg/response/region.go
 
 .PHONY: check static tidy generate-errdoc check-plugin
 
