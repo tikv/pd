@@ -62,10 +62,19 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
+<<<<<<< HEAD
 	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
 	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
 	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
 	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
+=======
+	// XPDHandleHeader is used to mark whether this request is handled by the PD.
+	XPDHandleHeader = "X-PD-Handle-By"
+	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
+	XForbiddenForwardToMicroserviceHeader = "X-Forbidden-Forward-To-Microservice"
+	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
+	XForwardedToMicroserviceHeader = "X-Forwarded-To-Microservice"
+>>>>>>> 303c6c3b4 (server, api: fix forward logic (#9836))
 
 	chunkSize = 4096
 )

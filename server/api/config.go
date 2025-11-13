@@ -61,6 +61,19 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Success  200  {object}  config.Config
 // @Router   /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.svr.GetMember().IsServing() {
+		localCfg := h.svr.GetConfig()
+		leaderCfg, err := h.getLeaderConfig()
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		mergedCfg := localCfg
+		mergedCfg.Replication = leaderCfg.Replication
+		mergedCfg.Schedule = leaderCfg.Schedule
+		h.rd.JSON(w, http.StatusOK, mergedCfg)
+		return
+	}
 	cfg := h.svr.GetConfig()
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) != "true" {
@@ -559,6 +572,34 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 // @Router   /config/pd-server [get]
 func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
+}
+
+func (h *confHandler) getLeaderConfig() (*config.Config, error) {
+	addrs := h.svr.GetMember().GetServingUrls()
+	if len(addrs) == 0 {
+		return nil, errs.ErrLeaderNil.FastGenByArgs()
+	}
+	addr := addrs[0]
+	url := fmt.Sprintf("%s/pd/api/v1/config", addr)
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := h.svr.GetHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errs.ErrSendRequest.FastGenByArgs(resp.StatusCode)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var leaderConfig config.Config
+	err = json.Unmarshal(b, &leaderConfig)
+	return &leaderConfig, err
 }
 
 func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
