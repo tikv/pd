@@ -29,8 +29,8 @@ import (
 const (
 	unknown   = "unknown"
 	labelType = "label"
-)
 
+<<<<<<< HEAD
 type storeStatistics struct {
 	opt             config.ConfProvider
 	Up              int
@@ -52,6 +52,32 @@ type storeStatistics struct {
 	Serving         int
 	Removing        int
 	Removed         int
+=======
+	clusterStatusStoreUpCount           = "store_up_count"
+	clusterStatusStoreDisconnectedCount = "store_disconnected_count"
+	clusterStatusStoreSlowCount         = "store_slow_count"
+	clusterStatusStoreDownCount         = "store_down_count"
+	clusterStatusStoreUnhealthCount     = "store_unhealth_count"
+	clusterStatusStoreOfflineCount      = "store_offline_count"
+	clusterStatusStoreTombstoneCount    = "store_tombstone_count"
+	clusterStatusStoreLowSpaceCount     = "store_low_space_count"
+	clusterStatusStorePreparingCount    = "store_preparing_count"
+	clusterStatusStoreServingCount      = "store_serving_count"
+	clusterStatusStoreRemovingCount     = "store_removing_count"
+	clusterStatusStoreRemovedCount      = "store_removed_count"
+
+	clusterStatusRegionCount     = "region_count"
+	clusterStatusLeaderCount     = "leader_count"
+	clusterStatusWitnessCount    = "witness_count"
+	clusterStatusLearnerCount    = "learner_count"
+	clusterStatusStorageSize     = "storage_size"
+	clusterStatusStorageCapacity = "storage_capacity"
+)
+
+type storeStatistics struct {
+	opt          config.ConfProvider
+	LabelCounter map[string][]uint64
+>>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
 }
 
 func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
@@ -59,6 +85,78 @@ func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 		opt:          opt,
 		LabelCounter: make(map[string][]uint64),
 	}
+}
+
+<<<<<<< HEAD
+func (s *storeStatistics) observe(store *core.StoreInfo) {
+	for _, k := range s.opt.GetLocationLabels() {
+		v := store.GetLabelValue(k)
+		if v == "" {
+			v = unknown
+		}
+		key := fmt.Sprintf("%s:%s", k, v)
+		// exclude tombstone
+		if !store.IsRemoved() {
+			s.LabelCounter[key] = append(s.LabelCounter[key], store.GetID())
+		}
+	}
+	storeAddress := store.GetAddress()
+	id := strconv.FormatUint(store.GetID(), 10)
+=======
+func (s *storeStatistics) observeStoreStatus(store *core.StoreInfo) map[string]float64 {
+	result := map[string]float64{
+		clusterStatusStoreUpCount:           0,
+		clusterStatusStoreDisconnectedCount: 0,
+		clusterStatusStoreSlowCount:         0,
+		clusterStatusStoreDownCount:         0,
+		clusterStatusStoreUnhealthCount:     0,
+		clusterStatusStoreOfflineCount:      0,
+		clusterStatusStoreTombstoneCount:    0,
+		clusterStatusStoreLowSpaceCount:     0,
+		clusterStatusStorePreparingCount:    0,
+		clusterStatusStoreServingCount:      0,
+		clusterStatusStoreRemovingCount:     0,
+		clusterStatusStoreRemovedCount:      0,
+	}
+
+>>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
+	// Store state.
+	isDown := false
+	switch store.GetNodeState() {
+	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
+		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
+			isDown = true
+			result[clusterStatusStoreDownCount]++
+		} else if store.IsUnhealthy() {
+			result[clusterStatusStoreUnhealthCount]++
+		} else if store.IsDisconnected() {
+			result[clusterStatusStoreDisconnectedCount]++
+		} else if store.IsSlow() {
+			result[clusterStatusStoreSlowCount]++
+		} else {
+			result[clusterStatusStoreUpCount]++
+		}
+		if store.IsPreparing() {
+			result[clusterStatusStorePreparingCount]++
+		} else {
+			result[clusterStatusStoreServingCount]++
+		}
+	case metapb.NodeState_Removing:
+		result[clusterStatusStoreOfflineCount]++
+		result[clusterStatusStoreRemovingCount]++
+	case metapb.NodeState_Removed:
+		result[clusterStatusStoreTombstoneCount]++
+		result[clusterStatusStoreRemovedCount]++
+		return result
+	}
+
+	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
+<<<<<<< HEAD
+		s.LowSpace++
+=======
+		result[clusterStatusStoreLowSpaceCount]++
+	}
+	return result
 }
 
 func (s *storeStatistics) observe(store *core.StoreInfo) {
@@ -75,47 +173,29 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
-	// Store state.
-	isDown := false
-	switch store.GetNodeState() {
-	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
-		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
-			isDown = true
-			s.Down++
-		} else if store.IsUnhealthy() {
-			s.Unhealthy++
-		} else if store.IsDisconnected() {
-			s.Disconnect++
-		} else if store.IsSlow() {
-			s.Slow++
-		} else {
-			s.Up++
-		}
-		if store.IsPreparing() {
-			s.Preparing++
-		} else {
-			s.Serving++
-		}
-	case metapb.NodeState_Removing:
-		s.Offline++
-		s.Removing++
-	case metapb.NodeState_Removed:
-		s.Tombstone++
-		s.Removed++
-		return
+	var engine string
+	if store.IsTiKV() {
+		engine = core.EngineTiKV
+	} else {
+		engine = core.EngineTiFlash
 	}
-
-	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
-		s.LowSpace++
+	storeStatusStats := s.observeStoreStatus(store)
+	for statusType, value := range storeStatusStats {
+		clusterStatusGauge.WithLabelValues(statusType, engine, id).Set(value)
+	}
+	// skip tombstone store avoid to overwrite metrics
+	if store.GetNodeState() == metapb.NodeState_Removed {
+		return
+>>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
 	}
 
 	// Store stats.
-	s.StorageSize += store.StorageSize()
-	s.StorageCapacity += store.GetCapacity()
-	s.RegionCount += store.GetRegionCount()
-	s.LeaderCount += store.GetLeaderCount()
-	s.WitnessCount += store.GetWitnessCount()
-	s.LearnerCount += store.GetLearnerCount()
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageSize, engine, id).Set(float64(store.StorageSize()))
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageCapacity, engine, id).Set(float64(store.GetCapacity()))
+	clusterStatusGauge.WithLabelValues(clusterStatusRegionCount, engine, id).Set(float64(store.GetRegionCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLeaderCount, engine, id).Set(float64(store.GetLeaderCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusWitnessCount, engine, id).Set(float64(store.GetWitnessCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLearnerCount, engine, id).Set(float64(store.GetLearnerCount()))
 	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
 	if ok {
 		cap := limit.GetCap()
@@ -182,6 +262,7 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 func (s *storeStatistics) collect() {
 	placementStatusGauge.Reset()
 
+<<<<<<< HEAD
 	metrics := make(map[string]float64)
 	metrics["store_up_count"] = float64(s.Up)
 	metrics["store_disconnected_count"] = float64(s.Disconnect)
@@ -206,6 +287,8 @@ func (s *storeStatistics) collect() {
 		clusterStatusGauge.WithLabelValues(typ).Set(value)
 	}
 
+=======
+>>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
 	// Current scheduling configurations of the cluster
 	configs := make(map[string]float64)
 	configs["leader-schedule-limit"] = float64(s.opt.GetLeaderScheduleLimit())
@@ -293,6 +376,7 @@ func ResetStoreStatistics(storeAddress string, id string) {
 	for _, m := range metrics {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
 	}
+	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 }
 
 type storeStatisticsMap struct {
@@ -323,6 +407,10 @@ func Reset() {
 	storeStatusGauge.Reset()
 	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()
+<<<<<<< HEAD
+=======
+	clusterStatusGauge.Reset()
+>>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
 	ResetRegionStatsMetrics()
 	ResetLabelStatsMetrics()
 	ResetHotCacheStatusMetrics()
