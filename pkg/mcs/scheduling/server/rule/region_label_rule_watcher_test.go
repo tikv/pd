@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2025 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,11 +71,10 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 	re.NoError(err)
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &RegionLabelRuleWatcher{
-		ctx:                   ctx,
-		cancel:                cancel,
-		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
-		etcdClient:            client,
-		regionLabeler:         labelerManager,
+		ctx:           ctx,
+		cancel:        cancel,
+		etcdClient:    client,
+		regionLabeler: labelerManager,
 	}
 	err = rw.initializeWatcher()
 	re.NoError(err)

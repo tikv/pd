@@ -40,15 +40,6 @@ type PlacementRuleWatcher struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// rulesPathPrefix:
-	//   - Key: /pd/{cluster_id}/rules/{group_id}-{rule_id}
-	//   - Value: placement.Rule
-	rulesPathPrefix string
-	// ruleGroupPathPrefix:
-	//   - Key: /pd/{cluster_id}/rule_group/{group_id}
-	//   - Value: placement.RuleGroup
-	ruleGroupPathPrefix string
-
 	etcdClient *clientv3.Client
 
 	// checkerController is used to add the suspect key ranges to the checker when the rule changed.
@@ -71,13 +62,11 @@ func NewPlacementRuleWatcher(
 ) (*PlacementRuleWatcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &PlacementRuleWatcher{
-		ctx:                 ctx,
-		cancel:              cancel,
-		rulesPathPrefix:     keypath.RulesPathPrefix(),
-		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
-		etcdClient:          etcdClient,
-		checkerController:   checkerController,
-		ruleManager:         ruleManager,
+		ctx:               ctx,
+		cancel:            cancel,
+		etcdClient:        etcdClient,
+		checkerController: checkerController,
+		ruleManager:       ruleManager,
 	}
 	err := rw.initializeWatcher()
 	if err != nil {
@@ -99,7 +88,7 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		if strings.HasPrefix(key, rw.rulesPathPrefix) {
+		if strings.HasPrefix(key, keypath.RulesPathPrefix()) {
 			log.Debug("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
 			rule, err := placement.NewRuleFromJSON(kv.Value)
 			if err != nil {
@@ -116,7 +105,7 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 				suspectKeyRanges.Append(oldRule.StartKey, oldRule.EndKey)
 			}
 			return nil
-		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
+		} else if strings.HasPrefix(key, keypath.RuleGroupPathPrefix()) {
 			log.Debug("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
 			ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
 			if err != nil {
@@ -135,10 +124,10 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		if strings.HasPrefix(key, rw.rulesPathPrefix) {
+		if strings.HasPrefix(key, keypath.RulesPathPrefix()) {
 			log.Debug("delete placement rule", zap.String("key", key))
 			// Parse groupID and ruleID from the key.
-			groupID, ruleID, err := rw.parseGroupIDAndRuleIDFromKey(key)
+			groupID, ruleID, err := parseGroupIDAndRuleIDFromKey(key)
 			if err != nil {
 				log.Error("failed to parse group id and rule id from key",
 					zap.String("key", key),
@@ -162,9 +151,9 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 			// Update the suspect key ranges
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			return nil
-		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
+		} else if strings.HasPrefix(key, keypath.RuleGroupPathPrefix()) {
 			log.Debug("delete placement rule group", zap.String("key", key))
-			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
+			trimmedKey := strings.TrimPrefix(key, keypath.RuleGroupPathPrefix())
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
 			// Update the suspect key ranges
@@ -202,8 +191,14 @@ func (rw *PlacementRuleWatcher) initializeWatcher() error {
 	return rw.ruleWatcher.WaitLoad()
 }
 
-func (rw *PlacementRuleWatcher) parseGroupIDAndRuleIDFromKey(key string) (groupID string, ruleID string, err error) {
-	ruleKey := strings.TrimPrefix(key, rw.rulesPathPrefix)
+// Close closes the watcher.
+func (rw *PlacementRuleWatcher) Close() {
+	rw.cancel()
+	rw.wg.Wait()
+}
+
+func parseGroupIDAndRuleIDFromKey(key string) (groupID string, ruleID string, err error) {
+	ruleKey := strings.TrimPrefix(key, keypath.RulesPathPrefix())
 	parts := strings.SplitN(ruleKey, "-", 2)
 	if len(parts) != 2 {
 		return "", "", errors.New("invalid rule key format")
@@ -217,10 +212,4 @@ func (rw *PlacementRuleWatcher) parseGroupIDAndRuleIDFromKey(key string) (groupI
 		return "", "", errors.New("failed to decode ruleID from rule key")
 	}
 	return string(groupIDBytes), string(ruleIDBytes), nil
-}
-
-// Close closes the watcher.
-func (rw *PlacementRuleWatcher) Close() {
-	rw.cancel()
-	rw.wg.Wait()
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2025 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,11 +36,6 @@ type RegionLabelRuleWatcher struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// regionLabelPathPrefix:
-	//   - Key: /pd/{cluster_id}/region_label/{rule_id}
-	//  - Value: labeler.LabelRule
-	regionLabelPathPrefix string
-
 	etcdClient *clientv3.Client
 
 	// regionLabeler is used to manage the region label rules.
@@ -57,11 +52,10 @@ func NewRegionLabelRuleWatcher(
 ) (*RegionLabelRuleWatcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &RegionLabelRuleWatcher{
-		ctx:                   ctx,
-		cancel:                cancel,
-		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
-		etcdClient:            etcdClient,
-		regionLabeler:         regionLabeler,
+		ctx:           ctx,
+		cancel:        cancel,
+		etcdClient:    etcdClient,
+		regionLabeler: regionLabeler,
 	}
 	err := rw.initializeWatcher()
 	if err != nil {
@@ -88,7 +82,7 @@ func (rw *RegionLabelRuleWatcher) initializeWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Debug("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
+		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, keypath.RegionLabelPathPrefix()))
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
@@ -100,7 +94,7 @@ func (rw *RegionLabelRuleWatcher) initializeWatcher() error {
 		rw.etcdClient,
 		"scheduling-region-label-watcher",
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
-		strings.TrimSuffix(rw.regionLabelPathPrefix, "/"),
+		strings.TrimSuffix(keypath.RegionLabelPathPrefix(), "/"),
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
