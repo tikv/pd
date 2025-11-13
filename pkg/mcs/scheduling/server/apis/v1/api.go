@@ -303,7 +303,6 @@ func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	localCfg := svr.GetConfig()
 	if svr.IsServing() {
-		localCfg.Schedule.MaxMergeRegionKeys = localCfg.Schedule.GetMaxMergeRegionKeys()
 		c.IndentedJSON(http.StatusOK, localCfg)
 		return
 	}
@@ -337,6 +336,7 @@ func getConfig(c *gin.Context) {
 		return
 	}
 
+	// Schedule and Replication are dynamic configs managed by primary, so we need to merge them.
 	mergedCfg := localCfg
 	mergedCfg.Schedule = primaryCfg.Schedule
 	mergedCfg.Replication = primaryCfg.Replication
