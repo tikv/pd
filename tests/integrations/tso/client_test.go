@@ -16,8 +16,10 @@ package tso
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +27,8 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
@@ -32,12 +36,14 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
+	"go.uber.org/zap"
 )
 
 var r = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -101,6 +107,9 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	suite.backendEndpoints = suite.pdLeaderServer.GetAddr()
 	suite.keyspaceIDs = make([]uint32, 0)
 
+	// Enable failpoint to check keyspace meta before fallback
+	failpoint.Enable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback", "return(true)")
+
 	if !suite.legacy {
 		suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
 		re.NoError(err)
@@ -136,7 +145,57 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 				},
 			})
 		}
+
+		// Create keyspace metadata for testing
+		// This is needed when failpoint checkKeyspaceBeforeFallback is enabled
+		suite.createKeyspaceMetadata(re)
 	}
+}
+
+// saveKeyspaceMetaWithLog saves keyspace metadata to storage and logs the operation.
+func (suite *tsoClientTestSuite) saveKeyspaceMetaWithLog(re *require.Assertions, meta *keyspacepb.KeyspaceMeta) {
+	storage := suite.pdLeaderServer.GetServer().GetStorage()
+	err := storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, meta)
+	})
+	re.NoError(err)
+	groupID := meta.Config["tso_keyspace_group_id"]
+	if groupID == "" {
+		groupID = "not configured"
+	}
+	log.Info("[test] saved keyspace metadata",
+		zap.Uint32("keyspace-id", meta.Id),
+		zap.String("keyspace-name", meta.Name),
+		zap.String("tso-group-id", groupID))
+}
+
+// createKeyspaceMetadata creates keyspace metadata for testing.
+// This is needed when failpoint checkKeyspaceBeforeFallback is enabled.
+func (suite *tsoClientTestSuite) createKeyspaceMetadata(re *require.Assertions) {
+	keyspaceMetaList := []struct {
+		keyspaceID uint32
+		groupID    *uint32 // nil means no group assigned (without tso_keyspace_group_id configuration)
+	}{
+		{1, uint32Ptr(1)},  // keyspace 1 -> group 1
+		{2, uint32Ptr(2)},  // keyspace 2 -> group 2
+		{10, nil},          // keyspace 10 -> no group configured (will use default group)
+		{11, uint32Ptr(1)}, // keyspace 11 -> group 1
+	}
+	for _, km := range keyspaceMetaList {
+		meta := &keyspacepb.KeyspaceMeta{
+			Id:     km.keyspaceID,
+			Name:   fmt.Sprintf("test_keyspace_%d", km.keyspaceID),
+			Config: make(map[string]string),
+		}
+		if km.groupID != nil {
+			meta.Config["tso_keyspace_group_id"] = strconv.FormatUint(uint64(*km.groupID), 10)
+		}
+		suite.saveKeyspaceMetaWithLog(re, meta)
+	}
+}
+
+func uint32Ptr(v uint32) *uint32 {
+	return &v
 }
 
 // Create independent clients to prevent interfering with other tests.
@@ -194,6 +253,7 @@ func (suite *tsoClientTestSuite) TearDownTest() {
 }
 
 func (suite *tsoClientTestSuite) TearDownSuite() {
+	failpoint.Disable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback")
 	suite.cancel()
 	if !suite.legacy {
 		suite.tsoCluster.Destroy()

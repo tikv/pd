@@ -450,7 +450,7 @@ func (s *TestServer) WaitLeader() bool {
 }
 
 func (s *TestServer) waitPreAllocKeyspaces() error {
-	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
 	if len(keyspaces) == 0 {
 		return nil
 	}
@@ -461,11 +461,13 @@ Outer:
 	for range WaitPreAllocKeyspacesRetryTimes {
 		for idx < len(keyspaces) {
 			_, err := manager.LoadKeyspace(keyspaces[idx])
-			if errors.ErrorEqual(err, keyspace.ErrKeyspaceNotFound) {
-				time.Sleep(WaitPreAllocKeyspacesInterval)
-				continue Outer
-			}
+
 			if err != nil {
+				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+				if errors.ErrorEqual(err, keyspace.ErrKeyspaceNotFound) || errors.ErrorEqual(err, errs.ErrEtcdTxnConflict) {
+					time.Sleep(WaitPreAllocKeyspacesInterval)
+					continue Outer
+				}
 				return errors.Trace(err)
 			}
 
@@ -478,7 +480,7 @@ Outer:
 
 // GetPreAllocKeyspaceIDs returns the pre-allocated keyspace IDs.
 func (s *TestServer) GetPreAllocKeyspaceIDs() ([]uint32, error) {
-	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
 	ids := make([]uint32, 0, len(keyspaces))
 	manager := s.GetKeyspaceManager()
 	for _, keyspace := range keyspaces {

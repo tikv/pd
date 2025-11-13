@@ -26,19 +26,23 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -63,6 +67,7 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback", "return(true)"))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
 	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
@@ -83,6 +88,7 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cleanupFunc()
 	suite.cluster.Destroy()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback"))
 }
 
 // getTSOServerURLs gets the TSO server URLs from PD, mimicking the client's getTSOServer logic
@@ -568,11 +574,15 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 	}
 	tests.WaitForPrimaryServing(re, nodes)
 
-	// Create keyspace group
+	// Use keyspaceID same as keyspaceGroupID for simplicity
+	keyspaceID := keyspaceGroupID
+
+	// Create keyspace group with keyspace binding
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
-			ID:       keyspaceGroupID,
-			UserKind: endpoint.Standard.String(),
+			ID:        keyspaceGroupID,
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{keyspaceID}, // Bind keyspace to this group
 		},
 	}}
 	code := suite.tryCreateKeyspaceGroup(re, kgs)
@@ -592,8 +602,11 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		return code == http.StatusOK && kg != nil && len(kg.Members) == nodeCount
 	})
 
+	// Create keyspace metadata with tso_keyspace_group_id configuration
+	// This is needed when failpoint checkKeyspaceBeforeFallback is enabled
+	suite.createKeyspaceMetadataForGroup(re, keyspaceID, keyspaceGroupID)
+
 	// Create client and get initial TSO
-	keyspaceID := keyspaceGroupID // Use same ID for simplicity
 	client := mcs.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceID, []string{suite.backendEndpoints})
 	mcs.WaitForTSOServiceAvailable(suite.ctx, re, client)
 
@@ -616,6 +629,36 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		firstNodeAddr: firstNodeAddr,
 		keyspaceID:    keyspaceID,
 	}
+}
+
+// saveKeyspaceMetaWithLog saves keyspace metadata to storage and logs the operation.
+func (suite *keyspaceGroupTestSuite) saveKeyspaceMetaWithLog(re *require.Assertions, meta *keyspacepb.KeyspaceMeta) {
+	storage := suite.server.GetServer().GetStorage()
+	err := storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, meta)
+	})
+	re.NoError(err)
+	groupID := meta.Config["tso_keyspace_group_id"]
+	if groupID == "" {
+		groupID = "not configured"
+	}
+	log.Info("[test] saved keyspace metadata",
+		zap.Uint32("keyspace-id", meta.Id),
+		zap.String("keyspace-name", meta.Name),
+		zap.String("tso-group-id", groupID))
+}
+
+// createKeyspaceMetadataForGroup creates keyspace metadata with tso_keyspace_group_id configuration.
+// This is needed when failpoint checkKeyspaceBeforeFallback is enabled.
+func (suite *keyspaceGroupTestSuite) createKeyspaceMetadataForGroup(re *require.Assertions, keyspaceID, keyspaceGroupID uint32) {
+	meta := &keyspacepb.KeyspaceMeta{
+		Id:   keyspaceID,
+		Name: fmt.Sprintf("test_keyspace_%d", keyspaceID),
+		Config: map[string]string{
+			"tso_keyspace_group_id": fmt.Sprintf("%d", keyspaceGroupID),
+		},
+	}
+	suite.saveKeyspaceMetaWithLog(re, meta)
 }
 
 // TestTSOFallbackIssue tests the fix for issue #6770

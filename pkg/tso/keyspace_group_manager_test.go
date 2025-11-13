@@ -31,12 +31,14 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"go.uber.org/zap"
 
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -77,9 +79,12 @@ func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	suite.backendEndpoints, suite.etcdClient, suite.clean = servers[0].Config().ListenClientUrls[0].String(), client, clean
 	suite.cfg = suite.createConfig()
+	// Enable failpoint to check keyspace meta before fallback
+	failpoint.Enable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback", "return(true)")
 }
 
 func (suite *keyspaceGroupManagerTestSuite) TearDownSuite() {
+	failpoint.Disable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback")
 	suite.clean()
 	suite.cancel()
 }
@@ -98,6 +103,22 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		MaxResetTSGap:             time.Hour * 24,
 		TLSConfig:                 nil,
 	}
+}
+
+// saveKeyspaceMetaWithLog is a helper function to save keyspace metadata and log the operation.
+func saveKeyspaceMetaWithLog(ctx context.Context, re *require.Assertions, storage *endpoint.StorageEndpoint, meta *keyspacepb.KeyspaceMeta) {
+	err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, meta)
+	})
+	re.NoError(err)
+	groupID := meta.Config["tso_keyspace_group_id"]
+	if groupID == "" {
+		groupID = "none (legacy)"
+	}
+	log.Info("[test] saved keyspace metadata",
+		zap.Uint32("keyspace-id", meta.Id),
+		zap.String("keyspace-name", meta.Name),
+		zap.String("tso-group-id", groupID))
 }
 
 func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
@@ -463,6 +484,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
+	// Create keyspace 3 metadata WITHOUT tso_keyspace_group_id config (legacy keyspace)
+	// This represents a keyspace that hasn't been assigned to any specific group yet.
+	meta3 := &keyspacepb.KeyspaceMeta{
+		Id:     3,
+		Name:   "test_keyspace_3_legacy",
+		Config: map[string]string{}, // No tso_keyspace_group_id configured
+	}
+	saveKeyspaceMetaWithLog(suite.ctx, re, mgr.legacySvcStorage, meta3)
+
 	// Should still succeed even keyspace 3 isn't explicitly assigned to any
 	// keyspace group. It will be assigned to the default keyspace group.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0, mgr)
@@ -655,6 +685,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(suite.ctx, 0, 1, GlobalDCLocation, 1)
 	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
+
+	// Create keyspace 100 metadata WITHOUT tso_keyspace_group_id config (legacy keyspace)
+	// This represents a keyspace that hasn't been explicitly assigned to any group.
+	meta100 := &keyspacepb.KeyspaceMeta{
+		Id:     100,
+		Name:   "test_keyspace_100_legacy",
+		Config: map[string]string{}, // No tso_keyspace_group_id - this is a legacy keyspace
+	}
+	saveKeyspaceMetaWithLog(suite.ctx, re, mgr.legacySvcStorage, meta100)
 
 	// Should succeed because keyspace 100 doesn't belong to any keyspace group, so it will
 	// be served by the default keyspace group 0, and keyspace group 0 is returned in the response.
@@ -1228,7 +1267,7 @@ func waitForPrimariesServing(
 // 1. Null keyspace (ID=0xFFFFFFFF) - should ALWAYS fallback to default group
 // 2. Keyspace has configured group in metadata - should NOT fallback to default group
 // 3. Keyspace has no configured group (legacy keyspace) - should fallback to default group
-// 4. Keyspace not found in storage - should fallback to default group
+// 4. Keyspace not found in storage - should return error (not fallback)
 func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 	re := suite.Require()
 
@@ -1266,10 +1305,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 			"tso_keyspace_group_id": strconv.FormatUint(uint64(configuredGroupID), 10),
 		},
 	}
-	err = mgr.legacySvcStorage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return mgr.legacySvcStorage.SaveKeyspaceMeta(txn, meta1)
-	})
-	re.NoError(err)
+	saveKeyspaceMetaWithLog(suite.ctx, re, mgr.legacySvcStorage, meta1)
 
 	// Try to get keyspace group meta, it should NOT fallback to default group
 	// because keyspace has configured group in metadata
@@ -1288,10 +1324,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 		Name:   "test_keyspace_2",
 		Config: map[string]string{}, // No tso_keyspace_group_id configured
 	}
-	err = mgr.legacySvcStorage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return mgr.legacySvcStorage.SaveKeyspaceMeta(txn, meta2)
-	})
-	re.NoError(err)
+	saveKeyspaceMetaWithLog(suite.ctx, re, mgr.legacySvcStorage, meta2)
 
 	// Try to get keyspace group meta, it should fallback to default group
 	// because keyspace has no configured group
@@ -1303,13 +1336,13 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
 	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 
-	// Scenario 4: Keyspace not found in storage (also should fallback)
+	// Scenario 4: Keyspace not found in storage (should return error)
 	keyspaceID3 := uint32(300)
 	am, kg, groupID, err = mgr.state.getKeyspaceGroupMetaWithCheck(
 		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
-	re.NoError(err)
-	re.NotNil(am)
-	re.NotNil(kg)
+	re.Error(err)
+	re.Nil(am)
+	re.Nil(kg)
 	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
-	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
+	re.True(errors.ErrorEqual(err, errs.ErrKeyspaceNotAssigned.FastGenByArgs()))
 }

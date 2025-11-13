@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/mock/mockserver"
@@ -699,8 +700,11 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	for range 3 {
 		wg.Add(1)
 		go func() {
-			leaderServer.BootstrapCluster()
-			wg.Done()
+			defer wg.Done()
+			if err != nil {
+				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+				re.ErrorContains(err, errs.ErrEtcdTxnConflict.GetMsg())
+			}
 		}()
 	}
 	wg.Wait()

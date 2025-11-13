@@ -26,7 +26,9 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
@@ -37,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -47,6 +50,7 @@ import (
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
+	"go.uber.org/zap"
 )
 
 type tsoKeyspaceGroupManagerTestSuite struct {
@@ -77,6 +81,7 @@ func TestTSOKeyspaceGroupManagerSuite(t *testing.T) {
 func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback", "return(true)"))
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -99,6 +104,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownSuite() {
 	suite.tsoCluster.Destroy()
 	suite.cluster.Destroy()
 	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
+	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/checkKeyspaceBeforeFallback"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
@@ -116,10 +122,54 @@ func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
 	}
 }
 
+// createLegacyKeyspaces creates keyspace metadata WITHOUT tso_keyspace_group_id configuration.
+// These keyspaces are not assigned to any specific keyspace group and should be served by the default keyspace group.
+func (suite *tsoKeyspaceGroupManagerTestSuite) createLegacyKeyspaces(re *require.Assertions, keyspaceIDs []uint32) {
+	suite.createKeyspacesWithGroupID(re, keyspaceIDs, nil)
+}
+
+// saveKeyspaceMetaWithLog saves keyspace metadata to storage and logs the operation.
+func (suite *tsoKeyspaceGroupManagerTestSuite) saveKeyspaceMetaWithLog(re *require.Assertions, meta *keyspacepb.KeyspaceMeta) {
+	storage := suite.pdLeaderServer.GetServer().GetStorage()
+	err := storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, meta)
+	})
+	re.NoError(err)
+	groupID := meta.Config["tso_keyspace_group_id"]
+	if groupID == "" {
+		groupID = "not configured"
+	}
+	log.Info("[test] saved keyspace metadata",
+		zap.Uint32("keyspace-id", meta.Id),
+		zap.String("keyspace-name", meta.Name),
+		zap.String("tso-group-id", groupID))
+}
+
+// createKeyspacesWithGroupID creates keyspace metadata with or without tso_keyspace_group_id configuration.
+// If groupID is nil, creates keyspaces without tso_keyspace_group_id configuration.
+// If groupID is not nil, creates keyspaces with the specified group ID.
+func (suite *tsoKeyspaceGroupManagerTestSuite) createKeyspacesWithGroupID(re *require.Assertions, keyspaceIDs []uint32, groupID *uint32) {
+	for _, keyspaceID := range keyspaceIDs {
+		meta := &keyspacepb.KeyspaceMeta{
+			Id:     keyspaceID,
+			Name:   fmt.Sprintf("test_keyspace_%d", keyspaceID),
+			Config: make(map[string]string),
+		}
+		if groupID != nil {
+			meta.Config["tso_keyspace_group_id"] = fmt.Sprintf("%d", *groupID)
+		}
+		suite.saveKeyspaceMetaWithLog(re, meta)
+	}
+}
+
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {
 	// There is only default keyspace group. Any keyspace, which hasn't been assigned to
 	// a keyspace group before, will be served by the default keyspace group.
 	re := suite.Require()
+
+	// Create keyspaces without tso_keyspace_group_id configuration, which should be served by default keyspace group
+	suite.createLegacyKeyspaces(re, []uint32{1, 2, 3, 1000})
+
 	testutil.Eventually(re, func() bool {
 		for _, keyspaceID := range []uint32{0, 1, 2} {
 			served := false
@@ -509,6 +559,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	// Enable failpoint to override keyspaceID to 1001
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/overrideKeyspaceID", "return(1001)"))
 	// wait for finishing alloc nodes
 	waitFinishAllocNodes(re, suite.pdLeaderServer, constant.DefaultKeyspaceGroupID)
 	testConfig := map[string]string{
@@ -516,11 +568,19 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 		"tso_keyspace_group_id": "0",
 		"user_kind":             "basic",
 	}
-	handlersutil.MustCreateKeyspace(re, suite.pdLeaderServer, &handlers.CreateKeyspaceParams{
+	keyspaceMeta := handlersutil.MustCreateKeyspace(re, suite.pdLeaderServer, &handlers.CreateKeyspaceParams{
 		Name:   "test_keyspace",
 		Config: testConfig,
 	})
+	// Verify the keyspace was created with ID 1001
+	re.Equal(uint32(1001), keyspaceMeta.Id)
+
+	// Save keyspace metadata for the created keyspace
+	// This is needed when failpoint checkKeyspaceBeforeFallback is enabled
+	suite.saveKeyspaceMetaWithLog(re, keyspaceMeta)
+
 	waitFinishAllocNodes(re, suite.pdLeaderServer, constant.DefaultKeyspaceGroupID)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/overrideKeyspaceID"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }

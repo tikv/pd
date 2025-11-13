@@ -263,6 +263,15 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
+	// Failpoint to override keyspaceID for testing purposes.
+	failpoint.Inject("overrideKeyspaceID", func(val failpoint.Value) {
+		if overrideID, ok := val.(int); ok {
+			newID = uint32(overrideID)
+			log.Info("[keyspace] override keyspace id via failpoint",
+				zap.Uint32("keyspace-id", newID),
+				zap.String("name", request.Name))
+		}
+	})
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
