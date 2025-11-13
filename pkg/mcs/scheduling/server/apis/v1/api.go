@@ -307,9 +307,13 @@ func getConfig(c *gin.Context) {
 		return
 	}
 
+	// If the server is not serving, it means it is a follower.
+	// We need to get the dynamic config from the primary server.
+	// If no primary server is found, return an error.
+	// Or if the primary server is itself but not serving, return an error.
 	primaryAddrs := svr.GetParticipant().GetServingUrls()
-	if len(primaryAddrs) == 0 {
-		c.String(http.StatusServiceUnavailable, "no primary scheduling server found, cannot get dynamic config")
+	if len(primaryAddrs) == 0 || primaryAddrs[0] == svr.GetAddr() {
+		c.String(http.StatusServiceUnavailable, "no available primary server found, cannot get dynamic config")
 		return
 	}
 
