@@ -38,7 +38,8 @@ type Storage interface {
 	endpoint.ServiceMiddlewareStorage
 	endpoint.ConfigStorage
 	endpoint.MetaStorage
-	endpoint.RuleStorage
+	endpoint.PlacementRuleStorage
+	endpoint.RegionLabelRuleStorage
 	endpoint.ReplicationStatusStorage
 	endpoint.GCStateStorage
 	endpoint.MinResolvedTSStorage

@@ -111,9 +111,10 @@ type Server struct {
 	storage   *endpoint.StorageEndpoint
 
 	// for watching the PD meta info updates that are related to the scheduling.
-	configWatcher *config.Watcher
-	ruleWatcher   *rule.Watcher
-	metaWatcher   *meta.Watcher
+	configWatcher          *config.Watcher
+	metaWatcher            *meta.Watcher
+	placementRuleWatcher   *rule.PlacementRuleWatcher
+	regionLabelRuleWatcher *rule.RegionLabelRuleWatcher
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -505,8 +506,8 @@ func (s *Server) startCluster(context.Context) error {
 	}
 	// Inject the cluster components into the config watcher after the scheduler controller is created.
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
-	// Start the rule watcher after the cluster is created.
-	err = s.startRuleWatcher()
+	// Start the rule watchers after the cluster is created.
+	err = s.startRuleWatchers()
 	if err != nil {
 		return err
 	}
@@ -528,17 +529,26 @@ func (s *Server) startMetaConfWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	return err
+	return nil
 }
 
-func (s *Server) startRuleWatcher() (err error) {
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
-		s.cluster.GetCoordinator().GetCheckerController(), s.cluster.GetRuleManager(), s.cluster.GetRegionLabeler())
-	return err
+func (s *Server) startRuleWatchers() (err error) {
+	s.placementRuleWatcher, err = rule.NewPlacementRuleWatcher(s.Context(), s.GetClient(),
+		s.cluster.GetCoordinator().GetCheckerController(), s.cluster.GetRuleManager())
+	if err != nil {
+		return err
+	}
+	s.regionLabelRuleWatcher, err = rule.NewRegionLabelRuleWatcher(s.Context(), s.GetClient(),
+		s.cluster.GetRegionLabeler())
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) stopWatcher() {
-	s.ruleWatcher.Close()
+	s.placementRuleWatcher.Close()
+	s.regionLabelRuleWatcher.Close()
 	s.configWatcher.Close()
 	s.metaWatcher.Close()
 }
