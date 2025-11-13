@@ -1556,9 +1556,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 }
 
 func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
-	upStores := c.getUpStores( /* isInclude */ func(store *core.StoreInfo) bool {
-		return store.IsTiKV()
-	})
+	upStores := c.getUpStores()
 	expectUpStoresNum := len(upStores) - 1
 	if expectUpStoresNum < c.opt.GetMaxReplicas() {
 		return errs.ErrStoresNotEnough.FastGenByArgs(storeID, expectUpStoresNum, c.opt.GetMaxReplicas())
@@ -1592,10 +1590,11 @@ func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 	return nil
 }
 
-func (c *RaftCluster) getUpStores(isInclude ...func(store *core.StoreInfo) bool) []uint64 {
+// getUpStores gets all up TiKV stores.
+func (c *RaftCluster) getUpStores() []uint64 {
 	upStores := make([]uint64, 0)
 	for _, store := range c.GetStores() {
-		if len(isInclude) > 0 && !isInclude[0](store) {
+		if !store.IsTiKV() {
 			continue
 		}
 		if store.IsUp() {
