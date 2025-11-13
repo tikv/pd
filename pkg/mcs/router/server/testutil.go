@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2025 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,29 +22,10 @@ import (
 
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/router/server/config"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
-
-// NewTestServer creates a scheduling server for testing.
-func NewTestServer(ctx context.Context, re *require.Assertions, cfg *config.Config) (*Server, testutil.CleanupFunc, error) {
-	// New zap logger
-	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	re.NoError(err)
-	log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	// Flushing any buffered log entries
-	log.Sync()
-	s := CreateServer(ctx, cfg)
-	if err = s.Run(); err != nil {
-		return nil, nil, err
-	}
-
-	cleanup := func() {
-		s.Close()
-	}
-	return s, cleanup, nil
-}
 
 // GenerateConfig generates a new config with the given options.
 func GenerateConfig(c *config.Config) (*config.Config, error) {
@@ -76,4 +57,24 @@ func GenerateConfig(c *config.Config) (*config.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// NewTestServer creates a router server for testing.
+func NewTestServer(ctx context.Context, re *require.Assertions, cfg *config.Config) (*Server, testutil.CleanupFunc, error) {
+	// New zap logger
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	re.NoError(err)
+	log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	// Flushing any buffered log entries
+	log.Sync()
+
+	s := CreateServer(ctx, cfg)
+	if err = s.Run(); err != nil {
+		return nil, nil, err
+	}
+
+	cleanup := func() {
+		s.Close()
+	}
+	return s, cleanup, nil
 }
