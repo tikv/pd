@@ -388,6 +388,7 @@ func newClientWithKeyspaceName(
 			return err
 		}
 		c.inner.keyspaceID = keyspaceMeta.GetId()
+		c.inner.keyspaceMeta = keyspaceMeta
 		// c.keyspaceID is the source of truth for keyspace id.
 		c.inner.serviceDiscovery.SetKeyspaceID(c.inner.keyspaceID)
 		return nil
