@@ -41,21 +41,21 @@ import (
 // TSO Stream Builder Factory
 
 type tsoStreamBuilderFactory interface {
-	makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder
+	makeBuilder(cc *grpc.ClientConn, keyspaceName string) tsoStreamBuilder
 }
 
 // PDStreamBuilderFactory is a factory for building TSO streams to the PD cluster.
 type PDStreamBuilderFactory struct{}
 
-func (*PDStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &pdStreamBuilder{client: pdpb.NewPDClient(cc), serverURL: cc.Target()}
+func (*PDStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn, keyspaceName string) tsoStreamBuilder {
+	return &pdStreamBuilder{client: pdpb.NewPDClient(cc), serverURL: cc.Target(), keyspaceName: keyspaceName}
 }
 
 // MSStreamBuilderFactory is a factory for building TSO streams to the microservice cluster.
 type MSStreamBuilderFactory struct{}
 
-func (*MSStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &msStreamBuilder{client: tsopb.NewTSOClient(cc), serverURL: cc.Target()}
+func (*MSStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn, keyspaceName string) tsoStreamBuilder {
+	return &msStreamBuilder{client: tsopb.NewTSOClient(cc), serverURL: cc.Target(), keyspaceName: keyspaceName}
 }
 
 // TSO Stream Builder
@@ -65,8 +65,9 @@ type tsoStreamBuilder interface {
 }
 
 type pdStreamBuilder struct {
-	serverURL string
-	client    pdpb.PDClient
+	serverURL    string
+	keyspaceName string
+	client       pdpb.PDClient
 }
 
 func (b *pdStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
@@ -76,14 +77,15 @@ func (b *pdStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, 
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return newTSOStream(ctx, b.serverURL, pdTSOStreamAdapter{stream}), nil
+		return newTSOStream(ctx, b.serverURL, pdTSOStreamAdapter{stream}, b.keyspaceName), nil
 	}
 	return nil, err
 }
 
 type msStreamBuilder struct {
-	serverURL string
-	client    tsopb.TSOClient
+	serverURL    string
+	client       tsopb.TSOClient
+	keyspaceName string
 }
 
 func (b *msStreamBuilder) build(
@@ -95,7 +97,7 @@ func (b *msStreamBuilder) build(
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{stream}), nil
+		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{stream}, b.keyspaceName), nil
 	}
 	return nil, err
 }
@@ -220,6 +222,8 @@ type tsoStream struct {
 
 	ongoingRequestCountGauge prometheus.Gauge
 	ongoingRequests          atomic.Int32
+
+	keyspaceName string
 }
 
 const (
@@ -235,7 +239,7 @@ const (
 	maxPendingRequestsInTSOStream = 64
 )
 
-func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
+func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter, keyspaceName string) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
 	// To make error handling in `tsoDispatcher` work, the internal `cancel` and external `cancel` is better to be
 	// distinguished.
@@ -250,6 +254,7 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 		cancel: cancel,
 
 		ongoingRequestCountGauge: metrics.OngoingRequestCountGauge.WithLabelValues(streamID),
+		keyspaceName:             keyspaceName,
 	}
 	s.wg.Add(1)
 	go s.recvLoop(ctx)
@@ -390,6 +395,17 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		// Update the metrics in seconds.
 		metrics.EstimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
 	}
+	successObserver := sync.OnceValue(func() prometheus.Observer {
+		return metrics.RequestDuration.WithLabelValues("tso", s.keyspaceName)
+	})
+
+	failedObserver := sync.OnceValue(func() prometheus.Observer {
+		return metrics.RequestDuration.WithLabelValues("tso-failed", s.keyspaceName)
+	})
+
+	batchObserver := sync.OnceValue(func() prometheus.Observer {
+		return metrics.TSOBatchSize.WithLabelValues(s.keyspaceName)
+	})
 
 recvLoop:
 	for {
@@ -401,7 +417,6 @@ recvLoop:
 		}
 
 		res, err := s.stream.Recv()
-
 		// Try to load the corresponding `batchedRequests`. If `Recv` is successful, there must be a request pending
 		// in the queue.
 		select {
@@ -419,7 +434,7 @@ recvLoop:
 			// Note that it's also possible that the stream is broken due to network without being requested. In this
 			// case, `Recv` may return an error while no request is pending.
 			if hasReq {
-				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
+				successObserver().Observe(latencySeconds)
 			}
 			if err == io.EOF {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
@@ -431,9 +446,8 @@ recvLoop:
 			finishWithErr = errors.New("tsoStream timing order broken")
 			break recvLoop
 		}
-
-		metrics.RequestDurationTSO.Observe(latencySeconds)
-		metrics.TSOBatchSize.Observe(float64(res.count))
+		failedObserver().Observe(latencySeconds)
+		batchObserver().Observe(float64(res.count))
 		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {

@@ -248,6 +248,7 @@ func createClientWithKeyspace(
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
 			keyspaceID:              keyspaceID,
+			keyspaceName:            constants.NullKeyspaceName,
 			svrUrls:                 svrAddrs,
 			updateTokenConnectionCh: make(chan struct{}, 1),
 			ctx:                     clientCtx,
@@ -262,7 +263,26 @@ func createClientWithKeyspace(
 		opt(c.inner.option)
 	}
 
-	return c, c.inner.init(nil)
+	updateKeyspaceNameFunc := func() error {
+		// skip keyspace name if keyspace equals NullKeyspaceID
+		if keyspaceID == constants.NullKeyspaceID {
+			return nil
+		}
+		// todo: create new API to get keyspace by id
+		metas, err := c.GetAllKeyspaces(clientCtx, keyspaceID, 1)
+		if err != nil {
+			return err
+		}
+		for _, m := range metas {
+			if m.GetId() == keyspaceID {
+				c.inner.keyspaceName = m.GetName()
+				break
+			}
+		}
+		return nil
+	}
+
+	return c, c.inner.init(updateKeyspaceNameFunc)
 }
 
 // APIVersion is the API version the server and the client is using.
@@ -368,6 +388,7 @@ func newClientWithKeyspaceName(
 			// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
 			// finally update the keyspace id to the service discovery for the following interactions.
 			keyspaceID:              constants.NullKeyspaceID,
+			keyspaceName:            keyspaceName,
 			updateTokenConnectionCh: make(chan struct{}, 1),
 			ctx:                     clientCtx,
 			cancel:                  clientCancel,
