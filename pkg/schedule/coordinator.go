@@ -85,7 +85,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	ctx, cancel := context.WithCancel(parentCtx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
-	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,

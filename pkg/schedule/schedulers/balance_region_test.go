@@ -658,10 +658,10 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	)
 	tc.PutRegion(region)
 
-	tc.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+	tc.KeyRangeManager.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
 	operators, _ := sb.Schedule(tc, false)
 	re.Empty(operators)
-	tc.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+	tc.KeyRangeManager.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
 
 	operators, _ = sb.Schedule(tc, false)
 	re.NotEmpty(operators)

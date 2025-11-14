@@ -17,9 +17,12 @@ package checker
 import (
 	"time"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 const (
@@ -35,4 +38,27 @@ type AffinityChecker struct {
 	affinityManager *affinity.Manager
 	conf            config.CheckerConfigProvider
 	startTime       time.Time // it's used to judge whether server recently start.
+}
+
+// NewAffinityChecker create an affinity checker.
+func NewAffinityChecker(cluster sche.CheckerCluster, affinityManager *affinity.Manager, conf config.CheckerConfigProvider) *AffinityChecker {
+	return &AffinityChecker{
+		cluster:         cluster,
+		affinityManager: affinityManager,
+		conf:            conf,
+		startTime:       time.Now(),
+	}
+}
+
+// GetType return AffinityChecker's type.
+// nolint:unused
+func (*AffinityChecker) GetType() types.CheckerSchedulerType {
+	return types.AffinityChecker
+}
+
+// Check verifies a region's replicas, creating an Operator if needed.
+// nolint:unused
+func (*AffinityChecker) Check(*core.RegionInfo) []*operator.Operator {
+	// TODO
+	return nil
 }

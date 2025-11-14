@@ -35,7 +35,6 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -74,6 +73,7 @@ type Controller struct {
 	ruleChecker             *RuleChecker
 	splitChecker            *SplitChecker
 	mergeChecker            *MergeChecker
+	affinityChecker         *AffinityChecker
 	jointStateChecker       *JointStateChecker
 	priorityInspector       *PriorityInspector
 	pendingProcessedRegions *cache.TTLUint64
@@ -97,8 +97,9 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, opController *operator.Controller) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
+	ruleManager := cluster.GetRuleManager()
 	c := &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
@@ -107,8 +108,9 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		learnerChecker:          NewLearnerChecker(cluster),
 		replicaChecker:          NewReplicaChecker(cluster, conf, pendingProcessedRegions),
 		ruleChecker:             NewRuleChecker(ctx, cluster, ruleManager, pendingProcessedRegions),
-		splitChecker:            NewSplitChecker(cluster, ruleManager, labeler),
+		splitChecker:            NewSplitChecker(cluster, ruleManager, cluster.GetRegionLabeler()),
 		mergeChecker:            NewMergeChecker(ctx, cluster, conf),
+		affinityChecker:         NewAffinityChecker(cluster, cluster.GetAffinityManager(), conf),
 		jointStateChecker:       NewJointStateChecker(cluster),
 		priorityInspector:       NewPriorityInspector(cluster, conf),
 		pendingProcessedRegions: pendingProcessedRegions,

@@ -88,6 +88,7 @@ type CheckerConfigProvider interface {
 	GetPatrolRegionWorkerCount() int
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
+	GetMaxAffinityMergeRegionSize() uint64
 	GetReplicaScheduleLimit() uint64
 }
 

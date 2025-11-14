@@ -179,10 +179,10 @@ type RaftCluster struct {
 	id  id.Allocator
 	opt *config.PersistOptions
 	*schedulingController
-	affinityManager          *affinity.Manager
 	ruleManager              *placement.RuleManager
 	keyRangeManager          *keyrange.Manager
 	regionLabeler            *labeler.RegionLabeler
+	affinityManager          *affinity.Manager
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsaferecovery.Controller
 	progressManager          *progress.Manager
@@ -983,11 +983,6 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
 }
 
-// GetAffinityManager returns the affinity manager reference.
-func (c *RaftCluster) GetAffinityManager() *affinity.Manager {
-	return c.affinityManager
-}
-
 // GetKeyRangeManager returns the key range manager reference
 func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
 	return c.keyRangeManager
@@ -996,6 +991,11 @@ func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
 // GetRegionLabeler returns the region labeler.
 func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.regionLabeler
+}
+
+// GetAffinityManager returns the affinity manager reference.
+func (c *RaftCluster) GetAffinityManager() *affinity.Manager {
+	return c.affinityManager
 }
 
 // GetStorage returns the storage.

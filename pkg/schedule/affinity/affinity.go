@@ -66,7 +66,7 @@ func (g *Group) String() string {
 }
 
 // GroupState defines the runtime state of an affinity group.
-// NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type GroupState struct {
 	// LeaderStoreID indicates which store the leader should be on.
 	LeaderStoreID uint64 `json:"leader_store_id"`

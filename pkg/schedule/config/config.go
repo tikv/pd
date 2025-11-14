@@ -80,6 +80,8 @@ const (
 	defaultHotRegionsWriteInterval = 10 * time.Minute
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+
+	defaultMaxAffinityMergeRegionSize = 0
 )
 
 var (
@@ -317,6 +319,9 @@ type ScheduleConfig struct {
 
 	// EnableAffinityScheduling is the option to enable affinity scheduling.
 	EnableAffinityScheduling bool `toml:"enable-affinity-scheduling" json:"enable-affinity-scheduling,string,omitempty"`
+	// If the size of region is smaller than MaxAffinityMergeRegionSize,
+	// and it is affinity, it will try to merge with adjacent regions.
+	MaxAffinityMergeRegionSize uint64 `toml:"max-affinity-merge-region-size" json:"max-affinity-merge-region-size"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -345,6 +350,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("max-merge-region-size") {
 		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	}
+	if !meta.IsDefined("max-affinity-merge-region-size") {
+		configutil.AdjustUint64(&c.MaxAffinityMergeRegionSize, defaultMaxAffinityMergeRegionSize)
 	}
 	configutil.AdjustDuration(&c.SplitMergeInterval, DefaultSplitMergeInterval)
 	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
@@ -476,6 +484,15 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 		return keys
 	}
 	return c.MaxMergeRegionSize * 10000
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// It returns 0 if the MaxMergeRegionSize is 0.
+func (c *ScheduleConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	if c.MaxMergeRegionSize == 0 {
+		return 0
+	}
+	return c.MaxAffinityMergeRegionSize
 }
 
 func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
