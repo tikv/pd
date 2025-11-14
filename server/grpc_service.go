@@ -1602,6 +1602,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 }
 
 // ScanRegions implements gRPC PDServer.
+//
 // Deprecated: use BatchScanRegions instead.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (resp *pdpb.ScanRegionsResponse, err error) {
 	done, err := s.rateLimitCheck()
