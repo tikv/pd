@@ -195,6 +195,11 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// IsAffinitySchedulingEnabled returns if the affinity scheduling is enabled.
+func (o *PersistOptions) IsAffinitySchedulingEnabled() bool {
+	return o.GetScheduleConfig().EnableAffinityScheduling
+}
+
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()

@@ -53,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -178,6 +179,7 @@ type RaftCluster struct {
 	id  id.Allocator
 	opt *config.PersistOptions
 	*schedulingController
+	affinityManager          *affinity.Manager
 	ruleManager              *placement.RuleManager
 	keyRangeManager          *keyrange.Manager
 	regionLabeler            *labeler.RegionLabeler
@@ -324,8 +326,9 @@ func (c *RaftCluster) InitCluster(
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
+	c.affinityManager = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts())
 	c.keyRangeManager = keyrange.NewManager()
-	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
+	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager) // TODO: pass affinity manager
 	return nil
 }
 
@@ -378,6 +381,11 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	if err != nil {
+		return err
+	}
+
+	err = c.affinityManager.Initialize()
 	if err != nil {
 		return err
 	}
@@ -973,6 +981,11 @@ func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 // GetRuleManager returns the rule manager reference.
 func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
+}
+
+// GetAffinityManager returns the affinity manager reference.
+func (c *RaftCluster) GetAffinityManager() *affinity.Manager {
+	return c.affinityManager
 }
 
 // GetKeyRangeManager returns the key range manager reference

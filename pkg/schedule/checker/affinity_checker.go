@@ -23,10 +23,12 @@ import (
 )
 
 const (
+	// nolint:unused
 	affinityLabel = "affinity"
 )
 
 // AffinityChecker groups regions with affinity labels together by affinity group.
+// nolint:unused
 type AffinityChecker struct {
 	PauseController
 	cluster         sche.CheckerCluster

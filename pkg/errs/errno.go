@@ -553,3 +553,11 @@ var (
 var (
 	ErrIDExhausted = errors.Normalize("id exhausted", errors.RFCCodeText("PD:idalloc:ErrIDExhausted"))
 )
+
+// affinity errors
+var (
+	ErrAffinityGroupNotFound = errors.Normalize("affinity group %s not found", errors.RFCCodeText("PD:affinity:ErrAffinityGroupNotFound"))
+	ErrAffinityGroupExist    = errors.Normalize("affinity group %s already exists", errors.RFCCodeText("PD:affinity:ErrAffinityGroupExist"))
+	ErrAffinityDisabled      = errors.Normalize("affinity is disabled", errors.RFCCodeText("PD:affinity:ErrAffinityDisabled"))
+	ErrAffinityGroupContent  = errors.Normalize("invalid affinity group content, %s", errors.RFCCodeText("PD:affinity:ErrAffinityGroupContent"))
+)

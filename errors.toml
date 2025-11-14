@@ -6,6 +6,26 @@ error = '''
 KMS error
 '''
 
+["PD:affinity:ErrAffinityDisabled"]
+error = '''
+affinity is disabled
+'''
+
+["PD:affinity:ErrAffinityGroupContent"]
+error = '''
+invalid affinity group content, %s
+'''
+
+["PD:affinity:ErrAffinityGroupExist"]
+error = '''
+affinity group %s already exists
+'''
+
+["PD:affinity:ErrAffinityGroupNotFound"]
+error = '''
+affinity group %s not found
+'''
+
 ["PD:apiutil:ErrOptionNotExist"]
 error = '''
 the option %s does not exist

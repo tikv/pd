@@ -314,6 +314,9 @@ type ScheduleConfig struct {
 
 	// PatrolRegionWorkerCount is the number of workers to patrol region.
 	PatrolRegionWorkerCount int `toml:"patrol-region-worker-count" json:"patrol-region-worker-count"`
+
+	// EnableAffinityScheduling is the option to enable affinity scheduling.
+	EnableAffinityScheduling bool `toml:"enable-affinity-scheduling" json:"enable-affinity-scheduling,string,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.

@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -56,6 +57,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	am *affinity.Manager
 	*keyrange.Manager
 	*labeler.RegionLabeler
 	*statistics.HotStat
@@ -81,6 +83,9 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
+	}
+	if c.PersistOptions.GetScheduleConfig().EnableAffinityScheduling {
+		c.initAffinityManager()
 	}
 	// It should be updated to the latest feature version.
 	c.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
@@ -215,9 +220,21 @@ func (mc *Cluster) initRuleManager() {
 	}
 }
 
+func (mc *Cluster) initAffinityManager() {
+	if mc.am == nil {
+		mc.am = affinity.NewManager(mc.ctx, mc.GetStorage(), mc, mc.GetSharedConfig())
+		mc.am.Initialize()
+	}
+}
+
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
+}
+
+// GetAffinityManager returns the affinity manager of the cluster.
+func (mc *Cluster) GetAffinityManager() *affinity.Manager {
+	return mc.am
 }
 
 // GetKeyRangeManager returns the key range manager of the cluster.

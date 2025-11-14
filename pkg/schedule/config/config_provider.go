@@ -95,6 +95,7 @@ type CheckerConfigProvider interface {
 type SharedConfigProvider interface {
 	GetMaxReplicas() int
 	IsPlacementRulesEnabled() bool
+	IsAffinitySchedulingEnabled() bool
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetLowSpaceRatio() float64

@@ -68,6 +68,7 @@ import (
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -2163,4 +2164,17 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
+}
+
+// GetAffinityManager gets the affinity manager.
+func (s *Server) GetAffinityManager() (*affinity.Manager, error) {
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	manager := rc.GetAffinityManager()
+	if manager == nil {
+		return nil, errs.ErrAffinityDisabled
+	}
+	return manager, nil
 }

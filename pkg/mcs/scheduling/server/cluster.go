@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
@@ -191,6 +192,12 @@ func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 // GetRuleManager returns the rule manager.
 func (c *Cluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
+}
+
+// GetAffinityManager returns the affinity manager.
+func (*Cluster) GetAffinityManager() *affinity.Manager {
+	// TODO: implement it in mcs
+	return nil
 }
 
 // GetKeyRangeManager returns the key range manager
