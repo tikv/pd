@@ -1167,6 +1167,16 @@ func (suite *clientStatelessTestSuite) TestScanRegions() {
 
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
+		region1 := suite.srv.GetRaftCluster().GetRegion(regions[0].GetId())
+		if region1 != nil {
+			digit := suite.srv.GetPDServerConfig().FlowRoundByDigit
+			re.NotEqual(digit, region1.GetFlowRoundDivisor())
+			re.Equal(core.GetFlowRoundDivisorByDigit(digit), region1.GetFlowRoundDivisor())
+			return true
+		}
+		return false
+	})
+	testutil.Eventually(re, func() bool {
 		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
 		return err == nil && len(scanRegions) == 10
 	})
