@@ -1414,9 +1414,6 @@ func (suite *clientTestSuite) TestScanRegions() {
 
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
-<<<<<<< HEAD
-		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
-=======
 		region1 := suite.srv.GetRaftCluster().GetRegion(regions[0].GetId())
 		if region1 != nil {
 			digit := suite.srv.GetPDServerConfig().FlowRoundByDigit
@@ -1427,8 +1424,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 		return false
 	})
 	testutil.Eventually(re, func() bool {
-		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
->>>>>>> 4a11b99ee (core:fix bug for FlowRoundByDigit (#9936))
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
