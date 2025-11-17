@@ -1524,7 +1524,7 @@ func TestStaleTermHeartbeat(t *testing.T) {
 		Term:            5,
 		ApproximateSize: 10,
 	}
-	flowRoundDivisor := leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit
+	flowRoundDivisor := core.GetFlowRoundDivisorByDigit(leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit)
 	region := core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
