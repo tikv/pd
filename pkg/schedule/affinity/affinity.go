@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -137,13 +138,14 @@ func (m *Manager) Initialize() error {
 				zap.String("key", k),
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 		}
-		m.groups[group.ID] = &GroupInfo{Group: *group}
+		m.groups[group.ID] = &GroupInfo{Group: *group, Effect: true}
 	})
 	if err != nil {
 		return err
 	}
 
 	m.initialized = true
+	m.startHealthCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
 	return nil
 }
@@ -196,7 +198,7 @@ func (m *Manager) GetAffinityGroup(id string) *Group {
 	m.RLock()
 	defer m.RUnlock()
 	if info, ok := m.groups[id]; ok {
-		return info.Clone() // Return a clone to prevent concurrent modification
+		return info.Clone() // Return a clone of Group to prevent concurrent modification
 	}
 	return nil
 }
@@ -207,7 +209,7 @@ func (m *Manager) GetAllAffinityGroups() []*Group {
 	defer m.RUnlock()
 	groups := make([]*Group, 0, len(m.groups))
 	for _, info := range m.groups {
-		groups = append(groups, info.Clone())
+		groups = append(groups, info.Clone()) // Clone Group, not GroupInfo
 	}
 	// Sort by ID for deterministic output
 	sort.Slice(groups, func(i, j int) bool {
@@ -222,6 +224,74 @@ func (m *Manager) IsGroupExist(id string) bool {
 	defer m.RUnlock()
 	_, ok := m.groups[id]
 	return ok
+}
+
+// GetLabelRuleID returns the label rule ID for an affinity group.
+// This ensures consistent naming between label creation and deletion.
+// Format: "affinity_group/{group_id}"
+func GetLabelRuleID(groupID string) string {
+	return "affinity_group/" + groupID
+}
+
+// GetGroups returns the internal groups map.
+// Used for testing only.
+func (m *Manager) GetGroups() map[string]*GroupInfo {
+	m.RLock()
+	defer m.RUnlock()
+	return m.groups
+}
+
+// SetRegionGroup sets the affinity group for a region.
+// Used for testing only.
+func (m *Manager) SetRegionGroup(regionID uint64, groupID string) {
+	m.Lock()
+	defer m.Unlock()
+	if groupID == "" {
+		delete(m.regions, regionID)
+		return
+	}
+
+	groupInfo, ok := m.groups[groupID]
+	if !ok {
+		return
+	}
+
+	m.regions[regionID] = groupInfo
+	if groupInfo.regions != nil {
+		groupInfo.regions[regionID] = struct{}{}
+	}
+}
+
+// GetRegionAffinityGroup returns the affinity group info for a region.
+// Returns nil if the region doesn't belong to any affinity group.
+// NOTE: Returns a lightweight copy with only essential fields to avoid concurrent issues
+// and minimize overhead. The regions and labels maps are not copied.
+func (m *Manager) GetRegionAffinityGroup(regionID uint64) *GroupInfo {
+	m.RLock()
+	defer m.RUnlock()
+
+	groupInfo := m.regions[regionID]
+	if groupInfo == nil {
+		return nil
+	}
+
+	if _, exists := m.groups[groupInfo.ID]; !exists {
+		return nil
+	}
+
+	// Return a lightweight copy with only essential fields
+	// This is more efficient than full Clone() and sufficient for checker usage
+	return &GroupInfo{
+		Group: Group{
+			ID:              groupInfo.ID,
+			CreateTimestamp: groupInfo.CreateTimestamp,
+			LeaderStoreID:   groupInfo.LeaderStoreID,
+			VoterStoreIDs:   append([]uint64(nil), groupInfo.VoterStoreIDs...), // Copy slice
+		},
+		Effect:              groupInfo.Effect,
+		AffinityRegionCount: groupInfo.AffinityRegionCount,
+		// regions and labels maps are intentionally not copied for performance
+	}
 }
 
 // AllocAffinityGroup alloc store IDs for a new affinity group based on the current cluster state.
@@ -270,7 +340,7 @@ func (m *Manager) SaveAffinityGroup(group *Group) error {
 		// TODO: Do we need to overwrite runtime info?
 		info.Group = *group
 	} else {
-		m.groups[group.ID] = &GroupInfo{Group: *group}
+		m.groups[group.ID] = &GroupInfo{Group: *group, Effect: true}
 	}
 
 	log.Info("affinity group added/updated", zap.String("group", group.String()))
@@ -287,15 +357,17 @@ func (m *Manager) SaveAffinityGroups(groups []*Group) error {
 	m.Lock()
 	defer m.Unlock()
 
-	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		// TODO: use RunBatchOpInTxn
-		for _, group := range groups {
-			if err := m.storage.SaveAffinityGroup(txn, group.ID, group); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	// Build batch operations
+	batch := make([]func(txn kv.Txn) error, 0, len(groups))
+	for _, group := range groups {
+		localGroup := group
+		batch = append(batch, func(txn kv.Txn) error {
+			return m.storage.SaveAffinityGroup(txn, localGroup.ID, localGroup)
+		})
+	}
+
+	// Execute batch operations
+	err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 	if err != nil {
 		return err
 	}
@@ -304,14 +376,20 @@ func (m *Manager) SaveAffinityGroups(groups []*Group) error {
 	for _, group := range groups {
 		info, ok := m.groups[group.ID]
 		if ok {
-			// TODO: Do we need to overwrite runtime info?
 			info.Group = *group
 		} else {
-			m.groups[group.ID] = &GroupInfo{Group: *group}
+			m.groups[group.ID] = &GroupInfo{
+				Group:   *group,
+				Effect:  true,
+				regions: make(map[uint64]struct{}),
+				labels:  make(map[string]*labeler.LabelRule),
+			}
 		}
 
 		log.Info("affinity group added/updated", zap.String("group", group.String()))
 	}
+
+	// TODO: Update regions map by scanning regions with affinity_group label
 	return nil
 }
 
@@ -321,8 +399,9 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 	m.Lock()
 	defer m.Unlock()
 
-	// Check existence first
-	if _, ok := m.groups[id]; !ok {
+	// Check existence first and save reference for cleanup
+	info, ok := m.groups[id]
+	if !ok {
 		return errs.ErrAffinityGroupNotFound.GenWithStackByArgs(id)
 	}
 
@@ -333,18 +412,160 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 		return err
 	}
 
-	// Update in-memory cache
-	delete(m.groups, id)
+	// Clean up regions map
+	// Remove all region entries that reference this group
+	var regionsToDelete []uint64
+	for regionID, groupInfo := range m.regions {
+		if groupInfo.ID == id {
+			regionsToDelete = append(regionsToDelete, regionID)
+		}
+	}
+	for _, regionID := range regionsToDelete {
+		delete(m.regions, regionID)
+	}
 
-	// TODO: Need to handle the labels?
-	// TODO: Need to handle the regions map?
-	// When a group is deleted, what happens to the regions associated with it?
-	for regionID, info := range m.regions {
-		if info.ID == id {
-			delete(m.regions, regionID)
+	// Clean up labels (if label rules are stored in GroupInfo)
+	if info.labels != nil {
+		for labelID := range info.labels {
+			log.Debug("label rule reference found in group info",
+				zap.String("group-id", id),
+				zap.String("label-id", labelID))
+			// Labels are managed by regionLabeler, not directly deleted here
 		}
 	}
 
-	log.Info("affinity group deleted", zap.String("group-id", id))
+	// Delete from in-memory cache
+	delete(m.groups, id)
+
+	log.Info("affinity group deleted",
+		zap.String("group-id", id),
+		zap.Int("cleaned-regions", len(regionsToDelete)))
 	return nil
+}
+
+const (
+	// defaultHealthCheckInterval is the default interval for checking store health.
+	defaultHealthCheckInterval = 10 * time.Second
+)
+
+var (
+	// healthCheckIntervalForTest can be set in tests to speed up health checks.
+	// Default is 0, which means use defaultHealthCheckInterval.
+	healthCheckIntervalForTest time.Duration
+)
+
+// getHealthCheckInterval returns the health check interval, which can be overridden for testing.
+func getHealthCheckInterval() time.Duration {
+	if healthCheckIntervalForTest > 0 {
+		return healthCheckIntervalForTest
+	}
+	return defaultHealthCheckInterval
+}
+
+// SetHealthCheckIntervalForTest sets the health check interval for testing. Only use this in tests.
+func SetHealthCheckIntervalForTest(interval time.Duration) {
+	healthCheckIntervalForTest = interval
+}
+
+// startHealthCheckLoop starts a goroutine to periodically check store health and invalidate groups with unhealthy stores.
+func (m *Manager) startHealthCheckLoop() {
+	interval := getHealthCheckInterval()
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.ctx.Done():
+				log.Info("affinity manager health check loop stopped")
+				return
+			case <-ticker.C:
+				m.checkStoreHealth()
+			}
+		}
+	}()
+	log.Info("affinity manager health check loop started", zap.Duration("interval", interval))
+}
+
+// checkStoreHealth checks the health status of stores and invalidates groups with unhealthy stores.
+func (m *Manager) checkStoreHealth() {
+	m.Lock()
+	defer m.Unlock()
+
+	if !m.initialized {
+		return
+	}
+
+	for groupID, groupInfo := range m.groups {
+		// Check if any store in the group is unhealthy
+		unhealthyStores := m.getUnhealthyStores(groupInfo)
+
+		if len(unhealthyStores) > 0 {
+			// If the group was previously in effect and now has unhealthy stores, invalidate it
+			if groupInfo.Effect {
+				groupInfo.Effect = false
+				log.Warn("affinity group invalidated due to unhealthy stores",
+					zap.String("group-id", groupID),
+					zap.Uint64s("unhealthy-stores", unhealthyStores))
+			}
+		} else {
+			// If all stores are healthy and the group was previously invalidated, restore it
+			if !groupInfo.Effect {
+				groupInfo.Effect = true
+				log.Info("affinity group restored to effect state",
+					zap.String("group-id", groupID))
+			}
+		}
+	}
+}
+
+// getUnhealthyStores returns the list of unhealthy store IDs in the group.
+func (m *Manager) getUnhealthyStores(groupInfo *GroupInfo) []uint64 {
+	var unhealthyStores []uint64
+	unhealthyStoreSet := make(map[uint64]struct{})
+
+	isStoreUnhealthy := func(storeID uint64) bool {
+		store := m.storeSetInformer.GetStore(storeID)
+		if store == nil {
+			return true
+		}
+		// Check if store is removed or physically destroyed
+		if store.IsRemoved() || store.IsPhysicallyDestroyed() {
+			return true
+		}
+		// Check if store is removing
+		if store.IsRemoving() {
+			return true
+		}
+		// Use IsUnhealthy (10min) to avoid frequent state flapping
+		// IsUnhealthy: DownTime > 10min (storeUnhealthyDuration)
+		// IsDisconnected: DownTime > 20s (storeDisconnectDuration) - too sensitive
+		if store.IsUnhealthy() {
+			return true
+		}
+		// Note: We intentionally do NOT check:
+		// - IsDisconnected(): Too sensitive (20s), would cause frequent flapping
+		// - IsSlow(): Performance issue, not availability issue
+		// - IsLowSpace(): Not mentioned in design doc, needs separate consideration
+		// TODO: maybe IsLowSpace() should also be considered in the future
+		return false
+	}
+
+	// Check leader store
+	if isStoreUnhealthy(groupInfo.LeaderStoreID) {
+		unhealthyStoreSet[groupInfo.LeaderStoreID] = struct{}{}
+	}
+
+	// Check voter stores
+	for _, voterStoreID := range groupInfo.VoterStoreIDs {
+		if isStoreUnhealthy(voterStoreID) {
+			unhealthyStoreSet[voterStoreID] = struct{}{}
+		}
+	}
+
+	// Convert set to slice
+	for storeID := range unhealthyStoreSet {
+		unhealthyStores = append(unhealthyStores, storeID)
+	}
+
+	return unhealthyStores
 }

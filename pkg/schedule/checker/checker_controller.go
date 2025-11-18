@@ -409,6 +409,11 @@ func (c *Controller) GetRuleChecker() *RuleChecker {
 	return c.ruleChecker
 }
 
+// GetAffinityChecker returns the affinity checker.
+func (c *Controller) GetAffinityChecker() *AffinityChecker {
+	return c.affinityChecker
+}
+
 // GetPendingProcessedRegions returns the pending processed regions in the cache.
 func (c *Controller) GetPendingProcessedRegions() []uint64 {
 	return c.pendingProcessedRegions.GetAllID()

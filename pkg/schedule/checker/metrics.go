@@ -85,6 +85,7 @@ const (
 	mergeChecker      = "merge_checker"
 	replicaChecker    = "replica_checker"
 	splitChecker      = "split_checker"
+	affinityChecker   = "affinity_checker"
 )
 
 const (
@@ -125,6 +126,7 @@ func newCheckerControllerMetrics() *checkerControllerMetrics {
 		learnerChecker,
 		replicaChecker,
 		mergeChecker,
+		affinityChecker,
 	}
 
 	m := &checkerControllerMetrics{
@@ -240,4 +242,11 @@ var (
 
 	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")
 	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitChecker, "paused")
+
+	affinityCheckerCounter                 = checkerCounter.WithLabelValues(affinityChecker, "check")
+	affinityCheckerPausedCounter           = checkerCounter.WithLabelValues(affinityChecker, "paused")
+	affinityCheckerRegionNoLeaderCounter   = checkerCounter.WithLabelValues(affinityChecker, "region-no-leader")
+	affinityCheckerGroupNotInEffectCounter = checkerCounter.WithLabelValues(affinityChecker, "group-not-in-effect")
+	affinityCheckerNewOpCounter            = checkerCounter.WithLabelValues(affinityChecker, "new-operator")
+	affinityCheckerCreateOpFailedCounter   = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
 )
