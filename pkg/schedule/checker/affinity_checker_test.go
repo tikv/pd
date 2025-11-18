@@ -120,13 +120,9 @@ func TestAffinityCheckerGroupNotInEffect(t *testing.T) {
 	affinityManager.SetRegionGroup(1, "test_group")
 
 	// Mark group as not in effect
-	groupInfo := affinityManager.GetAffinityGroup("test_group")
-	if groupInfo != nil {
-		// Access internal GroupInfo to modify Effect
-		internalGroupInfo := affinityManager.GetGroups()["test_group"]
-		if internalGroupInfo != nil {
-			internalGroupInfo.Effect = false
-		}
+	internalGroupInfo := affinityManager.GetGroups()["test_group"]
+	if internalGroupInfo != nil {
+		internalGroupInfo.Effect = false
 	}
 
 	// Check should return nil because group is not in effect

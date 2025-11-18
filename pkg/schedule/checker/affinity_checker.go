@@ -100,11 +100,11 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 // createAffinityOperator creates an operator to adjust region replicas according to affinity group constraints.
 // Parameters:
 //   - region: The region to adjust
-//   - groupInfo: The affinity group info that defines the desired peer distribution
+//   - groupState: The affinity group info that defines the desired peer distribution
 //
 // Returns:
 //   - *operator.Operator: The operator to adjust the region, or nil if no adjustment is needed
-func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, groupInfo *affinity.GroupInfo) *operator.Operator {
+func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, groupInfo *affinity.GroupState) *operator.Operator {
 	currentLeaderStoreID := region.GetLeader().GetStoreId()
 	expectedLeaderStoreID := groupInfo.LeaderStoreID
 

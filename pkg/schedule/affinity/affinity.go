@@ -17,8 +17,6 @@ package affinity
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -31,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -69,12 +66,11 @@ func (g *Group) String() string {
 // GroupState defines the runtime state of an affinity group.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type GroupState struct {
-	// LeaderStoreID indicates which store the leader should be on.
-	LeaderStoreID uint64 `json:"leader_store_id"`
-	// VoterStoreIDs indicates which stores Voters should be on.
-	VoterStoreIDs []uint64 `json:"voter_store_ids"`
-	// LabelCount indicates how many key ranges are associated with this group.
-	LabelCount int `json:"label_count"`
+	Group
+	// Effect parameter indicates whether the current constraint is in effect.
+	Effect bool `json:"effect"`
+	// RangeCount indicates how many key ranges are associated with this group.
+	RangeCount int `json:"range_count"`
 	// RegionCount indicates how many Regions are currently in the affinity state.
 	RegionCount int `json:"region_count"`
 	// RegionVotersReadyCount indicates how many Regions have all Voter peers in the correct stores.
@@ -96,7 +92,9 @@ type GroupInfo struct {
 	// nolint:unused
 	regions map[uint64]struct{}
 	// nolint:unused
-	labels map[string]*labeler.LabelRule
+	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
+	// Currently using label's internal multiple keyrange mechanism
+	labels *labeler.LabelRule
 }
 
 // Manager is the manager of all affinity information.
@@ -192,32 +190,6 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	return nil
 }
 
-// GetAffinityGroup gets a specific affinity group by ID.
-// It returns a clone of the persisted Group object.
-func (m *Manager) GetAffinityGroup(id string) *Group {
-	m.RLock()
-	defer m.RUnlock()
-	if info, ok := m.groups[id]; ok {
-		return info.Clone() // Return a clone of Group to prevent concurrent modification
-	}
-	return nil
-}
-
-// GetAllAffinityGroups returns all affinity groups.
-func (m *Manager) GetAllAffinityGroups() []*Group {
-	m.RLock()
-	defer m.RUnlock()
-	groups := make([]*Group, 0, len(m.groups))
-	for _, info := range m.groups {
-		groups = append(groups, info.Clone()) // Clone Group, not GroupInfo
-	}
-	// Sort by ID for deterministic output
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].ID < groups[j].ID
-	})
-	return groups
-}
-
 // IsGroupExist checks if a group exists.
 func (m *Manager) IsGroupExist(id string) bool {
 	m.RLock()
@@ -262,11 +234,8 @@ func (m *Manager) SetRegionGroup(regionID uint64, groupID string) {
 	}
 }
 
-// GetRegionAffinityGroup returns the affinity group info for a region.
-// Returns nil if the region doesn't belong to any affinity group.
-// NOTE: Returns a lightweight copy with only essential fields to avoid concurrent issues
-// and minimize overhead. The regions and labels maps are not copied.
-func (m *Manager) GetRegionAffinityGroup(regionID uint64) *GroupInfo {
+// GetRegionAffinityGroup returns the affinity group state for a region.
+func (m *Manager) GetRegionAffinityGroup(regionID uint64) *GroupState {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -279,33 +248,16 @@ func (m *Manager) GetRegionAffinityGroup(regionID uint64) *GroupInfo {
 		return nil
 	}
 
-	// Return a lightweight copy with only essential fields
-	// This is more efficient than full Clone() and sufficient for checker usage
-	return &GroupInfo{
+	return &GroupState{
 		Group: Group{
 			ID:              groupInfo.ID,
 			CreateTimestamp: groupInfo.CreateTimestamp,
 			LeaderStoreID:   groupInfo.LeaderStoreID,
 			VoterStoreIDs:   append([]uint64(nil), groupInfo.VoterStoreIDs...), // Copy slice
 		},
-		Effect:              groupInfo.Effect,
-		AffinityRegionCount: groupInfo.AffinityRegionCount,
-		// regions and labels maps are intentionally not copied for performance
+		Effect: groupInfo.Effect,
+		// TODO: it is a mock function now, need to implement the real logic.
 	}
-}
-
-// AllocAffinityGroup alloc store IDs for a new affinity group based on the current cluster state.
-// TODO: it is a mock function now, need to implement the real logic.
-func (m *Manager) AllocAffinityGroup(name string, ranges []keyutil.KeyRange, dataLayout string, tableGroup string) (group *Group, err error) {
-	m.Lock()
-	defer m.Unlock()
-	log.Info("allocating affinity group",
-		zap.String("group-name", name),
-		zap.String("data-layout", dataLayout),
-		zap.String("table-group", tableGroup),
-		zap.Int("key-range-count", len(ranges)),
-	)
-	return nil, errors.New("not implement")
 }
 
 // GetAffinityGroupState gets the runtime state of an affinity group.
@@ -316,6 +268,14 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 	log.Info("getting affinity group state", zap.String("group-id", id))
 	groupState := &GroupState{}
 	return groupState
+}
+
+// GetAllAffinityGroupStates returns all affinity groups.
+// TODO: it is a mock function now, need to implement the real logic.
+func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
+	m.RLock()
+	defer m.RUnlock()
+	return nil
 }
 
 // SaveAffinityGroup saves an affinity group to storage.
@@ -382,7 +342,7 @@ func (m *Manager) SaveAffinityGroups(groups []*Group) error {
 				Group:   *group,
 				Effect:  true,
 				regions: make(map[uint64]struct{}),
-				labels:  make(map[string]*labeler.LabelRule),
+				labels:  nil, // TODO: need to sync from labeler manager
 			}
 		}
 
@@ -398,12 +358,6 @@ func (m *Manager) SaveAffinityGroups(groups []*Group) error {
 func (m *Manager) DeleteAffinityGroup(id string) error {
 	m.Lock()
 	defer m.Unlock()
-
-	// Check existence first and save reference for cleanup
-	info, ok := m.groups[id]
-	if !ok {
-		return errs.ErrAffinityGroupNotFound.GenWithStackByArgs(id)
-	}
 
 	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		return m.storage.DeleteAffinityGroup(txn, id)
@@ -422,16 +376,6 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 	}
 	for _, regionID := range regionsToDelete {
 		delete(m.regions, regionID)
-	}
-
-	// Clean up labels (if label rules are stored in GroupInfo)
-	if info.labels != nil {
-		for labelID := range info.labels {
-			log.Debug("label rule reference found in group info",
-				zap.String("group-id", id),
-				zap.String("label-id", labelID))
-			// Labels are managed by regionLabeler, not directly deleted here
-		}
 	}
 
 	// Delete from in-memory cache

@@ -19,9 +19,9 @@ import (
 )
 
 // AffinityGroupPath returns the path to save a specific affinity group object.
-// Its format is: "/pd/{cluster_id}/affinity_groups/{group_name}"
-func AffinityGroupPath(groupName string) string {
-	return fmt.Sprintf(affinityGroupPathFormat, ClusterID(), groupName)
+// Its format is: "/pd/{cluster_id}/affinity_groups/{group_id}"
+func AffinityGroupPath(groupID string) string {
+	return fmt.Sprintf(affinityGroupPathFormat, ClusterID(), groupID)
 }
 
 // AffinityGroupsPrefix returns the path prefix for all affinity groups.

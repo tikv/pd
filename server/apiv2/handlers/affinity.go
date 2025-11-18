@@ -37,9 +37,9 @@ func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateAffinityGroups)
-	router.DELETE("/:group_name", DeleteAffinityGroup)
+	router.DELETE("/:group_id", DeleteAffinityGroup)
 	router.GET("", GetAllAffinityGroups)
-	router.GET("/:group_name", GetAffinityGroup)
+	router.GET("/:group_id", GetAffinityGroup)
 }
 
 // --- API Structures ---
@@ -56,21 +56,8 @@ type CreateAffinityGroupsRequest struct {
 	TableGroup     string                              `json:"table_group,omitempty"`
 }
 
-// CreateAffinityGroupOutput defines the output for a single group in the creation response.
-type CreateAffinityGroupOutput struct {
-	VoterStoreIDs []uint64 `json:"voter_store_ids"`
-	LeaderStoreID uint64   `json:"leader_store_id"`
-	LabelCount    int      `json:"label_count"`
-	RegionCount   int      `json:"region_count"`
-}
-
-// CreateAffinityGroupsResponse defines the success response for the POST request.
-type CreateAffinityGroupsResponse struct {
-	AffinityGroups map[string]CreateAffinityGroupOutput `json:"affinity_groups"`
-}
-
-// GetAllAffinityGroupsResponse defines the response for listing all groups.
-type GetAllAffinityGroupsResponse struct {
+// AffinityGroupsResponse defines the success response for the POST request.
+type AffinityGroupsResponse struct {
 	AffinityGroups map[string]*affinity.GroupState `json:"affinity_groups"`
 }
 
@@ -104,25 +91,25 @@ func CreateAffinityGroups(c *gin.Context) {
 	}
 
 	groups := make([]*affinity.Group, 0, len(req.AffinityGroups))
-	for name, input := range req.AffinityGroups {
-		if err := validateName(name); err != nil {
+	for groupID, input := range req.AffinityGroups {
+		if err := validateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
-		if manager.IsGroupExist(name) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupExist.GenWithStackByArgs(name))
+		if manager.IsGroupExist(groupID) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupExist.GenWithStackByArgs(groupID))
 			return
 		}
 		if len(input.Ranges) == 0 {
-			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no key ranges provided for group "+name))
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no key ranges provided for group "+groupID))
 			return
 		}
-		group, err := manager.AllocAffinityGroup(name, input.Ranges, req.DataLayout, req.TableGroup)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
-		groups = append(groups, group)
+		// TODO: use a zero LeaderStoreID and empty VoterStoreIDs to indicate
+		groups = append(groups, &affinity.Group{
+			ID:            groupID,
+			LeaderStoreID: 0,
+			VoterStoreIDs: make([]uint64, 0, len(input.Ranges)),
+		})
 	}
 
 	// Only when all groups are successfully created, we proceed to persist them
@@ -143,7 +130,7 @@ func CreateAffinityGroups(c *gin.Context) {
 	}
 	regionLabeler := rc.GetRegionLabeler()
 	if regionLabeler != nil {
-		for name, input := range req.AffinityGroups {
+		for groupID, input := range req.AffinityGroups {
 			// Convert KeyRange to labeler format
 			var keyRanges []any
 			for _, kr := range input.Ranges {
@@ -153,10 +140,11 @@ func CreateAffinityGroups(c *gin.Context) {
 				})
 			}
 
-			// Create label rule: affinity_group: {group_name}
+			// Create single label rule with multiple key ranges
+			// Relies on label's internal multiple keyrange mechanism
 			rule := &labeler.LabelRule{
-				ID:       affinity.GetLabelRuleID(name),
-				Labels:   []labeler.RegionLabel{{Key: "affinity_group", Value: name}},
+				ID:       affinity.GetLabelRuleID(groupID),
+				Labels:   []labeler.RegionLabel{{Key: "affinity_group", Value: groupID}},
 				RuleType: labeler.KeyRange,
 				Data:     keyRanges,
 			}
@@ -169,20 +157,15 @@ func CreateAffinityGroups(c *gin.Context) {
 	}
 
 	// Convert internal manager output to API output.
-	resp := CreateAffinityGroupsResponse{
-		AffinityGroups: make(map[string]CreateAffinityGroupOutput, len(req.AffinityGroups)),
+	resp := AffinityGroupsResponse{
+		AffinityGroups: make(map[string]*affinity.GroupState, len(req.AffinityGroups)),
 	}
 	for _, group := range groups {
 		state := manager.GetAffinityGroupState(group.ID)
 		if state == nil {
 			state = &affinity.GroupState{}
 		}
-		resp.AffinityGroups[group.ID] = CreateAffinityGroupOutput{
-			VoterStoreIDs: group.VoterStoreIDs,
-			LeaderStoreID: group.LeaderStoreID,
-			LabelCount:    state.LabelCount,
-			RegionCount:   state.RegionCount,
-		}
+		resp.AffinityGroups[group.ID] = state
 	}
 	c.IndentedJSON(http.StatusOK, resp)
 }
@@ -190,15 +173,15 @@ func CreateAffinityGroups(c *gin.Context) {
 // TODO: add more tests for CreateAffinityGroups and DeleteAffinityGroup
 // after AllocAffinityGroup is ready.
 
-// DeleteAffinityGroup deletes a specific affinity group by name.
+// DeleteAffinityGroup deletes a specific affinity group by group id.
 // @Tags     affinity-groups
-// @Summary  Delete an affinity group by name.
-// @Param    group_name  path  string  true  "The name of the affinity group"
+// @Summary  Delete an affinity group by group id.
+// @Param    group_id  path  string  true  "The group id of the affinity group"
 // @Produce  json
 // @Success  200  {string}  string  "Affinity group deleted successfully."
 // @Failure  404  {string}  string  "Affinity group not found."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups/{group_name} [delete]
+// @Router   /affinity-groups/{group_id} [delete]
 func DeleteAffinityGroup(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
@@ -207,15 +190,15 @@ func DeleteAffinityGroup(c *gin.Context) {
 		return
 	}
 
-	groupName := c.Param("group_name")
+	groupID := c.Param("group_id")
 
-	if !manager.IsGroupExist(groupName) {
-		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupName))
+	if !manager.IsGroupExist(groupID) {
+		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID))
 		return
 	}
 
 	// Delete the affinity group from manager
-	err = manager.DeleteAffinityGroup(groupName)
+	err = manager.DeleteAffinityGroup(groupID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -229,10 +212,10 @@ func DeleteAffinityGroup(c *gin.Context) {
 	if rc != nil {
 		regionLabeler := rc.GetRegionLabeler()
 		if regionLabeler != nil {
-			labelRuleID := affinity.GetLabelRuleID(groupName)
+			labelRuleID := affinity.GetLabelRuleID(groupID)
 			if err := regionLabeler.DeleteLabelRule(labelRuleID); err != nil {
 				log.Warn("failed to delete label rule for affinity group",
-					zap.String("group-name", groupName),
+					zap.String("group-id", groupID),
 					zap.String("label-rule-id", labelRuleID),
 					zap.Error(err))
 			}
@@ -245,7 +228,6 @@ func DeleteAffinityGroup(c *gin.Context) {
 // GetAllAffinityGroups lists affinity groups, with optional range details.
 // @Tags     affinity-groups
 // @Summary  List all affinity groups.
-// @Param    query_ranges  query  bool  false  "Include key ranges in the response"
 // @Produce  json
 // @Success  200  {object}  GetAllAffinityGroupsResponse
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
@@ -258,26 +240,25 @@ func GetAllAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	allGroupInfos := manager.GetAllAffinityGroups()
-	response := GetAllAffinityGroupsResponse{
+	allGroupInfos := manager.GetAllAffinityGroupStates()
+	response := AffinityGroupsResponse{
 		AffinityGroups: make(map[string]*affinity.GroupState, len(allGroupInfos)),
 	}
 	for _, info := range allGroupInfos {
-		response.AffinityGroups[info.ID] = manager.GetAffinityGroupState(info.ID)
+		response.AffinityGroups[info.ID] = info
 	}
 	c.IndentedJSON(http.StatusOK, response)
 }
 
-// GetAffinityGroup gets a specific affinity group by name, with optional range details.
+// GetAffinityGroup gets a specific affinity group by group id, with optional range details.
 // @Tags     affinity-groups
-// @Summary  Get an affinity group by name.
-// @Param    group_name    path  string  true   "The name of the affinity group"
-// @Param    query_ranges  query  bool    false  "Include key ranges in the response"
+// @Summary  Get an affinity group by group id.
+// @Param    group_id    path  string  true   "The group id of the affinity group"
 // @Produce  json
 // @Success  200  {object}  *affinity.GroupState
 // @Failure  404  {string}  string  "Affinity group not found."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups/{group_name} [get]
+// @Router   /affinity-groups/{group_id} [get]
 func GetAffinityGroup(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
@@ -286,35 +267,31 @@ func GetAffinityGroup(c *gin.Context) {
 		return
 	}
 
-	groupName := c.Param("group_name")
-
-	groupInfo := manager.GetAffinityGroup(groupName)
+	groupID := c.Param("group_id")
+	groupInfo := manager.GetAffinityGroupState(groupID)
 	if groupInfo == nil {
-		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupName))
+		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID))
 		return
 	}
-
-	response := manager.GetAffinityGroupState(groupInfo.ID)
-	c.IndentedJSON(http.StatusOK, response)
+	c.IndentedJSON(http.StatusOK, groupInfo)
 }
 
 const (
-	// namePattern is a regex that specifies acceptable characters of the name.
-	// Valid name must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
+	// idPattern is a regex that specifies acceptable characters of the id.
+	// Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 	// numbers (0-9), hyphens (-), and underscores (_).
-	namePattern = "^[-A-Za-z0-9_]{1,64}$"
+	idPattern = "^[-A-Za-z0-9_]{1,64}$"
 )
 
-// validateName check if user provided name is legal.
-// It throws errIllegalName when name contains illegal character,
-// or if it collides with reserved name.
-func validateName(name string) error {
-	isValid, err := regexp.MatchString(namePattern, name)
+// validateGroupID check if user provided id is legal.
+// It throws error when id contains illegal character.
+func validateGroupID(id string) error {
+	isValid, err := regexp.MatchString(idPattern, id)
 	if err != nil {
 		return err
 	}
 	if !isValid {
-		return errors.Errorf("illegal name %s, should contain only alphanumerical and underline", name)
+		return errors.Errorf("illegal id %s, should contain only alphanumerical and underline", id)
 	}
 	return nil
 }
