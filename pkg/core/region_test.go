@@ -158,7 +158,7 @@ func TestSortedEqual(t *testing.T) {
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
 
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	// test RegionFromHeartbeat
 	for _, testCase := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
@@ -953,7 +953,7 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		PendingPeers:    []*metapb.Peer{peers[1]},
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
