@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/core"
 )
 
