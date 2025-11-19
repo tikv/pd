@@ -124,7 +124,7 @@ func NewCluster(
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
-	affinityManager := affinity.NewManager(ctx, storage, basicCluster, persistConfig)
+	affinityManager := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,

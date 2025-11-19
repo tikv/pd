@@ -48,7 +48,7 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -82,7 +82,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -115,7 +115,7 @@ func TestAffinityCheckerGroupNotInEffect(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -151,7 +151,7 @@ func TestAffinityCheckerPaused(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -202,7 +202,7 @@ func TestHealthCheckAndOperatorGeneration(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 
 	// Set region to group mapping
@@ -264,7 +264,7 @@ func TestHealthCheckWithOfflineStore(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 
 	// Verify group is in effect
@@ -309,7 +309,7 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 
 	// Set stores 2 and 3 down
@@ -366,7 +366,7 @@ func TestAffinityCheckerAddPeer(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -401,7 +401,7 @@ func TestAffinityCheckerRemovePeer(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -435,7 +435,7 @@ func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -467,7 +467,7 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 		LeaderStoreID: 3,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 
@@ -512,7 +512,10 @@ func TestAffinityCheckerMultipleGroups(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{2, 3, 4},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group1, group2})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{
+		{Group: group1},
+		{Group: group2},
+	})
 	re.NoError(err)
 
 	affinityManager.SetRegionGroup(1, "group1")
@@ -551,7 +554,7 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	// Note: NOT calling affinityManager.SetRegionGroup(1, "test_group")
 
@@ -582,7 +585,7 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := affinityManager.SaveAffinityGroups([]*affinity.Group{group})
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
 	re.NoError(err)
 	affinityManager.SetRegionGroup(1, "test_group")
 

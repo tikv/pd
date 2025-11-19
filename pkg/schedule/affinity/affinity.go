@@ -15,8 +15,11 @@
 package affinity
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -105,23 +108,27 @@ type Manager struct {
 	initialized      bool
 	groups           map[string]*GroupInfo // {group_id} -> GroupInfo
 	regions          map[uint64]*GroupInfo // {region_id} -> GroupInfo
+	keyRanges        map[string][]keyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
+	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 }
 
 // NewManager creates a new affinity Manager.
-func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *Manager {
+func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider, regionLabeler *labeler.RegionLabeler) *Manager {
 	return &Manager{
 		ctx:              ctx,
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
 		conf:             conf,
+		regionLabeler:    regionLabeler,
 		groups:           make(map[string]*GroupInfo),
 		regions:          make(map[uint64]*GroupInfo),
+		keyRanges:        make(map[string][]keyRange),
 	}
 }
 
-// Initialize loads affinity groups from storage.
+// Initialize loads affinity groups from storage and rebuilds the group-label mapping.
 func (m *Manager) Initialize() error {
 	m.Lock()
 	defer m.Unlock()
@@ -140,6 +147,14 @@ func (m *Manager) Initialize() error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// load region labels
+	if m.regionLabeler != nil {
+		if err := m.loadRegionLabel(); err != nil {
+			log.Error("failed to rebuild group-label mapping", zap.Error(err))
+			return err
+		}
 	}
 
 	m.initialized = true
@@ -198,11 +213,70 @@ func (m *Manager) IsGroupExist(id string) bool {
 	return ok
 }
 
+// KeyRangeInput represents a key range input for validation.
+type KeyRangeInput struct {
+	StartKey []byte
+	EndKey   []byte
+	GroupID  string
+}
+
+// ValidateKeyRanges validates that the given key ranges do not overlap with existing ones.
+// This is a public method that can be called from handlers.
+func (m *Manager) ValidateKeyRanges(ranges []KeyRangeInput) error {
+	m.RLock()
+	defer m.RUnlock()
+
+	// Convert KeyRangeInput to internal keyRange type
+	internalRanges := make([]keyRange, len(ranges))
+	for i, r := range ranges {
+		internalRanges[i] = keyRange{
+			startKey: r.StartKey,
+			endKey:   r.EndKey,
+			groupID:  r.GroupID,
+		}
+	}
+
+	return m.validateNoKeyRangeOverlap(internalRanges)
+}
+
 // GetLabelRuleID returns the label rule ID for an affinity group.
 // This ensures consistent naming between label creation and deletion.
 // Format: "affinity_group/{group_id}"
 func GetLabelRuleID(groupID string) string {
 	return "affinity_group/" + groupID
+}
+
+const (
+	// labelRuleIDPrefix is the prefix for affinity group label rules.
+	labelRuleIDPrefix = "affinity_group/"
+	// affinityLabelKey is the label key for affinity group.
+	affinityLabelKey = "affinity_group"
+)
+
+// parseAffinityGroupIDFromLabelRule parses the affinity group ID from the label rule.
+// It will return the group ID and a boolean indicating whether the label rule is an affinity label rule.
+func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
+	// Validate the ID matches the expected format "affinity_group/{group_id}".
+	if rule == nil || !strings.HasPrefix(rule.ID, labelRuleIDPrefix) {
+		return "", false
+	}
+	// Retrieve the group ID.
+	groupID := strings.TrimPrefix(rule.ID, labelRuleIDPrefix)
+	if groupID == "" {
+		return "", false
+	}
+	// Double check the group ID from the label rule.
+	var groupIDFromLabel string
+	for _, label := range rule.Labels {
+		if label.Key == affinityLabelKey {
+			groupIDFromLabel = label.Value
+			break
+		}
+	}
+	if groupID != groupIDFromLabel {
+		return "", false
+	}
+	return groupID, true
 }
 
 // GetGroups returns the internal groups map.
@@ -278,87 +352,117 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	return nil
 }
 
-// SaveAffinityGroup saves an affinity group to storage.
-func (m *Manager) SaveAffinityGroup(group *Group) error {
-	if err := m.AdjustGroup(group); err != nil {
-		return err
-	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		return m.storage.SaveAffinityGroup(txn, group.ID, group)
-	})
-	if err != nil {
-		return err
-	}
-
-	// Update in-memory cache
-	info, ok := m.groups[group.ID]
-	if ok {
-		// TODO: Do we need to overwrite runtime info?
-		info.Group = *group
-	} else {
-		m.groups[group.ID] = &GroupInfo{Group: *group, Effect: true}
-	}
-
-	log.Info("affinity group added/updated", zap.String("group", group.String()))
-	return nil
+// GroupWithRanges represents a group with its associated key ranges.
+type GroupWithRanges struct {
+	Group     *Group
+	KeyRanges []any
 }
 
-// SaveAffinityGroups adds multiple affinity groups to storage.
-func (m *Manager) SaveAffinityGroups(groups []*Group) error {
-	for _, group := range groups {
-		if err := m.AdjustGroup(group); err != nil {
+// SaveAffinityGroups adds multiple affinity groups to storage and creates corresponding label rules.
+func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
+	// Validate all groups first (without lock)
+	for _, gwr := range groupsWithRanges {
+		if err := m.AdjustGroup(gwr.Group); err != nil {
 			return err
 		}
 	}
+
 	m.Lock()
 	defer m.Unlock()
 
-	// Build batch operations
-	batch := make([]func(txn kv.Txn) error, 0, len(groups))
-	for _, group := range groups {
-		localGroup := group
+	// Step 0: Re-validate key ranges no overlaps under write lock
+	var allNewRanges []keyRange
+	for _, gwr := range groupsWithRanges {
+		if len(gwr.KeyRanges) > 0 {
+			ranges, err := parseKeyRangesFromData(gwr.KeyRanges, gwr.Group.ID)
+			if err != nil {
+				return err
+			}
+			allNewRanges = append(allNewRanges, ranges...)
+		}
+	}
+	if err := m.validateNoKeyRangeOverlap(allNewRanges); err != nil {
+		return err
+	}
+
+	// Step 1: Build batch operations for storage
+	batch := make([]func(txn kv.Txn) error, 0, len(groupsWithRanges))
+	for _, gwr := range groupsWithRanges {
+		localGroup := gwr.Group
 		batch = append(batch, func(txn kv.Txn) error {
 			return m.storage.SaveAffinityGroup(txn, localGroup.ID, localGroup)
 		})
 	}
-
-	// Execute batch operations
 	err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 	if err != nil {
 		return err
 	}
 
-	// Update in-memory cache
-	for _, group := range groups {
-		info, ok := m.groups[group.ID]
+	// Step 2: Create label rules for each group
+	labelRules := make(map[string]*labeler.LabelRule)
+	if m.regionLabeler != nil {
+		for _, gwr := range groupsWithRanges {
+			if len(gwr.KeyRanges) > 0 {
+				labelRule := &labeler.LabelRule{
+					ID:       GetLabelRuleID(gwr.Group.ID),
+					Labels:   []labeler.RegionLabel{{Key: affinityLabelKey, Value: gwr.Group.ID}},
+					RuleType: labeler.KeyRange,
+					Data:     gwr.KeyRanges,
+				}
+				if err := m.regionLabeler.SetLabelRule(labelRule); err != nil {
+					log.Error("failed to create label rule",
+						zap.String("failed-group-id", gwr.Group.ID),
+						zap.Int("total-groups", len(groupsWithRanges)),
+						zap.Error(err))
+					// TODO: rollback newly created groups
+					return err
+				}
+				labelRules[gwr.Group.ID] = labelRule
+			}
+		}
+	}
+
+	// Step 3: Update in-memory cache with label rule pointers and key ranges
+	for _, gwr := range groupsWithRanges {
+		info, ok := m.groups[gwr.Group.ID]
+		labelRule := labelRules[gwr.Group.ID]
 		if ok {
-			info.Group = *group
+			// Update existing group
+			info.Group = *gwr.Group
+			info.labels = labelRule
 		} else {
-			m.groups[group.ID] = &GroupInfo{
-				Group:   *group,
+			// Create new group info
+			m.groups[gwr.Group.ID] = &GroupInfo{
+				Group:   *gwr.Group,
 				Effect:  true,
-				regions: make(map[uint64]struct{}),
-				labels:  nil, // TODO: need to sync from labeler manager
+				labels:  labelRule,
+				regions: make(map[uint64]struct{}), // TODO: load regions
 			}
 		}
 
-		log.Info("affinity group added/updated", zap.String("group", group.String()))
+		// Update key ranges cache for this group
+		if len(gwr.KeyRanges) > 0 {
+			ranges, err := parseKeyRangesFromData(gwr.KeyRanges, gwr.Group.ID)
+			if err == nil && len(ranges) > 0 {
+				m.keyRanges[gwr.Group.ID] = ranges
+			}
+		} else {
+			// No key ranges, remove from cache if exists
+			delete(m.keyRanges, gwr.Group.ID)
+		}
+
+		log.Info("affinity group added/updated", zap.String("group", gwr.Group.String()))
 	}
 
-	// TODO: Update regions map by scanning regions with affinity_group label
 	return nil
 }
 
-// DeleteAffinityGroup deletes an affinity group by ID.
-// This is analogous to RuleManager.DeleteRule[cite: 2810].
+// DeleteAffinityGroup deletes an affinity group by ID and removes its label rule.
 func (m *Manager) DeleteAffinityGroup(id string) error {
 	m.Lock()
 	defer m.Unlock()
 
+	// Step 1: Delete from storage
 	err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		return m.storage.DeleteAffinityGroup(txn, id)
 	})
@@ -366,7 +470,22 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 		return err
 	}
 
-	// Clean up regions map
+	// Step 2: Delete the corresponding label rule
+	if m.regionLabeler != nil {
+		labelRuleID := GetLabelRuleID(id)
+		if err := m.regionLabeler.DeleteLabelRule(labelRuleID); err != nil {
+			log.Warn("failed to delete label rule for affinity group",
+				zap.String("group-id", id),
+				zap.String("label-rule-id", labelRuleID),
+				zap.Error(err))
+			// Don't return error here - the group is already deleted from storage
+		}
+	}
+
+	// Step 3: Delete from in-memory key ranges cache
+	delete(m.keyRanges, id)
+
+	// Step 4: Clean up regions map
 	// Remove all region entries that reference this group
 	var regionsToDelete []uint64
 	for regionID, groupInfo := range m.regions {
@@ -377,8 +496,6 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 	for _, regionID := range regionsToDelete {
 		delete(m.regions, regionID)
 	}
-
-	// Delete from in-memory cache
 	delete(m.groups, id)
 
 	log.Info("affinity group deleted",
@@ -512,4 +629,205 @@ func (m *Manager) getUnhealthyStores(groupInfo *GroupInfo) []uint64 {
 	}
 
 	return unhealthyStores
+}
+
+// keyRange represents a key range extracted from label rules.
+type keyRange struct {
+	startKey []byte
+	endKey   []byte
+	groupID  string
+}
+
+// parseKeyRangesFromData parses key ranges from []any format (from API or label rule).
+// This is a common helper to avoid code duplication.
+func parseKeyRangesFromData(data []any, groupID string) ([]keyRange, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var ranges []keyRange
+	for _, item := range data {
+		rangeMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		startKeyStr, ok1 := rangeMap["start_key"].(string)
+		endKeyStr, ok2 := rangeMap["end_key"].(string)
+		if !ok1 || !ok2 {
+			continue
+		}
+
+		startKey, err := hex.DecodeString(startKeyStr)
+		if err != nil {
+			log.Warn("failed to decode start key", zap.String("group-id", groupID), zap.Error(err))
+			continue
+		}
+
+		endKey, err := hex.DecodeString(endKeyStr)
+		if err != nil {
+			log.Warn("failed to decode end key", zap.String("group-id", groupID), zap.Error(err))
+			continue
+		}
+
+		ranges = append(ranges, keyRange{
+			startKey: startKey,
+			endKey:   endKey,
+			groupID:  groupID,
+		})
+	}
+
+	return ranges, nil
+}
+
+// extractKeyRangesFromLabelRule extracts key ranges from a label rule data.
+func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) ([]keyRange, error) {
+	if rule == nil || rule.Data == nil {
+		return nil, nil
+	}
+
+	groupID, ok := parseAffinityGroupIDFromLabelRule(rule)
+	if !ok {
+		return nil, nil
+	}
+
+	dataSlice, ok := rule.Data.([]any)
+	if !ok {
+		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("invalid label rule data format")
+	}
+
+	return parseKeyRangesFromData(dataSlice, groupID)
+}
+
+// checkKeyRangesOverlap checks if two key ranges overlap.
+// Returns true if [start1, end1) and [start2, end2) have any overlap.
+func checkKeyRangesOverlap(start1, end1, start2, end2 []byte) bool {
+	// Handle empty keys (representing infinity)
+	if len(start1) == 0 && len(end1) == 0 {
+		return true // Range covers everything
+	}
+	if len(start2) == 0 && len(end2) == 0 {
+		return true // Range covers everything
+	}
+
+	// Check if ranges are disjoint
+	// Range 1 ends before Range 2 starts: end1 <= start2
+	if len(end1) > 0 && len(start2) > 0 && bytes.Compare(end1, start2) <= 0 {
+		return false
+	}
+
+	// Range 2 ends before Range 1 starts: end2 <= start1
+	if len(end2) > 0 && len(start1) > 0 && bytes.Compare(end2, start1) <= 0 {
+		return false
+	}
+
+	return true
+}
+
+// validateNoKeyRangeOverlap validates that the given key ranges do not overlap with existing ones.
+// It should be called with the manager lock held.
+// Uses in-memory keyRanges cache to avoid repeated labeler access and reduce lock contention.
+func (m *Manager) validateNoKeyRangeOverlap(newRanges []keyRange) error {
+	// First, check for overlaps within the new ranges themselves
+	for i := 0; i < len(newRanges); i++ {
+		for j := i + 1; j < len(newRanges); j++ {
+			if checkKeyRangesOverlap(
+				newRanges[i].startKey, newRanges[i].endKey,
+				newRanges[j].startKey, newRanges[j].endKey,
+			) {
+				return errs.ErrAffinityGroupContent.FastGenByArgs(
+					"key ranges overlap within the same request: group " +
+						newRanges[i].groupID + " and " + newRanges[j].groupID)
+			}
+		}
+	}
+
+	// Then, check for overlaps with existing key ranges from in-memory cache
+	// This avoids repeated labeler lock acquisition for better performance
+	for _, newRange := range newRanges {
+		for groupID, existingRanges := range m.keyRanges {
+			// Skip if it's the same group (updating existing group)
+			if newRange.groupID == groupID {
+				continue
+			}
+
+			for _, existingRange := range existingRanges {
+				if checkKeyRangesOverlap(
+					newRange.startKey, newRange.endKey,
+					existingRange.startKey, existingRange.endKey,
+				) {
+					return errs.ErrAffinityGroupContent.FastGenByArgs(
+						"key range overlaps with existing group: new group " +
+							newRange.groupID + " overlaps with group " + existingRange.groupID)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// loadRegionLabel rebuilds the mapping between groups and label rules after restart.
+// It should be called with the manager lock held.
+func (m *Manager) loadRegionLabel() error {
+	if m.regionLabeler == nil {
+		return nil
+	}
+
+	// Collect all key ranges from label rules and populate in-memory cache
+	var allRanges []keyRange
+
+	m.regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
+		groupID, ok := parseAffinityGroupIDFromLabelRule(rule)
+		if !ok {
+			// Not an affinity label rule, skip
+			return true
+		}
+
+		ranges, err := extractKeyRangesFromLabelRule(rule)
+		if err != nil {
+			log.Warn("failed to extract key ranges from label rule during rebuild",
+				zap.String("rule-id", rule.ID),
+				zap.String("group-id", groupID),
+				zap.Error(err))
+			return true
+		}
+
+		if len(ranges) > 0 {
+			allRanges = append(allRanges, ranges...)
+			// Populate in-memory key ranges cache
+			m.keyRanges[groupID] = ranges
+		}
+
+		// Associate the label rule with the group
+		if groupInfo, ok := m.groups[groupID]; ok {
+			groupInfo.labels = rule
+		} else {
+			log.Warn("found label rule for unknown affinity group",
+				zap.String("group-id", groupID),
+				zap.String("rule-id", rule.ID))
+		}
+
+		return true
+	})
+
+	// Validate that all key ranges are non-overlapping
+	for i := 0; i < len(allRanges); i++ {
+		for j := i + 1; j < len(allRanges); j++ {
+			if checkKeyRangesOverlap(
+				allRanges[i].startKey, allRanges[i].endKey,
+				allRanges[j].startKey, allRanges[j].endKey,
+			) {
+				return errs.ErrAffinityGroupContent.FastGenByArgs(
+					"found overlapping key ranges during rebuild: group " +
+						allRanges[i].groupID + " overlaps with group " + allRanges[j].groupID)
+			}
+		}
+	}
+
+	log.Info("rebuilt group-label mapping",
+		zap.Int("total-groups", len(m.keyRanges)),
+		zap.Int("total-ranges", len(allRanges)))
+
+	return nil
 }

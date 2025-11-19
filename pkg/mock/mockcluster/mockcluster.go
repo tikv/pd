@@ -84,11 +84,11 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
 	}
-	c.AffinityManager = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig())
-	_ = c.AffinityManager.Initialize()
 	// It should be updated to the latest feature version.
 	c.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	c.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, c.Storage, time.Second*5)
+	c.AffinityManager = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig(), c.RegionLabeler)
+	_ = c.AffinityManager.Initialize()
 	return c
 }
 

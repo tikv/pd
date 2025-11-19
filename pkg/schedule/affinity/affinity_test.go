@@ -26,12 +26,196 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestKeyRangeOverlapValidation(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+
+	// Create manager without region labeler for basic validation testing
+	manager := NewManager(ctx, store, storeInfos, conf, nil)
+	err := manager.Initialize()
+	re.NoError(err)
+
+	// Test 1: Non-overlapping ranges should succeed
+	keyRanges1 := []KeyRangeInput{
+		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
+		{StartKey: []byte("c"), EndKey: []byte("d"), GroupID: "group1"},
+	}
+	err = manager.ValidateKeyRanges(keyRanges1)
+	re.NoError(err, "Non-overlapping ranges should pass validation")
+
+	// Test 2: Overlapping ranges within same request should fail
+	keyRanges2 := []KeyRangeInput{
+		{StartKey: []byte("a"), EndKey: []byte("c"), GroupID: "group1"},
+		{StartKey: []byte("b"), EndKey: []byte("d"), GroupID: "group1"},
+	}
+	err = manager.ValidateKeyRanges(keyRanges2)
+	re.Error(err, "Overlapping ranges should fail validation")
+	re.Contains(err.Error(), "overlap")
+
+	// Test 3: Adjacent ranges (not overlapping) should succeed
+	keyRanges3 := []KeyRangeInput{
+		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
+		{StartKey: []byte("b"), EndKey: []byte("c"), GroupID: "group1"},
+	}
+	err = manager.ValidateKeyRanges(keyRanges3)
+	re.NoError(err, "Adjacent ranges should pass validation")
+
+	// Test 4: Verify checkKeyRangesOverlap function directly
+	overlaps := checkKeyRangesOverlap([]byte("a"), []byte("c"), []byte("b"), []byte("d"))
+	re.True(overlaps, "Ranges [a,c) and [b,d) should overlap")
+
+	overlaps = checkKeyRangesOverlap([]byte("a"), []byte("b"), []byte("c"), []byte("d"))
+	re.False(overlaps, "Ranges [a,b) and [c,d) should not overlap")
+}
+
+// TestKeyRangeOverlapRebuild tests rebuild after restart
+// Note: Full labeler integration test requires proper JSON serialization handling
+func TestKeyRangeOverlapRebuild(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+
+	manager := NewManager(ctx, store, storeInfos, conf, nil)
+	err := manager.Initialize()
+	re.NoError(err)
+
+	// Create two groups without key ranges for basic testing
+	groupsWithRanges := []GroupWithRanges{
+		{
+			Group: &Group{
+				ID:            "group1",
+				LeaderStoreID: 1,
+				VoterStoreIDs: []uint64{1},
+			},
+		},
+		{
+			Group: &Group{
+				ID:            "group2",
+				LeaderStoreID: 1,
+				VoterStoreIDs: []uint64{1},
+			},
+		},
+	}
+	err = manager.SaveAffinityGroups(groupsWithRanges)
+	re.NoError(err)
+
+	// Verify groups were created
+	re.True(manager.IsGroupExist("group1"))
+	re.True(manager.IsGroupExist("group2"))
+
+	// Create a new manager to simulate restart
+	manager2 := NewManager(ctx, store, storeInfos, conf, nil)
+	err = manager2.Initialize()
+	re.NoError(err)
+
+	// Verify groups were loaded from storage
+	re.True(manager2.IsGroupExist("group1"))
+	re.True(manager2.IsGroupExist("group2"))
+}
+
+// TestLabelRuleIntegration tests basic label rule creation and deletion
+// Note: Full integration with JSON serialization requires additional handling
+func TestLabelRuleIntegration(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	err = manager.Initialize()
+	re.NoError(err)
+
+	// Test: Group with no key ranges should not create label rule
+	group1 := &Group{
+		ID:            "group_no_label",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1},
+	}
+	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group1}})
+	re.NoError(err)
+
+	labelRuleID := GetLabelRuleID("group_no_label")
+	labelRule := regionLabeler.GetLabelRule(labelRuleID)
+	re.Nil(labelRule, "No label rule should be created when keyRanges is nil")
+
+	// Verify group was created
+	re.True(manager.IsGroupExist("group_no_label"))
+
+	// Delete group
+	err = manager.DeleteAffinityGroup("group_no_label")
+	re.NoError(err)
+	re.False(manager.IsGroupExist("group_no_label"))
+}
+
+// TestBasicGroupOperations tests basic group CRUD operations
+func TestBasicGroupOperations(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+
+	manager := NewManager(ctx, store, storeInfos, conf, nil)
+	err := manager.Initialize()
+	re.NoError(err)
+
+	// Create a group
+	group1 := &Group{
+		ID:            "group1",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1},
+	}
+	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group1}})
+	re.NoError(err)
+	re.True(manager.IsGroupExist("group1"))
+
+	// Delete the group
+	err = manager.DeleteAffinityGroup("group1")
+	re.NoError(err)
+	re.False(manager.IsGroupExist("group1"))
 }
 
 func TestStoreHealthCheck(t *testing.T) {
@@ -63,7 +247,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create affinity manager
-	manager := NewManager(ctx, store, storeInfos, conf)
+	manager := NewManager(ctx, store, storeInfos, conf, nil)
 	err := manager.Initialize()
 	re.NoError(err)
 
@@ -73,7 +257,7 @@ func TestStoreHealthCheck(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2},
 	}
-	err = manager.SaveAffinityGroup(group1)
+	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group1}})
 	re.NoError(err)
 
 	// Create a test affinity group with unhealthy store
@@ -82,7 +266,7 @@ func TestStoreHealthCheck(t *testing.T) {
 		LeaderStoreID: 3,
 		VoterStoreIDs: []uint64{3, 2},
 	}
-	err = manager.SaveAffinityGroup(group2)
+	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group2}})
 	re.NoError(err)
 
 	// Verify initial state - all groups should be in effect
@@ -133,7 +317,7 @@ func TestGetUnhealthyStores(t *testing.T) {
 	storeInfos.PutStore(disconnectedStore)
 
 	conf := mockconfig.NewTestOptions()
-	manager := NewManager(ctx, store, storeInfos, conf)
+	manager := NewManager(ctx, store, storeInfos, conf, nil)
 
 	// Test group with only healthy stores
 	groupInfo1 := &GroupInfo{

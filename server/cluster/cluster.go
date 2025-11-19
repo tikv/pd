@@ -326,7 +326,6 @@ func (c *RaftCluster) InitCluster(
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
-	c.affinityManager = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts())
 	c.keyRangeManager = keyrange.NewManager()
 	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager) // TODO: pass affinity manager
 	return nil
@@ -385,6 +384,8 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return err
 	}
 
+	// create affinity manager with region labeler for key range validation and rebuild
+	c.affinityManager = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
 	err = c.affinityManager.Initialize()
 	if err != nil {
 		return err

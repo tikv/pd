@@ -15,18 +15,16 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"net/http"
 	"regexp"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -90,7 +88,11 @@ func CreateAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	groups := make([]*affinity.Group, 0, len(req.AffinityGroups))
+	groupsWithRanges := make([]affinity.GroupWithRanges, 0, len(req.AffinityGroups))
+	
+	// Prepare key ranges for validation
+	var allNewRanges []affinity.KeyRangeInput
+	
 	for groupID, input := range req.AffinityGroups {
 		if err := validateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -104,68 +106,57 @@ func CreateAffinityGroups(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no key ranges provided for group "+groupID))
 			return
 		}
+		
+		// Convert KeyRange to labeler format (hex-encoded strings)
+		var keyRanges []any
+		for _, kr := range input.Ranges {
+			keyRanges = append(keyRanges, map[string]any{
+				"start_key": hex.EncodeToString(kr.StartKey),
+				"end_key":   hex.EncodeToString(kr.EndKey),
+			})
+			
+			// Collect key ranges for overlap validation
+			allNewRanges = append(allNewRanges, affinity.KeyRangeInput{
+				StartKey: kr.StartKey,
+				EndKey:   kr.EndKey,
+				GroupID:  groupID,
+			})
+		}
+		
 		// TODO: use a zero LeaderStoreID and empty VoterStoreIDs to indicate
-		groups = append(groups, &affinity.Group{
-			ID:            groupID,
-			LeaderStoreID: 0,
-			VoterStoreIDs: make([]uint64, 0, len(input.Ranges)),
+		groupsWithRanges = append(groupsWithRanges, affinity.GroupWithRanges{
+			Group: &affinity.Group{
+				ID:            groupID,
+				LeaderStoreID: 0,
+				VoterStoreIDs: make([]uint64, 0, len(input.Ranges)),
+			},
+			KeyRanges: keyRanges,
 		})
 	}
+	
+	// Validate that key ranges don't overlap
+	if err := manager.ValidateKeyRanges(allNewRanges); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 
-	// Only when all groups are successfully created, we proceed to persist them
-	// and update the in-memory state.
-	// Design: Save affinity groups first, then add labels
-	// Rationale: If labeling fails, we can retry with saved config;
-	//           If config save fails after labeling, orphaned labels exist
-	if err := manager.SaveAffinityGroups(groups); err != nil {
+	// Save affinity groups with their key ranges
+	// The manager will handle storage persistence, label creation, and in-memory updates atomically
+	if err := manager.SaveAffinityGroups(groupsWithRanges); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	// Label the regions affected by the new affinity groups
-	rc := svr.GetRaftCluster()
-	if rc == nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
-		return
-	}
-	regionLabeler := rc.GetRegionLabeler()
-	if regionLabeler != nil {
-		for groupID, input := range req.AffinityGroups {
-			// Convert KeyRange to labeler format
-			var keyRanges []any
-			for _, kr := range input.Ranges {
-				keyRanges = append(keyRanges, map[string]any{
-					"start_key": kr.StartKey,
-					"end_key":   kr.EndKey,
-				})
-			}
-
-			// Create single label rule with multiple key ranges
-			// Relies on label's internal multiple keyrange mechanism
-			rule := &labeler.LabelRule{
-				ID:       affinity.GetLabelRuleID(groupID),
-				Labels:   []labeler.RegionLabel{{Key: "affinity_group", Value: groupID}},
-				RuleType: labeler.KeyRange,
-				Data:     keyRanges,
-			}
-
-			if err := regionLabeler.SetLabelRule(rule); err != nil {
-				c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
 	}
 
 	// Convert internal manager output to API output.
 	resp := AffinityGroupsResponse{
 		AffinityGroups: make(map[string]*affinity.GroupState, len(req.AffinityGroups)),
 	}
-	for _, group := range groups {
-		state := manager.GetAffinityGroupState(group.ID)
+	for _, gwr := range groupsWithRanges {
+		state := manager.GetAffinityGroupState(gwr.Group.ID)
 		if state == nil {
 			state = &affinity.GroupState{}
 		}
-		resp.AffinityGroups[group.ID] = state
+		resp.AffinityGroups[gwr.Group.ID] = state
 	}
 	c.IndentedJSON(http.StatusOK, resp)
 }
@@ -204,23 +195,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 		return
 	}
 
-	// Delete the corresponding label rule
-	// Design: Delete group first, then delete labels
-	// Rationale: If label deletion fails, the group is already deleted and won't create new operators;
-	//           We can manually clean up orphaned labels later if needed
-	rc := svr.GetRaftCluster()
-	if rc != nil {
-		regionLabeler := rc.GetRegionLabeler()
-		if regionLabeler != nil {
-			labelRuleID := affinity.GetLabelRuleID(groupID)
-			if err := regionLabeler.DeleteLabelRule(labelRuleID); err != nil {
-				log.Warn("failed to delete label rule for affinity group",
-					zap.String("group-id", groupID),
-					zap.String("label-rule-id", labelRuleID),
-					zap.Error(err))
-			}
-		}
-	}
+	// Note: Label deletion is now handled inside the DeleteAffinityGroup method
 
 	c.JSON(http.StatusOK, "Affinity group deleted successfully.")
 }
