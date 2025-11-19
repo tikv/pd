@@ -15,14 +15,22 @@
 package checker
 
 import (
+	"bytes"
+
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -229,4 +237,170 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, groupI
 
 	// No adjustment needed
 	return nil
+}
+
+// MergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
+// It follows similar logic to merge_checker but with affinity-specific constraints:
+// - Does NOT skip recently split or recently started regions (as requested)
+// - Only merges regions within the same affinity group
+func (c *AffinityChecker) MergeCheck(region *core.RegionInfo) []*operator.Operator {
+	affinityMergeCheckerCounter.Inc()
+
+	if c.IsPaused() {
+		affinityMergeCheckerPausedCounter.Inc()
+		return nil
+	}
+
+	// Check if region has a leader
+	if region.GetLeader() == nil {
+		affinityMergeCheckerNoLeaderCounter.Inc()
+		return nil
+	}
+
+	// Check if region belongs to an affinity group and is an affinity region
+	groupInfo := c.affinityManager.GetRegionAffinityGroup(region.GetID())
+	if groupInfo == nil {
+		// Region doesn't belong to any affinity group
+		affinityMergeCheckerNoAffinityGroupCounter.Inc()
+		return nil
+	}
+
+	if !c.affinityManager.IsRegionAffinity(region) {
+		affinityMergeCheckerNotAffinityRegionCounter.Inc()
+		return nil
+	}
+
+	// Region is not small enough
+	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
+	maxKeys := maxSize * config.RegionSizeToKeysRatio
+	if !region.NeedMerge(maxSize, maxKeys) {
+		affinityMergeCheckerNoNeedCounter.Inc()
+		return nil
+	}
+
+	if !filter.IsRegionHealthy(region) {
+		affinityMergeCheckerUnhealthyRegionCounter.Inc()
+		return nil
+	}
+
+	if !filter.IsRegionReplicated(c.cluster, region) {
+		affinityMergeCheckerAbnormalReplicaCounter.Inc()
+		return nil
+	}
+
+	// Get adjacent regions
+	prev, next := c.cluster.GetAdjacentRegions(region)
+	var target *core.RegionInfo
+	if c.checkAffinityMergeTarget(region, next, groupInfo) {
+		target = next
+	}
+
+	// Check prev region (allow merging from both sides)
+	if !c.conf.IsOneWayMergeEnabled() && c.checkAffinityMergeTarget(region, prev, groupInfo) { // allow a region can be merged by two ways.
+		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
+			target = prev
+		}
+	}
+
+	if target == nil {
+		affinityMergeCheckerNoTargetCounter.Inc()
+		return nil
+	}
+
+	if region.GetApproximateSize()+target.GetApproximateSize() > maxSize ||
+		region.GetApproximateKeys()+target.GetApproximateKeys() > maxKeys {
+		affinityMergeCheckerTargetTooBigCounter.Inc()
+		return nil
+	}
+
+	log.Debug("try to merge affinity region",
+		logutil.ZapRedactStringer("from", core.RegionToHexMeta(region.GetMeta())),
+		logutil.ZapRedactStringer("to", core.RegionToHexMeta(target.GetMeta())),
+		zap.String("affinity-group", groupInfo.ID))
+
+	ops, err := operator.CreateMergeRegionOperator("affinity-merge-region", c.cluster, region, target, operator.OpMerge)
+	if err != nil {
+		log.Warn("create affinity merge region operator failed", errs.ZapError(err))
+		return nil
+	}
+
+	affinityMergeCheckerNewOpCounter.Inc()
+	return ops
+}
+
+// checkAffinityMergeTarget checks if an adjacent region is a valid merge target.
+// It ensures both regions belong to the same affinity group and satisfy merge conditions.
+func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.RegionInfo, groupInfo *affinity.GroupState) bool {
+	if adjacent == nil {
+		affinityMergeCheckerAdjNotExistCounter.Inc()
+		return false
+	}
+
+	// Check if adjacent region belongs to the same affinity group
+	adjacentGroupInfo := c.affinityManager.GetRegionAffinityGroup(adjacent.GetID())
+	if adjacentGroupInfo == nil || adjacentGroupInfo.ID != groupInfo.ID {
+		// Adjacent region is not in the same affinity group
+		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
+		return false
+	}
+
+	if !c.affinityManager.IsRegionAffinity(adjacent) {
+		affinityMergeCheckerAdjNotAffinityCounter.Inc()
+		return false
+	}
+
+	// Check if regions can be merged according to merge rules
+	if !c.allowAffinityMerge(region, adjacent) {
+		affinityMergeCheckerAdjDisallowMergeCounter.Inc()
+		return false
+	}
+
+	if !checkPeerStore(c.cluster, region, adjacent) {
+		affinityMergeCheckerAdjAbnormalPeerStoreCounter.Inc()
+		return false
+	}
+
+	// Check if adjacent region is healthy
+	if !filter.IsRegionHealthy(adjacent) {
+		affinityMergeCheckerAdjUnhealthyCounter.Inc()
+		return false
+	}
+
+	if !filter.IsRegionReplicated(c.cluster, adjacent) {
+		affinityMergeCheckerAdjAbnormalReplicaCounter.Inc()
+		return false
+	}
+
+	return true
+}
+
+// allowAffinityMerge checks if two regions can be merged according to merge rules.
+// This is based on checker.AllowMerge but adapted for affinity regions.
+func (c *AffinityChecker) allowAffinityMerge(region, adjacent *core.RegionInfo) bool {
+	var start, end []byte
+	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
+		start, end = region.GetStartKey(), adjacent.GetEndKey()
+	} else if bytes.Equal(adjacent.GetEndKey(), region.GetStartKey()) && len(adjacent.GetEndKey()) != 0 {
+		start, end = adjacent.GetStartKey(), region.GetEndKey()
+	} else {
+		return false
+	}
+
+	// Check placement rules
+	if c.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+		if len(c.cluster.GetRuleManager().GetSplitKeys(start, end)) > 0 {
+			return false
+		}
+	}
+
+	// Check region labeler
+	l := c.cluster.GetRegionLabeler()
+	if l != nil {
+		if len(l.GetSplitKeys(start, end)) > 0 {
+			return false
+		}
+		// Note: For affinity regions, we allow merge even if merge_option=deny is set
+	}
+
+	return true
 }

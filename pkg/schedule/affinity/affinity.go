@@ -729,7 +729,7 @@ func checkKeyRangesOverlap(start1, end1, start2, end2 []byte) bool {
 // Uses in-memory keyRanges cache to avoid repeated labeler access and reduce lock contention.
 func (m *Manager) validateNoKeyRangeOverlap(newRanges []keyRange) error {
 	// First, check for overlaps within the new ranges themselves
-	for i := 0; i < len(newRanges); i++ {
+	for i := range newRanges {
 		for j := i + 1; j < len(newRanges); j++ {
 			if checkKeyRangesOverlap(
 				newRanges[i].startKey, newRanges[i].endKey,
@@ -812,7 +812,7 @@ func (m *Manager) loadRegionLabel() error {
 	})
 
 	// Validate that all key ranges are non-overlapping
-	for i := 0; i < len(allRanges); i++ {
+	for i := range allRanges {
 		for j := i + 1; j < len(allRanges); j++ {
 			if checkKeyRangesOverlap(
 				allRanges[i].startKey, allRanges[i].endKey,
@@ -830,4 +830,56 @@ func (m *Manager) loadRegionLabel() error {
 		zap.Int("total-ranges", len(allRanges)))
 
 	return nil
+}
+
+// IsRegionAffinity checks if a region conforms to its affinity group distribution requirements.
+// Returns true if the region:
+// Belongs to an affinity group and satisfies all distribution constraints:
+//   - Leader is on the expected store
+//   - All voters are on the expected stores
+func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
+	m.RLock()
+	defer m.RUnlock()
+
+	// Get the affinity group for this region
+	groupInfo := m.regions[region.GetID()]
+	if groupInfo == nil {
+		// Region doesn't belong to any affinity group, return false
+		return false
+	}
+
+	// If group is not in effect, return false
+	if !groupInfo.Effect {
+		return false
+	}
+
+	// Check leader placement
+	leader := region.GetLeader()
+	if leader == nil {
+		return false
+	}
+	if leader.GetStoreId() != groupInfo.LeaderStoreID {
+		return false
+	}
+
+	// Check voters placement
+	voters := region.GetVoters()
+	if len(voters) != len(groupInfo.VoterStoreIDs) {
+		return false
+	}
+
+	// Create a set of expected voter store IDs
+	expectedStores := make(map[uint64]struct{}, len(groupInfo.VoterStoreIDs))
+	for _, storeID := range groupInfo.VoterStoreIDs {
+		expectedStores[storeID] = struct{}{}
+	}
+
+	// Verify all voters are on expected stores
+	for _, voter := range voters {
+		if _, ok := expectedStores[voter.GetStoreId()]; !ok {
+			return false
+		}
+	}
+
+	return true
 }

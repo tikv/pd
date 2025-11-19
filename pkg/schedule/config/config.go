@@ -82,6 +82,9 @@ const (
 	defaultMaxStorePreparingTime = 48 * time.Hour
 
 	defaultMaxAffinityMergeRegionSize = 0
+
+	// RegionSizeToKeysRatio is the ratio between region size and region keys.
+	RegionSizeToKeysRatio = 10000
 )
 
 var (
@@ -483,7 +486,7 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	if keys := c.MaxMergeRegionKeys; keys != 0 {
 		return keys
 	}
-	return c.MaxMergeRegionSize * 10000
+	return c.MaxMergeRegionSize * RegionSizeToKeysRatio
 }
 
 // GetMaxAffinityMergeRegionSize returns the max affinity merge region size.

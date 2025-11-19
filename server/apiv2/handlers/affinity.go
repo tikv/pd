@@ -89,10 +89,10 @@ func CreateAffinityGroups(c *gin.Context) {
 	}
 
 	groupsWithRanges := make([]affinity.GroupWithRanges, 0, len(req.AffinityGroups))
-	
+
 	// Prepare key ranges for validation
 	var allNewRanges []affinity.KeyRangeInput
-	
+
 	for groupID, input := range req.AffinityGroups {
 		if err := validateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -106,7 +106,7 @@ func CreateAffinityGroups(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no key ranges provided for group "+groupID))
 			return
 		}
-		
+
 		// Convert KeyRange to labeler format (hex-encoded strings)
 		var keyRanges []any
 		for _, kr := range input.Ranges {
@@ -114,7 +114,7 @@ func CreateAffinityGroups(c *gin.Context) {
 				"start_key": hex.EncodeToString(kr.StartKey),
 				"end_key":   hex.EncodeToString(kr.EndKey),
 			})
-			
+
 			// Collect key ranges for overlap validation
 			allNewRanges = append(allNewRanges, affinity.KeyRangeInput{
 				StartKey: kr.StartKey,
@@ -122,7 +122,7 @@ func CreateAffinityGroups(c *gin.Context) {
 				GroupID:  groupID,
 			})
 		}
-		
+
 		// TODO: use a zero LeaderStoreID and empty VoterStoreIDs to indicate
 		groupsWithRanges = append(groupsWithRanges, affinity.GroupWithRanges{
 			Group: &affinity.Group{
@@ -133,7 +133,7 @@ func CreateAffinityGroups(c *gin.Context) {
 			KeyRanges: keyRanges,
 		})
 	}
-	
+
 	// Validate that key ranges don't overlap
 	if err := manager.ValidateKeyRanges(allNewRanges); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())

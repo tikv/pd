@@ -21,6 +21,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -600,4 +603,523 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 	// Check should now return nil (group no longer exists)
 	ops = checker.Check(tc.GetRegion(1))
 	re.Nil(ops)
+}
+
+// TestAffinityMergeCheckBasic tests basic merge functionality for affinity regions.
+func TestAffinityMergeCheckBasic(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20) // Small size to trigger merge
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create two small adjacent regions in the same group
+	tc.AddLeaderRegion(1, 1, 2, 3) // Small region
+	tc.AddLeaderRegion(2, 1, 2, 3) // Adjacent small region
+	region1 := tc.GetRegion(1)
+	region2 := tc.GetRegion(2)
+
+	// Set regions to be small
+	region1 = region1.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	region2 = region2.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+
+	// Make them adjacent
+	region1 = region1.Clone(core.WithStartKey([]byte("a")), core.WithEndKey([]byte("b")))
+	region2 = region2.Clone(core.WithStartKey([]byte("b")), core.WithEndKey([]byte("c")))
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Create affinity group
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+
+	// Set both regions to the same group and mark them as affinity regions
+	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroup(2, "test_group")
+
+	// MergeCheck should create merge operator
+	ops := checker.MergeCheck(region1)
+	re.NotNil(ops)
+	re.Len(ops, 2) // Merge operation creates 2 operators
+	re.Contains(ops[0].Desc(), "merge")
+}
+
+// TestAffinityMergeCheckNoTarget tests merge when no valid target exists.
+func TestAffinityMergeCheckNoTarget(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create a small region with no adjacent regions
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region1 := tc.GetRegion(1)
+	region1 = region1.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	tc.PutRegion(region1)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	// MergeCheck should return nil (no adjacent regions)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops)
+}
+
+// TestAffinityMergeCheckDifferentGroups tests that regions in different groups don't merge.
+func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create two small adjacent regions
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	region1 := tc.GetRegion(1)
+	region2 := tc.GetRegion(2)
+
+	region1 = region1.Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("a")),
+		core.WithEndKey([]byte("b")),
+	)
+	region2 = region2.Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("b")),
+		core.WithEndKey([]byte("c")),
+	)
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Create two different affinity groups
+	group1 := &affinity.Group{
+		ID:            "group1",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	group2 := &affinity.Group{
+		ID:            "group2",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{
+		{Group: group1},
+		{Group: group2},
+	})
+	re.NoError(err)
+
+	// Assign regions to different groups
+	affinityManager.SetRegionGroup(1, "group1")
+	affinityManager.SetRegionGroup(2, "group2")
+
+	// MergeCheck should return nil (different groups)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops)
+}
+
+// TestAffinityMergeCheckRegionTooLarge tests that large regions don't merge.
+func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create one small and one large adjacent region
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	region1 := tc.GetRegion(1)
+	region2 := tc.GetRegion(2)
+
+	region1 = region1.Clone(
+		core.SetApproximateSize(30), // Too large to merge
+		core.SetApproximateKeys(30000),
+		core.WithStartKey([]byte("a")),
+		core.WithEndKey([]byte("b")),
+	)
+	region2 = region2.Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("b")),
+		core.WithEndKey([]byte("c")),
+	)
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroup(2, "test_group")
+
+	// MergeCheck should return nil (region1 is too large)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops)
+}
+
+// TestAffinityMergeCheckAdjacentNotAffinity tests that non-affinity adjacent regions don't merge.
+func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create two small adjacent regions
+	tc.AddLeaderRegion(1, 1, 2, 3) // This one is affinity-compliant
+	tc.AddLeaderRegion(2, 2, 1, 3) // This one has wrong leader (leader on store 2 instead of 1)
+	region1 := tc.GetRegion(1)
+	region2 := tc.GetRegion(2)
+
+	region1 = region1.Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("a")),
+		core.WithEndKey([]byte("b")),
+	)
+	region2 = region2.Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("b")),
+		core.WithEndKey([]byte("c")),
+	)
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1, // Expect leader on store 1
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroup(2, "test_group")
+
+	// MergeCheck should return nil (region2 is not affinity-compliant due to wrong leader)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops)
+}
+
+// TestAffinityMergeCheckNotAffinityRegion tests that non-affinity regions don't merge.
+func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create a small region with wrong leader (not matching affinity requirement)
+	tc.AddLeaderRegion(1, 2, 1, 3) // Leader on store 2, but group expects leader on store 1
+	region1 := tc.GetRegion(1)
+	region1 = region1.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	tc.PutRegion(region1)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1, // Expect leader on store 1
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	// MergeCheck should return nil (region doesn't satisfy affinity requirements)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops)
+}
+
+// TestAffinityMergeCheckUnhealthyRegion tests that unhealthy regions don't merge.
+func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create a small region with down peer
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region1 := tc.GetRegion(1)
+
+	// Get peer on store 2 to mark as down
+	var peerOnStore2 *pdpb.PeerStats
+	for _, peer := range region1.GetMeta().Peers {
+		if peer.GetStoreId() == 2 {
+			peerOnStore2 = &pdpb.PeerStats{Peer: peer}
+			break
+		}
+	}
+
+	region1 = region1.Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithDownPeers([]*pdpb.PeerStats{peerOnStore2}), // Mark peer as down
+	)
+	tc.PutRegion(region1)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	// MergeCheck should return nil (region is unhealthy)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops)
+}
+
+// TestAffinityMergeCheckBothDirections tests that merge can happen in both directions when one-way merge is disabled.
+func TestAffinityMergeCheckBothDirections(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	// One-way merge is disabled by default
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create three small adjacent regions
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	tc.AddLeaderRegion(3, 1, 2, 3)
+
+	region1 := tc.GetRegion(1).Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("a")),
+		core.WithEndKey([]byte("b")),
+	)
+	region2 := tc.GetRegion(2).Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("b")),
+		core.WithEndKey([]byte("c")),
+	)
+	region3 := tc.GetRegion(3).Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("c")),
+		core.WithEndKey([]byte("d")),
+	)
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+	tc.PutRegion(region3)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroup(3, "test_group")
+
+	// MergeCheck on region2 can merge with either prev (region1) or next (region3)
+	// When one-way merge is disabled, it should prefer next but can also merge with prev
+	ops := checker.MergeCheck(region2)
+	re.NotNil(ops) // Should merge with one of the adjacent regions
+}
+
+// TestAffinityMergeCheckTargetTooBig tests that merging regions whose combined size exceeds the max limit is disallowed.
+func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20) // Max size 20, Max keys 200000
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create two adjacent regions whose total size exceeds the limit
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	region1 := tc.GetRegion(1).Clone(
+		core.SetApproximateSize(15), // 15 size (Source)
+		core.SetApproximateKeys(150000),
+		core.WithStartKey([]byte("a")),
+		core.WithEndKey([]byte("b")),
+	)
+	region2 := tc.GetRegion(2).Clone(
+		core.SetApproximateSize(6), // 6 size (Target). Total: 21 > 20
+		core.SetApproximateKeys(60000),
+		core.WithStartKey([]byte("b")),
+		core.WithEndKey([]byte("c")),
+	)
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroup(2, "test_group")
+
+	// MergeCheck should return nil because the combined size (21) exceeds the limit (20)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops, "Merged size exceeds MaxAffinityMergeRegionSize")
+}
+
+// TestAffinityMergeCheckAdjacentUnhealthy tests that merging is blocked if the adjacent region is unhealthy.
+func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	// Create two adjacent regions
+	tc.AddLeaderRegion(1, 1, 2, 3) // Region 1 (Source)
+	tc.AddLeaderRegion(2, 1, 2, 3) // Region 2 (Target, Unhealthy)
+	region1 := tc.GetRegion(1).Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("a")),
+		core.WithEndKey([]byte("b")),
+	)
+	region2 := tc.GetRegion(2).Clone(
+		core.SetApproximateSize(10),
+		core.SetApproximateKeys(10),
+		core.WithStartKey([]byte("b")),
+		core.WithEndKey([]byte("c")),
+	)
+
+	// Get peer on store 2 of region 2 to mark as down
+	var peerOnStore2 *pdpb.PeerStats
+	for _, peer := range region2.GetMeta().Peers {
+		if peer.GetStoreId() == 2 {
+			peerOnStore2 = &pdpb.PeerStats{Peer: peer}
+			break
+		}
+	}
+	region2 = region2.Clone(
+		core.WithDownPeers([]*pdpb.PeerStats{peerOnStore2}), // Mark target peer as down
+	)
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroup(2, "test_group")
+
+	// MergeCheck should return nil (Adjacent region is unhealthy)
+	ops := checker.MergeCheck(region1)
+	re.Nil(ops, "Should not merge into an unhealthy adjacent region")
 }
