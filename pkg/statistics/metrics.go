@@ -14,7 +14,12 @@
 
 package statistics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"strconv"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/core"
+)
 
 var (
 	hotCacheStatusGauge = prometheus.NewGaugeVec(
@@ -117,4 +122,11 @@ func init() {
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
 	prometheus.MustRegister(hotPeerSummary)
+}
+
+func DeleteClusterStatusMetrics(store *core.StoreInfo) {
+	engine := store.Engine()
+	for _, status := range storeStatuses {
+		clusterStatusGauge.DeleteLabelValues(status, engine, strconv.FormatUint(store.GetID(), 10))
+	}
 }

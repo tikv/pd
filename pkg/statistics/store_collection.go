@@ -52,6 +52,21 @@ const (
 	clusterStatusStorageCapacity = "storage_capacity"
 )
 
+var storeStatuses = []string{
+	clusterStatusStoreUpCount,
+	clusterStatusStoreDisconnectedCount,
+	clusterStatusStoreSlowCount,
+	clusterStatusStoreDownCount,
+	clusterStatusStoreUnhealthCount,
+	clusterStatusStoreOfflineCount,
+	clusterStatusStoreTombstoneCount,
+	clusterStatusStoreLowSpaceCount,
+	clusterStatusStorePreparingCount,
+	clusterStatusStoreServingCount,
+	clusterStatusStoreRemovingCount,
+	clusterStatusStoreRemovedCount,
+}
+
 type storeStatistics struct {
 	opt          config.ConfProvider
 	LabelCounter map[string][]uint64
@@ -129,12 +144,7 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
-	var engine string
-	if store.IsTiKV() {
-		engine = core.EngineTiKV
-	} else {
-		engine = core.EngineTiFlash
-	}
+	engine := store.Engine()
 	storeStatusStats := s.observeStoreStatus(store)
 	for statusType, value := range storeStatusStats {
 		clusterStatusGauge.WithLabelValues(statusType, engine, id).Set(value)
