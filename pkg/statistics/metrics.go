@@ -124,6 +124,7 @@ func init() {
 	prometheus.MustRegister(hotPeerSummary)
 }
 
+// DeleteClusterStatusMetrics deletes the cluster status metrics of a store.
 func DeleteClusterStatusMetrics(store *core.StoreInfo) {
 	engine := store.Engine()
 	for _, status := range storeStatuses {
