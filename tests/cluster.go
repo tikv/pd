@@ -641,7 +641,7 @@ func (c *TestCluster) RunInitialServers() error {
 // RunServersWithRetry starts to run multiple TestServer with retry logic.
 func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
 	var lastErr error
-	for retry := 0; retry < maxRetries; retry++ {
+	for range maxRetries {
 		lastErr = RunServers(servers)
 		if lastErr == nil {
 			return nil
