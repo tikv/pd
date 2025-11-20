@@ -187,8 +187,18 @@ func TestEtcdClientSync(t *testing.T) {
 		}
 	}
 
-	_, err = RemoveEtcdMember(client1, memIDToRemove)
-	re.NoError(err)
+	// Use testutil.Eventually to handle potential transient errors during member removal.
+	// The removed member will be shut down immediately, which may cause the removal RPC
+	// to fail with "server stopped", but we verify success by checking the member list.
+	testutil.Eventually(re, func() bool {
+		_, err := RemoveEtcdMember(client1, memIDToRemove)
+		if err == nil {
+			return true
+		}
+		// Verify if the member was actually removed by checking the member list
+		listResp, listErr := ListEtcdMembers(client1.Ctx(), client1)
+		return listErr == nil && len(listResp.Members) == 1
+	})
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
