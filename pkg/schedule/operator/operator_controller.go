@@ -527,7 +527,13 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		}
 		// Replace the old operator with the new one
 		oc.operators.Store(regionID, op)
-		_ = oc.removeOperatorInner(oldOp)
+		// Manually decrement the old operator's counter since it's been replaced
+		oc.counts.dec(oldOp.SchedulerKind())
+		operatorCounter.WithLabelValues(oldOp.Desc(), "remove").Inc()
+		oc.ack(oldOp)
+		if oldOp.Kind()&OpMerge != 0 {
+			oc.removeRelatedMergeOperator(oldOp)
+		}
 		_ = oldOp.Replace()
 		oc.buryOperator(oldOp)
 	}
