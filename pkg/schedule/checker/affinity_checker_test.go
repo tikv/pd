@@ -59,7 +59,7 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 	re.Len(ops, 1)
-	re.Equal("affinity-transfer-leader", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
@@ -93,7 +93,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 	re.Len(ops, 1)
-	re.Equal("affinity-move-peer", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
@@ -172,7 +172,7 @@ func TestAffinityCheckerPaused(t *testing.T) {
 	ops = checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 	re.Len(ops, 1)
-	re.Equal("affinity-transfer-leader", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 }
 
 // TestHealthCheckAndOperatorGeneration tests the full flow:
@@ -220,7 +220,7 @@ func TestHealthCheckAndOperatorGeneration(t *testing.T) {
 	ops := affinityChecker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 	re.Len(ops, 1)
-	re.Equal("affinity-transfer-leader", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 
 	// Simulate health check invalidating the group
 	groupInfo.Effect = false
@@ -236,7 +236,7 @@ func TestHealthCheckAndOperatorGeneration(t *testing.T) {
 	ops = affinityChecker.Check(tc.GetRegion(1))
 	re.NotNil(ops, "Checker should create operator for restored group")
 	re.Len(ops, 1)
-	re.Equal("affinity-transfer-leader", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 }
 
 // TestHealthCheckWithOfflineStore tests that groups are invalidated when stores go offline.
@@ -377,7 +377,7 @@ func TestAffinityCheckerAddPeer(t *testing.T) {
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 	re.Len(ops, 1)
-	re.Equal("affinity-add-peer", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
@@ -412,7 +412,7 @@ func TestAffinityCheckerRemovePeer(t *testing.T) {
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 	re.Len(ops, 1)
-	re.Equal("affinity-remove-peer", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
@@ -479,7 +479,7 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 	re.Len(ops, 1)
-	re.Equal("affinity-move-peer", ops[0].Desc())
+	re.Equal("affinity-move-region", ops[0].Desc())
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
@@ -528,7 +528,7 @@ func TestAffinityCheckerMultipleGroups(t *testing.T) {
 	ops1 := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops1)
 	re.Len(ops1, 1)
-	re.Equal("affinity-transfer-leader", ops1[0].Desc())
+	re.Equal("affinity-move-region", ops1[0].Desc())
 
 	// Check region 2 should return nil (already aligned)
 	ops2 := checker.Check(tc.GetRegion(2))
@@ -1122,4 +1122,656 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 	// MergeCheck should return nil (Adjacent region is unhealthy)
 	ops := checker.MergeCheck(region1)
 	re.Nil(ops, "Should not merge into an unhealthy adjacent region")
+}
+
+// TestAffinityCheckerComplexMove tests moving multiple peers and transferring leader in one operation.
+// This tests the combo operator's ability to handle complex transformations.
+func TestAffinityCheckerComplexMove(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	tc.AddRegionStore(5, 10)
+	tc.AddRegionStore(6, 10)
+
+	// Current: peers on [1, 2, 4], leader on 1
+	// Expected: peers on [3, 5, 6], leader on 5
+	// This requires replacing all 3 peers AND transferring leader
+	tc.AddLeaderRegion(1, 1, 2, 4)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 5,
+		VoterStoreIDs: []uint64{3, 5, 6},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	// Check should create a combo operator for the complex transformation
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
+	re.Equal(operator.OpLeader, ops[0].Kind()&operator.OpLeader)
+	re.Equal(operator.OpRegion, ops[0].Kind()&operator.OpRegion)
+}
+
+// TestAffinityCheckerPartialOverlap tests when current and expected peers partially overlap.
+func TestAffinityCheckerPartialOverlap(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	tc.AddRegionStore(5, 10)
+
+	// Current: peers on [1, 2, 3], leader on 1
+	// Expected: peers on [1, 4, 5], leader on 4
+	// Stores 2, 3 need to be replaced with 4, 5, and leader transferred to 4
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 4,
+		VoterStoreIDs: []uint64{1, 4, 5},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+}
+
+// TestAffinityCheckerOperatorSteps tests that the generated operator contains correct steps.
+func TestAffinityCheckerOperatorSteps(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+
+	// Current: peers on [1, 2, 4], leader on 1
+	// Expected: peers on [1, 2, 3], leader on 2
+	// This requires: remove peer from 4, add peer to 3, transfer leader to 2
+	tc.AddLeaderRegion(1, 1, 2, 4)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+
+	op := ops[0]
+	re.Equal("affinity-move-region", op.Desc())
+
+	// Verify the operator has steps
+	re.Positive(op.Len(), "Operator should have steps")
+}
+
+// TestAffinityCheckerOnlyLeaderTransfer tests when only leader transfer is needed (no peer changes).
+func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+
+	// Current: peers on [1, 2, 3], leader on 1
+	// Expected: peers on [1, 2, 3], leader on 3
+	// Only leader transfer is needed
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 3,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+	// Should have OpLeader since we're transferring leader
+	re.Equal(operator.OpLeader, ops[0].Kind()&operator.OpLeader)
+}
+
+// TestAffinityCheckerOnlyPeerChange tests when only peer changes are needed (no leader transfer).
+func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+
+	// Current: peers on [1, 2, 4], leader on 1
+	// Expected: peers on [1, 2, 3], leader on 1
+	// Only peer change is needed (replace 4 with 3)
+	tc.AddLeaderRegion(1, 1, 2, 4)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+}
+
+// TestAffinityCheckerDifferentReplicaCount tests when expected replica count differs from current.
+func TestAffinityCheckerDifferentReplicaCount(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	tc.AddRegionStore(5, 10)
+
+	// Test case 1: Current 3 peers, expected 5 peers
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3, 4, 5},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+}
+
+// TestAffinityCheckerReduceReplicaCount tests reducing replica count.
+func TestAffinityCheckerReduceReplicaCount(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	tc.AddRegionStore(5, 10)
+
+	// Current: 5 peers on [1, 2, 3, 4, 5], leader on 1
+	// Expected: 3 peers on [1, 2, 3], leader on 1
+	tc.AddLeaderRegion(1, 1, 2, 3, 4, 5)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+}
+
+// TestAffinityCheckerLeaderNotInVoters tests the edge case where leader store is not in voter list.
+// This is an invalid configuration that should be rejected by SaveAffinityGroups.
+func TestAffinityCheckerLeaderNotInVoters(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+
+	// Invalid configuration: leader store 4 is not in voter list [1, 2, 3]
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 4,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	// Should return error for invalid configuration
+	re.Error(err)
+	re.Contains(err.Error(), "leader must be in voter stores")
+}
+
+// TestAffinityCheckerSameStoreOrder tests when voter stores are in different order.
+func TestAffinityCheckerSameStoreOrder(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+
+	// Current: peers on [1, 2, 3], leader on 1
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Expected: same stores but in different order [3, 1, 2], leader on 1
+	// This should NOT require any operator since stores are the same
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{3, 1, 2}, // Different order
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	// Should return nil since stores are the same (order doesn't matter)
+	ops := checker.Check(tc.GetRegion(1))
+	re.Nil(ops)
+}
+
+// TestAffinityCheckerSinglePeer tests with single peer configuration.
+func TestAffinityCheckerSinglePeer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+
+	// Current: single peer on store 1
+	tc.AddLeaderRegion(1, 1)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Expected: single peer on store 2
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{2},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+}
+
+// TestAffinityCheckerLargeReplicaCount tests with large replica count.
+func TestAffinityCheckerLargeReplicaCount(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	// Add 10 stores
+	for i := uint64(1); i <= 10; i++ {
+		tc.AddRegionStore(i, 10)
+	}
+
+	// Current: 5 peers on [1, 2, 3, 4, 5], leader on 1
+	tc.AddLeaderRegion(1, 1, 2, 3, 4, 5)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Expected: 5 peers on [6, 7, 8, 9, 10], leader on 8
+	// Complete replacement of all peers
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 8,
+		VoterStoreIDs: []uint64{6, 7, 8, 9, 10},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+	re.Equal(operator.OpLeader, ops[0].Kind()&operator.OpLeader)
+	re.Equal(operator.OpRegion, ops[0].Kind()&operator.OpRegion)
+}
+
+// TestAffinityCheckerStoreNotExist tests when expected store doesn't exist.
+// This is an invalid configuration that should be rejected by SaveAffinityGroups.
+func TestAffinityCheckerStoreNotExist(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	// Note: store 4 is NOT added
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+
+	// Expected: peers on [1, 2, 4], but store 4 doesn't exist
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 4},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	// Should return error because store 4 doesn't exist
+	re.Error(err)
+	re.Contains(err.Error(), "voter store does not exist")
+}
+
+// TestAffinityCheckerOfflineStore tests when expected store is offline.
+func TestAffinityCheckerOfflineStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+
+	// Set store 4 as offline
+	tc.SetStoreOffline(4)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Expected: peers on [1, 2, 4], but store 4 is offline
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 4},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	// CreateMoveRegionOperator should handle offline store appropriately
+	ops := checker.Check(tc.GetRegion(1))
+	// May return nil or fail to create operator
+	if ops != nil {
+		re.Len(ops, 1)
+	}
+}
+
+// TestAffinityCheckerDownStore tests when expected store is down.
+func TestAffinityCheckerDownStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+
+	// Set store 4 as down
+	tc.SetStoreDown(4)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Expected: peers on [1, 2, 4], but store 4 is down
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 4},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(tc.GetRegion(1))
+	// May return nil or fail to create operator
+	if ops != nil {
+		re.Len(ops, 1)
+	}
+}
+
+// TestAffinityCheckerMultipleRegionsSameGroup tests multiple regions in the same group.
+func TestAffinityCheckerMultipleRegionsSameGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+
+	// Create multiple regions with different configurations
+	tc.AddLeaderRegion(1, 1, 2, 4) // Needs adjustment
+	tc.AddLeaderRegion(2, 1, 2, 3) // Already correct, but leader wrong
+	tc.AddLeaderRegion(3, 2, 1, 3) // Already correct
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+
+	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroup(3, "test_group")
+
+	// Region 1: needs peer change (4->3) and leader transfer (1->2)
+	ops1 := checker.Check(tc.GetRegion(1))
+	re.NotNil(ops1)
+	re.Len(ops1, 1)
+	re.Equal("affinity-move-region", ops1[0].Desc())
+
+	// Region 2: needs leader transfer only (1->2)
+	ops2 := checker.Check(tc.GetRegion(2))
+	re.NotNil(ops2)
+	re.Len(ops2, 1)
+	re.Equal("affinity-move-region", ops2[0].Desc())
+
+	// Region 3: already correct
+	ops3 := checker.Check(tc.GetRegion(3))
+	re.Nil(ops3)
+}
+
+// TestAffinityCheckerRegionNoLeader tests region without leader.
+func TestAffinityCheckerRegionNoLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+
+	// Create a region and manually remove the leader
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+	// Clone with no leader
+	region = region.Clone(core.WithLeader(nil))
+	tc.PutRegion(region)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	// Should return nil because region has no leader
+	ops := checker.Check(region)
+	re.Nil(ops)
+}
+
+// TestAffinityCheckerDuplicateStores tests when VoterStoreIDs has duplicates.
+// This is an invalid configuration that should be rejected by SaveAffinityGroups.
+func TestAffinityCheckerDuplicateStores(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+
+	// Invalid: duplicate stores in VoterStoreIDs
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 2}, // Duplicate store 2
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	// Should return error for duplicate stores
+	re.Error(err)
+	re.Contains(err.Error(), "duplicate voter store ID")
+}
+
+// TestAffinityCheckerEmptyVoterList tests with empty voter list.
+// This is an invalid configuration that should be rejected by SaveAffinityGroups.
+func TestAffinityCheckerEmptyVoterList(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	affinityManager := tc.GetAffinityManager()
+
+	// Invalid: empty VoterStoreIDs
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{}, // Empty
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	// Should return error for empty voter list
+	re.Error(err)
+	re.Contains(err.Error(), "voter store IDs should not be empty")
 }

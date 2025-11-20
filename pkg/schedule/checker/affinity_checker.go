@@ -19,7 +19,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -29,6 +28,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -83,20 +83,20 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// Get the affinity group for this region
-	groupInfo := c.affinityManager.GetRegionAffinityGroup(region.GetID())
-	if groupInfo == nil {
+	group := c.affinityManager.GetRegionAffinityGroup(region.GetID())
+	if group == nil {
 		// Region doesn't belong to any affinity group
 		return nil
 	}
 
 	// Check if the group is in effect
-	if !groupInfo.Effect {
+	if !group.Effect {
 		affinityCheckerGroupNotInEffectCounter.Inc()
 		return nil
 	}
 
 	// Create operator to adjust region according to affinity group
-	op := c.createAffinityOperator(region, groupInfo)
+	op := c.createAffinityOperator(region, group)
 	if op != nil {
 		affinityCheckerNewOpCounter.Inc()
 		return []*operator.Operator{op}
@@ -106,137 +106,66 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 }
 
 // createAffinityOperator creates an operator to adjust region replicas according to affinity group constraints.
-// Parameters:
-//   - region: The region to adjust
-//   - groupState: The affinity group info that defines the desired peer distribution
-//
-// Returns:
-//   - *operator.Operator: The operator to adjust the region, or nil if no adjustment is needed
-func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, groupInfo *affinity.GroupState) *operator.Operator {
-	currentLeaderStoreID := region.GetLeader().GetStoreId()
-	expectedLeaderStoreID := groupInfo.LeaderStoreID
-
-	// Check if leader needs transfer
-	if currentLeaderStoreID != expectedLeaderStoreID {
-		// Check if target leader store has a peer
-		hasPeer := false
-		for _, peer := range region.GetPeers() {
-			if peer.GetStoreId() == expectedLeaderStoreID {
-				hasPeer = true
-				break
-			}
-		}
-
-		if hasPeer {
-			// Simple leader transfer
-			op, err := operator.CreateTransferLeaderOperator(
-				"affinity-transfer-leader",
-				c.cluster,
-				region,
-				expectedLeaderStoreID,
-				[]uint64{},
-				operator.OpAffinity,
-			)
-			if err != nil {
-				affinityCheckerCreateOpFailedCounter.Inc()
-				return nil
-			}
-			return op
-		}
+// It creates a "combo" operator that directly specifies the final leader and voter positions,
+// moving the region to match the expected configuration in one operation.
+func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState) *operator.Operator {
+	// Build expected voter stores set
+	expectedVoterStores := make(map[uint64]bool)
+	for _, storeID := range group.VoterStoreIDs {
+		expectedVoterStores[storeID] = true
 	}
 
-	// Check voters distribution
+	// Build current voter stores set
 	currentVoterStores := make(map[uint64]bool)
 	for _, peer := range region.GetVoters() {
 		currentVoterStores[peer.GetStoreId()] = true
 	}
 
-	expectedVoterStores := make(map[uint64]bool)
-	for _, storeID := range groupInfo.VoterStoreIDs {
-		expectedVoterStores[storeID] = true
-	}
-
-	// Find a peer to remove (not in expected stores)
-	var removeStoreID uint64
-	for _, peer := range region.GetVoters() {
-		storeID := peer.GetStoreId()
-		if !expectedVoterStores[storeID] {
-			removeStoreID = storeID
-			break
+	// Check if region already matches the expected configuration
+	currentLeaderStoreID := region.GetLeader().GetStoreId()
+	if currentLeaderStoreID == group.LeaderStoreID && len(currentVoterStores) == len(expectedVoterStores) {
+		allMatch := true
+		for storeID := range expectedVoterStores {
+			if !currentVoterStores[storeID] {
+				allMatch = false
+				break
+			}
 		}
-	}
-
-	// Find a store to add (in expected but not in current)
-	var addStoreID uint64
-	for _, storeID := range groupInfo.VoterStoreIDs {
-		if !currentVoterStores[storeID] {
-			addStoreID = storeID
-			break
-		}
-	}
-
-	// Create appropriate operator based on what needs to be adjusted
-	if removeStoreID != 0 && addStoreID != 0 {
-		// Move peer from removeStore to addStore
-		newPeer := &metapb.Peer{
-			StoreId: addStoreID,
-			Role:    metapb.PeerRole_Voter,
-		}
-
-		op, err := operator.CreateMovePeerOperator(
-			"affinity-move-peer",
-			c.cluster,
-			region,
-			operator.OpAffinity,
-			removeStoreID,
-			newPeer,
-		)
-		if err != nil {
-			affinityCheckerCreateOpFailedCounter.Inc()
+		if allMatch {
+			// No adjustment needed
 			return nil
 		}
-		return op
 	}
 
-	if addStoreID != 0 {
-		// Add a peer
-		newPeer := &metapb.Peer{
-			StoreId: addStoreID,
-			Role:    metapb.PeerRole_Voter,
+	// Build roles map for the target configuration
+	// Leader store gets Leader role, other voters get Voter role
+	roles := make(map[uint64]placement.PeerRoleType)
+	for _, storeID := range group.VoterStoreIDs {
+		if storeID == group.LeaderStoreID {
+			roles[storeID] = placement.Leader
+		} else {
+			roles[storeID] = placement.Voter
 		}
-
-		op, err := operator.CreateAddPeerOperator(
-			"affinity-add-peer",
-			c.cluster,
-			region,
-			newPeer,
-			operator.OpAffinity,
-		)
-		if err != nil {
-			affinityCheckerCreateOpFailedCounter.Inc()
-			return nil
-		}
-		return op
 	}
 
-	if removeStoreID != 0 {
-		// Remove a peer
-		op, err := operator.CreateRemovePeerOperator(
-			"affinity-remove-peer",
-			c.cluster,
-			operator.OpAffinity,
-			region,
-			removeStoreID,
-		)
-		if err != nil {
-			affinityCheckerCreateOpFailedCounter.Inc()
-			return nil
-		}
-		return op
+	// Create combo operator that moves region to target configuration
+	op, err := operator.CreateMoveRegionOperator(
+		"affinity-move-region",
+		c.cluster,
+		region,
+		operator.OpAffinity|operator.OpLeader|operator.OpRegion,
+		roles,
+	)
+	if err != nil {
+		log.Warn("create affinity move region operator failed",
+			zap.Uint64("region-id", region.GetID()),
+			zap.String("group-id", group.ID),
+			errs.ZapError(err))
+		affinityCheckerCreateOpFailedCounter.Inc()
+		return nil
 	}
 
-	// No adjustment needed
-	return nil
+	return op
 }
 
 // MergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
@@ -258,8 +187,8 @@ func (c *AffinityChecker) MergeCheck(region *core.RegionInfo) []*operator.Operat
 	}
 
 	// Check if region belongs to an affinity group and is an affinity region
-	groupInfo := c.affinityManager.GetRegionAffinityGroup(region.GetID())
-	if groupInfo == nil {
+	group := c.affinityManager.GetRegionAffinityGroup(region.GetID())
+	if group == nil {
 		// Region doesn't belong to any affinity group
 		affinityMergeCheckerNoAffinityGroupCounter.Inc()
 		return nil
@@ -291,12 +220,12 @@ func (c *AffinityChecker) MergeCheck(region *core.RegionInfo) []*operator.Operat
 	// Get adjacent regions
 	prev, next := c.cluster.GetAdjacentRegions(region)
 	var target *core.RegionInfo
-	if c.checkAffinityMergeTarget(region, next, groupInfo) {
+	if c.checkAffinityMergeTarget(region, next, group) {
 		target = next
 	}
 
 	// Check prev region (allow merging from both sides)
-	if !c.conf.IsOneWayMergeEnabled() && c.checkAffinityMergeTarget(region, prev, groupInfo) { // allow a region can be merged by two ways.
+	if !c.conf.IsOneWayMergeEnabled() && c.checkAffinityMergeTarget(region, prev, group) { // allow a region can be merged by two ways.
 		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
 			target = prev
 		}
@@ -316,7 +245,7 @@ func (c *AffinityChecker) MergeCheck(region *core.RegionInfo) []*operator.Operat
 	log.Debug("try to merge affinity region",
 		logutil.ZapRedactStringer("from", core.RegionToHexMeta(region.GetMeta())),
 		logutil.ZapRedactStringer("to", core.RegionToHexMeta(target.GetMeta())),
-		zap.String("affinity-group", groupInfo.ID))
+		zap.String("affinity-group", group.ID))
 
 	ops, err := operator.CreateMergeRegionOperator("affinity-merge-region", c.cluster, region, target, operator.OpMerge)
 	if err != nil {
@@ -330,15 +259,15 @@ func (c *AffinityChecker) MergeCheck(region *core.RegionInfo) []*operator.Operat
 
 // checkAffinityMergeTarget checks if an adjacent region is a valid merge target.
 // It ensures both regions belong to the same affinity group and satisfy merge conditions.
-func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.RegionInfo, groupInfo *affinity.GroupState) bool {
+func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.RegionInfo, group *affinity.GroupState) bool {
 	if adjacent == nil {
 		affinityMergeCheckerAdjNotExistCounter.Inc()
 		return false
 	}
 
 	// Check if adjacent region belongs to the same affinity group
-	adjacentGroupInfo := c.affinityManager.GetRegionAffinityGroup(adjacent.GetID())
-	if adjacentGroupInfo == nil || adjacentGroupInfo.ID != groupInfo.ID {
+	adjacentGroup := c.affinityManager.GetRegionAffinityGroup(adjacent.GetID())
+	if adjacentGroup == nil || adjacentGroup.ID != group.ID {
 		// Adjacent region is not in the same affinity group
 		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
 		return false

@@ -215,11 +215,11 @@ func GetAllAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	allGroupInfos := manager.GetAllAffinityGroupStates()
+	allGroupStates := manager.GetAllAffinityGroupStates()
 	response := AffinityGroupsResponse{
-		AffinityGroups: make(map[string]*affinity.GroupState, len(allGroupInfos)),
+		AffinityGroups: make(map[string]*affinity.GroupState, len(allGroupStates)),
 	}
-	for _, info := range allGroupInfos {
+	for _, info := range allGroupStates {
 		response.AffinityGroups[info.ID] = info
 	}
 	c.IndentedJSON(http.StatusOK, response)
@@ -243,12 +243,12 @@ func GetAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	groupInfo := manager.GetAffinityGroupState(groupID)
-	if groupInfo == nil {
+	groupState := manager.GetAffinityGroupState(groupID)
+	if groupState == nil {
 		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID))
 		return
 	}
-	c.IndentedJSON(http.StatusOK, groupInfo)
+	c.IndentedJSON(http.StatusOK, groupState)
 }
 
 const (
