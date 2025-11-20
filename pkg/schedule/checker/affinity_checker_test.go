@@ -44,7 +44,7 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3) // Leader on store 1
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group with leader on store 2
 	group := &affinity.Group{
@@ -78,7 +78,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 4) // Peers on 1, 2, 4
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group expecting peers on 1, 2, 3
 	group := &affinity.Group{
@@ -111,7 +111,7 @@ func TestAffinityCheckerGroupNotInEffect(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group
 	group := &affinity.Group{
@@ -147,7 +147,7 @@ func TestAffinityCheckerPaused(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group with leader on store 2
 	group := &affinity.Group{
@@ -198,7 +198,7 @@ func TestHealthCheckAndOperatorGeneration(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3) // Leader on store 1
 
 	affinityManager := tc.GetAffinityManager()
-	affinityChecker := NewAffinityChecker(tc, affinityManager, opt)
+	affinityChecker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group with expected leader on store 2
 	group := &affinity.Group{
@@ -362,7 +362,7 @@ func TestAffinityCheckerAddPeer(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2) // Only 2 peers, need to add store 3
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group expecting peers on 1, 2, 3
 	group := &affinity.Group{
@@ -397,7 +397,7 @@ func TestAffinityCheckerRemovePeer(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3, 4) // 4 peers, need to remove store 4
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group expecting peers on 1, 2, 3 only
 	group := &affinity.Group{
@@ -431,7 +431,7 @@ func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3) // Perfect match
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group matching current state
 	group := &affinity.Group{
@@ -463,7 +463,7 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 4) // Leader on 1, but need leader on 3
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group with leader on store 3, but store 3 has no peer yet
 	group := &affinity.Group{
@@ -503,7 +503,7 @@ func TestAffinityCheckerMultipleGroups(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create two different affinity groups
 	group1 := &affinity.Group{
@@ -550,7 +550,7 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create an affinity group but don't assign region 1 to it
 	group := &affinity.Group{
@@ -581,7 +581,7 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group
 	group := &affinity.Group{
@@ -637,7 +637,7 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	tc.PutRegion(region2)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create affinity group
 	group := &affinity.Group{
@@ -679,7 +679,7 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 	tc.PutRegion(region1)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -731,7 +731,7 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 	tc.PutRegion(region2)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Create two different affinity groups
 	group1 := &affinity.Group{
@@ -795,7 +795,7 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	tc.PutRegion(region2)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -848,7 +848,7 @@ func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 	tc.PutRegion(region2)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -885,7 +885,7 @@ func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 	tc.PutRegion(region1)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -935,7 +935,7 @@ func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 	tc.PutRegion(region1)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -994,7 +994,7 @@ func TestAffinityMergeCheckBothDirections(t *testing.T) {
 	tc.PutRegion(region3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1046,7 +1046,7 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	tc.PutRegion(region2)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1108,7 +1108,7 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 	tc.PutRegion(region2)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1147,7 +1147,7 @@ func TestAffinityCheckerComplexMove(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 4)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1188,7 +1188,7 @@ func TestAffinityCheckerPartialOverlap(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1224,7 +1224,7 @@ func TestAffinityCheckerOperatorSteps(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 4)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1264,7 +1264,7 @@ func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1302,7 +1302,7 @@ func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 4)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1342,7 +1342,7 @@ func TestAffinityCheckerDifferentReplicaCount(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1378,7 +1378,7 @@ func TestAffinityCheckerReduceReplicaCount(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3, 4, 5)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1441,7 +1441,7 @@ func TestAffinityCheckerSameStoreOrder(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Expected: same stores but in different order [3, 1, 2], leader on 1
 	// This should NOT require any operator since stores are the same
@@ -1474,7 +1474,7 @@ func TestAffinityCheckerSinglePeer(t *testing.T) {
 	tc.AddLeaderRegion(1, 1)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Expected: single peer on store 2
 	group := &affinity.Group{
@@ -1510,7 +1510,7 @@ func TestAffinityCheckerLargeReplicaCount(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3, 4, 5)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Expected: 5 peers on [6, 7, 8, 9, 10], leader on 8
 	// Complete replacement of all peers
@@ -1580,7 +1580,7 @@ func TestAffinityCheckerOfflineStore(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Expected: peers on [1, 2, 4], but store 4 is offline
 	group := &affinity.Group{
@@ -1619,7 +1619,7 @@ func TestAffinityCheckerDownStore(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Expected: peers on [1, 2, 4], but store 4 is down
 	group := &affinity.Group{
@@ -1657,7 +1657,7 @@ func TestAffinityCheckerMultipleRegionsSameGroup(t *testing.T) {
 	tc.AddLeaderRegion(3, 2, 1, 3) // Already correct
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1708,7 +1708,7 @@ func TestAffinityCheckerRegionNoLeader(t *testing.T) {
 	tc.PutRegion(region)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	group := &affinity.Group{
 		ID:            "test_group",
@@ -1811,7 +1811,7 @@ func TestAffinityCheckerPreserveLearners(t *testing.T) {
 	tc.PutRegion(region)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Affinity group expects voters on [1, 2, 3] with leader on 2
 	// This should only transfer leader, not touch the learner on store 4
@@ -1864,7 +1864,7 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 	tc.PutRegion(region)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Affinity group expects voters on [1, 2, 3] with leader on 1
 	// This should replace voter 4 with 3, and preserve learner on store 5
@@ -1920,7 +1920,7 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	tc.PutRegion(region)
 
 	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, affinityManager, opt)
+	checker := NewAffinityChecker(tc, opt)
 
 	// Affinity group expects voters on [1, 2, 6] with leader on 2
 	// This should replace voter 3 with 6, transfer leader to 2, and preserve both learners on [4, 5]

@@ -123,12 +123,11 @@ func CreateAffinityGroups(c *gin.Context) {
 			})
 		}
 
-		// TODO: use a zero LeaderStoreID and empty VoterStoreIDs to indicate
 		groupsWithRanges = append(groupsWithRanges, affinity.GroupWithRanges{
 			Group: &affinity.Group{
 				ID:            groupID,
 				LeaderStoreID: 0,
-				VoterStoreIDs: make([]uint64, 0, len(input.Ranges)),
+				VoterStoreIDs: nil,
 			},
 			KeyRanges: keyRanges,
 		})

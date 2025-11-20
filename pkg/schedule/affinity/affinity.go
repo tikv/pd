@@ -35,6 +35,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+const (
+	// labelKey is the key for affinity group id in region label.
+	labelKey = "affinity_group"
+	// labelRuleIDPrefix is the prefix for affinity group label rules.
+	labelRuleIDPrefix = "affinity_group/"
+)
+
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
 type Group struct {
@@ -76,10 +83,54 @@ type GroupState struct {
 	RangeCount int `json:"range_count"`
 	// RegionCount indicates how many Regions are currently in the affinity state.
 	RegionCount int `json:"region_count"`
-	// RegionVotersReadyCount indicates how many Regions have all Voter peers in the correct stores.
-	RegionVotersReadyCount int `json:"region_voters_ready_count"`
-	// RegionLeadersReadyCount indicates how many Regions have their leader in the correct store.
-	RegionLeadersReadyCount int `json:"region_leaders_ready_count"`
+	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores.
+	AffinityRegionCount int `json:"affinity_region_count"`
+
+	// affinityVer is used to mark the version of the cache.
+	affinityVer uint64
+	// groupInfoPtr is a pointer to the original information.
+	// It is used only for pointer comparison and should not access any internal data.
+	groupInfoPtr *GroupInfo
+}
+
+type regionCache struct {
+	region      *core.RegionInfo
+	groupInfo   *GroupInfo
+	affinityVer uint64
+	isAffinity  bool
+}
+
+// IsRegionAffinity checks whether the Region is in an affinity state.
+func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCache) bool {
+	if region == nil {
+		return false
+	}
+
+	// Use the result in the cache when both the Region pointer and the Group’s affinityVer remain unchanged.
+	if region == cache.region && g.affinityVer == cache.affinityVer {
+		return cache.isAffinity
+	}
+
+	// Compare the Leader
+	if region.GetLeader().GetStoreId() != g.LeaderStoreID {
+		return false
+	}
+	// Compare the Voters
+	voters := region.GetVoters()
+	if len(voters) != len(g.VoterStoreIDs) {
+		return false
+	}
+	expected := make(map[uint64]struct{}, len(voters))
+	for _, voter := range g.VoterStoreIDs {
+		expected[voter] = struct{}{}
+	}
+	for _, voter := range voters {
+		if _, ok := expected[voter.GetStoreId()]; !ok {
+			return false
+		}
+	}
+	// TODO: Compare the Learners.
+	return true
 }
 
 // GroupInfo contains meta information and runtime statistics for the Group.
@@ -89,15 +140,36 @@ type GroupInfo struct {
 	// Effect parameter indicates whether the current constraint is in effect.
 	// Constraints are typically released when the store is in an abnormal state.
 	Effect bool
-	// AffinityRegionCount indicates how many Regions are currently in the affinity state.
-	AffinityRegionCount uint64
+	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
+	AffinityVer uint64
+	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
+	AffinityRegionCount int
 
 	// nolint:unused
-	regions map[uint64]struct{}
+	Regions map[uint64]regionCache
 	// nolint:unused
 	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
 	// Currently using label's internal multiple keyrange mechanism
 	labels *labeler.LabelRule
+}
+
+// newGroupState creates a GroupState from the given GroupInfo.
+// GroupInfo may need to be accessed under a Lock.
+func newGroupState(g *GroupInfo) *GroupState {
+	return &GroupState{
+		Group: Group{
+			ID:              g.ID,
+			CreateTimestamp: g.CreateTimestamp,
+			LeaderStoreID:   g.LeaderStoreID,
+			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
+		},
+		Effect:              g.Effect,
+		RangeCount:          0, // TODO: len(labels)
+		RegionCount:         len(g.Regions),
+		AffinityRegionCount: g.AffinityRegionCount,
+		affinityVer:         g.AffinityVer,
+		groupInfoPtr:        g,
+	}
 }
 
 // Manager is the manager of all affinity information.
@@ -107,11 +179,13 @@ type Manager struct {
 	storage          endpoint.AffinityStorage
 	initialized      bool
 	groups           map[string]*GroupInfo // {group_id} -> GroupInfo
-	regions          map[uint64]*GroupInfo // {region_id} -> GroupInfo
+	regions          map[uint64]regionCache
 	keyRanges        map[string][]keyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
+
+	affinityRegionCount int
 }
 
 // NewManager creates a new affinity Manager.
@@ -123,7 +197,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		conf:             conf,
 		regionLabeler:    regionLabeler,
 		groups:           make(map[string]*GroupInfo),
-		regions:          make(map[uint64]*GroupInfo),
+		regions:          make(map[uint64]regionCache),
 		keyRanges:        make(map[string][]keyRange),
 	}
 }
@@ -143,7 +217,7 @@ func (m *Manager) Initialize() error {
 				zap.String("key", k),
 				zap.Error(errs.ErrLoadRule.Wrap(err)))
 		}
-		m.groups[group.ID] = &GroupInfo{Group: *group, Effect: true}
+		m.updateGroupLabelsLocked(group.ID, nil)
 	})
 	if err != nil {
 		return err
@@ -168,6 +242,179 @@ func (m *Manager) IsInitialized() bool {
 	m.RLock()
 	defer m.RUnlock()
 	return m.initialized
+}
+
+func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) {
+	groupInfo, ok := m.groups[groupID]
+	if !ok {
+		return
+	}
+	// Becoming effective requires the affinityVer to match.
+	if leaderStoreID != 0 && groupInfo.AffinityVer != affinityVer {
+		return
+	}
+
+	if leaderStoreID == 0 {
+		// Set Effect = false
+		groupInfo.Effect = false
+	} else {
+		// Set Effect = true. The affinityVer consistency has already been checked.
+		groupInfo.Effect = true
+		groupInfo.LeaderStoreID = leaderStoreID
+		groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)
+	}
+	// Reset Statistics
+	m.affinityRegionCount -= groupInfo.AffinityRegionCount
+	groupInfo.AffinityRegionCount = 0
+	groupInfo.AffinityVer++
+}
+
+func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelRule) {
+	groupInfo, ok := m.groups[groupID]
+	if !ok {
+		groupInfo = &GroupInfo{
+			Group: Group{
+				ID:              groupID,
+				CreateTimestamp: uint64(time.Now().Unix()),
+				LeaderStoreID:   0,
+				VoterStoreIDs:   nil,
+			},
+			Effect:              false,
+			AffinityVer:         1,
+			AffinityRegionCount: 0,
+			Regions:             make(map[uint64]regionCache),
+			labels:              labels,
+		}
+		m.groups[groupID] = groupInfo
+	} else {
+		// Reset Statistics
+		m.affinityRegionCount -= groupInfo.AffinityRegionCount
+		groupInfo.AffinityRegionCount = 0
+		groupInfo.AffinityVer++
+		// Set labels
+		groupInfo.labels = labels
+	}
+}
+
+func (m *Manager) deleteGroupLocked(groupID string) {
+	group, ok := m.groups[groupID]
+	if !ok {
+		return
+	}
+
+	delete(m.groups, groupID)
+	m.affinityRegionCount -= group.AffinityRegionCount
+	for regionID := range group.Regions {
+		delete(m.regions, regionID)
+	}
+}
+
+func (m *Manager) deleteCacheLocked(regionID uint64) {
+	cache, ok := m.regions[regionID]
+	if !ok {
+		return
+	}
+	if cache.isAffinity && cache.affinityVer == cache.groupInfo.AffinityVer {
+		cache.groupInfo.AffinityRegionCount--
+		m.affinityRegionCount--
+	}
+	delete(m.regions, regionID)
+	delete(cache.groupInfo.Regions, regionID)
+}
+
+func (m *Manager) saveCache(region *core.RegionInfo, group *GroupState) *regionCache {
+	regionID := region.GetID()
+	cache := &regionCache{}
+	cache.isAffinity = group.isRegionAffinity(region, cache)
+	cache.region = region
+	cache.groupInfo = group.groupInfoPtr
+	cache.affinityVer = group.affinityVer
+	// Save cache
+	m.Lock()
+	defer m.Unlock()
+	// If the Group has changed, update it but do not save it afterward.
+	groupInfo, ok := m.groups[group.ID]
+	if ok && groupInfo == group.groupInfoPtr && groupInfo.AffinityVer == group.affinityVer {
+		m.deleteCacheLocked(regionID)
+		m.regions[regionID] = *cache
+		groupInfo.Regions[regionID] = *cache
+		if cache.isAffinity {
+			m.affinityRegionCount++
+			groupInfo.AffinityRegionCount++
+		}
+	}
+	return cache
+}
+
+// InvalidCache invalidates the cache of the corresponding Region in the manager by its Region ID.
+func (m *Manager) InvalidCache(regionID uint64) {
+	m.RLock()
+	initialized := m.initialized
+	_, ok := m.regions[regionID]
+	m.RUnlock()
+	if !initialized || !ok {
+		return
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	cache, ok := m.regions[regionID]
+	if !ok {
+		return
+	}
+	if cache.isAffinity && cache.affinityVer == cache.groupInfo.AffinityVer {
+		cache.groupInfo.AffinityRegionCount--
+		m.affinityRegionCount--
+	}
+	delete(m.regions, regionID)
+	delete(cache.groupInfo.Regions, regionID)
+}
+
+func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) {
+	m.RLock()
+	defer m.RUnlock()
+	cache, ok := m.regions[region.GetID()]
+	if ok && cache.affinityVer == cache.groupInfo.AffinityVer {
+		return &cache, newGroupState(cache.groupInfo)
+	}
+	return nil, nil
+}
+
+// ObserveHealthyRegion observes healthy Regions and collects information to update the Peer distribution within the Group.
+func (m *Manager) ObserveHealthyRegion(region *core.RegionInfo, group *GroupState) {
+	// Use the peer distribution of the first observed healthy Region as the result.
+	// TODO: Improve the strategy.
+	if group == nil || group.Effect {
+		return
+	}
+	leaderStoreID := region.GetLeader().GetStoreId()
+	voterStoreIDs := make([]uint64, 0, len(region.GetVoters()))
+	for _, voter := range region.GetVoters() {
+		voterStoreIDs = append(voterStoreIDs, voter.GetStoreId())
+	}
+	m.Lock()
+	defer m.Unlock()
+	m.updateGroupEffectLocked(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
+}
+
+// GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
+func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (*GroupState, bool) {
+	if region == nil {
+		return nil, false
+	}
+	cache, group := m.getCache(region)
+	if cache == nil || group == nil || region != cache.region {
+		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)
+		if groupID != "" {
+			group = m.GetAffinityGroupState(groupID)
+		}
+		if group == nil {
+			return nil, false
+		}
+		cache = m.saveCache(region, group)
+	}
+
+	return group, cache.isAffinity
 }
 
 // AdjustGroup validates the group and sets default values.
@@ -243,15 +490,8 @@ func (m *Manager) ValidateKeyRanges(ranges []KeyRangeInput) error {
 // This ensures consistent naming between label creation and deletion.
 // Format: "affinity_group/{group_id}"
 func GetLabelRuleID(groupID string) string {
-	return "affinity_group/" + groupID
+	return labelRuleIDPrefix + groupID
 }
-
-const (
-	// labelRuleIDPrefix is the prefix for affinity group label rules.
-	labelRuleIDPrefix = "affinity_group/"
-	// affinityLabelKey is the label key for affinity group.
-	affinityLabelKey = "affinity_group"
-)
 
 // parseAffinityGroupIDFromLabelRule parses the affinity group ID from the label rule.
 // It will return the group ID and a boolean indicating whether the label rule is an affinity label rule.
@@ -265,10 +505,10 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 	if groupID == "" {
 		return "", false
 	}
-	// Double check the group ID from the label rule.
+	// Double-check the group ID from the label rule.
 	var groupIDFromLabel string
 	for _, label := range rule.Labels {
-		if label.Key == affinityLabelKey {
+		if label.Key == labelKey {
 			groupIDFromLabel = label.Value
 			break
 		}
@@ -302,46 +542,25 @@ func (m *Manager) SetRegionGroup(regionID uint64, groupID string) {
 		return
 	}
 
-	m.regions[regionID] = groupInfo
-	if groupInfo.regions != nil {
-		groupInfo.regions[regionID] = struct{}{}
-	}
-}
-
-// GetRegionAffinityGroup returns the affinity group state for a region.
-func (m *Manager) GetRegionAffinityGroup(regionID uint64) *GroupState {
-	m.RLock()
-	defer m.RUnlock()
-
-	groupInfo := m.regions[regionID]
-	if groupInfo == nil {
-		return nil
+	cache := regionCache{
+		region:      nil,
+		affinityVer: groupInfo.AffinityVer,
+		groupInfo:   groupInfo,
 	}
 
-	if _, exists := m.groups[groupInfo.ID]; !exists {
-		return nil
-	}
-
-	return &GroupState{
-		Group: Group{
-			ID:              groupInfo.ID,
-			CreateTimestamp: groupInfo.CreateTimestamp,
-			LeaderStoreID:   groupInfo.LeaderStoreID,
-			VoterStoreIDs:   append([]uint64(nil), groupInfo.VoterStoreIDs...), // Copy slice
-		},
-		Effect: groupInfo.Effect,
-		// TODO: it is a mock function now, need to implement the real logic.
-	}
+	m.regions[regionID] = cache
+	groupInfo.Regions[regionID] = cache
 }
 
 // GetAffinityGroupState gets the runtime state of an affinity group.
-// TODO: it is a mock function now, need to implement the real logic.
 func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 	m.RLock()
 	defer m.RUnlock()
-	log.Info("getting affinity group state", zap.String("group-id", id))
-	groupState := &GroupState{}
-	return groupState
+	group, ok := m.groups[id]
+	if ok {
+		return newGroupState(group)
+	}
+	return nil
 }
 
 // GetAllAffinityGroupStates returns all affinity groups.
@@ -405,7 +624,7 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 			if len(gwr.KeyRanges) > 0 {
 				labelRule := &labeler.LabelRule{
 					ID:       GetLabelRuleID(gwr.Group.ID),
-					Labels:   []labeler.RegionLabel{{Key: affinityLabelKey, Value: gwr.Group.ID}},
+					Labels:   []labeler.RegionLabel{{Key: labelKey, Value: gwr.Group.ID}},
 					RuleType: labeler.KeyRange,
 					Data:     gwr.KeyRanges,
 				}
@@ -424,22 +643,8 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 
 	// Step 3: Update in-memory cache with label rule pointers and key ranges
 	for _, gwr := range groupsWithRanges {
-		info, ok := m.groups[gwr.Group.ID]
 		labelRule := labelRules[gwr.Group.ID]
-		if ok {
-			// Update existing group
-			info.Group = *gwr.Group
-			info.labels = labelRule
-		} else {
-			// Create new group info
-			m.groups[gwr.Group.ID] = &GroupInfo{
-				Group:   *gwr.Group,
-				Effect:  true,
-				labels:  labelRule,
-				regions: make(map[uint64]struct{}), // TODO: load regions
-			}
-		}
-
+		m.updateGroupLabelsLocked(gwr.Group.ID, labelRule)
 		// Update key ranges cache for this group
 		if len(gwr.KeyRanges) > 0 {
 			ranges, err := parseKeyRangesFromData(gwr.KeyRanges, gwr.Group.ID)
@@ -488,16 +693,16 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 	// Step 4: Clean up regions map
 	// Remove all region entries that reference this group
 	var regionsToDelete []uint64
-	for regionID, groupInfo := range m.regions {
-		if groupInfo.ID == id {
+	for regionID, cache := range m.regions {
+		if cache.groupInfo.ID == id {
 			regionsToDelete = append(regionsToDelete, regionID)
 		}
 	}
 	for _, regionID := range regionsToDelete {
 		delete(m.regions, regionID)
 	}
-	delete(m.groups, id)
 
+	m.deleteGroupLocked(id)
 	log.Info("affinity group deleted",
 		zap.String("group-id", id),
 		zap.Int("cleaned-regions", len(regionsToDelete)))
@@ -560,21 +765,12 @@ func (m *Manager) checkStoreHealth() {
 		// Check if any store in the group is unhealthy
 		unhealthyStores := m.getUnhealthyStores(groupInfo)
 
-		if len(unhealthyStores) > 0 {
+		if len(unhealthyStores) > 0 && groupInfo.Effect {
 			// If the group was previously in effect and now has unhealthy stores, invalidate it
-			if groupInfo.Effect {
-				groupInfo.Effect = false
-				log.Warn("affinity group invalidated due to unhealthy stores",
-					zap.String("group-id", groupID),
-					zap.Uint64s("unhealthy-stores", unhealthyStores))
-			}
-		} else {
-			// If all stores are healthy and the group was previously invalidated, restore it
-			if !groupInfo.Effect {
-				groupInfo.Effect = true
-				log.Info("affinity group restored to effect state",
-					zap.String("group-id", groupID))
-			}
+			m.updateGroupEffectLocked(groupID, 0, 0, nil)
+			log.Warn("affinity group invalidated due to unhealthy stores",
+				zap.String("group-id", groupID),
+				zap.Uint64s("unhealthy-stores", unhealthyStores))
 		}
 	}
 }
@@ -800,12 +996,12 @@ func (m *Manager) loadRegionLabel() error {
 		}
 
 		// Associate the label rule with the group
-		if groupInfo, ok := m.groups[groupID]; ok {
-			groupInfo.labels = rule
-		} else {
+		if _, ok = m.keyRanges[groupID]; !ok {
 			log.Warn("found label rule for unknown affinity group",
 				zap.String("group-id", groupID),
 				zap.String("rule-id", rule.ID))
+		} else {
+			m.updateGroupLabelsLocked(groupID, rule)
 		}
 
 		return true
@@ -838,48 +1034,6 @@ func (m *Manager) loadRegionLabel() error {
 //   - Leader is on the expected store
 //   - All voters are on the expected stores
 func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
-	m.RLock()
-	defer m.RUnlock()
-
-	// Get the affinity group for this region
-	groupInfo := m.regions[region.GetID()]
-	if groupInfo == nil {
-		// Region doesn't belong to any affinity group, return false
-		return false
-	}
-
-	// If group is not in effect, return false
-	if !groupInfo.Effect {
-		return false
-	}
-
-	// Check leader placement
-	leader := region.GetLeader()
-	if leader == nil {
-		return false
-	}
-	if leader.GetStoreId() != groupInfo.LeaderStoreID {
-		return false
-	}
-
-	// Check voters placement
-	voters := region.GetVoters()
-	if len(voters) != len(groupInfo.VoterStoreIDs) {
-		return false
-	}
-
-	// Create a set of expected voter store IDs
-	expectedStores := make(map[uint64]struct{}, len(groupInfo.VoterStoreIDs))
-	for _, storeID := range groupInfo.VoterStoreIDs {
-		expectedStores[storeID] = struct{}{}
-	}
-
-	// Verify all voters are on expected stores
-	for _, voter := range voters {
-		if _, ok := expectedStores[voter.GetStoreId()]; !ok {
-			return false
-		}
-	}
-
-	return true
+	_, isAffinity := m.GetRegionAffinityGroupState(region)
+	return isAffinity
 }

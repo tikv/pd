@@ -249,6 +249,8 @@ var (
 	affinityCheckerGroupNotInEffectCounter = checkerCounter.WithLabelValues(affinityChecker, "group-not-in-effect")
 	affinityCheckerNewOpCounter            = checkerCounter.WithLabelValues(affinityChecker, "new-operator")
 	affinityCheckerCreateOpFailedCounter   = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
+	affinityCheckerUnhealthyRegionCounter  = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
+	affinityCheckerAbnormalReplicaCounter  = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")
