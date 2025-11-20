@@ -512,16 +512,30 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 
-	// If there is an old operator, replace it. The priority should be checked
-	// already.
-	if oldi, ok := oc.operators.Load(regionID); ok {
-		old := oldi.(*Operator)
-		_ = oc.removeOperatorInner(old)
-		_ = old.Replace()
-		oc.buryOperator(old)
+	// Try to add the operator atomically first
+	old, loaded := oc.operators.LoadOrStore(regionID, op)
+	if loaded {
+		// If there is an old operator and it has lower priority, replace it
+		oldOp := old.(*Operator)
+		if !isHigherPriorityOperator(op, oldOp) {
+			log.Debug("operator already exists with higher or equal priority",
+				zap.Uint64("region-id", regionID),
+				zap.Reflect("old", oldOp),
+				zap.Reflect("new", op))
+			operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
+			return false
+		}
+		// Replace the old operator with the new one
+		oc.operators.Store(regionID, op)
+		_ = oc.removeOperatorInner(oldOp)
+		_ = oldOp.Replace()
+		oc.buryOperator(oldOp)
 	}
 
+	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
+		// Failed to start, remove it from the map
+		oc.operators.Delete(regionID)
 		log.Error("adding operator with unexpected status",
 			zap.Uint64("region-id", regionID),
 			zap.String("status", OpStatusToString(op.Status())),
@@ -530,16 +544,6 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			panic(op)
 		})
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
-		return false
-	}
-
-	old, loaded := oc.operators.LoadOrStore(regionID, op)
-	if loaded {
-		log.Debug("operator already exists",
-			zap.Uint64("region-id", regionID),
-			zap.Reflect("old", old.(*Operator)),
-			zap.Reflect("new", op))
-		operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
 		return false
 	}
 
