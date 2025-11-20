@@ -19,6 +19,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -108,6 +109,12 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 // createAffinityOperator creates an operator to adjust region replicas according to affinity group constraints.
 // It creates a "combo" operator that directly specifies the final leader and voter positions,
 // moving the region to match the expected configuration in one operation.
+//
+// This function preserves:
+// - Existing learner peers (e.g., TiFlash peers)
+//
+// Note: This function assumes that regions passed to it already comply with placement rules.
+// The affinity checker focuses solely on adjusting voter peers according to affinity group configuration.
 func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group *affinity.GroupState) *operator.Operator {
 	// Build expected voter stores set
 	expectedVoterStores := make(map[uint64]bool)
@@ -138,8 +145,10 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	}
 
 	// Build roles map for the target configuration
-	// Leader store gets Leader role, other voters get Voter role
+	// This includes voters (from affinity group) and existing learners
 	roles := make(map[uint64]placement.PeerRoleType)
+
+	// Add voters from affinity group
 	for _, storeID := range group.VoterStoreIDs {
 		if storeID == group.LeaderStoreID {
 			roles[storeID] = placement.Leader
@@ -148,14 +157,42 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		}
 	}
 
-	// Create combo operator that moves region to target configuration
-	op, err := operator.CreateMoveRegionOperator(
+	// Preserve all existing learner peers
+	// Since regions that violate placement rules won't reach this function,
+	// we can safely assume all existing learners should be preserved
+	for _, learner := range region.GetLearners() {
+		storeID := learner.GetStoreId()
+		// Only add learner if it's not already in the voters list
+		// (in case there's a conflict, voters take precedence)
+		if _, exists := roles[storeID]; !exists {
+			roles[storeID] = placement.Learner
+		}
+	}
+
+	// Build target peers map with same roles
+	// TODO: Consider preserving witness flags in the future if needed
+	peers := make(map[uint64]*metapb.Peer)
+	for storeID, role := range roles {
+		peers[storeID] = &metapb.Peer{
+			StoreId: storeID,
+			Role:    role.MetaPeerRole(),
+		}
+	}
+
+	// Use Builder to create the operator with preserved learners
+	builder := operator.NewBuilder(
 		"affinity-move-region",
 		c.cluster,
 		region,
-		operator.OpAffinity|operator.OpLeader|operator.OpRegion,
-		roles,
-	)
+	).SetPeers(peers).SetExpectedRoles(roles)
+
+	// Determine operator kind based on whether leader needs to change
+	kind := operator.OpAffinity | operator.OpRegion
+	if currentLeaderStoreID != group.LeaderStoreID {
+		kind |= operator.OpLeader
+	}
+
+	op, err := builder.Build(kind)
 	if err != nil {
 		log.Warn("create affinity move region operator failed",
 			zap.Uint64("region-id", region.GetID()),

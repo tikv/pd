@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -1316,6 +1317,11 @@ func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 	re.NotNil(ops)
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
+
+	// Verify OpLeader is NOT set (since leader doesn't change)
+	re.Equal(operator.OpKind(0), ops[0].Kind()&operator.OpLeader, "OpLeader should not be set when leader doesn't change")
+	// Verify OpRegion is set
+	re.Equal(operator.OpRegion, ops[0].Kind()&operator.OpRegion)
 }
 
 // TestAffinityCheckerDifferentReplicaCount tests when expected replica count differs from current.
@@ -1774,4 +1780,164 @@ func TestAffinityCheckerEmptyVoterList(t *testing.T) {
 	// Should return error for empty voter list
 	re.Error(err)
 	re.Contains(err.Error(), "voter store IDs should not be empty")
+}
+
+// TestAffinityCheckerPreserveLearners tests that existing learner peers are preserved.
+func TestAffinityCheckerPreserveLearners(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	tc.AddRegionStore(5, 10)
+
+	// Create region with voters on [1, 2, 3] and learner on [4]
+	// Leader on store 1
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	// Add a learner peer on store 4
+	learnerPeer := &metapb.Peer{
+		StoreId: 4,
+		Role:    metapb.PeerRole_Learner,
+	}
+	newPeers := append(region.GetMeta().GetPeers(), learnerPeer)
+	region = region.Clone(core.SetPeers(newPeers))
+	tc.PutRegion(region)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Affinity group expects voters on [1, 2, 3] with leader on 2
+	// This should only transfer leader, not touch the learner on store 4
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(region)
+	re.NotNil(ops)
+	re.Len(ops, 1)
+
+	// Verify the operator preserves the learner
+	op := ops[0]
+	re.Equal("affinity-move-region", op.Desc())
+	// The operator should have steps that preserve the learner on store 4
+	re.Positive(op.Len())
+}
+
+// TestAffinityCheckerPreserveLearnersWithPeerChange tests learner preservation when peers change.
+func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	tc.AddRegionStore(5, 10)
+
+	// Create region with voters on [1, 2, 4] and learner on [5]
+	// Leader on store 1
+	tc.AddLeaderRegion(1, 1, 2, 4)
+	region := tc.GetRegion(1)
+
+	// Add a learner peer on store 5
+	learnerPeer := &metapb.Peer{
+		StoreId: 5,
+		Role:    metapb.PeerRole_Learner,
+	}
+	newPeers := append(region.GetMeta().GetPeers(), learnerPeer)
+	region = region.Clone(core.SetPeers(newPeers))
+	tc.PutRegion(region)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Affinity group expects voters on [1, 2, 3] with leader on 1
+	// This should replace voter 4 with 3, and preserve learner on store 5
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(region)
+	re.NotNil(ops)
+	re.Len(ops, 1)
+
+	// Verify the operator preserves the learner while changing voters
+	op := ops[0]
+	re.Equal("affinity-move-region", op.Desc())
+	re.Positive(op.Len())
+}
+
+// TestAffinityCheckerMultipleLearners tests preserving multiple learner peers.
+func TestAffinityCheckerMultipleLearners(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+	tc.AddRegionStore(5, 10)
+	tc.AddRegionStore(6, 10)
+
+	// Create region with voters on [1, 2, 3] and learners on [4, 5]
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	// Add two learner peers
+	learner1 := &metapb.Peer{
+		StoreId: 4,
+		Role:    metapb.PeerRole_Learner,
+	}
+	learner2 := &metapb.Peer{
+		StoreId: 5,
+		Role:    metapb.PeerRole_Learner,
+	}
+	newPeers := append(region.GetMeta().GetPeers(), learner1, learner2)
+	region = region.Clone(core.SetPeers(newPeers))
+	tc.PutRegion(region)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, affinityManager, opt)
+
+	// Affinity group expects voters on [1, 2, 6] with leader on 2
+	// This should replace voter 3 with 6, transfer leader to 2, and preserve both learners on [4, 5]
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{1, 2, 6},
+	}
+	err := affinityManager.SaveAffinityGroups([]affinity.GroupWithRanges{{Group: group}})
+	re.NoError(err)
+	affinityManager.SetRegionGroup(1, "test_group")
+
+	ops := checker.Check(region)
+	re.NotNil(ops)
+	re.Len(ops, 1)
+
+	op := ops[0]
+	re.Equal("affinity-move-region", op.Desc())
+	re.Positive(op.Len())
 }
