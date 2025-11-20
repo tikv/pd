@@ -184,9 +184,9 @@ func TestHealthCheckAndOperatorGeneration(t *testing.T) {
 	defer cancel()
 
 	// Enable fast health check for testing (100ms instead of 10s)
-	affinity.SetHealthCheckIntervalForTest(100 * time.Millisecond)
+	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
 	defer func() {
-		affinity.SetHealthCheckIntervalForTest(0) // Reset to default
+		affinity.SetAvailabilityCheckIntervalForTest(0) // Reset to default
 	}()
 
 	opt := mockconfig.NewTestOptions()
@@ -247,9 +247,9 @@ func TestHealthCheckWithOfflineStore(t *testing.T) {
 	defer cancel()
 
 	// Enable fast health check
-	affinity.SetHealthCheckIntervalForTest(100 * time.Millisecond)
+	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
 	defer func() {
-		affinity.SetHealthCheckIntervalForTest(0)
+		affinity.SetAvailabilityCheckIntervalForTest(0)
 	}()
 
 	opt := mockconfig.NewTestOptions()
@@ -293,9 +293,9 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 	defer cancel()
 
 	// Enable fast health check
-	affinity.SetHealthCheckIntervalForTest(100 * time.Millisecond)
+	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
 	defer func() {
-		affinity.SetHealthCheckIntervalForTest(0)
+		affinity.SetAvailabilityCheckIntervalForTest(0)
 	}()
 
 	opt := mockconfig.NewTestOptions()

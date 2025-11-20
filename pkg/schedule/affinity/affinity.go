@@ -35,12 +35,43 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+type storeState int
+
+const (
+	available storeState = iota
+	down
+	lowSpace
+	preparing
+	degraded // storeState less than degraded and non-zero indicate the store is not unusable.
+	removingOrRemoved
+)
+
 const (
 	// labelKey is the key for affinity group id in region label.
 	labelKey = "affinity_group"
 	// labelRuleIDPrefix is the prefix for affinity group label rules.
 	labelRuleIDPrefix = "affinity_group/"
 )
+
+// nolint
+func (state storeState) isAvailable() bool {
+	return state == available
+}
+
+// nolint
+func (state storeState) isUnavailable() bool {
+	return state != available
+}
+
+// nolint
+func (state storeState) isDegraded() bool {
+	return state > 0 && state <= degraded
+}
+
+// nolint
+func (state storeState) isUnusable() bool {
+	return state > degraded
+}
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
@@ -177,15 +208,16 @@ type Manager struct {
 	syncutil.RWMutex
 	ctx              context.Context
 	storage          endpoint.AffinityStorage
-	initialized      bool
-	groups           map[string]*GroupInfo // {group_id} -> GroupInfo
-	regions          map[uint64]regionCache
-	keyRanges        map[string][]keyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
 	storeSetInformer core.StoreSetInformer
 	conf             config.SharedConfigProvider
 	regionLabeler    *labeler.RegionLabeler // region labeler for syncing key ranges
 
+	initialized         bool
 	affinityRegionCount int
+	groups              map[string]*GroupInfo // {group_id} -> GroupInfo
+	regions             map[uint64]regionCache
+	keyRanges           map[string][]keyRange // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
+	unavailableStores   map[uint64]storeState
 }
 
 // NewManager creates a new affinity Manager.
@@ -232,7 +264,7 @@ func (m *Manager) Initialize() error {
 	}
 
 	m.initialized = true
-	m.startHealthCheckLoop()
+	m.startAvailabilityCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
 	return nil
 }
@@ -380,9 +412,9 @@ func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) 
 	return nil, nil
 }
 
-// ObserveHealthyRegion observes healthy Regions and collects information to update the Peer distribution within the Group.
-func (m *Manager) ObserveHealthyRegion(region *core.RegionInfo, group *GroupState) {
-	// Use the peer distribution of the first observed healthy Region as the result.
+// ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
+func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
+	// Use the peer distribution of the first observed available Region as the result.
 	// TODO: Improve the strategy.
 	if group == nil || group.Effect {
 		return
@@ -391,6 +423,9 @@ func (m *Manager) ObserveHealthyRegion(region *core.RegionInfo, group *GroupStat
 	voterStoreIDs := make([]uint64, 0, len(region.GetVoters()))
 	for _, voter := range region.GetVoters() {
 		voterStoreIDs = append(voterStoreIDs, voter.GetStoreId())
+	}
+	if m.hasUnavailableStore(voterStoreIDs) {
+		return
 	}
 	m.Lock()
 	defer m.Unlock()
@@ -710,121 +745,139 @@ func (m *Manager) DeleteAffinityGroup(id string) error {
 }
 
 const (
-	// defaultHealthCheckInterval is the default interval for checking store health.
-	defaultHealthCheckInterval = 10 * time.Second
+	// defaultAvailabilityCheckInterval is the default interval for checking store availability.
+	defaultAvailabilityCheckInterval = 10 * time.Second
 )
 
 var (
-	// healthCheckIntervalForTest can be set in tests to speed up health checks.
-	// Default is 0, which means use defaultHealthCheckInterval.
-	healthCheckIntervalForTest time.Duration
+	// availabilityCheckIntervalForTest can be set in tests to speed up availability checks.
+	// Default is 0, which means use defaultAvailabilityCheckInterval.
+	availabilityCheckIntervalForTest time.Duration
 )
 
-// getHealthCheckInterval returns the health check interval, which can be overridden for testing.
-func getHealthCheckInterval() time.Duration {
-	if healthCheckIntervalForTest > 0 {
-		return healthCheckIntervalForTest
+// getAvailabilityCheckInterval returns the availability check interval, which can be overridden for testing.
+func getAvailabilityCheckInterval() time.Duration {
+	if availabilityCheckIntervalForTest > 0 {
+		return availabilityCheckIntervalForTest
 	}
-	return defaultHealthCheckInterval
+	return defaultAvailabilityCheckInterval
 }
 
-// SetHealthCheckIntervalForTest sets the health check interval for testing. Only use this in tests.
-func SetHealthCheckIntervalForTest(interval time.Duration) {
-	healthCheckIntervalForTest = interval
+// SetAvailabilityCheckIntervalForTest sets the availability check interval for testing. Only use this in tests.
+func SetAvailabilityCheckIntervalForTest(interval time.Duration) {
+	availabilityCheckIntervalForTest = interval
 }
 
-// startHealthCheckLoop starts a goroutine to periodically check store health and invalidate groups with unhealthy stores.
-func (m *Manager) startHealthCheckLoop() {
-	interval := getHealthCheckInterval()
+// startAvailabilityCheckLoop starts a goroutine to periodically check store availability and invalidate groups with unavailable stores.
+func (m *Manager) startAvailabilityCheckLoop() {
+	interval := getAvailabilityCheckInterval()
 	ticker := time.NewTicker(interval)
 	go func() {
 		defer ticker.Stop()
 		for {
 			select {
 			case <-m.ctx.Done():
-				log.Info("affinity manager health check loop stopped")
+				log.Info("affinity manager availability check loop stopped")
 				return
 			case <-ticker.C:
-				m.checkStoreHealth()
+				m.checkStoresAvailability()
 			}
 		}
 	}()
-	log.Info("affinity manager health check loop started", zap.Duration("interval", interval))
+	log.Info("affinity manager availability check loop started", zap.Duration("interval", interval))
 }
 
-// checkStoreHealth checks the health status of stores and invalidates groups with unhealthy stores.
-func (m *Manager) checkStoreHealth() {
-	m.Lock()
-	defer m.Unlock()
-
-	if !m.initialized {
+// checkStoresAvailability checks the availability status of stores and invalidates groups with unavailable stores.
+func (m *Manager) checkStoresAvailability() {
+	if !m.IsInitialized() {
 		return
 	}
-
-	for groupID, groupInfo := range m.groups {
-		// Check if any store in the group is unhealthy
-		unhealthyStores := m.getUnhealthyStores(groupInfo)
-
-		if len(unhealthyStores) > 0 && groupInfo.Effect {
-			// If the group was previously in effect and now has unhealthy stores, invalidate it
-			m.updateGroupEffectLocked(groupID, 0, 0, nil)
-			log.Warn("affinity group invalidated due to unhealthy stores",
-				zap.String("group-id", groupID),
-				zap.Uint64s("unhealthy-stores", unhealthyStores))
-		}
+	unavailableStores := m.generateUnavailableStores()
+	if m.isUnavailableStoresChanged(unavailableStores) {
+		m.setUnavailableStores(unavailableStores)
 	}
 }
 
-// getUnhealthyStores returns the list of unhealthy store IDs in the group.
-func (m *Manager) getUnhealthyStores(groupInfo *GroupInfo) []uint64 {
-	var unhealthyStores []uint64
-	unhealthyStoreSet := make(map[uint64]struct{})
-
-	isStoreUnhealthy := func(storeID uint64) bool {
-		store := m.storeSetInformer.GetStore(storeID)
-		if store == nil {
-			return true
-		}
-		// Check if store is removed or physically destroyed
-		if store.IsRemoved() || store.IsPhysicallyDestroyed() {
-			return true
-		}
-		// Check if store is removing
-		if store.IsRemoving() {
-			return true
-		}
-		// Use IsUnhealthy (10min) to avoid frequent state flapping
-		// IsUnhealthy: DownTime > 10min (storeUnhealthyDuration)
-		// IsDisconnected: DownTime > 20s (storeDisconnectDuration) - too sensitive
-		if store.IsUnhealthy() {
-			return true
+func (m *Manager) generateUnavailableStores() map[uint64]storeState {
+	unavailableStores := make(map[uint64]storeState)
+	stores := m.storeSetInformer.GetStores()
+	lowSpaceRatio := m.conf.GetLowSpaceRatio()
+	for _, store := range stores {
+		if store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving() {
+			unavailableStores[store.GetID()] = removingOrRemoved
+		} else if store.IsUnhealthy() {
+			// Use IsUnavailable (10min) to avoid frequent state flapping
+			// IsUnavailable: DownTime > 10min (storeUnavailableDuration)
+			// IsDisconnected: DownTime > 20s (storeDisconnectDuration) - too sensitive
+			unavailableStores[store.GetID()] = down
+		} else if store.IsLowSpace(lowSpaceRatio) {
+			unavailableStores[store.GetID()] = lowSpace
+		} else if store.IsPreparing() {
+			unavailableStores[store.GetID()] = preparing
 		}
 		// Note: We intentionally do NOT check:
 		// - IsDisconnected(): Too sensitive (20s), would cause frequent flapping
 		// - IsSlow(): Performance issue, not availability issue
-		// - IsLowSpace(): Not mentioned in design doc, needs separate consideration
-		// TODO: maybe IsLowSpace() should also be considered in the future
-		return false
 	}
+	return unavailableStores
+}
 
-	// Check leader store
-	if isStoreUnhealthy(groupInfo.LeaderStoreID) {
-		unhealthyStoreSet[groupInfo.LeaderStoreID] = struct{}{}
+func (m *Manager) isUnavailableStoresChanged(unavailableStores map[uint64]storeState) bool {
+	m.RLock()
+	defer m.RUnlock()
+	if len(m.unavailableStores) != len(unavailableStores) {
+		return true
 	}
-
-	// Check voter stores
-	for _, voterStoreID := range groupInfo.VoterStoreIDs {
-		if isStoreUnhealthy(voterStoreID) {
-			unhealthyStoreSet[voterStoreID] = struct{}{}
+	for storeID, state := range m.unavailableStores {
+		if state != unavailableStores[storeID] {
+			return true
 		}
 	}
+	return false
+}
 
-	// Convert set to slice
-	for storeID := range unhealthyStoreSet {
-		unhealthyStores = append(unhealthyStores, storeID)
+func (m *Manager) setUnavailableStores(unavailableStores map[uint64]storeState) {
+	m.Lock()
+	defer m.Unlock()
+	// Set unavailableStores
+	m.unavailableStores = unavailableStores
+	if len(m.unavailableStores) == 0 {
+		return
 	}
+	// Update groupInfo
+	for _, group := range m.groups {
+		if !group.Effect {
+			continue
+		}
+		unavailableStore := uint64(0)
+		_, hasUnavailableStore := unavailableStores[group.LeaderStoreID]
+		for _, storeID := range group.VoterStoreIDs {
+			if !hasUnavailableStore {
+				_, hasUnavailableStore = unavailableStores[storeID]
+				if hasUnavailableStore {
+					unavailableStore = storeID
+				}
+			}
+		}
+		if hasUnavailableStore {
+			m.updateGroupEffectLocked(group.ID, 0, 0, nil)
+			log.Warn("affinity group invalidated due to unavailable stores",
+				zap.String("group-id", group.ID),
+				zap.Uint64("unavailable-store", unavailableStore))
+		}
+	}
+}
 
-	return unhealthyStores
+func (m *Manager) hasUnavailableStore(storeIDs []uint64) bool {
+	m.RLock()
+	defer m.RUnlock()
+	for _, storeID := range storeIDs {
+		_, ok := m.unavailableStores[storeID]
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 // keyRange represents a key range extracted from label rules.

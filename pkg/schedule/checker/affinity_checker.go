@@ -98,7 +98,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 	// If the Group is not effective, provide the healthy Region information and fetch it again.
 	if !group.Effect {
-		c.affinityManager.ObserveHealthyRegion(region, group)
+		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
 	// Check if the group is in effect

@@ -383,7 +383,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	re.True(groupInfo2.Effect)
 
 	// Manually call checkStoreHealth to test
-	manager.checkStoreHealth()
+	manager.checkStoresAvailability()
 
 	// After health check, group1 should still be in effect (all stores healthy)
 	re.True(manager.groups["group1"].Effect)
@@ -396,75 +396,8 @@ func TestStoreHealthCheck(t *testing.T) {
 	storeInfos.PutStore(store3Healthy)
 
 	// Check health again
-	manager.checkStoreHealth()
+	manager.checkStoresAvailability()
 
 	// Group2 should be restored to effect state
 	re.True(manager.groups["group2"].Effect)
-}
-
-func TestGetUnhealthyStores(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	store := storage.NewStorageWithMemoryBackend()
-	storeInfos := core.NewStoresInfo()
-
-	// Create stores with different health status
-	healthyStore := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
-	healthyStore = healthyStore.Clone(core.SetLastHeartbeatTS(time.Now()))
-	storeInfos.PutStore(healthyStore)
-
-	unhealthyStore := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "test2"})
-	unhealthyStore = unhealthyStore.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
-	storeInfos.PutStore(unhealthyStore)
-
-	disconnectedStore := core.NewStoreInfo(&metapb.Store{Id: 3, Address: "test3"})
-	disconnectedStore = disconnectedStore.Clone(core.SetLastHeartbeatTS(time.Now().Add(-35 * time.Minute)))
-	storeInfos.PutStore(disconnectedStore)
-
-	conf := mockconfig.NewTestOptions()
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-
-	// Test group with only healthy stores
-	groupInfo1 := &GroupInfo{
-		Group: Group{
-			LeaderStoreID: 1,
-			VoterStoreIDs: []uint64{1},
-		},
-	}
-	unhealthy := manager.getUnhealthyStores(groupInfo1)
-	re.Empty(unhealthy)
-
-	// Test group with unhealthy leader
-	groupInfo2 := &GroupInfo{
-		Group: Group{
-			LeaderStoreID: 2,
-			VoterStoreIDs: []uint64{2, 1},
-		},
-	}
-	unhealthy = manager.getUnhealthyStores(groupInfo2)
-	re.Contains(unhealthy, uint64(2))
-
-	// Test group with disconnected voter
-	groupInfo3 := &GroupInfo{
-		Group: Group{
-			LeaderStoreID: 1,
-			VoterStoreIDs: []uint64{1, 3},
-		},
-	}
-	unhealthy = manager.getUnhealthyStores(groupInfo3)
-	re.Contains(unhealthy, uint64(3))
-
-	// Test group with multiple unhealthy stores
-	groupInfo4 := &GroupInfo{
-		Group: Group{
-			LeaderStoreID: 2,
-			VoterStoreIDs: []uint64{2, 3},
-		},
-	}
-	unhealthy = manager.getUnhealthyStores(groupInfo4)
-	re.Len(unhealthy, 2)
-	re.Contains(unhealthy, uint64(2))
-	re.Contains(unhealthy, uint64(3))
 }
