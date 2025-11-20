@@ -92,16 +92,11 @@ func TestRegionSyncer(t *testing.T) {
 
 		// test All regions have been synchronized to the cache of followerServer
 		re.NotNil(followerServer)
+		cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
+		re.Len(cacheRegions, regionLen)
 		testutil.Eventually(re, func() bool {
-			cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
-			if len(cacheRegions) != regionLen {
-				return false
-			}
 			for _, region := range cacheRegions {
 				r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
-				if r == nil {
-					return false
-				}
 				if region.GetMeta().String() != r.GetMeta().String() {
 					t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
 					return false
