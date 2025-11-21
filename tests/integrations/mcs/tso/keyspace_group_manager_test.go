@@ -157,7 +157,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		},
 	})
 	suite.waitKeyspaceReady([]uint32{keyspaceGroupID}, keyspaceIDs)
-	var modVersion uint64
+	var modRevision uint64
 	checkFn := func(groupID uint32, keyspaceID uint32, addr string, terr *tsopb.Error) (string, string) {
 		conn, err := cli.GetServiceDiscovery().GetOrCreateGRPCConn(addr)
 		re.NoError(err)
@@ -167,8 +167,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 				KeyspaceId:      keyspaceID,
 				KeyspaceGroupId: groupID,
 			},
-			KeyspaceId: keyspaceID,
-			ModVersion: modVersion,
+			KeyspaceId:  keyspaceID,
+			ModRevision: modRevision,
 		}
 		resp, err := tsopb.NewTSOClient(conn).FindGroupByKeyspaceID(suite.ctx, &req)
 		if terr != nil {
@@ -179,8 +179,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		re.Nil(resp.GetHeader().GetError())
 		re.Len(resp.KeyspaceGroup.Members, 2)
 		re.Equal(groupID, resp.KeyspaceGroup.Id)
-		re.GreaterOrEqual(resp.GetModVersion(), modVersion)
-		modVersion = resp.GetModVersion()
+		re.GreaterOrEqual(resp.GetModRevision(), modRevision)
+		modRevision = resp.GetModRevision()
 		var (
 			primaryAddress string
 			secondAddress  string

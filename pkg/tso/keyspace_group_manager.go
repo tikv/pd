@@ -92,9 +92,9 @@ type state struct {
 	// Being merged will cause the group to be removed from this map eventually if the merge is successful.
 	requestedGroups map[uint32]struct{}
 
-	// modVersion is the modification version of keyspace space.
+	// modRevision is the modification revision of keyspace space.
 	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
-	modVersion uint64
+	modRevision uint64
 }
 
 func (s *state) initialize() {
@@ -140,11 +140,11 @@ func (s *state) getKeyspaceGroupMeta(
 // SetModVersion sets the modification version of the keyspace group state.
 // return true if the version is updated.
 // It only allows increasing the version.
-func (s *state) SetModVersion(modVersion uint64) bool {
+func (s *state) SetModVersion(modRevision uint64) bool {
 	s.Lock()
 	defer s.Unlock()
-	if s.modVersion < modVersion {
-		s.modVersion = modVersion
+	if s.modRevision < modRevision {
+		s.modRevision = modRevision
 		return true
 	}
 	return false
@@ -265,7 +265,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 		kg := s.kgs[keyspaceGroupID]
 		if kg != nil {
 			if _, ok := kg.KeyspaceLookupTable[keyspaceID]; ok {
-				return allocator, kg, keyspaceGroupID, s.modVersion, nil
+				return allocator, kg, keyspaceGroupID, s.modRevision, nil
 			}
 		}
 	}
@@ -274,26 +274,26 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 	// keyspace groups, and return the correct keyspace group meta to the client.
 	if kgid, ok := s.keyspaceLookupTable[keyspaceID]; ok {
 		if s.allocators[kgid] != nil {
-			return s.allocators[kgid], s.kgs[kgid], kgid, s.modVersion, nil
+			return s.allocators[kgid], s.kgs[kgid], kgid, s.modRevision, nil
 		}
-		return nil, s.kgs[kgid], kgid, s.modVersion, genNotServedErr(errs.ErrGetAllocator, keyspaceGroupID)
+		return nil, s.kgs[kgid], kgid, s.modRevision, genNotServedErr(errs.ErrGetAllocator, keyspaceGroupID)
 	}
 
 	// The keyspace doesn't belong to any keyspace group but the keyspace has been assigned to a
 	// keyspace group before, which means the keyspace group hasn't initialized yet.
 	if keyspaceGroupID != constant.DefaultKeyspaceGroupID {
-		return nil, nil, keyspaceGroupID, s.modVersion, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+		return nil, nil, keyspaceGroupID, s.modRevision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 
 	// For migrating the existing keyspaces which have no keyspace group assigned as configured
 	// in the keyspace meta. All these keyspaces will be served by the default keyspace group.
 	if s.allocators[constant.DefaultKeyspaceGroupID] == nil {
-		return nil, nil, constant.DefaultKeyspaceGroupID, s.modVersion,
+		return nil, nil, constant.DefaultKeyspaceGroupID, s.modRevision,
 			errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 	return s.allocators[constant.DefaultKeyspaceGroupID],
 		s.kgs[constant.DefaultKeyspaceGroupID],
-		constant.DefaultKeyspaceGroupID, s.modVersion, nil
+		constant.DefaultKeyspaceGroupID, s.modRevision, nil
 }
 
 func (s *state) getNextPrimaryToReset(
@@ -554,8 +554,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			last := event[len(event)-1]
 			if !kgm.SetModVersion(uint64(last.Kv.ModRevision)) {
 				log.Warn("watch keyspace group met mod version not increased",
-					zap.Uint32("current-mod-version", uint32(kgm.modVersion)),
-					zap.Uint64("new-mod-version", uint64(last.Kv.ModRevision)),
+					zap.Uint32("current-mod-revision", uint32(kgm.modRevision)),
+					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
 				)
 			}
 		}
