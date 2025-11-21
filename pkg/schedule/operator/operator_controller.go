@@ -253,7 +253,7 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 	var reason CancelReasonType
 	r, reason = oc.checkOperatorLightly(op)
 	if len(reason) != 0 {
-		_ = oc.removeOperatorInner(op)
+		_ = oc.removeOperatorWithoutBury(op)
 		if op.Cancel(reason) {
 			log.Warn("remove operator because region disappeared",
 				zap.Uint64("region-id", op.RegionID()),
@@ -512,7 +512,6 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 
-	// Try to add the operator atomically first
 	old, loaded := oc.operators.LoadOrStore(regionID, op)
 	if loaded {
 		// If there is an old operator and it has lower priority, replace it
@@ -525,23 +524,30 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
 			return false
 		}
-		// Replace the old operator with the new one
-		oc.operators.Store(regionID, op)
-		// Manually decrement the old operator's counter since it's been replaced
+		// replace old operator
+		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
+			log.Debug("operator changed during replace, skip this add",
+				zap.Uint64("region-id", regionID),
+				zap.Reflect("old", oldOp),
+				zap.Reflect("new", op))
+			return false
+		}
 		oc.counts.dec(oldOp.SchedulerKind())
-		operatorCounter.WithLabelValues(oldOp.Desc(), "remove").Inc()
 		oc.ack(oldOp)
 		if oldOp.Kind()&OpMerge != 0 {
 			oc.removeRelatedMergeOperator(oldOp)
 		}
 		_ = oldOp.Replace()
 		oc.buryOperator(oldOp)
+		return true
 	}
 
+	oc.counts.inc(op.SchedulerKind())
 	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
-		// Failed to start, remove it from the map
-		oc.operators.Delete(regionID)
+		_ = oc.removeOperatorWithoutBury(op)
+		_ = op.Cancel(Unknown)
+		oc.buryOperator(op)
 		log.Error("adding operator with unexpected status",
 			zap.Uint64("region-id", regionID),
 			zap.String("status", OpStatusToString(op.Status())),
@@ -553,7 +559,6 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		return false
 	}
 
-	oc.counts.inc(op.SchedulerKind())
 	log.Info("add operator",
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
@@ -643,7 +648,7 @@ func (oc *Controller) removeOperatorsInner() []*Operator {
 
 // RemoveOperator removes an operator from the running operators.
 func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) bool {
-	removed := oc.removeOperatorInner(op)
+	removed := oc.removeOperatorWithoutBury(op)
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
@@ -661,10 +666,6 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 }
 
 func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
-	return oc.removeOperatorInner(op)
-}
-
-func (oc *Controller) removeOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 	if cur, ok := oc.operators.Load(regionID); ok && cur.(*Operator) == op {
 		oc.operators.Delete(regionID)
@@ -687,7 +688,7 @@ func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 	}
 	relatedOp := relatedOpi.(*Operator)
 	if relatedOp != nil && relatedOp.Status() != CANCELED {
-		oc.removeOperatorInner(relatedOp)
+		oc.removeOperatorWithoutBury(relatedOp)
 		relatedOp.Cancel(RelatedMergeRegion)
 		oc.buryOperator(relatedOp)
 	}
