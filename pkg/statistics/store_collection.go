@@ -31,6 +31,21 @@ const (
 	labelType = "label"
 )
 
+var storeStatuses = []string{
+	clusterStatusStoreUpCount,
+	clusterStatusStoreDisconnectedCount,
+	clusterStatusStoreSlowCount,
+	clusterStatusStoreDownCount,
+	clusterStatusStoreUnhealthCount,
+	clusterStatusStoreOfflineCount,
+	clusterStatusStoreTombstoneCount,
+	clusterStatusStoreLowSpaceCount,
+	clusterStatusStorePreparingCount,
+	clusterStatusStoreServingCount,
+	clusterStatusStoreRemovingCount,
+	clusterStatusStoreRemovedCount,
+}
+
 type storeStatistics struct {
 	opt             config.ConfProvider
 	Up              int
@@ -75,6 +90,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
+<<<<<<< HEAD
 	// Store state.
 	isDown := false
 	switch store.GetNodeState() {
@@ -102,6 +118,15 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	case metapb.NodeState_Removed:
 		s.Tombstone++
 		s.Removed++
+=======
+	engine := store.Engine()
+	storeStatusStats := s.observeStoreStatus(store)
+	for statusType, value := range storeStatusStats {
+		clusterStatusGauge.WithLabelValues(statusType, engine, id).Set(value)
+	}
+	// skip tombstone store avoid to overwrite metrics
+	if store.GetNodeState() == metapb.NodeState_Removed {
+>>>>>>> c87b73a1e0 (statistics: delete cluster status metrics on store deletion (#9945))
 		return
 	}
 
