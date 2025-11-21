@@ -26,6 +26,8 @@ const (
 	MaxKeyspaceID = uint32(0xFFFFFF)
 	// NullKeyspaceID is used for API v1 or legacy path where is keyspace agnostic.
 	NullKeyspaceID = uint32(0xFFFFFFFF)
+	// NullKeyspaceName is used for API v1 or legacy path where is keyspace agnostic.
+	NullKeyspaceName = ""
 	// DefaultKeyspaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
 	DefaultKeyspaceGroupID = uint32(0)

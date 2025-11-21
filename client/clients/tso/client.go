@@ -88,13 +88,14 @@ type Cli struct {
 	// tsoReqPool is the pool to recycle `*tsoRequest`.
 	tsoReqPool *sync.Pool
 	// dispatcher is used to dispatch the TSO requests to the channel.
-	dispatcher atomic.Pointer[tsoDispatcher]
+	dispatcher   atomic.Pointer[tsoDispatcher]
+	keyspaceName string
 }
 
 // NewClient returns a new TSO client.
 func NewClient(
 	ctx context.Context, option *opt.Option,
-	svcDiscovery sd.ServiceDiscovery, factory tsoStreamBuilderFactory,
+	svcDiscovery sd.ServiceDiscovery, factory tsoStreamBuilderFactory, keyspaceName string,
 ) *Cli {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &Cli{
@@ -114,6 +115,7 @@ func NewClient(
 				}
 			},
 		},
+		keyspaceName: keyspaceName,
 	}
 
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateTSOLeaderURL)
@@ -338,7 +340,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		}
 		if cc != nil {
 			cctx, cancel := context.WithCancel(ctx)
-			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc, c.keyspaceName).build(cctx, cancel, c.option.Timeout)
 			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
@@ -382,7 +384,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 			// create the follower stream
 			cctx, cancel := context.WithCancel(ctx)
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
-			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.Timeout)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn, c.keyspaceName).build(cctx, cancel, c.option.Timeout)
 			if err == nil {
 				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
 				addr := tlsutil.TrimHTTPPrefix(backupURL)
@@ -431,7 +433,7 @@ func (c *Cli) checkLeader(
 			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 				// create a stream of the original tso leader
 				cctx, cancel := context.WithCancel(ctx)
-				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
+				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc, c.keyspaceName).build(cctx, cancel, c.option.Timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("url", url))
 					c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
@@ -518,7 +520,7 @@ func (c *Cli) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			streamBuilders[addr] = c.makeBuilder(cc)
+			streamBuilders[addr] = c.makeBuilder(cc, c.keyspaceName)
 		}
 	}
 	return streamBuilders

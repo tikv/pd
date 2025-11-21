@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
@@ -55,11 +56,12 @@ const (
 )
 
 type mockTSOStreamImpl struct {
-	ctx        context.Context
-	requestCh  chan requestMsg
-	resultCh   chan resultMsg
-	keyspaceID uint32
-	errorState error
+	ctx          context.Context
+	requestCh    chan requestMsg
+	resultCh     chan resultMsg
+	keyspaceID   uint32
+	keyspaceName string
+	errorState   error
 
 	resultMode resultMode
 	// Current progress of generating TSO results
@@ -68,10 +70,11 @@ type mockTSOStreamImpl struct {
 
 func newMockTSOStreamImpl(ctx context.Context, resultMode resultMode) *mockTSOStreamImpl {
 	return &mockTSOStreamImpl{
-		ctx:        ctx,
-		requestCh:  make(chan requestMsg, 64),
-		resultCh:   make(chan resultMsg, 64),
-		keyspaceID: 0,
+		ctx:          ctx,
+		requestCh:    make(chan requestMsg, 64),
+		resultCh:     make(chan resultMsg, 64),
+		keyspaceID:   constants.DefaultKeyspaceID,
+		keyspaceName: constants.DefaultKeyspaceName,
 
 		resultMode:     resultMode,
 		resGenPhysical: 10000,
@@ -272,7 +275,7 @@ type testTSOStreamSuite struct {
 func (s *testTSOStreamSuite) SetupTest() {
 	s.re = require.New(s.T())
 	s.inner = newMockTSOStreamImpl(context.Background(), resultModeManual)
-	s.stream = newTSOStream(context.Background(), mockStreamURL, s.inner)
+	s.stream = newTSOStream(context.Background(), mockStreamURL, s.inner, constants.DefaultKeyspaceName)
 }
 
 func (s *testTSOStreamSuite) TearDownTest() {
@@ -611,7 +614,7 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 	log.SetLevel(zapcore.FatalLevel)
 
 	streamInner := newMockTSOStreamImpl(context.Background(), resultModeGenerated)
-	stream := newTSOStream(context.Background(), mockStreamURL, streamInner)
+	stream := newTSOStream(context.Background(), mockStreamURL, streamInner, constants.DefaultKeyspaceName)
 	defer func() {
 		streamInner.stop()
 		stream.WaitForClosed()

@@ -71,12 +71,13 @@ var (
 	cmdFailedDuration         *prometheus.HistogramVec
 	internalCmdDuration       *prometheus.HistogramVec
 	internalCmdFailedDuration *prometheus.HistogramVec
-	requestDuration           *prometheus.HistogramVec
+	// RequestDuration is the histogram of the duration of requests include tso and query region.
+	RequestDuration *prometheus.HistogramVec
 
 	// TSOBestBatchSize is the histogram of the best batch size of TSO requests.
 	TSOBestBatchSize prometheus.Histogram
 	// TSOBatchSize is the histogram of the batch size of TSO requests.
-	TSOBatchSize prometheus.Histogram
+	TSOBatchSize *prometheus.HistogramVec
 	// TSOBatchSendLatency is the histogram of the latency of sending TSO requests.
 	TSOBatchSendLatency prometheus.Histogram
 	// TSORetryCount is the histogram of the retry count for TSO requests.
@@ -138,7 +139,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
 
-	requestDuration = prometheus.NewHistogramVec(
+	RequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace:   "pd_client",
 			Subsystem:   "request",
@@ -146,7 +147,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Bucketed histogram of processing time (s) of handled requests.",
 			ConstLabels: constLabels,
 			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"type"})
+		}, []string{"type", "keyspace_name"})
 
 	TSOBestBatchSize = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -158,7 +159,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Buckets:     prometheus.ExponentialBuckets(1, 2, 13),
 		})
 
-	TSOBatchSize = prometheus.NewHistogram(
+	TSOBatchSize = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace:   "pd_client",
 			Subsystem:   "request",
@@ -166,7 +167,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Bucketed histogram of the batch size of handled requests.",
 			ConstLabels: constLabels,
 			Buckets:     []float64{1, 2, 4, 8, 10, 14, 18, 22, 26, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200, 500, 1000},
-		})
+		}, []string{"keyspace_name"})
 
 	TSOBatchSendLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -329,13 +330,7 @@ var (
 	InternalCmdFailedDurationGetClusterInfo prometheus.Observer
 	InternalCmdFailedDurationGetMembers     prometheus.Observer
 
-	// RequestDurationTSO records the durations of the successful TSO requests.
-	RequestDurationTSO prometheus.Observer
-	// RequestFailedDurationTSO records the durations of the failed TSO requests.
-	RequestFailedDurationTSO prometheus.Observer
-	// RequestDurationQueryRegion records the durations of the successful query region requests.
-	RequestDurationQueryRegion prometheus.Observer
-	// RequestFailedDurationQueryRegion records the durations of the failed query region requests.
+	RequestDurationQueryRegion       prometheus.Observer
 	RequestFailedDurationQueryRegion prometheus.Observer
 
 	QueryRegionBatchSizeTotal      prometheus.Observer
@@ -419,10 +414,8 @@ func initLabelValues() {
 	InternalCmdFailedDurationGetClusterInfo = internalCmdFailedDuration.WithLabelValues("get_cluster_info")
 	InternalCmdFailedDurationGetMembers = internalCmdFailedDuration.WithLabelValues("get_members")
 
-	RequestDurationTSO = requestDuration.WithLabelValues("tso")
-	RequestFailedDurationTSO = requestDuration.WithLabelValues("tso-failed")
-	RequestDurationQueryRegion = requestDuration.WithLabelValues("query_region")
-	RequestFailedDurationQueryRegion = requestDuration.WithLabelValues("query_region-failed")
+	RequestDurationQueryRegion = RequestDuration.WithLabelValues("query_region", "")
+	RequestFailedDurationQueryRegion = RequestDuration.WithLabelValues("query_region-failed", "")
 
 	QueryRegionBatchSizeTotal = QueryRegionBatchSize.WithLabelValues("total")
 	QueryRegionBatchSizeByKeys = QueryRegionBatchSize.WithLabelValues("by_keys")
@@ -435,7 +428,7 @@ func registerMetrics() {
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(internalCmdDuration)
 	prometheus.MustRegister(internalCmdFailedDuration)
-	prometheus.MustRegister(requestDuration)
+	prometheus.MustRegister(RequestDuration)
 	prometheus.MustRegister(TSOBestBatchSize)
 	prometheus.MustRegister(TSOBatchSize)
 	prometheus.MustRegister(TSORetryCount)
