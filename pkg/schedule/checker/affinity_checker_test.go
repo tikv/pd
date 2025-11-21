@@ -597,8 +597,8 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
 
-	// Delete the group
-	err = affinityManager.DeleteAffinityGroup("test_group")
+	// Delete the group (force=true to ensure deletion)
+	err = affinityManager.DeleteAffinityGroup("test_group", true)
 	re.NoError(err)
 
 	// Check should now return nil (group no longer exists)

@@ -285,8 +285,8 @@ func TestLabelRuleIntegration(t *testing.T) {
 	// Verify group was created
 	re.True(manager.IsGroupExist("group_no_label"))
 
-	// Delete group
-	err = manager.DeleteAffinityGroup("group_no_label")
+	// Delete group (no key ranges, so force=false should work)
+	err = manager.DeleteAffinityGroup("group_no_label", false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group_no_label"))
 }
@@ -319,8 +319,8 @@ func TestBasicGroupOperations(t *testing.T) {
 	re.NoError(err)
 	re.True(manager.IsGroupExist("group1"))
 
-	// Delete the group
-	err = manager.DeleteAffinityGroup("group1")
+	// Delete the group (no key ranges, so force=false should work)
+	err = manager.DeleteAffinityGroup("group1", false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
 }
