@@ -38,16 +38,6 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, NotPrimaryErr)
 }
 
-// ShouldRedial determines whether the client should redial to the server forcing a DNS resolution.
-func ShouldRedial(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, NotLeaderErr) ||
-		strings.Contains(errMsg, NotPrimaryErr)
-}
-
 // ZapError is used to make the log output easier.
 func ZapError(err error, causeError ...error) zap.Field {
 	if err == nil {

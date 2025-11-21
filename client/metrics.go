@@ -48,8 +48,6 @@ var (
 	requestForwarded         *prometheus.GaugeVec
 	ongoingRequestCountGauge *prometheus.GaugeVec
 	estimateTSOLatencyGauge  *prometheus.GaugeVec
-
-	tsoLeaderChangedCounter prometheus.Counter
 )
 
 func initMetrics(constLabels prometheus.Labels) {
@@ -138,15 +136,6 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Estimated latency of an RTT of getting TSO",
 			ConstLabels: constLabels,
 		}, []string{"stream"})
-	tsoLeaderChangedCounter = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Namespace:   "pd_client",
-			Subsystem:   "request",
-			Name:        "tso_leader_changed_total",
-			Help:        "Counter of tso leader changed",
-			ConstLabels: constLabels,
-		},
-	)
 }
 
 var (
@@ -257,5 +246,4 @@ func registerMetrics() {
 	prometheus.MustRegister(tsoBatchSendLatency)
 	prometheus.MustRegister(requestForwarded)
 	prometheus.MustRegister(estimateTSOLatencyGauge)
-	prometheus.MustRegister(tsoLeaderChangedCounter)
 }
