@@ -90,15 +90,6 @@ type Group struct {
 	// TODO: LearnerStoreIDs
 }
 
-// Clone returns a deep copy of the Group.
-// This is used to return copies from the cache, preventing race conditions.
-func (g *Group) Clone() *Group {
-	clone := *g
-	clone.VoterStoreIDs = append([]uint64(nil), g.VoterStoreIDs...)
-	// TODO: Clone LearnerStoreIDs when added
-	return &clone
-}
-
 func (g *Group) String() string {
 	b, _ := json.Marshal(g)
 	return string(b)
@@ -133,7 +124,7 @@ type regionCache struct {
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
 func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCache) bool {
-	if region == nil {
+	if region == nil || !g.Effect {
 		return false
 	}
 
@@ -176,12 +167,13 @@ type GroupInfo struct {
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
 	AffinityRegionCount int
 
-	// nolint:unused
+	// Regions represents the cache of Regions.
 	Regions map[uint64]regionCache
-	// nolint:unused
 	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
 	// Currently using label's internal multiple keyrange mechanism
 	labels *labeler.LabelRule
+	// RangeCount counts how many KeyRanges exist in the Label.
+	RangeCount int
 }
 
 // newGroupState creates a GroupState from the given GroupInfo.
@@ -195,7 +187,7 @@ func newGroupState(g *GroupInfo) *GroupState {
 			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
 		},
 		Effect:              g.Effect,
-		RangeCount:          0, // TODO: len(labels)
+		RangeCount:          g.RangeCount,
 		RegionCount:         len(g.Regions),
 		AffinityRegionCount: g.AffinityRegionCount,
 		affinityVer:         g.AffinityVer,
@@ -276,6 +268,13 @@ func (m *Manager) IsInitialized() bool {
 	return m.initialized
 }
 
+// IsAvailable checks that the Manager has been initialized and contains at least one Group.
+func (m *Manager) IsAvailable() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.initialized && len(m.groups) > 0
+}
+
 func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
@@ -302,6 +301,10 @@ func (m *Manager) updateGroupEffectLocked(groupID string, affinityVer uint64, le
 }
 
 func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelRule) {
+	rangeCount := 0
+	if ranges, ok := labels.Data.([]*labeler.KeyRangeRule); ok {
+		rangeCount = len(ranges)
+	}
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		groupInfo = &GroupInfo{
@@ -316,6 +319,7 @@ func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelR
 			AffinityRegionCount: 0,
 			Regions:             make(map[uint64]regionCache),
 			labels:              labels,
+			RangeCount:          rangeCount,
 		}
 		m.groups[groupID] = groupInfo
 	} else {
@@ -325,6 +329,7 @@ func (m *Manager) updateGroupLabelsLocked(groupID string, labels *labeler.LabelR
 		groupInfo.AffinityVer++
 		// Set labels
 		groupInfo.labels = labels
+		groupInfo.RangeCount = rangeCount
 	}
 }
 
@@ -416,7 +421,7 @@ func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) 
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// TODO: Improve the strategy.
-	if group == nil || group.Effect {
+	if group == nil || group.Effect || !m.IsAvailable() {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -434,7 +439,7 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 
 // GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
 func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (*GroupState, bool) {
-	if region == nil {
+	if region == nil || !m.IsAvailable() {
 		return nil, false
 	}
 	cache, group := m.getCache(region)
@@ -556,6 +561,7 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 
 // GetGroups returns the internal groups map.
 // Used for testing only.
+// TODO: Move these tests.
 func (m *Manager) GetGroups() map[string]*GroupInfo {
 	m.RLock()
 	defer m.RUnlock()
@@ -599,11 +605,14 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 }
 
 // GetAllAffinityGroupStates returns all affinity groups.
-// TODO: it is a mock function now, need to implement the real logic.
 func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	m.RLock()
 	defer m.RUnlock()
-	return nil
+	result := make([]*GroupState, 0, len(m.groups))
+	for _, group := range m.groups {
+		result = append(result, newGroupState(group))
+	}
+	return result
 }
 
 // GroupWithRanges represents a group with its associated key ranges.
@@ -614,6 +623,10 @@ type GroupWithRanges struct {
 
 // SaveAffinityGroups adds multiple affinity groups to storage and creates corresponding label rules.
 func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
+	if !m.IsInitialized() {
+		return errs.ErrAffinityDisabled
+	}
+
 	// Validate all groups first (without lock)
 	for _, gwr := range groupsWithRanges {
 		if err := m.AdjustGroup(gwr.Group); err != nil {
@@ -699,6 +712,10 @@ func (m *Manager) SaveAffinityGroups(groupsWithRanges []GroupWithRanges) error {
 
 // DeleteAffinityGroup deletes an affinity group by ID and removes its label rule.
 func (m *Manager) DeleteAffinityGroup(id string) error {
+	if !m.IsInitialized() {
+		return errs.ErrAffinityDisabled
+	}
+
 	m.Lock()
 	defer m.Unlock()
 
@@ -789,7 +806,7 @@ func (m *Manager) startAvailabilityCheckLoop() {
 
 // checkStoresAvailability checks the availability status of stores and invalidates groups with unavailable stores.
 func (m *Manager) checkStoresAvailability() {
-	if !m.IsInitialized() {
+	if !m.IsAvailable() {
 		return
 	}
 	unavailableStores := m.generateUnavailableStores()
