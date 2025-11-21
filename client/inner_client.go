@@ -339,6 +339,13 @@ func (c *innerClient) gRPCErrorHandler(err error) {
 	}
 }
 
+func (c *innerClient) resourceManagerErrorHandler(err error) {
+	log.Error("[resource-manager] resource manager error", zap.Error(err))
+	if c.resourceManagerDiscovery != nil {
+		c.resourceManagerDiscovery.ScheduleUpateServiceURL()
+	}
+}
+
 func (c *innerClient) getOrCreateGRPCConn() (*grpc.ClientConn, error) {
 	cc, err := c.serviceDiscovery.GetOrCreateGRPCConn(c.serviceDiscovery.GetServingURL())
 	if err != nil {

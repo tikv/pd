@@ -111,6 +111,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
+		c.inner.resourceManagerErrorHandler(err)
 		return nil, errs.ErrClientListResourceGroup.FastGenByArgs(err.Error())
 	}
 	resErr := resp.GetError()
@@ -140,6 +141,7 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
+		c.inner.resourceManagerErrorHandler(err)
 		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
 	}
 	resErr := resp.GetError()
@@ -185,6 +187,7 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 	}
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
+		c.inner.resourceManagerErrorHandler(err)
 		return "", err
 	}
 	resErr := resp.GetError()
@@ -209,6 +212,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
+		c.inner.resourceManagerErrorHandler(err)
 		return "", err
 	}
 	resErr := resp.GetError()
@@ -391,6 +395,7 @@ func (c *innerClient) processTokenRequests(stream rmpb.ResourceManager_AcquireTo
 	resp, err := stream.Recv()
 	if err != nil {
 		c.gRPCErrorHandler(err)
+		c.resourceManagerErrorHandler(err)
 		err = errors.WithStack(err)
 		t.done <- err
 		return err
@@ -422,6 +427,9 @@ func (c *innerClient) tryResourceManagerConnect(ctx context.Context, connection 
 			connection.ctx = cctx
 			connection.stream = stream
 			return nil
+		}
+		if err != nil {
+			c.resourceManagerErrorHandler(err)
 		}
 		cancel()
 		select {

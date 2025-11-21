@@ -25,7 +25,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
@@ -53,8 +52,9 @@ type ResourceManagerDiscovery struct {
 	discoveryKey string
 	tlsCfg       *tls.Config
 	// Client option.
-	option          *opt.Option
-	onLeaderChanged func(string) error
+	option             *opt.Option
+	onLeaderChanged    func(string) error
+	updateServiceURLCh chan struct{}
 
 	mu         sync.RWMutex
 	serviceURL string
@@ -65,14 +65,15 @@ type ResourceManagerDiscovery struct {
 func NewResourceManagerDiscovery(ctx context.Context, clusterID uint64, metaCli metastorage.Client, tlsCfg *tls.Config, opt *opt.Option, leaderChangedCb func(string) error) *ResourceManagerDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	d := &ResourceManagerDiscovery{
-		ctx:             ctx,
-		cancel:          cancel,
-		clusterID:       clusterID,
-		metaCli:         metaCli,
-		discoveryKey:    fmt.Sprintf(resourceManagerSvcDiscoveryFormat, clusterID),
-		tlsCfg:          tlsCfg,
-		option:          opt,
-		onLeaderChanged: leaderChangedCb,
+		ctx:                ctx,
+		cancel:             cancel,
+		clusterID:          clusterID,
+		metaCli:            metaCli,
+		discoveryKey:       fmt.Sprintf(resourceManagerSvcDiscoveryFormat, clusterID),
+		tlsCfg:             tlsCfg,
+		option:             opt,
+		onLeaderChanged:    leaderChangedCb,
+		updateServiceURLCh: make(chan struct{}, 1),
 	}
 
 	log.Info("[resource-manager] created resource manager discovery",
@@ -105,7 +106,7 @@ func (r *ResourceManagerDiscovery) Init() error {
 	}
 	r.resetConn(url)
 	r.wg.Add(1)
-	go r.watchServiceURL(revision)
+	go r.updateServiceURLLoop(revision)
 	return nil
 }
 
@@ -180,60 +181,38 @@ func (r *ResourceManagerDiscovery) parseURLFromStorageValue(value []byte) (strin
 	return listenUrls[0], nil
 }
 
-func (r *ResourceManagerDiscovery) watchServiceURL(revision int64) {
+// ScheduleUpateServiceURL schedules an update of the service URL.
+func (r *ResourceManagerDiscovery) ScheduleUpateServiceURL() {
+	select {
+	case r.updateServiceURLCh <- struct{}{}:
+	default:
+	}
+}
+
+func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 	defer r.wg.Done()
 
-	log.Info("[resource-manager] watching service URL",
-		zap.String("discovery-key", r.discoveryKey))
-
-	lastRevision := revision
-start_watch:
-	ch, err := r.metaCli.Watch(r.ctx, []byte(r.discoveryKey), opt.WithRev(lastRevision))
-	if err != nil {
-		log.Error("[resource-manager] failed to watch service URL",
-			zap.String("discovery-key", r.discoveryKey),
-			zap.Error(err))
-		select {
-		case <-r.ctx.Done():
-			return
-		case <-time.After(serviceURLWatchRetryInterval):
-			goto start_watch
-		}
-	}
 	for {
 		select {
 		case <-r.ctx.Done():
+			log.Info("[resource-manager] exit update service URL loop due to context canceled")
 			return
-		case events, ok := <-ch:
-			if !ok {
-				log.Info("[resource-manager] service URL watch channel closed",
-					zap.String("discovery-key", r.discoveryKey))
-				goto start_watch
+		case <-r.updateServiceURLCh:
+			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
+			url, newRevision, err := r.discoverServiceURL()
+			if err != nil {
+				log.Error("[resource-manager] failed to discover service URL",
+					zap.String("discovery-key", r.discoveryKey),
+					zap.Error(err))
+				continue
 			}
-			var connReset bool
-			for _, event := range events {
-				if event.Type == meta_storagepb.Event_PUT {
-					url, err := r.parseURLFromStorageValue(event.Kv.Value)
-					if err != nil {
-						log.Error("[resource-manager] failed to parse service URL",
-							zap.String("discovery-key", r.discoveryKey),
-							zap.Error(err))
-						continue
-					}
-					log.Info("[resource-manager] service URL changed",
-						zap.String("discovery-key", r.discoveryKey),
-						zap.String("new-url", url))
-					lastRevision = event.Kv.ModRevision
-					r.resetConn(url)
-					connReset = true
-				}
-			}
-			if connReset && r.onLeaderChanged != nil {
-				if err := r.onLeaderChanged(""); err != nil {
-					log.Error("[resource-manager] failed to notify leader change",
-						zap.String("discovery-key", r.discoveryKey),
-						zap.Error(err))
-				}
+			log.Info("[resource-manager] updated service URL",
+				zap.String("new-url", url),
+				zap.Int64("new-revision", newRevision),
+				zap.Int64("revision", revision))
+			if newRevision > revision {
+				r.resetConn(url)
+				revision = newRevision
 			}
 		}
 	}
