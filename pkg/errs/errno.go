@@ -560,4 +560,5 @@ var (
 	ErrAffinityGroupExist    = errors.Normalize("affinity group %s already exists", errors.RFCCodeText("PD:affinity:ErrAffinityGroupExist"))
 	ErrAffinityDisabled      = errors.Normalize("affinity is disabled", errors.RFCCodeText("PD:affinity:ErrAffinityDisabled"))
 	ErrAffinityGroupContent  = errors.Normalize("invalid affinity group content, %s", errors.RFCCodeText("PD:affinity:ErrAffinityGroupContent"))
+	ErrInvalidKeyFormat      = errors.Normalize("invalid hex %s key '%s' for group '%s'", errors.RFCCodeText("PD:affinity:ErrInvalidKeyFormat"))
 )

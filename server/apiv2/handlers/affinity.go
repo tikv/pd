@@ -15,7 +15,6 @@
 package handlers
 
 import (
-	"encoding/hex"
 	"net/http"
 	"regexp"
 
@@ -116,10 +115,6 @@ func CreateAffinityGroups(c *gin.Context) {
 	}
 
 	groupsWithRanges := make([]affinity.GroupWithRanges, 0, len(req.AffinityGroups))
-
-	// Prepare key ranges for validation
-	var allNewRanges []affinity.KeyRangeInput
-
 	for groupID, input := range req.AffinityGroups {
 		if err := validateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -135,18 +130,11 @@ func CreateAffinityGroups(c *gin.Context) {
 		}
 
 		// Convert KeyRange to labeler format (hex-encoded strings)
-		var keyRanges []any
+		var keyRanges []keyutil.KeyRange
 		for _, kr := range input.Ranges {
-			keyRanges = append(keyRanges, map[string]any{
-				"start_key": hex.EncodeToString(kr.StartKey),
-				"end_key":   hex.EncodeToString(kr.EndKey),
-			})
-
-			// Collect key ranges for overlap validation
-			allNewRanges = append(allNewRanges, affinity.KeyRangeInput{
+			keyRanges = append(keyRanges, keyutil.KeyRange{
 				StartKey: kr.StartKey,
 				EndKey:   kr.EndKey,
-				GroupID:  groupID,
 			})
 		}
 
@@ -160,15 +148,13 @@ func CreateAffinityGroups(c *gin.Context) {
 		})
 	}
 
-	// Validate that key ranges don't overlap
-	if err := manager.ValidateKeyRanges(allNewRanges); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-
 	// Save affinity groups with their key ranges
 	// The manager will handle storage persistence, label creation, and in-memory updates atomically
 	if err := manager.SaveAffinityGroups(groupsWithRanges); err != nil {
+		if errs.ErrAffinityGroupContent.Equal(err) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -477,6 +463,9 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 			return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(op.ID)
 		}
 		affectedGroups[op.ID] = true
+		if len(op.Ranges) == 0 {
+			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("no key ranges provided")
+		}
 
 		// Convert ranges to RangeModification format
 		for _, kr := range op.Ranges {

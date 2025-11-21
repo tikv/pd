@@ -26,6 +26,11 @@ error = '''
 affinity group %s not found
 '''
 
+["PD:affinity:ErrInvalidKeyFormat"]
+error = '''
+invalid hex %s key '%s' for group '%s'
+'''
+
 ["PD:apiutil:ErrOptionNotExist"]
 error = '''
 the option %s does not exist

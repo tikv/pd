@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -160,29 +161,35 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	err := manager.Initialize()
 	re.NoError(err)
 
-	// Test 1: Non-overlapping ranges should succeed
-	keyRanges1 := []KeyRangeInput{
-		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
-		{StartKey: []byte("c"), EndKey: []byte("d"), GroupID: "group1"},
+	validate := func(ranges []keyRange) error {
+		manager.Lock()
+		defer manager.Unlock()
+		return manager.validateNoKeyRangeOverlap(ranges)
 	}
-	err = manager.ValidateKeyRanges(keyRanges1)
+
+	// Test 1: Non-overlapping ranges should succeed
+	keyRanges1 := []keyRange{
+		{startKey: []byte("a"), endKey: []byte("b"), groupID: "group1"},
+		{startKey: []byte("c"), endKey: []byte("d"), groupID: "group1"},
+	}
+	err = validate(keyRanges1)
 	re.NoError(err, "Non-overlapping ranges should pass validation")
 
 	// Test 2: Overlapping ranges within same request should fail
-	keyRanges2 := []KeyRangeInput{
-		{StartKey: []byte("a"), EndKey: []byte("c"), GroupID: "group1"},
-		{StartKey: []byte("b"), EndKey: []byte("d"), GroupID: "group1"},
+	keyRanges2 := []keyRange{
+		{startKey: []byte("a"), endKey: []byte("c"), groupID: "group1"},
+		{startKey: []byte("b"), endKey: []byte("d"), groupID: "group1"},
 	}
-	err = manager.ValidateKeyRanges(keyRanges2)
+	err = validate(keyRanges2)
 	re.Error(err, "Overlapping ranges should fail validation")
 	re.Contains(err.Error(), "overlap")
 
 	// Test 3: Adjacent ranges (not overlapping) should succeed
-	keyRanges3 := []KeyRangeInput{
-		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
-		{StartKey: []byte("b"), EndKey: []byte("c"), GroupID: "group1"},
+	keyRanges3 := []keyRange{
+		{startKey: []byte("a"), endKey: []byte("b"), groupID: "group1"},
+		{startKey: []byte("b"), endKey: []byte("c"), groupID: "group1"},
 	}
-	err = manager.ValidateKeyRanges(keyRanges3)
+	err = validate(keyRanges3)
 	re.NoError(err, "Adjacent ranges should pass validation")
 
 	// Test 4: Verify checkKeyRangesOverlap function directly
@@ -244,6 +251,157 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	// Verify groups were loaded from storage
 	re.True(manager2.IsGroupExist("group1"))
 	re.True(manager2.IsGroupExist("group2"))
+}
+
+func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"})
+	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
+	for _, s := range []*core.StoreInfo{store1, store2} {
+		storeInfos.PutStore(s.Clone(core.SetLastHeartbeatTS(time.Now())))
+	}
+	conf := mockconfig.NewTestOptions()
+
+	manager := NewManager(ctx, store, storeInfos, conf, nil)
+	re.NoError(manager.Initialize())
+
+	group := &Group{ID: "g", LeaderStoreID: 0, VoterStoreIDs: nil}
+	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{{Group: group}}))
+
+	// First observation makes group effective with store 1.
+	region1 := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       10,
+			StartKey: []byte(""),
+			EndKey:   []byte("a"),
+			Peers:    []*metapb.Peer{{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter}},
+		},
+		&metapb.Peer{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+	)
+	manager.ObserveAvailableRegion(region1, manager.GetAffinityGroupState("g"))
+	state := manager.GetAffinityGroupState("g")
+	re.True(state.Effect)
+	re.Equal(uint64(1), state.LeaderStoreID)
+	re.ElementsMatch([]uint64{1}, state.VoterStoreIDs)
+
+	// Second observation with different layout should not overwrite.
+	region2 := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       20,
+			StartKey: []byte("a"),
+			EndKey:   []byte("b"),
+			Peers:    []*metapb.Peer{{Id: 21, StoreId: 2, Role: metapb.PeerRole_Voter}},
+		},
+		&metapb.Peer{Id: 21, StoreId: 2, Role: metapb.PeerRole_Voter},
+	)
+	manager.ObserveAvailableRegion(region2, manager.GetAffinityGroupState("g"))
+	state2 := manager.GetAffinityGroupState("g")
+	re.True(state2.Effect)
+	re.Equal(uint64(1), state2.LeaderStoreID)
+	re.ElementsMatch([]uint64{1}, state2.VoterStoreIDs)
+}
+
+func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
+	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()), core.SetNodeState(metapb.NodeState_Removing))
+	storeInfos.PutStore(store2)
+
+	conf := mockconfig.NewTestOptions()
+	manager := NewManager(ctx, store, storeInfos, conf, nil)
+	re.NoError(manager.Initialize())
+
+	group := &Group{ID: "avail", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
+	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{{Group: group}}))
+	_, err := manager.UpdateGroupPeers("avail", 1, []uint64{1, 2})
+	re.NoError(err)
+	state := manager.GetAffinityGroupState("avail")
+	re.True(state.Effect)
+
+	// Simulate store 2 unavailable.
+	unavailable := map[uint64]storeState{2: removingOrRemoved}
+	manager.setUnavailableStores(unavailable)
+
+	state2 := manager.GetAffinityGroupState("avail")
+	re.False(state2.Effect)
+}
+
+func TestParseKeyRangesFromDataInvalidHex(t *testing.T) {
+	re := require.New(t)
+	_, err := parseKeyRangesFromData([]*labeler.KeyRangeRule{
+		{StartKeyHex: "zz", EndKeyHex: "10"},
+	}, "g1")
+	re.Error(err)
+	re.ErrorContains(err, "invalid hex start key")
+}
+
+func TestAffinityPersistenceWithLabeler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(manager.Initialize())
+
+	gwr := GroupWithRanges{
+		Group: &Group{
+			ID:            "persist",
+			LeaderStoreID: 1,
+			VoterStoreIDs: []uint64{1},
+		},
+		KeyRanges: []keyutil.KeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}},
+	}
+	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{gwr}))
+
+	// RangeCount should be recorded and label rule created.
+	state := manager.GetAffinityGroupState("persist")
+	re.NotNil(state)
+	re.Equal(1, state.RangeCount)
+	re.NotNil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))
+
+	// Reload manager to verify persistence and loadRegionLabel integration.
+	manager2 := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(manager2.Initialize())
+	state2 := manager2.GetAffinityGroupState("persist")
+	re.NotNil(state2)
+	re.Equal(1, state2.RangeCount)
+
+	// Remove all ranges and ensure cache/label are cleared.
+	ranges := []keyRange{{
+		startKey: []byte{0x00},
+		endKey:   []byte{0x10},
+		groupID:  "persist",
+	}}
+	re.NoError(manager2.updateGroupRanges("persist", ranges))
+	re.NoError(manager2.updateGroupRanges("persist", nil))
+	state3 := manager2.GetAffinityGroupState("persist")
+	re.NotNil(state3)
+	re.Equal(0, state3.RangeCount)
+	re.Nil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))
 }
 
 // TestLabelRuleIntegration tests basic label rule creation and deletion
