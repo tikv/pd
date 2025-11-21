@@ -164,9 +164,9 @@ var (
 			BalanceLeaderScheduler,
 			BalanceRegionScheduler,
 			BalanceHotRegionScheduler,
+			EvictSlowStoreScheduler,
 		}
 		if !kerneltype.IsNextGen() {
-			defaultSchedulers = append(defaultSchedulers, EvictSlowStoreScheduler)
 			defaultSchedulers = append(defaultSchedulers, EvictStoppingStoreScheduler)
 		}
 		return defaultSchedulers
