@@ -30,6 +30,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 
@@ -110,6 +112,7 @@ type tsoServiceDiscovery struct {
 	serviceDiscovery ServiceDiscovery
 	clusterID        uint64
 	keyspaceID       atomic.Uint32
+	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
 	// the default keyspace group
@@ -142,7 +145,7 @@ type tsoServiceDiscovery struct {
 // NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func NewTSOServiceDiscovery(
 	ctx context.Context, metacli metastorage.Client, serviceDiscovery ServiceDiscovery,
-	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
+	keyspaceID uint32, keyspaceMeta *keyspacepb.KeyspaceMeta, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -151,6 +154,7 @@ func NewTSOServiceDiscovery(
 		metacli:           metacli,
 		serviceDiscovery:  serviceDiscovery,
 		clusterID:         serviceDiscovery.GetClusterID(),
+		keyspaceMeta:      keyspaceMeta,
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
@@ -402,6 +406,55 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 	return nil
 }
 
+// hasKeyspaceGroupIDConfig checks if the keyspace has been assigned a keyspace group
+// by checking if tso_keyspace_group_id is present in its config.
+// Returns true if the keyspace has tso_keyspace_group_id configured, false otherwise.
+// If keyspaceMeta is nil (not passed from upper layer), returns false.
+func (c *tsoServiceDiscovery) hasKeyspaceGroupIDConfig() bool {
+	if c.keyspaceMeta == nil || c.keyspaceMeta.Config == nil {
+		return false
+	}
+
+	// Check if tso_keyspace_group_id exists in config
+	_, exists := c.keyspaceMeta.Config[constants.TSOKeyspaceGroupIDKey]
+	return exists
+}
+
+// checkAndHandleFallbackInMicroserviceMode checks if fallback is allowed when TSO server is unavailable
+// in microservice mode. Returns an error if fallback is not allowed, nil otherwise.
+// Only keyspaces with tso_keyspace_group_id in their config should not fallback.
+// This is to support backward compatibility for keyspaces that have not been assigned
+// to any keyspace group yet (they should still use the default group 0).
+func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceID uint32) error {
+	clusterInfo, err := c.serviceDiscovery.(*serviceDiscovery).getClusterInfo(
+		c.ctx, c.serviceDiscovery.GetServingURL(), UpdateMemberTimeout)
+	if err != nil {
+		log.Warn("[tso] failed to get cluster info to check service mode",
+			zap.Uint32("keyspace-id", keyspaceID),
+			errs.ZapError(err))
+		return err
+	}
+
+	// If we are in API_SVC_MODE (microservice mode), check if fallback is allowed
+	if len(clusterInfo.ServiceModes) > 0 && clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
+		// Check if the keyspace has been assigned a keyspace group
+		// Only keyspaces with tso_keyspace_group_id configured should not fallback
+		if c.hasKeyspaceGroupIDConfig() {
+			// This keyspace has been assigned to a keyspace group, don't fallback
+			log.Warn("[tso] in microservice mode but no TSO server available - cannot fallback to group 0",
+				zap.Uint32("keyspace-id", keyspaceID),
+				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
+			return errors.New("no TSO microservice available in microservice mode")
+		}
+		// Keyspace doesn't have tso_keyspace_group_id config, allow fallback
+		log.Info("[tso] keyspace has no tso_keyspace_group_id config, allowing fallback to group 0",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
+	}
+
+	return nil
+}
+
 func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving URL of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
@@ -423,11 +476,18 @@ func (c *tsoServiceDiscovery) updateMember() error {
 			return err
 		}
 	} else {
-		// There is no error but no tso server URL found, which means
-		// the server side hasn't been upgraded to the version that
-		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
-		// we fall back to the old way of discovering the tso primary URL
-		// from etcd directly.
+		// Check the current service mode from PD to determine if fallback is appropriate
+		// Note: tsoServiceDiscovery is only created in API_SVC_MODE (microservice mode)
+		// If we are in API_SVC_MODE and tsoServerURL is empty, it means all TSO microservices
+		// are unavailable. In this case, falling back to default group may cause issues like
+		// timestamp fallback (issue #6770), so we should return an error instead.
+		if err := c.checkAndHandleFallbackInMicroserviceMode(keyspaceID); err != nil {
+			return err
+		}
+
+		// Only fallback to legacy path if we are in PD_SVC_MODE
+		// This means the server hasn't been upgraded to the version that supports
+		// independent TSO microservice, and we should use the PD's built-in TSO (group 0)
 		c.printFallbackLogOnce.Do(func() {
 			log.Warn("[tso] no tso server URL found,"+
 				" fallback to the legacy path to discover from etcd directly",
@@ -435,6 +495,15 @@ func (c *tsoServiceDiscovery) updateMember() error {
 				zap.String("tso-server-url", tsoServerURL),
 				zap.String("discovery-key", c.defaultDiscoveryKey))
 		})
+
+		// Inject a failpoint to verify that in TSO MCS mode, we should NOT reach discoverWithLegacyPath
+		// This failpoint is used in tests to ensure proper code path execution
+		failpoint.Inject("assertNotReachLegacyPath", func(val failpoint.Value) {
+			if shouldPanic, ok := val.(bool); ok && shouldPanic {
+				panic("BUG: In TSO MCS mode, should not fallback to discoverWithLegacyPath when TSO server is temporarily unavailable")
+			}
+		})
+
 		urls, err := c.discoverWithLegacyPath()
 		if err != nil {
 			return err
