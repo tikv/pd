@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -212,6 +213,10 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 	// It is necessary because checkKeyspaceGroupLeadership will correct the keyspace group ID automatically if keyspace serves.
 	_, _, expected, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if keyspaceGroupID != expected || err != nil {
+
+		if err != nil {
+			log.Info("test-yjy IsKeyspaceServingByGroup err", zap.Error(err), zap.String("stack", string(debug.Stack())))
+		}
 		return false
 	}
 	return s.checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID)
