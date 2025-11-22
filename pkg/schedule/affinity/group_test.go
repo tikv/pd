@@ -12,8 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package labeler
-
-// TODO: Special Labeler logic, e.g.
-// * TTL is not supported.
-// * Cannot set a group name that does not exist.
+package affinity

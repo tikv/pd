@@ -451,10 +451,10 @@ func validateGroupID(id string) error {
 	return nil
 }
 
-// convertAndValidateRangeOps validates group operations and converts them to RangeModification format.
+// convertAndValidateRangeOps validates group operations and converts them to GroupRangeModification format.
 // It updates affectedGroups with all groups encountered.
-func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.RangeModification, error) {
-	var result []affinity.RangeModification
+func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupRangeModification, error) {
+	var result []affinity.GroupRangeModification
 	for _, op := range ops {
 		if err := validateGroupID(op.ID); err != nil {
 			return nil, errors.Errorf("invalid group id: %s", op.ID)
@@ -467,9 +467,9 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("no key ranges provided")
 		}
 
-		// Convert ranges to RangeModification format
+		// Convert ranges to GroupRangeModification format
 		for _, kr := range op.Ranges {
-			result = append(result, affinity.RangeModification{
+			result = append(result, affinity.GroupRangeModification{
 				GroupID:  op.ID,
 				StartKey: kr.StartKey,
 				EndKey:   kr.EndKey,
