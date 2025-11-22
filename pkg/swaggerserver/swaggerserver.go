@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build swagger_server
-// +build swagger_server
 
 package swaggerserver
 

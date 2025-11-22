@@ -48,7 +48,7 @@ const (
 
 // initTags sets up the tags.
 func initTags() {
-	tmpTags := []string{deadlockTag}
+	tmpTags := []string{}
 
 	if isNextGenEnabled() {
 		tmpTags = append(tmpTags, nextGenTag)
