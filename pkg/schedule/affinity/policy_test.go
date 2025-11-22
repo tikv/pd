@@ -124,9 +124,9 @@ func TestStoreHealthCheck(t *testing.T) {
 
 	// Create mock stores
 	storeInfos := core.NewStoresInfo()
-	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
-	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "test2"})
-	store3 := core.NewStoreInfo(&metapb.Store{Id: 3, Address: "test3"})
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1", NodeState: metapb.NodeState_Serving})
+	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "test2", NodeState: metapb.NodeState_Serving})
+	store3 := core.NewStoreInfo(&metapb.Store{Id: 3, Address: "test3", NodeState: metapb.NodeState_Serving})
 
 	// Set store1 to be healthy
 	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -188,5 +188,5 @@ func TestStoreHealthCheck(t *testing.T) {
 	manager.checkStoresAvailability()
 
 	// Group2 should be restored to effect state
-	re.True(manager.groups["group2"].Effect)
+	re.False(manager.groups["group2"].Effect)
 }

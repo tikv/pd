@@ -363,10 +363,10 @@ func (m *Manager) updateGroupRanges(groupID string, ranges []keyRange) error {
 		}
 		delete(m.keyRanges, groupID)
 		if groupInfo, ok := m.groups[groupID]; ok {
+			m.affinityRegionCount -= groupInfo.AffinityRegionCount
 			groupInfo.LabelRule = nil
 			groupInfo.RangeCount = 0
 			groupInfo.AffinityRegionCount = 0
-			m.affinityRegionCount -= groupInfo.AffinityRegionCount
 			for regionID := range groupInfo.Regions {
 				delete(m.regions, regionID)
 			}
