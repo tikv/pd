@@ -14,13 +14,13 @@ require (
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250923091925-d79d11002599
+	github.com/pingcap/kvproto v0.0.0-20251109100001-1907922fbd18
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0-20251111035811-bae53730c065
 	go.etcd.io/etcd/client/pkg/v3 v3.5.15
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
