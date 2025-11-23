@@ -386,7 +386,7 @@ func newClientWithKeyspaceName(
 		keyspaceMeta, err := c.LoadKeyspace(clientCtx, keyspaceName)
 		log.Info("test-yjy newClientWithKeyspaceName 00")
 		if err != nil {
-			log.Info("test-yjy newClientWithKeyspaceName 00-01", zap.Error("err", err))
+			log.Info("test-yjy newClientWithKeyspaceName 00-01", zap.Error(err))
 			return err
 		}
 		log.Info("test-yjy newClientWithKeyspaceName 01")
@@ -399,7 +399,7 @@ func newClientWithKeyspaceName(
 	}
 	log.Info("test-yjy newClientWithKeyspaceName 03")
 	if err := c.inner.init(updateKeyspaceIDFunc); err != nil {
-		log.Info("test-yjy newClientWithKeyspaceName 04", zap.Any("err", err))
+		log.Info("test-yjy newClientWithKeyspaceName 04", zap.Error(err))
 		return nil, err
 	}
 	log.Info("[pd] create pd client with endpoints and keyspace",
