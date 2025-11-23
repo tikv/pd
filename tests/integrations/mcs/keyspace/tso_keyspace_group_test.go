@@ -692,6 +692,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 			log.Info("test-yjy failed to create temp client for gRPC verification", zap.Error(err))
 			return false
 		}
+		log.Info("test-yjy setupTSONodesAndClient tempClient 00")
 
 		// Try to load keyspace via gRPC
 		loadedKeyspace, err := tempClient.LoadKeyspace(suite.ctx, keyspaceName)
@@ -700,6 +701,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 			log.Info("test-yjy failed to load keyspace via gRPC", zap.Error(err))
 			return false
 		}
+		log.Info("test-yjy setupTSONodesAndClient tempClient 01")
 		if loadedKeyspace == nil || loadedKeyspace.Name != keyspaceName {
 			actualName := "nil"
 			if loadedKeyspace != nil {
