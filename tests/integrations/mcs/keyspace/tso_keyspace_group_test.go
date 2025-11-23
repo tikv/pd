@@ -682,6 +682,8 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 
 	// Wait for keyspace to be available via gRPC API (client uses gRPC to load keyspace)
 	// Create a temporary client to verify keyspace can be loaded via gRPC
+	// Note: We need to wait longer because the client needs time to discover and connect to the PD leader,
+	// and the leader may have just switched, requiring time to sync keyspace data.
 	testutil.Eventually(re, func() bool {
 		apiCtx := pd.NewAPIContextV2(keyspaceName)
 		// Try to create a temporary client to verify keyspace is accessible via gRPC
@@ -692,7 +694,10 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 			log.Info("test-yjy failed to create temp client for gRPC verification", zap.Error(err))
 			return false
 		}
-		log.Info("test-yjy setupTSONodesAndClient tempClient 00")
+
+		// Give the client some time to initialize and discover the PD leader
+		// The client's serviceDiscovery needs time to connect to the leader and sync keyspace data
+		time.Sleep(500 * time.Millisecond)
 
 		// Try to load keyspace via gRPC
 		loadedKeyspace, err := tempClient.LoadKeyspace(suite.ctx, keyspaceName)
@@ -701,7 +706,6 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 			log.Info("test-yjy failed to load keyspace via gRPC", zap.Error(err))
 			return false
 		}
-		log.Info("test-yjy setupTSONodesAndClient tempClient 01")
 		if loadedKeyspace == nil || loadedKeyspace.Name != keyspaceName {
 			actualName := "nil"
 			if loadedKeyspace != nil {
@@ -716,7 +720,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 			zap.String("name", loadedKeyspace.Name),
 			zap.Uint32("id", loadedKeyspace.Id))
 		return true
-	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
+	}, testutil.WithWaitFor(15*time.Second), testutil.WithTickInterval(500*time.Millisecond))
 
 	// Create client using keyspace name (not ID) to ensure keyspace meta is loaded and passed to tsoServiceDiscovery
 	apiCtx := pd.NewAPIContextV2(keyspaceName)

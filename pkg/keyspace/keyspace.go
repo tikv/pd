@@ -307,6 +307,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		)
 		return nil, err
 	}
+	log.Info("test-yjy [keyspace] UpdateKeyspaceStateByID end 01")
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
@@ -398,6 +399,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		)
 		return nil, err
 	}
+	log.Info("test-yjy [keyspace] UpdateKeyspaceStateByID end")
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
@@ -541,6 +543,7 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 			return err
 		}
 		if !loaded {
+			log.Info("test-yjy server LoadKeyspace ErrKeyspaceNotFound 01")
 			return errs.ErrKeyspaceNotFound
 		}
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
@@ -548,6 +551,7 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 			return err
 		}
 		if meta == nil {
+			log.Info("test-yjy server LoadKeyspace ErrKeyspaceNotFound 02")
 			return errs.ErrKeyspaceNotFound
 		}
 		return nil
