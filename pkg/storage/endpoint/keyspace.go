@@ -16,6 +16,7 @@ package endpoint
 
 import (
 	"context"
+	"runtime/debug"
 	"strconv"
 
 	"github.com/gogo/protobuf/proto"
@@ -79,7 +80,7 @@ func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.Key
 		log.Info("test-yjy server LoadKeyspaceMeta 02", zap.Error(err))
 		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
-	log.Info("test-yjy server LoadKeyspaceMeta 03", zap.Any("meta", meta))
+	log.Info("test-yjy server LoadKeyspaceMeta 03", zap.Any("meta", meta), zap.String("stack", string(debug.Stack())))
 	return meta, nil
 }
 
