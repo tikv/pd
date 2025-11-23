@@ -23,9 +23,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
-
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 )
@@ -53,13 +50,9 @@ type KeyspaceClient interface {
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
 func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
-	clientConn := c.inner.serviceDiscovery.GetServingEndpointClientConn()
-	servingURL := c.inner.serviceDiscovery.GetServingURL()
-	if clientConn != nil {
-		log.Info("test-yjy client keyspaceClient", zap.String("serving-url", servingURL))
-		return keyspacepb.NewKeyspaceClient(clientConn)
+	if client := c.inner.serviceDiscovery.GetServingEndpointClientConn(); client != nil {
+		return keyspacepb.NewKeyspaceClient(client)
 	}
-	log.Info("test-yjy client keyspaceClient returning nil", zap.String("serving-url", servingURL))
 	return nil
 }
 
