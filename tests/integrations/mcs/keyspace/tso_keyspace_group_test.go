@@ -38,6 +38,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -623,7 +624,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		},
 	})
 
-	// Wait for keyspace to be fully created and available
+	// Wait for keyspace to be fully created and available via HTTP API
 	testutil.Eventually(re, func() bool {
 		resp, err := tests.TestDialClient.Get(suite.server.GetAddr() + "/pd/api/v2/keyspaces/" + keyspaceName)
 		if err != nil {
@@ -633,28 +634,28 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
-		
+
 		// Parse response body to verify keyspace details
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.Info("test-yjy failed to read response body", zap.Error(err))
 			return false
 		}
-		
+
 		var keyspaceMeta handlers.KeyspaceMeta
 		if err := json.Unmarshal(body, &keyspaceMeta); err != nil {
 			log.Info("test-yjy failed to unmarshal response", zap.Error(err))
 			return false
 		}
-		
+
 		// Verify keyspace name
 		if keyspaceMeta.Name != keyspaceName {
-			log.Info("test-yjy keyspace name mismatch", 
-				zap.String("expected", keyspaceName), 
+			log.Info("test-yjy keyspace name mismatch",
+				zap.String("expected", keyspaceName),
 				zap.String("actual", keyspaceMeta.Name))
 			return false
 		}
-		
+
 		// Verify keyspace config contains correct UserKind
 		if keyspaceMeta.Config == nil {
 			log.Info("test-yjy keyspace config is nil")
@@ -671,13 +672,49 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 				zap.String("actual", userKind))
 			return false
 		}
-		
-		log.Info("test-yjy keyspace verified successfully",
+
+		log.Info("test-yjy keyspace verified successfully via HTTP",
 			zap.String("name", keyspaceMeta.Name),
 			zap.Any("config", keyspaceMeta.Config),
 			zap.Uint32("id", keyspaceMeta.Id))
 		return true
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	// Wait for keyspace to be available via gRPC API (client uses gRPC to load keyspace)
+	// Create a temporary client to verify keyspace can be loaded via gRPC
+	testutil.Eventually(re, func() bool {
+		apiCtx := pd.NewAPIContextV2(keyspaceName)
+		// Try to create a temporary client to verify keyspace is accessible via gRPC
+		tempClient, err := pd.NewClientWithAPIContext(suite.ctx, apiCtx,
+			caller.TestComponent,
+			[]string{suite.backendEndpoints}, pd.SecurityOption{}, opts...)
+		if err != nil {
+			log.Info("test-yjy failed to create temp client for gRPC verification", zap.Error(err))
+			return false
+		}
+
+		// Try to load keyspace via gRPC
+		loadedKeyspace, err := tempClient.LoadKeyspace(suite.ctx, keyspaceName)
+		tempClient.Close() // Close immediately after use
+		if err != nil {
+			log.Info("test-yjy failed to load keyspace via gRPC", zap.Error(err))
+			return false
+		}
+		if loadedKeyspace == nil || loadedKeyspace.Name != keyspaceName {
+			actualName := "nil"
+			if loadedKeyspace != nil {
+				actualName = loadedKeyspace.Name
+			}
+			log.Info("test-yjy keyspace name mismatch in gRPC response",
+				zap.String("expected", keyspaceName),
+				zap.String("actual", actualName))
+			return false
+		}
+		log.Info("test-yjy keyspace verified successfully via gRPC",
+			zap.String("name", loadedKeyspace.Name),
+			zap.Uint32("id", loadedKeyspace.Id))
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 
 	// Create client using keyspace name (not ID) to ensure keyspace meta is loaded and passed to tsoServiceDiscovery
 	apiCtx := pd.NewAPIContextV2(keyspaceName)
