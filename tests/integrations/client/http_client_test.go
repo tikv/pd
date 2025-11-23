@@ -1243,3 +1243,146 @@ func (suite *httpClientTestSuite) TestGetSiblingsRegions() {
 	re.NotZero(ops[0].Kind() & operator.OpMerge)
 	re.NotZero(ops[1].Kind() & operator.OpMerge)
 }
+
+func (suite *httpClientTestSuite) TestAffinityGroups() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Test key encoding: use raw keys that will be properly encoded
+	testKey1 := []byte("test_key_1")
+	testKey2 := []byte("test_key_2")
+	testKey3 := []byte("test_key_3")
+	testKey4 := []byte("test_key_4")
+
+	// Test 1: Create affinity groups
+	affinityGroups := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey1,
+				EndKey:   testKey2,
+			},
+		},
+		"test-group-2": {
+			{
+				StartKey: testKey3,
+				EndKey:   testKey4,
+			},
+		},
+	}
+
+	createResp, err := client.CreateAffinityGroups(ctx, affinityGroups)
+	re.NoError(err)
+	re.NotNil(createResp)
+	re.Len(createResp, 2)
+	re.Contains(createResp, "test-group-1")
+	re.Contains(createResp, "test-group-2")
+
+	// Verify the created groups
+	group1 := createResp["test-group-1"]
+	re.NotNil(group1)
+	re.Equal("test-group-1", group1.ID)
+	re.Equal(1, group1.RangeCount)
+
+	group2 := createResp["test-group-2"]
+	re.NotNil(group2)
+	re.Equal("test-group-2", group2.ID)
+	re.Equal(1, group2.RangeCount)
+
+	// Test 2: Get single affinity group
+	getGroup, err := client.GetAffinityGroup(ctx, "test-group-1")
+	re.NoError(err)
+	re.NotNil(getGroup)
+	re.Equal("test-group-1", getGroup.ID)
+	re.Equal(1, getGroup.RangeCount)
+
+	// Test 3: Get all affinity groups
+	allGroups, err := client.GetAllAffinityGroups(ctx)
+	re.NoError(err)
+	re.NotNil(allGroups)
+	re.GreaterOrEqual(len(allGroups), 2)
+	re.Contains(allGroups, "test-group-1")
+	re.Contains(allGroups, "test-group-2")
+
+	// Test 4: Add key ranges to affinity groups
+	testKey5 := []byte("test_key_5")
+	testKey6 := []byte("test_key_6")
+
+	addRanges := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey5,
+				EndKey:   testKey6,
+			},
+		},
+	}
+
+	modifyResp, err := client.AddAffinityGroupKeyRanges(ctx, addRanges)
+	re.NoError(err)
+	re.NotNil(modifyResp)
+	re.Contains(modifyResp, "test-group-1")
+	modifiedGroup := modifyResp["test-group-1"]
+	re.Equal(2, modifiedGroup.RangeCount)
+
+	// Test 5: Update affinity group peers
+	updatedGroup, err := client.UpdateAffinityGroupPeers(ctx, "test-group-1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.NotNil(updatedGroup)
+	re.Equal(uint64(1), updatedGroup.LeaderStoreID)
+	re.Equal([]uint64{1, 2, 3}, updatedGroup.VoterStoreIDs)
+
+	// Test 6: Remove key ranges from affinity groups
+	removeRanges := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey5,
+				EndKey:   testKey6,
+			},
+		},
+	}
+
+	removeResp, err := client.RemoveAffinityGroupKeyRanges(ctx, removeRanges)
+	re.NoError(err)
+	re.NotNil(removeResp)
+	re.Contains(removeResp, "test-group-1")
+	removedGroup := removeResp["test-group-1"]
+	re.Equal(1, removedGroup.RangeCount)
+
+	// Test 7: Delete single affinity group (with force since it still has ranges)
+	err = client.DeleteAffinityGroup(ctx, "test-group-1", true)
+	re.NoError(err)
+
+	// Verify deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-1")
+	re.Error(err)
+
+	// Test 8: Batch delete affinity groups (with force since they have ranges)
+	err = client.BatchDeleteAffinityGroups(ctx, []string{"test-group-2"}, true)
+	re.NoError(err)
+
+	// Verify batch deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-2")
+	re.Error(err)
+
+	// Test 9: Test force delete with non-empty group
+	affinityGroups2 := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-3": {
+			{
+				StartKey: testKey1,
+				EndKey:   testKey2,
+			},
+		},
+	}
+
+	_, err = client.CreateAffinityGroups(ctx, affinityGroups2)
+	re.NoError(err)
+
+	// Force delete the group
+	err = client.DeleteAffinityGroup(ctx, "test-group-3", true)
+	re.NoError(err)
+
+	// Verify force deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-3")
+	re.Error(err)
+}

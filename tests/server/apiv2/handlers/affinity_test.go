@@ -27,7 +27,6 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
@@ -59,8 +58,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		// Create two non-overlapping groups.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-1": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
-				"group-2": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
 			},
 		}
 		data, err := json.Marshal(createReq)
@@ -79,7 +78,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		// Creating an overlapping group should be rejected.
 		overlapReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"group-overlap": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x05}, EndKey: []byte{0x0f}}}},
+				"group-overlap": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x05}, EndKey: []byte{0x0f}}}},
 			},
 		}
 		data, err = json.Marshal(overlapReq)
@@ -120,10 +119,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		// Batch modify ranges: add one to group-1 and remove the only one from group-2.
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Add: []handlers.GroupRangesModification{
-				{ID: "group-1", Ranges: []keyutil.KeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				{ID: "group-1", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
 			},
 			Remove: []handlers.GroupRangesModification{
-				{ID: "group-2", Ranges: []keyutil.KeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				{ID: "group-2", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
 			},
 		}
 		data, err = json.Marshal(patchReq)
@@ -184,7 +183,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		// Create a group without peer placement; range covers the default region.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"first-win": {Ranges: []keyutil.KeyRange{{StartKey: []byte{}, EndKey: []byte{}}}},
+				"first-win": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{}, EndKey: []byte{}}}},
 			},
 		}
 		data, err := json.Marshal(createReq)
@@ -244,7 +243,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityRemoveOnlyPatch() {
 
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"remove-only": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x02}}}},
+				"remove-only": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x02}}}},
 			},
 		}
 		data, err := json.Marshal(createReq)
@@ -257,7 +256,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityRemoveOnlyPatch() {
 		// Remove the only range.
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Remove: []handlers.GroupRangesModification{
-				{ID: "remove-only", Ranges: []keyutil.KeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x02}}}},
+				{ID: "remove-only", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x02}}}},
 			},
 		}
 		data, err = json.Marshal(patchReq)
@@ -297,7 +296,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySuccess() {
 
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"patch-success": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x05}}}},
+				"patch-success": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x05}}}},
 			},
 		}
 		data, err := json.Marshal(createReq)
@@ -309,10 +308,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySuccess() {
 
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Remove: []handlers.GroupRangesModification{
-				{ID: "patch-success", Ranges: []keyutil.KeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x05}}}},
+				{ID: "patch-success", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x05}}}},
 			},
 			Add: []handlers.GroupRangesModification{
-				{ID: "patch-success", Ranges: []keyutil.KeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
+				{ID: "patch-success", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}},
 			},
 		}
 		data, err = json.Marshal(patchReq)
@@ -351,7 +350,7 @@ func (suite *affinityHandlerTestSuite) TestUpdatePeersLeaderNotInVoters() {
 		// Prepare group.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"mismatch": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+				"mismatch": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
 			},
 		}
 		data, err := json.Marshal(createReq)
@@ -403,7 +402,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 		// Illegal group ID.
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"bad id": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+				"bad id": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
 			},
 		}
 		data, err = json.Marshal(createReq)
@@ -416,7 +415,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 		// Create a valid group for follow-up checks.
 		createReq = handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"ok": {Ranges: []keyutil.KeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
+				"ok": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}},
 			},
 		}
 		data, err = json.Marshal(createReq)
@@ -479,7 +478,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Batch modify referencing non-existent group.
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
-			Add: []handlers.GroupRangesModification{{ID: "ghost", Ranges: []keyutil.KeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}}},
+			Add: []handlers.GroupRangesModification{{ID: "ghost", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x10}, EndKey: []byte{0x20}}}}},
 		}
 		data, err = json.Marshal(patchReq)
 		re.NoError(err)
