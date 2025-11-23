@@ -19,14 +19,11 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/log"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -55,7 +52,7 @@ func getErrorHeader(err error) *pdpb.ResponseHeader {
 // Request must specify keyspace name.
 // On Error, keyspaceMeta in response will be nil,
 // error information will be encoded in response header with corresponding error type.
-func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -65,13 +62,6 @@ func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.L
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
-
-	log.Info("test-yjy service LoadKeyspace success", zap.String("keyspace-name", request.GetName()), zap.Uint32("keyspace-id", meta.GetId()))
-	resp := &keyspacepb.LoadKeyspaceResponse{
-		Header:   grpcutil.WrapHeader(),
-		Keyspace: meta,
-	}
-
 	failpoint.Inject("skipKeyspaceRegionCheck", func() {
 		failpoint.Return(&keyspacepb.LoadKeyspaceResponse{
 			Header:   grpcutil.WrapHeader(),
@@ -84,18 +74,10 @@ func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.L
 		err = errs.ErrKeyspaceNotFound
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
-
-	log.Info("test-yjy service LoadKeyspace response",
-		zap.String("keyspace-name", request.GetName()),
-		zap.Any("header", resp.Header),
-		zap.Bool("keyspace-nil", resp.Keyspace == nil),
-		zap.Uint32("keyspace-id", func() uint32 {
-			if resp.Keyspace != nil {
-				return resp.Keyspace.GetId()
-			}
-			return 0
-		}()))
-	return resp, nil
+	return &keyspacepb.LoadKeyspaceResponse{
+		Header:   grpcutil.WrapHeader(),
+		Keyspace: meta,
+	}, nil
 }
 
 // WatchKeyspaces captures and sends keyspace metadata changes to the client via gRPC stream.
