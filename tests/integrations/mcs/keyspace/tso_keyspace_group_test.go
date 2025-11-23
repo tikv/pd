@@ -769,6 +769,14 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 		waitForGetTSStart = 3 * time.Second
 	)
 
+	// Enable mockLoadKeyspace failpoint to return hardcoded keyspace meta for testing
+	// This bypasses the gRPC LoadKeyspace call which may fail due to timing issues
+	// Must enable before setupTSONodesAndClient because that's when the client is created
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockLoadKeyspace", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/mockLoadKeyspace"))
+	}()
+
 	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
 	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(30*time.Second))
 	defer func() {

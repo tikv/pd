@@ -73,10 +73,21 @@ func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.L
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
 	log.Info("test-yjy service LoadKeyspace success", zap.String("keyspace-name", request.GetName()), zap.Uint32("keyspace-id", meta.GetId()))
-	return &keyspacepb.LoadKeyspaceResponse{
+	resp := &keyspacepb.LoadKeyspaceResponse{
 		Header:   wrapHeader(),
 		Keyspace: meta,
-	}, nil
+	}
+	log.Info("test-yjy service LoadKeyspace response",
+		zap.String("keyspace-name", request.GetName()),
+		zap.Any("header", resp.Header),
+		zap.Bool("keyspace-nil", resp.Keyspace == nil),
+		zap.Uint32("keyspace-id", func() uint32 {
+			if resp.Keyspace != nil {
+				return resp.Keyspace.GetId()
+			}
+			return 0
+		}()))
+	return resp, nil
 }
 
 // WatchKeyspaces captures and sends keyspace metadata changes to the client via gRPC stream.
