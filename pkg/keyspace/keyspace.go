@@ -551,21 +551,17 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 			return err
 		}
 		if !loaded {
-			log.Info("test-yjy server LoadKeyspace ErrKeyspaceNotFound 01")
 			return errs.ErrKeyspaceNotFound
 		}
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
-			log.Info("test-yjy server LoadKeyspace ErrKeyspaceNotFound 01-01", zap.Error(err))
 			return err
 		}
 		if meta == nil {
-			log.Info("test-yjy server LoadKeyspace ErrKeyspaceNotFound 02")
 			return errs.ErrKeyspaceNotFound
 		}
 		return nil
 	})
-	log.Info("test-yjy server LoadKeyspace return", zap.Error(err))
 	return meta, err
 }
 
