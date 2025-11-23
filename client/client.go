@@ -384,22 +384,16 @@ func newClientWithKeyspaceName(
 
 	updateKeyspaceIDFunc := func() error {
 		keyspaceMeta, err := c.LoadKeyspace(clientCtx, keyspaceName)
-		log.Info("test-yjy newClientWithKeyspaceName 00")
 		if err != nil {
-			log.Info("test-yjy newClientWithKeyspaceName 00-01", zap.Error(err))
 			return err
 		}
-		log.Info("test-yjy newClientWithKeyspaceName 01")
 		c.inner.keyspaceID = keyspaceMeta.GetId()
 		c.inner.keyspaceMeta = keyspaceMeta
 		// c.keyspaceID is the source of truth for keyspace id.
 		c.inner.serviceDiscovery.SetKeyspaceID(c.inner.keyspaceID)
-		log.Info("test-yjy newClientWithKeyspaceName 02")
 		return nil
 	}
-	log.Info("test-yjy newClientWithKeyspaceName 03")
 	if err := c.inner.init(updateKeyspaceIDFunc); err != nil {
-		log.Info("test-yjy newClientWithKeyspaceName 04", zap.Error(err))
 		return nil, err
 	}
 	log.Info("[pd] create pd client with endpoints and keyspace",

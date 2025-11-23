@@ -82,9 +82,6 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 					"tso_keyspace_group_id": "1",
 				},
 			}
-			log.Info("test-yjy mockLoadKeyspace failpoint triggered",
-				zap.String("keyspace-name", name),
-				zap.Uint32("keyspace-id", mockKeyspaceMeta.Id))
 			failpoint.Return(mockKeyspaceMeta, nil)
 		}
 	})
@@ -100,47 +97,25 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		Header: c.requestHeader(),
 		Name:   name,
 	}
-	log.Info("test-yjy client LoadKeyspace calling", zap.String("keyspace-name", name))
 	protoClient := c.keyspaceClient()
 	if protoClient == nil {
 		cancel()
-		log.Info("test-yjy client LoadKeyspace protoClient is nil")
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.LoadKeyspace(ctx, req)
 	cancel()
 
 	if err != nil {
-		log.Info("test-yjy client LoadKeyspace gRPC error", zap.String("keyspace-name", name), zap.Error(err))
 		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
-	log.Info("test-yjy client LoadKeyspace received response",
-		zap.String("keyspace-name", name),
-		zap.Any("header", resp.Header),
-		zap.Bool("keyspace-nil", resp.Keyspace == nil),
-		zap.Uint32("keyspace-id", func() uint32 {
-			if resp.Keyspace != nil {
-				return resp.Keyspace.GetId()
-			}
-			return 0
-		}()),
-		zap.String("header-error", func() string {
-			if resp.Header != nil && resp.Header.GetError() != nil {
-				return resp.Header.GetError().String()
-			}
-			return "nil"
-		}()))
-
 	if resp.Header.GetError() != nil {
-		log.Info("test-yjy client LoadKeyspace response error", zap.String("keyspace-name", name), zap.String("error", resp.Header.GetError().String()))
 		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Load keyspace %s failed: %s", name, resp.Header.GetError().String())
 	}
 
-	log.Info("test-yjy client LoadKeyspace success", zap.String("keyspace-name", name))
 	return resp.Keyspace, nil
 }
 
