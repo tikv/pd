@@ -1932,7 +1932,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -1942,49 +1942,49 @@
               "step": 4
             },
             {
-              "expr": "go_memstats_heap_sys_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "go_memstats_heap_sys_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapSys-{{job}}-{{instance}}",
               "refId": "B"
             },
             {
-              "expr": "go_memstats_heap_inuse_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "go_memstats_heap_inuse_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "HeapInuse-{{job}}-{{instance}}",
               "refId": "C"
             },
             {
-              "expr": "go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapAlloc-{{job}}-{{instance}}",
               "refId": "D"
             },
             {
-              "expr": "go_memstats_heap_idle_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "go_memstats_heap_idle_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapIdle-{{job}}-{{instance}}",
               "refId": "E"
             },
             {
-              "expr": "go_memstats_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "go_memstats_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapReleased-{{job}}-{{instance}}",
               "refId": "F"
             },
             {
-              "expr": "go_memstats_next_gc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "go_memstats_next_gc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "GCTrigger-{{job}}-{{instance}}",
               "refId": "G"
             },
             {
-              "expr": "pd_service_memory_quota_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "pd_service_memory_quota_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "quota-{{job}}-{{instance}}",
@@ -2299,7 +2299,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})by(type)",
+              "expr": "max(pd_cluster_tso{type=\"tso\"})by(type)",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -2602,7 +2602,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})by(type)",
+              "expr": "max(pd_cluster_tso{type=\"tso\"})by(type)",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -4561,112 +4561,6 @@
           "timeRegions": [],
           "timeShift": null,
           "title": "Store Region count",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": false
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": 3,
-          "description": "The witness count of each TiKV instance",
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": []
-          },
-          "fill": 0,
-          "fillGradient": 0,
-          "gridPos": {
-            "h": 6,
-            "w": 12,
-            "x": 12,
-            "y": 111
-          },
-          "hiddenSeries": false,
-          "id": 411,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "options": {
-            "alertThreshold": true
-          },
-          "paceLength": 10,
-          "percentage": false,
-          "pluginVersion": "7.5.11",
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "exemplar": true,
-              "expr": "pd_scheduler_store_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"witness_count\"}",
-              "format": "time_series",
-              "interval": "",
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Store witness count",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -7872,7 +7766,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_schedule_source_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\", type!=\"store-state-tombstone-filter\"}[1m])*60) by (source, type, scope)",
+              "expr": "sum(rate(pd_schedule_source_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type!=\"store-state-tombstone-filter\"}[1m])*60) by (source, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{scope}}-store-{{source}}-{{type}}",
@@ -7967,7 +7861,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_schedule_target_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-target\", type!=\"store-state-tombstone-filter\"}[1m])*60) by (target, type, scope)",
+              "expr": "sum(rate(pd_schedule_target_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type!=\"store-state-tombstone-filter\"}[1m])*60) by (target, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{scope}}-store-{{target}}-{{type}}",

@@ -293,14 +293,14 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 	testCases := []struct {
 		name                   string
 		labels                 map[string]string
-		expectedTiFlash        bool
+		expectedTiKV           bool
 		expectedTiFlashWrite   bool
 		expectedTiFlashCompute bool
 	}{
 		{
 			name:                   "TiKV node without engine label",
 			labels:                 map[string]string{},
-			expectedTiFlash:        false,
+			expectedTiKV:           true,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: false,
 		},
@@ -309,7 +309,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: EngineTiKV,
 			},
-			expectedTiFlash:        false,
+			expectedTiKV:           true,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: false,
 		},
@@ -318,7 +318,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: EngineTiFlash,
 			},
-			expectedTiFlash:        true,
+			expectedTiKV:           false,
 			expectedTiFlashWrite:   true,
 			expectedTiFlashCompute: false,
 		},
@@ -327,7 +327,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: EngineTiFlashCompute,
 			},
-			expectedTiFlash:        true,
+			expectedTiKV:           false,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: true,
 		},
@@ -339,7 +339,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 				"rack":    "rack1",
 				"host":    "host1",
 			},
-			expectedTiFlash:        true,
+			expectedTiKV:           false,
 			expectedTiFlashWrite:   true,
 			expectedTiFlashCompute: false,
 		},
@@ -351,7 +351,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 				"rack":    "rack2",
 				"host":    "host2",
 			},
-			expectedTiFlash:        true,
+			expectedTiKV:           false,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: true,
 		},
@@ -360,7 +360,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: "unknown_engine",
 			},
-			expectedTiFlash:        false,
+			expectedTiKV:           true,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: false,
 		},
@@ -369,7 +369,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: "TiFlash", // uppercase, should not match
 			},
-			expectedTiFlash:        false,
+			expectedTiKV:           true,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: false,
 		},
@@ -378,7 +378,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: "",
 			},
-			expectedTiFlash:        false,
+			expectedTiKV:           true,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: false,
 		},
@@ -387,8 +387,8 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(*testing.T) {
 			store := NewStoreInfoWithLabel(1, tc.labels)
-			result := store.IsTiFlash()
-			re.Equal(tc.expectedTiFlash, result, "Expected to return %v for test case: %s", tc.expectedTiFlash, tc.name)
+			result := store.IsTiKV()
+			re.Equal(tc.expectedTiKV, result, "Expected to return %v for test case: %s", tc.expectedTiKV, tc.name)
 			result = store.IsTiFlashWrite()
 			re.Equal(tc.expectedTiFlashWrite, result, "Expected to return %v for test case: %s", tc.expectedTiFlashWrite, tc.name)
 			result = store.IsTiFlashCompute()

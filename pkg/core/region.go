@@ -218,7 +218,7 @@ type RegionHeartbeatRequest interface {
 }
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor int) *RegionInfo {
+func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint64) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
 	// The size of empty region will be correct by the previous RegionInfo.
@@ -242,7 +242,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor int)
 		interval:         heartbeat.GetInterval(),
 		queryStats:       heartbeat.GetQueryStats(),
 		source:           Heartbeat,
-		flowRoundDivisor: uint64(flowRoundDivisor),
+		flowRoundDivisor: flowRoundDivisor,
 	}
 
 	// scheduling service doesn't need the following fields.
@@ -448,7 +448,7 @@ func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetDownLearner returns the down learner with soecified peer id.
+// GetDownLearner returns the down learner with specified peer id.
 func (r *RegionInfo) GetDownLearner(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
 		if down.GetPeer().GetId() == peerID && IsLearner(down.GetPeer()) {
@@ -747,6 +747,11 @@ func (r *RegionInfo) GetLeader() *metapb.Peer {
 // GetStartKey returns the start key of the region.
 func (r *RegionInfo) GetStartKey() []byte {
 	return r.meta.StartKey
+}
+
+// GetFlowRoundDivisor returns the flow round divisor of the region.
+func (r *RegionInfo) GetFlowRoundDivisor() uint64 {
+	return r.flowRoundDivisor
 }
 
 // GetEndKey returns the end key of the region.
