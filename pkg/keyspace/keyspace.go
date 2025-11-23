@@ -308,7 +308,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		)
 		return nil, err
 	}
-	log.Info("test-yjy [keyspace] UpdateKeyspaceStateByID end 01")
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
@@ -400,7 +399,6 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		)
 		return nil, err
 	}
-	log.Info("test-yjy [keyspace] UpdateKeyspaceStateByID end")
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
