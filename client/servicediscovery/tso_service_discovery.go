@@ -447,7 +447,7 @@ func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceI
 			return errors.New("no TSO microservice available in microservice mode")
 		}
 		// Keyspace doesn't have tso_keyspace_group_id config, allow fallback
-		log.Info("[tso] keyspace has no tso_keyspace_group_id config, allowing fallback to group 0",
+		log.Debug("[tso] keyspace has no tso_keyspace_group_id config, allowing fallback to group 0",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
 	}
