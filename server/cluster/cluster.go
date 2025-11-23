@@ -685,7 +685,7 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		}
 		// filter out the stores that are tiflash
 		store := stores[index]
-		if store.IsTiFlash() {
+		if !store.IsTiKV() {
 			continue
 		}
 
@@ -1590,9 +1590,13 @@ func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 	return nil
 }
 
+// getUpStores gets all up TiKV stores.
 func (c *RaftCluster) getUpStores() []uint64 {
 	upStores := make([]uint64, 0)
 	for _, store := range c.GetStores() {
+		if !store.IsTiKV() {
+			continue
+		}
 		if store.IsUp() {
 			upStores = append(upStores, store.GetID())
 		}
@@ -2004,6 +2008,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
+	statistics.DeleteClusterStatusMetrics(store)
 	c.DeleteStore(store)
 	return nil
 }
@@ -2615,13 +2620,13 @@ func (c *RaftCluster) collectStorageSize(
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
 	start := time.Now()
 	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
-	regionLabeler.IterateLableRules(func(rule *labeler.LabelRule) bool {
+	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
 		// Try to parse the keyspace ID from the label rule.
 		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
 		if !ok {
 			return true
 		}
-		keyspaceName, err := keyspaceManager.GetKeyspaceNameByID(keyspaceID)
+		keyspaceName, err := keyspaceManager.GetEnabledKeyspaceNameByID(keyspaceID)
 		if err != nil {
 			// TODO: improve the observability of this error.
 			return true
@@ -2640,8 +2645,9 @@ func (c *RaftCluster) collectStorageSize(
 	for keyspaceName, regionBounds := range regionBoundsMap {
 		regionStats := c.GetRegionStatsByRange(regionBounds.TxnLeftBound, regionBounds.TxnRightBound)
 		storageSizeInfoList = append(storageSizeInfoList, &storageSizeInfo{
-			keyspaceName:           keyspaceName,
-			rowBasedStorageSize:    uint64(regionStats.StorageSize),
+			keyspaceName: keyspaceName,
+			// Use the user storage size to record the logical storage size.
+			rowBasedStorageSize:    uint64(regionStats.UserStorageSize),
 			columnBasedStorageSize: uint64(regionStats.UserColumnarStorageSize),
 		})
 	}
@@ -2719,7 +2725,7 @@ func (c *RaftCluster) collectDFSStats(keyspaceManager *keyspace.Manager) (keyspa
 			if scope.GetIsGlobal() {
 				keyspaceName = ""
 			} else {
-				keyspaceName, err = keyspaceManager.GetKeyspaceNameByID(scope.GetKeyspaceId())
+				keyspaceName, err = keyspaceManager.GetEnabledKeyspaceNameByID(scope.GetKeyspaceId())
 				if err != nil {
 					continue
 				}

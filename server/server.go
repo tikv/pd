@@ -1075,7 +1075,7 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range rc.GetStores() {
-				if !s.IsRemoved() && s.IsTiFlash() {
+				if !s.IsRemoved() && !s.IsTiKV() {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}

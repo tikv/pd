@@ -4153,7 +4153,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 		}
 		requests = append(requests, request)
 	}
-	flowRoundDivisor := opt.GetPDServerConfig().FlowRoundByDigit
+	flowRoundDivisor := core.GetFlowRoundDivisorByDigit(opt.GetPDServerConfig().FlowRoundByDigit)
 
 	// Reset timer after setup
 	b.ResetTimer()
