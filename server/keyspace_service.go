@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -53,17 +54,25 @@ func getErrorHeader(err error) *pdpb.ResponseHeader {
 // Request must specify keyspace name.
 // On Error, keyspaceMeta in response will be nil,
 // error information will be encoded in response header with corresponding error type.
-func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+	log.Info("test-yjy service LoadKeyspace called", zap.String("keyspace-name", request.GetName()))
 	if err := s.validateRequest(request.GetHeader()); err != nil {
+		log.Info("test-yjy service LoadKeyspace validateRequest failed", zap.Error(err))
 		return nil, err
 	}
 
 	manager := s.GetKeyspaceManager()
-	meta, err := manager.LoadKeyspace(request.GetName())
-	if err != nil {
-		log.Info("test-yjy service LoadKeyspace", zap.Error(err))
+	if manager == nil {
+		err := errors.New("keyspace manager is nil")
+		log.Info("test-yjy service LoadKeyspace manager is nil")
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
+	meta, err := manager.LoadKeyspace(request.GetName())
+	if err != nil {
+		log.Info("test-yjy service LoadKeyspace LoadKeyspace failed", zap.String("keyspace-name", request.GetName()), zap.Error(err))
+		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
+	}
+	log.Info("test-yjy service LoadKeyspace success", zap.String("keyspace-name", request.GetName()), zap.Uint32("keyspace-id", meta.GetId()))
 	return &keyspacepb.LoadKeyspaceResponse{
 		Header:   wrapHeader(),
 		Keyspace: meta,

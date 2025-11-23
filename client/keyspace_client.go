@@ -22,6 +22,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
@@ -50,9 +52,13 @@ type KeyspaceClient interface {
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
 func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
-	if client := c.inner.serviceDiscovery.GetServingEndpointClientConn(); client != nil {
-		return keyspacepb.NewKeyspaceClient(client)
+	clientConn := c.inner.serviceDiscovery.GetServingEndpointClientConn()
+	servingURL := c.inner.serviceDiscovery.GetServingURL()
+	if clientConn != nil {
+		log.Info("test-yjy client keyspaceClient", zap.String("serving-url", servingURL))
+		return keyspacepb.NewKeyspaceClient(clientConn)
 	}
+	log.Info("test-yjy client keyspaceClient returning nil", zap.String("serving-url", servingURL))
 	return nil
 }
 
@@ -69,25 +75,30 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		Header: c.requestHeader(),
 		Name:   name,
 	}
+	log.Info("test-yjy client LoadKeyspace calling", zap.String("keyspace-name", name))
 	protoClient := c.keyspaceClient()
 	if protoClient == nil {
 		cancel()
+		log.Info("test-yjy client LoadKeyspace protoClient is nil")
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.LoadKeyspace(ctx, req)
 	cancel()
 
 	if err != nil {
+		log.Info("test-yjy client LoadKeyspace gRPC error", zap.String("keyspace-name", name), zap.Error(err))
 		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
+		log.Info("test-yjy client LoadKeyspace response error", zap.String("keyspace-name", name), zap.String("error", resp.Header.GetError().String()))
 		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Load keyspace %s failed: %s", name, resp.Header.GetError().String())
 	}
 
+	log.Info("test-yjy client LoadKeyspace success", zap.String("keyspace-name", name))
 	return resp.Keyspace, nil
 }
 
