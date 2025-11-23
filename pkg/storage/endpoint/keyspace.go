@@ -19,7 +19,9 @@ import (
 	"strconv"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
@@ -64,16 +66,20 @@ func (*StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMe
 // LoadKeyspaceMeta load and return keyspace meta specified by id.
 // If keyspace does not exist or error occurs, returned meta will be nil.
 func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
+	log.Info("test-yjy server LoadKeyspaceMeta")
 	metaPath := keypath.KeyspaceMetaPath(id)
 	metaVal, err := txn.Load(metaPath)
 	if err != nil || metaVal == "" {
+		log.Info("test-yjy server LoadKeyspaceMeta 01", zap.Error(err))
 		return nil, err
 	}
 	meta := &keyspacepb.KeyspaceMeta{}
 	err = proto.Unmarshal([]byte(metaVal), meta)
 	if err != nil {
+		log.Info("test-yjy server LoadKeyspaceMeta 02", zap.Error(err))
 		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
+	log.Info("test-yjy server LoadKeyspaceMeta 03", zap.Any("meta", meta))
 	return meta, nil
 }
 
