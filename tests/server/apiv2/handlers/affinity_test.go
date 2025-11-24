@@ -509,3 +509,40 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 		re.Equal(http.StatusOK, resp.StatusCode)
 	})
 }
+
+// TestAffinityGroupDuplicateErrorMessage verifies that duplicate group creation
+// returns a clear error message.
+func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		client := tests.TestDialClient
+		baseURL := fmt.Sprintf("%s/pd/api/v2/affinity-groups", leader.GetAddr())
+
+		// Create a group successfully.
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"test-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+			},
+		}
+		data, err := json.Marshal(createReq)
+		re.NoError(err)
+		resp, err := client.Post(baseURL, "application/json", bytes.NewReader(data))
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+
+		// Try to create the same group again, should get clear error message.
+		resp, err = client.Post(baseURL, "application/json", bytes.NewReader(data))
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+		// Verify error message is not empty and contains useful information.
+		var errorMsg string
+		re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+		re.NotEmpty(errorMsg, "Error message should not be empty")
+		re.Contains(errorMsg, "test-group", "Error message should contain the group ID")
+		re.Contains(errorMsg, "already exists", "Error message should indicate the group already exists")
+	})
+}

@@ -119,12 +119,12 @@ func CreateAffinityGroups(c *gin.Context) {
 	}
 	req := &CreateAffinityGroupsRequest{}
 	if err := c.BindJSON(req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	// TODO: validate TableGroup if necessary
 	if len(req.AffinityGroups) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no affinity groups provided"))
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no affinity groups provided").Error())
 		return
 	}
 
@@ -135,11 +135,11 @@ func CreateAffinityGroups(c *gin.Context) {
 			return
 		}
 		if manager.IsGroupExist(groupID) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupExist.GenWithStackByArgs(groupID))
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupExist.GenWithStackByArgs(groupID).Error())
 			return
 		}
 		if len(input.Ranges) == 0 {
-			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no key ranges provided for group "+groupID))
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no key ranges provided for group "+groupID).Error())
 			return
 		}
 
@@ -206,7 +206,7 @@ func BatchDeleteAffinityGroups(c *gin.Context) {
 
 	req := &BatchDeleteAffinityGroupsRequest{}
 	if err := c.BindJSON(req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 
@@ -252,7 +252,7 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 
 	req := &BatchModifyAffinityGroupsRequest{}
 	if err := c.BindJSON(req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 
@@ -317,7 +317,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 	groupID := c.Param("group_id")
 	req := &UpdateAffinityGroupPeersRequest{}
 	if err := c.BindJSON(req); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	if err := validateGroupID(groupID); err != nil {
@@ -325,7 +325,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 		return
 	}
 	if req.LeaderStoreID == 0 || len(req.VoterStoreIDs) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("leader_store_id and voter_store_ids are required"))
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("leader_store_id and voter_store_ids are required").Error())
 		return
 	}
 
@@ -371,7 +371,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 	force := c.DefaultQuery("force", "false") == "true"
 
 	if !manager.IsGroupExist(groupID) {
-		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID))
+		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
 		return
 	}
 
@@ -436,7 +436,7 @@ func GetAffinityGroup(c *gin.Context) {
 	groupID := c.Param("group_id")
 	groupState := manager.GetAffinityGroupState(groupID)
 	if groupState == nil {
-		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID))
+		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
 		return
 	}
 	c.IndentedJSON(http.StatusOK, groupState)
