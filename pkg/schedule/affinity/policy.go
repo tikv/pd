@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/config"
 )
 
 type storeState int
@@ -134,6 +135,10 @@ func (m *Manager) generateUnavailableStores() map[uint64]storeState {
 	stores := m.storeSetInformer.GetStores()
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
+		if !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) {
+			unavailableStores[store.GetID()] = degraded
+			continue
+		}
 		if store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving() {
 			unavailableStores[store.GetID()] = removingOrRemoved
 		} else if store.IsUnhealthy() {

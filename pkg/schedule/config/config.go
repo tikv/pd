@@ -65,6 +65,7 @@ const (
 	defaultEnablePlacementRules            = true
 	defaultEnableWitness                   = false
 	defaultHaltScheduling                  = false
+	defaultEnableAffinityScheduling        = true
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
@@ -435,6 +436,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 
 	if !meta.IsDefined("halt-scheduling") {
 		c.HaltScheduling = defaultHaltScheduling
+	}
+	if !meta.IsDefined("enable-affinity-scheduling") {
+		c.EnableAffinityScheduling = defaultEnableAffinityScheduling
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)

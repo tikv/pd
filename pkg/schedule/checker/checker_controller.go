@@ -360,17 +360,19 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
-		if ops := c.affinityChecker.Check(region); ops != nil {
-			if opController.OperatorCount(operator.OpRegion) < c.conf.GetRegionScheduleLimit() {
-				return ops
+	if c.conf.IsAffinitySchedulingEnabled() {
+		if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
+			if ops := c.affinityChecker.Check(region); ops != nil {
+				if opController.OperatorCount(operator.OpRegion) < c.conf.GetRegionScheduleLimit() {
+					return ops
+				}
+				operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpReplica)
+				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
-			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpReplica)
-			c.pendingProcessedRegions.Put(region.GetID(), nil)
+			return nil
+		}); len(ops) > 0 {
+			return ops
 		}
-		return nil
-	}); len(ops) > 0 {
-		return ops
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[mergeChecker], func() []*operator.Operator {

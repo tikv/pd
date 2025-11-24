@@ -69,6 +69,9 @@ func (*AffinityChecker) Name() string {
 
 // Check verifies a region's replicas according to affinity group constraints, creating an Operator if needed.
 func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
+	if !c.conf.IsAffinitySchedulingEnabled() || c.affinityManager == nil || !c.affinityManager.IsInitialized() {
+		return nil
+	}
 	affinityCheckerCounter.Inc()
 
 	if c.IsPaused() {
@@ -201,6 +204,13 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		c.cluster,
 		region,
 	).SetPeers(peers).SetExpectedRoles(roles)
+
+	// Skip building if target leader store currently disallows leader in (e.g., evict-leader / reject-leader).
+	if targetLeader := c.cluster.GetStore(group.LeaderStoreID); targetLeader != nil {
+		if !targetLeader.AllowLeaderTransferIn() || c.conf.CheckLabelProperty(config.RejectLeader, targetLeader.GetLabels()) {
+			return nil
+		}
+	}
 
 	// Determine operator kind based on whether leader needs to change
 	kind := operator.OpAffinity | operator.OpRegion
