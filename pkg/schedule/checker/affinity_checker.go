@@ -92,6 +92,10 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		affinityCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
+	if filter.HasWitnessPeers(region) {
+		affinityCheckerWitnessPeerCounter.Inc()
+		return nil
+	}
 
 	// Get the affinity group for this region
 	group, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
