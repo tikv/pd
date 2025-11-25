@@ -82,9 +82,8 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	if m.hasUnavailableStore(voterStoreIDs) {
 		return
 	}
-	m.Lock()
-	defer m.Unlock()
-	m.updateGroupEffectLocked(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
+	// TODO: Update asynchronously to avoid blocking the Checker.
+	_, _ = m.updateAffinityGroupPeersWithAffinityVer(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
 }
 
 // getAvailabilityCheckInterval returns the availability check interval, which can be overridden for testing.
@@ -196,7 +195,7 @@ func (m *Manager) setUnavailableStores(unavailableStores map[uint64]storeState) 
 			}
 		}
 		if hasUnavailableStore {
-			m.updateGroupEffectLocked(groupInfo.ID, 0, 0, nil)
+			m.updateGroupEffectLocked(groupInfo.ID, false)
 			log.Warn("affinity group invalidated due to unavailable stores",
 				zap.String("group-id", groupInfo.ID),
 				zap.Uint64("unavailable-store", unavailableStore))

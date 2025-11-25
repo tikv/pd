@@ -452,20 +452,20 @@ const (
 // validateGroupID check if user provided id is legal.
 // It throws error when id contains illegal character.
 func validateGroupID(id string) error {
-	isValid, err := regexp.MatchString(idPattern, id)
+	isIDValid, err := regexp.MatchString(idPattern, id)
 	if err != nil {
 		return err
 	}
-	if !isValid {
+	if !isIDValid {
 		return errors.Errorf("illegal id %s, should contain only alphanumerical and underline", id)
 	}
 	return nil
 }
 
-// convertAndValidateRangeOps validates group operations and converts them to GroupRangeModification format.
+// convertAndValidateRangeOps validates group operations and converts them to GroupKeyRange format.
 // It updates affectedGroups with all groups encountered.
-func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupRangeModification, error) {
-	var result []affinity.GroupRangeModification
+func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupKeyRange, error) {
+	var result []affinity.GroupKeyRange
 	for _, op := range ops {
 		if err := validateGroupID(op.ID); err != nil {
 			return nil, errors.Errorf("invalid group id: %s", op.ID)
@@ -478,12 +478,14 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("no key ranges provided")
 		}
 
-		// Convert ranges to GroupRangeModification format
+		// Convert ranges to GroupKeyRange format
 		for _, kr := range op.Ranges {
-			result = append(result, affinity.GroupRangeModification{
-				GroupID:  op.ID,
-				StartKey: kr.StartKey,
-				EndKey:   kr.EndKey,
+			result = append(result, affinity.GroupKeyRange{
+				KeyRange: keyutil.KeyRange{
+					StartKey: kr.StartKey,
+					EndKey:   kr.EndKey,
+				},
+				GroupID: op.ID,
 			})
 		}
 	}

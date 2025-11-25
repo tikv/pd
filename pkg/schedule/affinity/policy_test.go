@@ -42,8 +42,8 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 	}
 	conf := mockconfig.NewTestOptions()
 
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	re.NoError(manager.Initialize())
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+	re.NoError(err)
 
 	group := &Group{ID: "g", LeaderStoreID: 0, VoterStoreIDs: nil}
 	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{{Group: group}}))
@@ -96,12 +96,12 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	storeInfos.PutStore(store2)
 
 	conf := mockconfig.NewTestOptions()
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	re.NoError(manager.Initialize())
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+	re.NoError(err)
 
 	group := &Group{ID: "avail", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
 	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{{Group: group}}))
-	_, err := manager.UpdateGroupPeers("avail", 1, []uint64{1, 2})
+	_, err = manager.UpdateGroupPeers("avail", 1, []uint64{1, 2})
 	re.NoError(err)
 	state := manager.GetAffinityGroupState("avail")
 	re.True(state.Effect)
@@ -143,8 +143,7 @@ func TestStoreHealthCheck(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create affinity manager
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	err := manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	// Create a test affinity group with healthy stores

@@ -43,8 +43,7 @@ func TestIsRegionAffinity(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	err := manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	// Create affinity group
@@ -149,8 +148,7 @@ func TestBasicGroupOperations(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	err := manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	// Create a group

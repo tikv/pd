@@ -44,37 +44,36 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create manager without region labeler for basic validation testing
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	err := manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
-	validate := func(ranges []keyRange) error {
+	validate := func(ranges []GroupKeyRange) error {
 		manager.Lock()
 		defer manager.Unlock()
 		return manager.validateNoKeyRangeOverlap(ranges)
 	}
 
 	// Test 1: Non-overlapping ranges should succeed
-	keyRanges1 := []keyRange{
-		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
-		{StartKey: []byte("c"), EndKey: []byte("d"), GroupID: "group1"},
+	keyRanges1 := []GroupKeyRange{
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, GroupID: "group1"},
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}, GroupID: "group1"},
 	}
 	err = validate(keyRanges1)
 	re.NoError(err, "Non-overlapping ranges should pass validation")
 
 	// Test 2: Overlapping ranges within same request should fail
-	keyRanges2 := []keyRange{
-		{StartKey: []byte("a"), EndKey: []byte("c"), GroupID: "group1"},
-		{StartKey: []byte("b"), EndKey: []byte("d"), GroupID: "group1"},
+	keyRanges2 := []GroupKeyRange{
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, GroupID: "group1"},
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("d")}, GroupID: "group1"},
 	}
 	err = validate(keyRanges2)
 	re.Error(err, "Overlapping ranges should fail validation")
 	re.Contains(err.Error(), "overlap")
 
 	// Test 3: Adjacent ranges (not overlapping) should succeed
-	keyRanges3 := []keyRange{
-		{StartKey: []byte("a"), EndKey: []byte("b"), GroupID: "group1"},
-		{StartKey: []byte("b"), EndKey: []byte("c"), GroupID: "group1"},
+	keyRanges3 := []GroupKeyRange{
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, GroupID: "group1"},
+		{KeyRange: keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("c")}, GroupID: "group1"},
 	}
 	err = validate(keyRanges3)
 	re.NoError(err, "Adjacent ranges should pass validation")
@@ -102,8 +101,7 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	manager := NewManager(ctx, store, storeInfos, conf, nil)
-	err := manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	// Create two groups without key ranges for basic testing
@@ -131,8 +129,7 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re.True(manager.IsGroupExist("group2"))
 
 	// Create a new manager to simulate restart
-	manager2 := NewManager(ctx, store, storeInfos, conf, nil)
-	err = manager2.Initialize()
+	manager2, err := NewManager(ctx, store, storeInfos, conf, nil)
 	re.NoError(err)
 
 	// Verify groups were loaded from storage
@@ -165,8 +162,8 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
 
-	manager := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(manager.Initialize())
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
 
 	gwr := GroupWithRanges{
 		Group: &Group{
@@ -185,17 +182,19 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re.NotNil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))
 
 	// Reload manager to verify persistence and loadRegionLabel integration.
-	manager2 := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	re.NoError(manager2.Initialize())
+	manager2, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
 	state2 := manager2.GetAffinityGroupState("persist")
 	re.NotNil(state2)
 	re.Equal(1, state2.RangeCount)
 
 	// Remove all ranges and ensure cache/label are cleared.
-	ranges := []keyRange{{
-		StartKey: []byte{0x00},
-		EndKey:   []byte{0x10},
-		GroupID:  "persist",
+	ranges := []GroupKeyRange{{
+		KeyRange: keyutil.KeyRange{
+			StartKey: []byte{0x00},
+			EndKey:   []byte{0x10},
+		},
+		GroupID: "persist",
 	}}
 	re.NoError(manager2.updateGroupRanges("persist", ranges))
 	re.NoError(manager2.updateGroupRanges("persist", nil))
@@ -224,8 +223,7 @@ func TestLabelRuleIntegration(t *testing.T) {
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
 
-	manager := NewManager(ctx, store, storeInfos, conf, regionLabeler)
-	err = manager.Initialize()
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	// Test: Group with no key ranges should not create label rule

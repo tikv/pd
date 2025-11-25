@@ -87,8 +87,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	// It should be updated to the latest feature version.
 	c.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	c.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, c.Storage, time.Second*5)
-	c.AffinityManager = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig(), c.RegionLabeler)
-	_ = c.AffinityManager.Initialize()
+	c.AffinityManager, _ = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig(), c.RegionLabeler)
 	return c
 }
 

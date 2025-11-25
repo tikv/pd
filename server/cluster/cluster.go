@@ -385,8 +385,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 
 	// create affinity manager with region labeler for key range validation and rebuild
-	c.affinityManager = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
-	err = c.affinityManager.Initialize()
+	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
 	if err != nil {
 		return err
 	}

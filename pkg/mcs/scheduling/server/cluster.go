@@ -124,7 +124,11 @@ func NewCluster(
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
-	affinityManager := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
+	affinityManager, err := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,
@@ -149,11 +153,6 @@ func NewCluster(
 
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel(), true)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	err = c.affinityManager.Initialize()
 	if err != nil {
 		cancel()
 		return nil, err

@@ -20,6 +20,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
@@ -111,8 +112,7 @@ type runtimeGroupInfo struct {
 
 	// Regions represents the cache of Regions.
 	Regions map[uint64]regionCache
-	// TODO: Consider separate modification support in the future (read-modify keyrange-write)
-	// Currently using label's internal multiple keyrange mechanism
+	// LabelRule using label's internal multiple keyrange mechanism.
 	LabelRule *labeler.LabelRule
 	// RangeCount counts how many KeyRanges exist in the Label.
 	RangeCount int
@@ -185,4 +185,24 @@ func (m *Manager) AdjustGroup(g *Group) error {
 func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
 	_, isAffinity := m.GetRegionAffinityGroupState(region)
 	return isAffinity
+}
+
+// GroupKeyRange represents a key range with group id.
+// TODO: change []GroupKeyRange to GroupKeyRanges
+type GroupKeyRange struct {
+	keyutil.KeyRange
+	GroupID string
+}
+
+// GroupKeyRanges represents key ranges with group id.
+type GroupKeyRanges struct {
+	KeyRanges []keyutil.KeyRange
+	GroupID   string
+}
+
+// GroupWithRanges represents a group with its associated key ranges.
+// TODO: remove it
+type GroupWithRanges struct {
+	Group     *Group
+	KeyRanges []keyutil.KeyRange
 }
