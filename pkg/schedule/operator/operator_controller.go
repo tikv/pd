@@ -533,14 +533,12 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			return false
 		}
 		oc.counts.dec(oldOp.SchedulerKind())
-		oc.counts.inc(op.SchedulerKind())
 		oc.ack(oldOp)
 		if oldOp.Kind()&OpMerge != 0 {
 			oc.removeRelatedMergeOperator(oldOp)
 		}
 		_ = oldOp.Replace()
 		oc.buryOperator(oldOp)
-		return true
 	}
 
 	oc.counts.inc(op.SchedulerKind())
