@@ -483,12 +483,12 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	svcAddr := mgr.tsoServiceID.ServiceAddr
 
 	var (
-		allocator *Allocator
-		kg        *endpoint.KeyspaceGroup
-		kgid      uint32
-		err       error
-		event     *etcdEvent
-		version   uint64
+		allocator   *Allocator
+		kg          *endpoint.KeyspaceGroup
+		kgid        uint32
+		err         error
+		event       *etcdEvent
+		modRevision uint64
 	)
 
 	// Create keyspace group 0 which contains keyspace 0, 1, 2.
@@ -506,7 +506,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	re.NoError(err)
 
 	// Should be able to get the allocator for keyspace 0 in keyspace group 0.
-	allocator, kg, kgid, version, err = mgr.getKeyspaceGroupMetaWithCheck(
+	allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
 		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
@@ -525,19 +525,19 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	// Sleep for a while to wait for the events to propagate. If the logic doesn't work
 	// as expected, it will cause random failure.
 	time.Sleep(1 * time.Second)
-	oldVersion := version
+	oldModRevision := modRevision
 	// Behavior differs between Classic and NextGen modes
 	if kerneltype.IsNextGen() {
 		// In NextGen mode, keyspace 0 should be allowed to move to keyspace group 3
-		allocator, kg, kgid, version, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
 		re.NoError(err)
 		re.Equal(uint32(3), kgid) // Should be in group 3
 		re.NotNil(allocator)
 		re.NotNil(kg)
-		re.Less(oldVersion, version)
+		re.Less(oldModRevision, modRevision)
 	} else {
 		// In Classic mode, keyspace 0 should stay in the default keyspace group 0
-		allocator, kg, kgid, version, err = mgr.getKeyspaceGroupMetaWithCheck(
+		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
 			constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 		re.NoError(err)
 		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
@@ -548,7 +548,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 		re.NoError(err)
 		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 		re.NotNil(allocator)
-		re.Less(oldVersion, version)
+		re.Less(oldModRevision, modRevision)
 	}
 	re.NotNil(kg)
 }
@@ -731,7 +731,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	re *require.Assertions,
 	numberOfKeyspaceGroupsToAdd int,
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
-	probabilityAssignToMe int, // percentage of assigning keyspace groups to this host/pod
+	probabilityAssignToMe int,         // percentage of assigning keyspace groups to this host/pod
 ) {
 	expectedGroupIDs := []uint32{}
 	mgr := suite.newUniqueKeyspaceGroupManager(loadKeyspaceGroupsBatchSize)

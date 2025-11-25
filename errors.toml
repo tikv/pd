@@ -581,9 +581,9 @@ error = '''
 primary of keyspace group does not exist
 '''
 
-["PD:keyspace:ErrKeyspaceGroupVersionStale"]
+["PD:keyspace:ErrKeyspaceGroupModReVisionStale"]
 error = '''
-keyspace group version is stale
+keyspace group mod revision is stale
 '''
 
 ["PD:keyspace:ErrKeyspaceGroupWithEmptyKeyspace"]

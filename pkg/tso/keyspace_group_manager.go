@@ -137,10 +137,10 @@ func (s *state) getKeyspaceGroupMeta(
 	return s.allocators[groupID], s.kgs[groupID]
 }
 
-// SetModVersion sets the modification version of the keyspace group state.
-// return true if the version is updated.
-// It only allows increasing the version.
-func (s *state) SetModVersion(modRevision uint64) bool {
+// SetModRevision sets the modification revision of the keyspace group state.
+// return true if the mod revision is updated.
+// It only allows increasing the mod revision.
+func (s *state) SetModRevision(modRevision uint64) bool {
 	s.Lock()
 	defer s.Unlock()
 	if s.modRevision < modRevision {
@@ -552,8 +552,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		})
 		if len(event) > 0 {
 			last := event[len(event)-1]
-			if !kgm.SetModVersion(uint64(last.Kv.ModRevision)) {
-				log.Warn("watch keyspace group met mod version not increased",
+			if !kgm.SetModRevision(uint64(last.Kv.ModRevision)) {
+				log.Warn("watch keyspace group met mod revision not increased",
 					zap.Uint32("current-mod-revision", uint32(kgm.modRevision)),
 					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
 				)
@@ -1031,12 +1031,12 @@ func (kgm *KeyspaceGroupManager) GetAllocator(keyspaceGroupID uint32) (*Allocato
 func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	keyspaceID uint32,
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
-	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, version, err :=
+	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
 		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
-		return nil, nil, curKeyspaceGroupID, version, err
+		return nil, nil, curKeyspaceGroupID, modRevision, err
 	}
-	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, version, nil
+	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
 }
 
 // GetMember returns the member of the keyspace group serving the given keyspace.

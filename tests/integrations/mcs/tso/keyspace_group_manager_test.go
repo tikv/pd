@@ -224,7 +224,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 
 	terr := &tsopb.Error{
 		Type:    tsopb.ErrorType_INVALID_VALUE,
-		Message: "[PD:keyspace:ErrKeyspaceGroupVersionStale]keyspace group version is stale",
+		Message: "[PD:keyspace:ErrKeyspaceGroupModRevisionStale]keyspace group mod revision is stale",
 	}
 	checkFn(newGroupID, keyspaceIDs[1], secondAddress, terr)
 }

@@ -69,7 +69,7 @@ type keyspaceGroupSvcDiscovery struct {
 
 	// modRevision is used to avoid updating stale info, it is provided by etcd watcher on the server side and increases
 	// monotonically.
-	// If the tso response version is less than the client version, it means that the keyspace group information of
+	// If the tso response mod revision is less than the client mod revision, it means that the keyspace group information of
 	// the request tso server is stale, we should ignore the update and try to another tso service.
 	modRevision atomic.Uint64
 }
@@ -82,11 +82,11 @@ func (k *keyspaceGroupSvcDiscovery) update(
 	keyspaceGroup *tsopb.KeyspaceGroup,
 	newPrimaryURL string,
 	secondaryURLs, urls []string,
-	modVersion uint64,
+	modRevision uint64,
 ) (oldPrimaryURL string, primarySwitched, success bool) {
 	k.Lock()
 	defer k.Unlock()
-	if k.getModRevision() > modVersion {
+	if k.getModRevision() > modRevision {
 		return "", false, false
 	}
 	success = true
@@ -103,7 +103,7 @@ func (k *keyspaceGroupSvcDiscovery) update(
 
 	k.group = keyspaceGroup
 	k.urls = urls
-	k.modRevision.Store(modVersion)
+	k.modRevision.Store(modRevision)
 	return
 }
 
@@ -428,22 +428,22 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
-	var version uint64
-	curVersion := c.keyspaceGroupSD.getModRevision()
+	var modRevision uint64
+	curModRevision := c.keyspaceGroupSD.getModRevision()
 	if len(tsoServerURL) > 0 {
-		keyspaceGroup, version, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getModRevision())
+		keyspaceGroup, modRevision, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getModRevision())
 		if err != nil {
 			log.Error("[tso] failed to find the keyspace group",
 				zap.Uint32("keyspace-id-in-request", keyspaceID),
 				zap.String("tso-server-url", tsoServerURL),
-				zap.Uint64("response-version", version),
-				zap.Uint64("current-version", curVersion),
+				zap.Uint64("response-mod-revision", modRevision),
+				zap.Uint64("current-mod-revision", curModRevision),
 				errs.ZapError(err))
 			return err
 		}
 	} else {
 		// There is no error but no tso server URL found, which means
-		// the server side hasn't been upgraded to the version that
+		// the server side hasn't been upgraded to the modRevision that
 		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
 		// we fall back to the old way of discovering the tso primary URL
 		// from etcd directly.
@@ -508,10 +508,10 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	}
 
 	oldPrimary, primarySwitched, success :=
-		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls, version)
+		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls, modRevision)
 	if !success {
-		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("version", version))
-		return errors.Errorf("keyspace group version is stale, current version: %d, new version: %d", c.keyspaceGroupSD.getModRevision(), version)
+		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("modRevision", modRevision))
+		return errors.Errorf("keyspace group modRevision is stale, current modRevision: %d, new modRevision: %d", c.keyspaceGroupSD.getModRevision(), modRevision)
 	}
 	if primarySwitched {
 		log.Info("[tso] updated keyspace group service discovery info",
@@ -576,8 +576,8 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 	if resp.ModRevision < modRevision {
-		attachErr := errors.Errorf("error:%s target:%s response version:%d current version:%d",
-			"response version less than the given version", cc.Target(), resp.ModRevision, modRevision)
+		attachErr := errors.Errorf("error:%s target:%s response mod revision:%d current mod revision:%d",
+			"response mod revision less than the given mod revision", cc.Target(), resp.ModRevision, modRevision)
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 
@@ -606,7 +606,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 
 	if len(urls) == 0 {
 		// There is no error but no tso server url found, which means
-		// the server side hasn't been upgraded to the version that
+		// the server side hasn't been upgraded to the mod revision that
 		// processes and returns GetClusterInfoResponse.TsoUrls. Return here
 		// and handle the fallback logic outside of this function.
 		return "", nil
