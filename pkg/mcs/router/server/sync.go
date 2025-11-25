@@ -58,8 +58,11 @@ type RegionSyncer struct {
 	name             string
 	listenURL        string
 
-	serverCtx context.Context
-	cancelCtx context.CancelFunc
+	serverCtx  context.Context
+	cancelFunc context.CancelFunc
+
+	// syncLoopCancelCtx is used to cancel the current syncing with leader
+	syncLoopCancelCtx context.CancelFunc
 
 	// notify the syncer to reconnect to leader
 	// true means force reconnect, it will stop the current syncing stream, such as leader changed
@@ -77,12 +80,14 @@ func NewRegionSyncer(serverCtx context.Context, cluster *core.BasicCluster, etcd
 	tlsConfig *grpcutil.TLSConfig, name, listenURL string) *RegionSyncer {
 	checkMembershipCh := make(chan struct{}, 1)
 	reconnectCh := make(chan bool, 1)
+	ctx, cancelFunc := context.WithCancel(serverCtx)
 	return &RegionSyncer{
 		cluster:           cluster,
 		tlsConfig:         tlsConfig,
 		name:              name,
 		listenURL:         listenURL,
-		serverCtx:         serverCtx,
+		serverCtx:         ctx,
+		cancelFunc:        cancelFunc,
 		checkMembershipCh: checkMembershipCh,
 		etcdClient:        etcdClient,
 		reconnectCh:       reconnectCh,
@@ -105,8 +110,6 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 	defer logutil.LogPanic()
 	defer s.wg.Done()
 
-	ctx, cancel := context.WithCancel(s.serverCtx)
-	defer cancel()
 	ticker := time.NewTicker(memberUpdateInterval)
 	failpoint.Inject("speedUpMemberLoop", func() {
 		ticker.Reset(100 * time.Millisecond)
@@ -115,13 +118,13 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 	var curLeader uint64
 	for {
 		select {
-		case <-ctx.Done():
+		case <-s.serverCtx.Done():
 			log.Info("server is closed, exit update member loop")
 			return
 		case <-ticker.C:
 		case <-s.checkMembershipCh:
 		}
-		members, err := etcdutil.ListEtcdMembers(ctx, s.getClient())
+		members, err := etcdutil.ListEtcdMembers(s.serverCtx, s.getClient())
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
 			continue
@@ -131,7 +134,7 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
 				continue
 			}
-			status, err := s.getClient().Status(ctx, ep.ClientURLs[0])
+			status, err := s.getClient().Status(s.serverCtx, ep.ClientURLs[0])
 			if err != nil {
 				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
 				continue
@@ -173,9 +176,9 @@ func (s *RegionSyncer) syncLoop() {
 			if !force && s.streamingRunning.Load() {
 				continue
 			}
-			if s.cancelCtx != nil {
-				s.cancelCtx()
-				s.cancelCtx = nil
+			if s.syncLoopCancelCtx != nil {
+				s.syncLoopCancelCtx()
+				s.syncLoopCancelCtx = nil
 			}
 		}
 		s.startSyncWithLeader()
@@ -190,8 +193,8 @@ func (s *RegionSyncer) startSyncWithLeader() {
 		s.reconnectCh <- false
 		return
 	}
-	ctx, cancelCtx := context.WithCancel(s.serverCtx)
-	s.cancelCtx = cancelCtx
+	ctx, syncCancelFunc := context.WithCancel(s.serverCtx)
+	s.syncLoopCancelCtx = syncCancelFunc
 	log.Info("region syncer reconnect to leader", zap.String("server", s.name), zap.Any("leader", leaderAddr))
 	s.wg.Add(1)
 	go s.sync(ctx, leaderAddr.(string))
@@ -237,6 +240,11 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 	}
 	defer conn.Close()
 
+	// mark the client as running status when it finished the first history region sync.
+	if !s.streamingRunning.CompareAndSwap(false, true) {
+		log.Warn("sync region is still running, exit")
+		return
+	}
 	// Start syncing data.
 	for {
 		select {
@@ -334,8 +342,6 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 				if err == nil {
 					s.nextSyncIndex++
 				}
-				// mark the client as running status when it finished the first history region sync.
-				s.streamingRunning.Store(true)
 			}
 		}
 	}
@@ -355,11 +361,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (s
 		},
 		StartIndex: s.nextSyncIndex,
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return syncStream, nil
+	return syncStream, err
 }
 
 // IsRunning returns whether the region syncer client is running.
@@ -369,8 +371,8 @@ func (s *RegionSyncer) IsRunning() bool {
 
 // Stop stops the region syncer.
 func (s *RegionSyncer) Stop() {
-	if s.cancelCtx != nil {
-		s.cancelCtx()
+	if s.cancelFunc != nil {
+		s.cancelFunc()
 	}
 	s.wg.Wait()
 }
