@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -265,6 +266,79 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 	id := uint32(100)
 	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: ""})
 	re.Error(err)
+}
+
+// TestCreateKeyspaceNoIDLeak tests that repeated failed creation attempts
+// do not waste IDs for both CreateKeyspace and CreateKeyspaceByID.
+func (suite *keyspaceTestSuite) TestCreateKeyspaceNoIDLeak() {
+	re := suite.Require()
+	manager := suite.manager
+	now := time.Now().Unix()
+
+	// Test CreateKeyspace: repeated attempts with same name should not waste IDs.
+	req := &CreateKeyspaceRequest{
+		Name:       "test_no_leak",
+		CreateTime: now,
+		Config:     map[string]string{testConfig1: "100"},
+	}
+	first, err := manager.CreateKeyspace(req)
+	re.NoError(err)
+	re.Equal(uint32(1), first.Id)
+
+	// Attempt to create the same keyspace 5 times - should all fail without allocating IDs.
+	for range 5 {
+		_, err := manager.CreateKeyspace(req)
+		re.ErrorIs(err, errs.ErrKeyspaceExists)
+	}
+
+	// Next successful creation should get ID 2, not 7 (proving no ID leak).
+	second, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "test_no_leak_2",
+		CreateTime: now,
+		Config:     map[string]string{testConfig1: "100"},
+	})
+	re.NoError(err)
+	re.Equal(uint32(2), second.Id)
+
+	// Test CreateKeyspaceByID: should reject duplicate name or ID early.
+	id10 := uint32(10)
+	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+		ID:         &id10,
+		Name:       "test_by_id",
+		CreateTime: now,
+		Config:     map[string]string{testConfig1: "100"},
+	})
+	re.NoError(err)
+
+	// Duplicate name with different ID should fail.
+	id11 := uint32(11)
+	for range 3 {
+		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+			ID:         &id11,
+			Name:       "test_by_id", // Duplicate name
+			CreateTime: now,
+		})
+		re.ErrorIs(err, errs.ErrKeyspaceExists)
+	}
+
+	// Duplicate ID with different name should also fail.
+	for range 3 {
+		_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+			ID:         &id10, // Duplicate ID
+			Name:       "test_different",
+			CreateTime: now,
+		})
+		re.ErrorIs(err, errs.ErrKeyspaceExists)
+	}
+
+	// Next successful creation should get ID 3, not 14 (proving no ID leak).
+	third, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "test_no_leak_3",
+		CreateTime: now,
+		Config:     map[string]string{testConfig1: "100"},
+	})
+	re.NoError(err)
+	re.Equal(uint32(3), third.Id)
 }
 
 func makeMutations() []*Mutation {
