@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestValidateID(t *testing.T) {
@@ -35,11 +36,26 @@ func TestValidateID(t *testing.T) {
 		hasErr bool
 	}{
 		{100, false},
-		{constant.MaxValidKeyspaceID - 1, false},
 		{constant.MaxValidKeyspaceID, false},
 		{constant.MaxValidKeyspaceID + 1, true},
 		{math.MaxUint32, true},
 	}
+
+	// Add kernel-specific test case for MaxValidKeyspaceID - 1
+	if kerneltype.IsNextGen() {
+		// In NextGen mode, MaxValidKeyspaceID - 1 is SystemKeyspaceID, which is protected
+		testCases = append(testCases, struct {
+			id     uint32
+			hasErr bool
+		}{constant.MaxValidKeyspaceID - 1, true})
+	} else {
+		// In Classic mode, MaxValidKeyspaceID - 1 is not protected
+		testCases = append(testCases, struct {
+			id     uint32
+			hasErr bool
+		}{constant.MaxValidKeyspaceID - 1, false})
+	}
+
 	for _, testCase := range testCases {
 		re.Equal(testCase.hasErr, validateID(testCase.id) != nil)
 	}

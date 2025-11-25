@@ -187,8 +187,18 @@ func TestEtcdClientSync(t *testing.T) {
 		}
 	}
 
-	_, err = RemoveEtcdMember(client1, memIDToRemove)
-	re.NoError(err)
+	// Use testutil.Eventually to handle potential transient errors during member removal.
+	// The removed member will be shut down immediately, which may cause the removal RPC
+	// to fail with "server stopped", but we verify success by checking the member list.
+	testutil.Eventually(re, func() bool {
+		_, err := RemoveEtcdMember(client1, memIDToRemove)
+		if err == nil {
+			return true
+		}
+		// Verify if the member was actually removed by checking the member list
+		listResp, listErr := ListEtcdMembers(client1.Ctx(), client1)
+		return listErr == nil && len(listResp.Members) == 1
+	})
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
@@ -228,10 +238,16 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	defer etcd2.Close()
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
-	// scale in etcd1
-	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	// Create a client connected to etcd2 to perform the removal
+	cfg2 := etcd2.Config()
+	client3, err := CreateEtcdClient(nil, cfg2.ListenClientUrls)
 	re.NoError(err)
-	checkMembers(re, client2, []*embed.Etcd{etcd2})
+	defer client3.Close()
+
+	// scale in etcd1 using client3 (connected to etcd2)
+	_, err = RemoveEtcdMember(client3, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	checkMembers(re, client3, []*embed.Etcd{etcd2})
 }
 
 func TestRandomKillEtcd(t *testing.T) {

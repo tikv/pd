@@ -32,11 +32,13 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -1368,18 +1370,25 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	re.Len(fit.OrphanPeers, 2)
 
 	var label labeler.LabelRule
-	escapedID := url.PathEscape("keyspaces/0")
+	// In NextGen, default keyspace ID is SystemKeyspaceID, in Classic it's 0
+	var expectedKeyspaceID string
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceID = fmt.Sprintf("keyspaces/%d", constant.SystemKeyspaceID)
+	} else {
+		expectedKeyspaceID = "keyspaces/0"
+	}
+	escapedID := url.PathEscape(expectedKeyspaceID)
 	u = fmt.Sprintf("%s/config/region-label/rule/%s", urlPrefix, escapedID)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, &label)
 	re.NoError(err)
-	re.Equal("keyspaces/0", label.ID)
+	re.Equal(expectedKeyspaceID, label.ID)
 
 	var labels []labeler.LabelRule
 	u = fmt.Sprintf("%s/config/region-label/rules", urlPrefix)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, &labels)
 	re.NoError(err)
 	re.Len(labels, 1)
-	re.Equal("keyspaces/0", labels[0].ID)
+	re.Equal(expectedKeyspaceID, labels[0].ID)
 
 	u = fmt.Sprintf("%s/config/region-label/rules/ids", urlPrefix)
 	err = testutil.CheckGetJSON(tests.TestDialClient, u, []byte(`["rule1", "rule3"]`), func(resp []byte, _ int, _ http.Header) {
@@ -1389,11 +1398,12 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	})
 	re.NoError(err)
 
-	err = testutil.CheckGetJSON(tests.TestDialClient, u, []byte(`["keyspaces/0"]`), func(resp []byte, _ int, _ http.Header) {
+	expectedIDsJSON := fmt.Sprintf("[\"%s\"]", expectedKeyspaceID)
+	err = testutil.CheckGetJSON(tests.TestDialClient, u, []byte(expectedIDsJSON), func(resp []byte, _ int, _ http.Header) {
 		err := json.Unmarshal(resp, &labels)
 		re.NoError(err)
 		re.Len(labels, 1)
-		re.Equal("keyspaces/0", labels[0].ID)
+		re.Equal(expectedKeyspaceID, labels[0].ID)
 	})
 	re.NoError(err)
 

@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -228,18 +229,31 @@ func TestGCOperations(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(resp.Header)
 	re.Nil(resp.Header.Error)
-	// The default keyspace (keyspaceID == 0) will be included, so it has 3.
+	// The default keyspace will be included, so it has 3.
 	re.Len(resp.GetGcStates(), 3)
-	receivedKeyspaceIDs := make([]uint32, 0, 2)
+	receivedKeyspaceIDs := make([]uint32, 0, 3)
 	for _, gcState := range resp.GetGcStates() {
 		receivedKeyspaceIDs = append(receivedKeyspaceIDs, gcState.KeyspaceScope.KeyspaceId)
 	}
 	slices.Sort(receivedKeyspaceIDs)
-	re.Equal([]uint32{0, ks1.Id, constant.NullKeyspaceID}, receivedKeyspaceIDs)
+
+	// Expected keyspace IDs differ between NextGen and Classic
+	var expectedKeyspaceIDs []uint32
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceIDs = []uint32{ks1.Id, constant.SystemKeyspaceID, constant.NullKeyspaceID}
+	} else {
+		expectedKeyspaceIDs = []uint32{0, ks1.Id, constant.NullKeyspaceID}
+	}
+	re.Equal(expectedKeyspaceIDs, receivedKeyspaceIDs)
+
 	// As the same test logic was run on the two keyspaces, they should have the same result.
 	for _, gcState := range resp.GetGcStates() {
-		// Ignore the default keyspace (keyspaceID == 0) which is not used in this test.
-		if gcState.KeyspaceScope.KeyspaceId == 0 {
+		// Ignore the default keyspace which is not used in this test.
+		defaultKeyspaceID := uint32(0)
+		if kerneltype.IsNextGen() {
+			defaultKeyspaceID = constant.SystemKeyspaceID
+		}
+		if gcState.KeyspaceScope.KeyspaceId == defaultKeyspaceID {
 			continue
 		}
 		re.Equal(gcState.KeyspaceScope.KeyspaceId != constant.NullKeyspaceID, gcState.GetIsKeyspaceLevelGc())
@@ -350,7 +364,9 @@ func TestGCOperations(t *testing.T) {
 		re.Nil(resp.Header.Error)
 		re.Equal("b1", resp.GetDeletedBarrierInfo().GetBarrierId())
 		re.Equal(uint64(20), resp.GetDeletedBarrierInfo().GetBarrierTs())
-		re.Equal(3600, int(resp.GetDeletedBarrierInfo().GetTtlSeconds()))
+		// The TTL value decreases over time
+		re.Greater(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3595))
+		re.LessOrEqual(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3600))
 	}
 
 	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {

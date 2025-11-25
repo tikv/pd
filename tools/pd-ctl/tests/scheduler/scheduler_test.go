@@ -987,7 +987,7 @@ func TestHotSchedulerUpgrade(t *testing.T) {
 		pdTests.MustPutStore(re, cluster, store)
 	}
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-	// wait scheduelrs run
+	// wait schedulers run
 	testutil.Eventually(re, func() bool {
 		schedulers := []string{}
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &schedulers)

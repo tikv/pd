@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
@@ -409,6 +410,13 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	re := suite.Require()
 	// Enable the failpoint to slow down the system time to test whether the TSO is monotonic.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
+
+	// Enable the failpoint to delay before checking election member
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delayBeforeCheckingElectionMember", `return()`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delayBeforeCheckingElectionMember"))
+	}()
+
 	// Create the keyspace group `oldID` with keyspaces [777, 888, 999].
 	oldID := suite.allocID()
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
@@ -450,9 +458,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re.NoError(err)
 	re.NotNil(primary)
 	// Prepare the client for keyspace.
-	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx,
-		caller.TestComponent,
-		keyspaceID, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
+
+	tsoClient := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceID, []string{suite.pdLeaderServer.GetAddr()})
 	re.NoError(err)
 	re.NotNil(tsoClient)
 	var (
@@ -568,7 +575,8 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		return err == nil
 	})
 
-	waitFinishSplit(re, leaderServer, 0, 1, []uint32{constant.DefaultKeyspaceID, 1}, []uint32{2})
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	waitFinishSplit(re, leaderServer, 0, 1, []uint32{bootstrapKeyspaceID, 1}, []uint32{2})
 
 	// Then split keyspace group 0 to 2 with keyspace 1.
 	testutil.Eventually(re, func() bool {
@@ -576,13 +584,13 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		return err == nil
 	})
 
-	waitFinishSplit(re, leaderServer, 0, 2, []uint32{constant.DefaultKeyspaceID}, []uint32{1})
+	waitFinishSplit(re, leaderServer, 0, 2, []uint32{bootstrapKeyspaceID}, []uint32{1})
 
 	// Check the keyspace group 0 is split to 1 and 2.
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
 	kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 2)
-	re.Equal([]uint32{0}, kg0.Keyspaces)
+	re.Equal([]uint32{bootstrapKeyspaceID}, kg0.Keyspaces)
 	re.Equal([]uint32{2}, kg1.Keyspaces)
 	re.Equal([]uint32{1}, kg2.Keyspaces)
 	re.False(kg0.IsSplitting())
@@ -734,6 +742,13 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
 
 	// Init PD config but not start.
 	keyspaces := []string{
@@ -767,11 +782,13 @@ func TestGetTSOImmediately(t *testing.T) {
 		return err == nil
 	})
 
-	waitFinishSplit(re, leaderServer, 0, 1, []uint32{constant.DefaultKeyspaceID, 1}, []uint32{2})
+	// Get the correct bootstrap keyspace ID for the current mode
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	waitFinishSplit(re, leaderServer, 0, 1, []uint32{bootstrapKeyspaceID, 1}, []uint32{2})
 
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
-	re.Equal([]uint32{0, 1}, kg0.Keyspaces)
+	re.Equal([]uint32{bootstrapKeyspaceID, 1}, kg0.Keyspaces)
 	re.Equal([]uint32{2}, kg1.Keyspaces)
 	re.False(kg0.IsSplitting())
 	re.False(kg1.IsSplitting())
@@ -798,10 +815,6 @@ func TestGetTSOImmediately(t *testing.T) {
 		re.NoError(err)
 		cli.Close()
 	}
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault() {
