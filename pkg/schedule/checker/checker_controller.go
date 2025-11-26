@@ -366,7 +366,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 				if opController.OperatorCount(operator.OpRegion) < c.conf.GetRegionScheduleLimit() {
 					return ops
 				}
-				operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpReplica)
+				operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpRegion)
 				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
 			return nil

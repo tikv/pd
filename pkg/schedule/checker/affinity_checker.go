@@ -114,6 +114,13 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	// Check if region's voter count matches affinity group's requirement.
+	// Affinity checker only adjusts peer positions, not replica counts.
+	if len(region.GetVoters()) != len(group.VoterStoreIDs) {
+		affinityCheckerReplicaCountMismatchCounter.Inc()
+		return nil
+	}
+
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
 		return c.MergeCheck(region, group)
