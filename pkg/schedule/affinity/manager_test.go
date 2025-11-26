@@ -121,7 +121,7 @@ func TestIsRegionAffinity(t *testing.T) {
 
 	// Test 7: Group not in effect should return false
 	groupInfo := manager.GetGroups()["test_group"]
-	groupInfo.Effect = false
+	groupInfo.State = groupExpired
 	region6 := core.NewRegionInfo(
 		&metapb.Region{Id: 6, Peers: []*metapb.Peer{
 			{Id: 61, StoreId: 1, Role: metapb.PeerRole_Voter},

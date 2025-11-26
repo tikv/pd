@@ -16,12 +16,69 @@ package affinity
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
+
+// condition is an enumeration that includes both Store state and Group state.
+type condition int
+
+const (
+	// groupAvailable indicates that the current Group allows affinity scheduling and disallows other balancing scheduling.
+	groupAvailable condition = iota
+
+	// groupDegraded indicates that the current Group does not generate affinity scheduling but still disallows other balancing scheduling.
+	// All values greater than groupAvailable and less than or equal to groupDegraded represent groupDegraded states.
+	// The groupDegraded state should have an expiration time. After it expires, it should be treated as groupExpired.
+	storeDown
+	storeLowSpace
+	storePreparing
+	storeEvictLeader
+	groupDegraded
+
+	// groupExpired indicates that the current Group does not generate affinity scheduling and allows other balancing scheduling.
+	// All values greater than groupDegraded and less than or equal to groupExpired represent groupExpired states.
+	storeRemovingOrRemoved
+	groupExpired
+
+	// groupAvailable, groupDegraded, and groupExpired define the Group’s availability lifecycle.
+	// Roughly:
+	//   groupAvailable ──degraded (e.g. store evict-leader)───────────────> groupDegraded
+	//   groupDegraded  ──recovered────────────────────────────────────────> groupAvailable // expected to be temporary
+	//   groupDegraded  ──expired──────────────────────────────────────────> groupExpired
+	//   groupAvailable ──directly failed (e.g. store removed)─────────────> groupExpired
+	//   groupExpired   ──reconfigured (e.g. peers moved to healthy stores)→ groupAvailable
+	// groupDegraded is intended to be a temporary state that may return to groupAvailable,
+	// while groupExpired usually represents a terminal state under the current topology,
+	// but can become groupAvailable again after the Group’s stores/peers are reconfigured.
+	// groupDegraded has an expiration time (degradedExpireAt); once it expires, the Group is
+	// automatically treated as groupExpired.
+)
+
+// toGroupState converts the condition into the corresponding Group state.
+func (s condition) toGroupState() condition {
+	if s == groupAvailable {
+		return groupAvailable
+	} else if s <= groupDegraded {
+		return groupDegraded
+	}
+	return groupExpired
+}
+
+func (s condition) String() string {
+	switch s.toGroupState() {
+	case groupDegraded:
+		return "degraded"
+	case groupExpired:
+		return "expired"
+	default:
+		return "available"
+	}
+}
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
@@ -49,8 +106,10 @@ func (g *Group) String() string {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type GroupState struct {
 	Group
-	// Effect parameter indicates whether the current constraint is in effect.
-	Effect bool `json:"effect"`
+	// IsBalanceSchedulingAllowed indicates whether balance scheduling is allowed.
+	IsBalanceSchedulingAllowed bool `json:"is_balance_scheduling_allowed"`
+	// IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
+	IsAffinitySchedulingAllowed bool `json:"is_affinity_scheduling_allowed"`
 	// RangeCount indicates how many key ranges are associated with this group.
 	RangeCount int `json:"range_count"`
 	// RegionCount indicates how many Regions are currently in the affinity state.
@@ -66,16 +125,10 @@ type GroupState struct {
 }
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
-func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCache) bool {
-	if region == nil || !g.Effect {
+func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
+	if region == nil || g.IsBalanceSchedulingAllowed {
 		return false
 	}
-
-	// Use the result in the cache when both the Region pointer and the Group’s affinityVer remain unchanged.
-	if region == cache.region && g.affinityVer == cache.affinityVer {
-		return cache.isAffinity
-	}
-
 	// Compare the Leader
 	if region.GetLeader().GetStoreId() != g.LeaderStoreID {
 		return false
@@ -102,9 +155,10 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo, cache *regionCach
 type runtimeGroupInfo struct {
 	Group
 
-	// Effect parameter indicates whether the current constraint is in effect.
-	// Constraints are typically released when the store is in an abnormal state.
-	Effect bool
+	// State should use the condition enum values whose names start with group.
+	State condition
+	// DegradedExpireAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
+	DegradedExpireAt uint64
 	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
 	AffinityVer uint64
 	// AffinityRegionCount indicates how many Regions have all Voter and Leader peers in the correct stores. (AffinityVer equals).
@@ -128,13 +182,53 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			LeaderStoreID:   g.LeaderStoreID,
 			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
 		},
-		Effect:              g.Effect,
-		RangeCount:          g.RangeCount,
-		RegionCount:         len(g.Regions),
-		AffinityRegionCount: g.AffinityRegionCount,
-		affinityVer:         g.AffinityVer,
-		groupInfoPtr:        g,
+		IsBalanceSchedulingAllowed:  g.IsAllowBalanceScheduling(),
+		IsAffinitySchedulingAllowed: g.IsAffinitySchedulingAllowed(),
+		RangeCount:                  g.RangeCount,
+		RegionCount:                 len(g.Regions),
+		AffinityRegionCount:         g.AffinityRegionCount,
+		affinityVer:                 g.AffinityVer,
+		groupInfoPtr:                g,
 	}
+}
+
+// IsAvailable indicates that the Group is currently in the groupAvailable state,
+// which allows affinity scheduling and disallows other balancing scheduling.
+func (g *runtimeGroupInfo) IsAvailable() bool {
+	return g.State.toGroupState() == groupAvailable
+}
+
+// IsExpired indicates that the Group is currently in the groupExpired state,
+// which disallows affinity scheduling and allows other balancing scheduling.
+func (g *runtimeGroupInfo) IsExpired() bool {
+	switch g.State.toGroupState() {
+	case groupExpired:
+		return true
+	case groupDegraded:
+		return uint64(time.Now().Unix()) > g.DegradedExpireAt
+	default:
+		return false
+	}
+}
+
+func (g *runtimeGroupInfo) getState() condition {
+	state := g.State.toGroupState()
+	if state == groupAvailable {
+		return groupAvailable
+	} else if g.IsExpired() {
+		return groupExpired
+	}
+	return groupDegraded
+}
+
+// IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
+func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
+	return g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
+}
+
+// IsAllowBalanceScheduling indicates whether balance scheduling is allowed.
+func (g *runtimeGroupInfo) IsAllowBalanceScheduling() bool {
+	return g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 
 // AdjustGroup validates the group and sets default values.

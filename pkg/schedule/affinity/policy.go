@@ -25,17 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 )
 
-type storeState int
-
-const (
-	available storeState = iota
-	down
-	lowSpace
-	preparing
-	degraded // storeState less than degraded and non-zero indicate the store is not unusable.
-	removingOrRemoved
-)
-
 const (
 	// defaultAvailabilityCheckInterval is the default interval for checking store availability.
 	defaultAvailabilityCheckInterval = 10 * time.Second
@@ -47,31 +36,11 @@ var (
 	availabilityCheckIntervalForTest time.Duration
 )
 
-// nolint
-func (state storeState) isAvailable() bool {
-	return state == available
-}
-
-// nolint
-func (state storeState) isUnavailable() bool {
-	return state != available
-}
-
-// nolint
-func (state storeState) isDegraded() bool {
-	return state > 0 && state <= degraded
-}
-
-// nolint
-func (state storeState) isUnusable() bool {
-	return state > degraded
-}
-
 // ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// TODO: Improve the strategy.
-	if group == nil || group.Effect || !m.IsAvailable() {
+	if group == nil || !group.IsBalanceSchedulingAllowed {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -124,31 +93,32 @@ func (m *Manager) checkStoresAvailability() {
 		return
 	}
 	unavailableStores := m.generateUnavailableStores()
-	if m.isUnavailableStoresChanged(unavailableStores) {
-		m.setUnavailableStores(unavailableStores)
+	isUnavailableStoresChanged, groupStateChanges := m.getGroupStateChanges(unavailableStores)
+	if isUnavailableStoresChanged {
+		m.setGroupStateChanges(unavailableStores, groupStateChanges)
 	}
 }
 
-func (m *Manager) generateUnavailableStores() map[uint64]storeState {
-	unavailableStores := make(map[uint64]storeState)
+func (m *Manager) generateUnavailableStores() map[uint64]condition {
+	unavailableStores := make(map[uint64]condition)
 	stores := m.storeSetInformer.GetStores()
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
 		if !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) {
-			unavailableStores[store.GetID()] = degraded
+			unavailableStores[store.GetID()] = storeEvictLeader
 			continue
 		}
 		if store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving() {
-			unavailableStores[store.GetID()] = removingOrRemoved
+			unavailableStores[store.GetID()] = storeRemovingOrRemoved
 		} else if store.IsUnhealthy() {
 			// Use IsUnavailable (10min) to avoid frequent state flapping
 			// IsUnavailable: DownTime > 10min (storeUnavailableDuration)
 			// IsDisconnected: DownTime > 20s (storeDisconnectDuration) - too sensitive
-			unavailableStores[store.GetID()] = down
+			unavailableStores[store.GetID()] = storeDown
 		} else if store.IsLowSpace(lowSpaceRatio) {
-			unavailableStores[store.GetID()] = lowSpace
+			unavailableStores[store.GetID()] = storeLowSpace
 		} else if store.IsPreparing() {
-			unavailableStores[store.GetID()] = preparing
+			unavailableStores[store.GetID()] = storePreparing
 		}
 		// Note: We intentionally do NOT check:
 		// - IsDisconnected(): Too sensitive (20s), would cause frequent flapping
@@ -157,49 +127,57 @@ func (m *Manager) generateUnavailableStores() map[uint64]storeState {
 	return unavailableStores
 }
 
-func (m *Manager) isUnavailableStoresChanged(unavailableStores map[uint64]storeState) bool {
+func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (isUnavailableStoresChanged bool, groupStateChanges map[string]condition) {
 	m.RLock()
 	defer m.RUnlock()
-	if len(m.unavailableStores) != len(unavailableStores) {
-		return true
-	}
-	for storeID, state := range m.unavailableStores {
-		if state != unavailableStores[storeID] {
-			return true
+	// Validate whether unavailableStores has changed.
+	isUnavailableStoresChanged = len(m.unavailableStores) != len(unavailableStores)
+	if !isUnavailableStoresChanged {
+		for storeID, state := range m.unavailableStores {
+			if state != unavailableStores[storeID] {
+				isUnavailableStoresChanged = true
+				break
+			}
+		}
+		if !isUnavailableStoresChanged {
+			return false, nil
 		}
 	}
-	return false
-}
-
-func (m *Manager) setUnavailableStores(unavailableStores map[uint64]storeState) {
-	m.Lock()
-	defer m.Unlock()
-	// Set unavailableStores
-	m.unavailableStores = unavailableStores
-	if len(m.unavailableStores) == 0 {
-		return
-	}
-	// Update groupInfo
+	// Analyze which Groups have changed state
+	groupStateChanges = make(map[string]condition)
 	for _, groupInfo := range m.groups {
-		if !groupInfo.Effect {
-			continue
-		}
-		unavailableStore := uint64(0)
-		_, hasUnavailableStore := unavailableStores[groupInfo.LeaderStoreID]
+		var unavailableStore uint64
+		var maxCondition condition
 		for _, storeID := range groupInfo.VoterStoreIDs {
-			if !hasUnavailableStore {
-				_, hasUnavailableStore = unavailableStores[storeID]
-				if hasUnavailableStore {
+			if _, ok := unavailableStores[storeID]; ok {
+				if unavailableStore == 0 || unavailableStores[storeID] > maxCondition {
 					unavailableStore = storeID
+					maxCondition = unavailableStores[storeID]
 				}
 			}
 		}
-		if hasUnavailableStore {
-			m.updateGroupEffectLocked(groupInfo.ID, false)
-			log.Warn("affinity group invalidated due to unavailable stores",
-				zap.String("group-id", groupInfo.ID),
-				zap.Uint64("unavailable-store", unavailableStore))
+		newState := maxCondition.toGroupState()
+		if newState != groupInfo.getState() {
+			groupStateChanges[groupInfo.ID] = newState
+			if unavailableStore != 0 {
+				log.Warn("affinity group invalidated due to unavailable stores",
+					zap.String("group-id", groupInfo.ID),
+					zap.Uint64("unavailable-store", unavailableStore),
+					zap.String("state", newState.String()))
+			} else {
+				log.Info("affinity group become available", zap.String("group-id", groupInfo.ID))
+			}
 		}
+	}
+	return
+}
+
+func (m *Manager) setGroupStateChanges(unavailableStores map[uint64]condition, groupStateChanges map[string]condition) {
+	m.Lock()
+	defer m.Unlock()
+	m.unavailableStores = unavailableStores
+	for groupID, state := range groupStateChanges {
+		m.updateGroupStateLocked(groupID, state)
 	}
 }
 

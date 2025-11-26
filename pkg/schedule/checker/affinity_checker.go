@@ -104,12 +104,12 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 	// If the Group is not effective, provide the healthy Region information and fetch it again.
-	if !group.Effect {
+	if !group.IsAffinitySchedulingAllowed {
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
 	// Check if the group is in effect
-	if group == nil || !group.Effect {
+	if group == nil || !group.IsAffinitySchedulingAllowed {
 		affinityCheckerGroupNotInEffectCounter.Inc()
 		return nil
 	}

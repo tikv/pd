@@ -112,7 +112,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		re.Equal(http.StatusOK, res.StatusCode)
 		groupState := &affinity.GroupState{}
 		re.NoError(json.NewDecoder(res.Body).Decode(groupState))
-		re.True(groupState.Effect)
+		re.True(groupState.IsAffinitySchedulingAllowed)
 		re.Equal(updatePeersReq.LeaderStoreID, groupState.LeaderStoreID)
 		re.ElementsMatch(updatePeersReq.VoterStoreIDs, groupState.VoterStoreIDs)
 
@@ -196,7 +196,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		manager := leader.GetServer().GetRaftCluster().GetAffinityManager()
 		group := manager.GetAffinityGroupState("first-win")
 		re.NotNil(group)
-		re.False(group.Effect)
+		re.False(group.IsAffinitySchedulingAllowed)
 		re.Equal(uint64(0), group.LeaderStoreID)
 
 		// Fake a healthy region that matches store 1.
@@ -220,7 +220,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		re.Equal(http.StatusOK, res.StatusCode)
 		finalState := &affinity.GroupState{}
 		re.NoError(json.NewDecoder(res.Body).Decode(finalState))
-		re.True(finalState.Effect)
+		re.True(finalState.IsAffinitySchedulingAllowed)
 		re.Equal(region.GetLeader().GetStoreId(), finalState.LeaderStoreID)
 		re.ElementsMatch([]uint64{region.GetLeader().GetStoreId()}, finalState.VoterStoreIDs)
 
@@ -328,7 +328,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySuccess() {
 		state := respBody.AffinityGroups["patch-success"]
 		re.NotNil(state)
 		re.Equal(1, state.RangeCount)
-		re.False(state.Effect) // peers未设置，保持未生效
+		re.False(state.IsAffinitySchedulingAllowed) // peers未设置，保持未生效
 
 		// Cleanup.
 		request, err = http.NewRequest(http.MethodDelete, baseURL+"/patch-success?force=true", http.NoBody)

@@ -60,7 +60,7 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 	)
 	manager.ObserveAvailableRegion(region1, manager.GetAffinityGroupState("g"))
 	state := manager.GetAffinityGroupState("g")
-	re.True(state.Effect)
+	re.True(state.IsAffinitySchedulingAllowed)
 	re.Equal(uint64(1), state.LeaderStoreID)
 	re.ElementsMatch([]uint64{1}, state.VoterStoreIDs)
 
@@ -76,7 +76,7 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 	)
 	manager.ObserveAvailableRegion(region2, manager.GetAffinityGroupState("g"))
 	state2 := manager.GetAffinityGroupState("g")
-	re.True(state2.Effect)
+	re.True(state2.IsAffinitySchedulingAllowed)
 	re.Equal(uint64(1), state2.LeaderStoreID)
 	re.ElementsMatch([]uint64{1}, state2.VoterStoreIDs)
 }
@@ -104,14 +104,16 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	_, err = manager.UpdateGroupPeers("avail", 1, []uint64{1, 2})
 	re.NoError(err)
 	state := manager.GetAffinityGroupState("avail")
-	re.True(state.Effect)
+	re.True(state.IsAffinitySchedulingAllowed)
 
 	// Simulate store 2 unavailable.
-	unavailable := map[uint64]storeState{2: removingOrRemoved}
-	manager.setUnavailableStores(unavailable)
+	unavailable := map[uint64]condition{2: storeRemovingOrRemoved}
+	isUnavailableStoresChanged, groupStateChanges := manager.getGroupStateChanges(unavailable)
+	re.True(isUnavailableStoresChanged)
+	manager.setGroupStateChanges(unavailable, groupStateChanges)
 
 	state2 := manager.GetAffinityGroupState("avail")
-	re.False(state2.Effect)
+	re.False(state2.IsAffinitySchedulingAllowed)
 }
 
 func TestStoreHealthCheck(t *testing.T) {
@@ -166,18 +168,18 @@ func TestStoreHealthCheck(t *testing.T) {
 
 	// Verify initial state - all groups should be in effect
 	groupInfo1 := manager.groups["group1"]
-	re.True(groupInfo1.Effect)
+	re.True(groupInfo1.IsAffinitySchedulingAllowed())
 	groupInfo2 := manager.groups["group2"]
-	re.True(groupInfo2.Effect)
+	re.True(groupInfo2.IsAffinitySchedulingAllowed())
 
 	// Manually call checkStoreHealth to test
 	manager.checkStoresAvailability()
 
 	// After health check, group1 should still be in effect (all stores healthy)
-	re.True(manager.groups["group1"].Effect)
+	re.True(manager.groups["group1"].IsAffinitySchedulingAllowed())
 
 	// After health check, group2 should be invalidated (store3 is unhealthy)
-	re.False(manager.groups["group2"].Effect)
+	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
 
 	// Now make store3 healthy again
 	store3Healthy := store3.Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -187,5 +189,5 @@ func TestStoreHealthCheck(t *testing.T) {
 	manager.checkStoresAvailability()
 
 	// Group2 should be restored to effect state
-	re.False(manager.groups["group2"].Effect)
+	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
 }
