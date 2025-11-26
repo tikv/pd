@@ -103,21 +103,24 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// Region doesn't belong to any affinity group
 		return nil
 	}
-	// If the Group is not affinity scheduling allowed, provide the available Region information and fetch it again.
-	if !group.IsAffinitySchedulingAllowed {
+
+	// If the Group is not affinity scheduling allowed, provide the available Region information and fetch group state again.
+	needRefetch := !group.IsAffinitySchedulingAllowed
+
+	// If Region is affinity, but the Group is not replicated, expire the Group.
+	// Then provide the available Region information and fetch the Group state again.
+	if isAffinity && !c.isGroupReplicated(region, group) {
+		c.affinityManager.ExpireAffinityGroup(group.ID)
+		needRefetch = true
+	}
+
+	// Recheck after refetching.
+	if needRefetch {
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
-	// Recheck after fetching.
 	if group == nil || !group.IsAffinitySchedulingAllowed {
 		affinityCheckerGroupScheduleDisallowedCounter.Inc()
-		return nil
-	}
-
-	// Check if region's voter count matches affinity group's requirement.
-	// Affinity checker only adjusts peer positions, not replica counts.
-	if len(region.GetVoters()) != len(group.VoterStoreIDs) {
-		affinityCheckerReplicaCountMismatchCounter.Inc()
 		return nil
 	}
 
@@ -134,6 +137,29 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	return nil
+}
+
+// isGroupReplicated checks whether the Group’s target Region is in the replicated state.
+func (c *AffinityChecker) isGroupReplicated(region *core.RegionInfo, group *affinity.GroupState) bool {
+	voters := region.GetVoters()
+
+	if len(voters) != len(group.VoterStoreIDs) {
+		return false
+	}
+
+	options := make([]core.RegionCreateOption, 0, len(voters)+1)
+	for i, voterStoreID := range group.VoterStoreIDs {
+		options = append(options, core.WithReplacePeerStore(voters[i].GetStoreId(), voterStoreID))
+		if group.LeaderStoreID == voterStoreID {
+			options = append(options, core.WithLeader(voters[i]))
+		}
+	}
+	if len(options) != len(voters)+1 {
+		return false
+	}
+
+	targetRegion := region.Clone(options...)
+	return filter.IsRegionReplicated(c.cluster, targetRegion)
 }
 
 // createAffinityOperator creates an operator to adjust region replicas according to affinity group constraints.

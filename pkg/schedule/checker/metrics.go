@@ -252,7 +252,6 @@ var (
 	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
 	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
 	affinityCheckerWitnessPeerCounter             = checkerCounter.WithLabelValues(affinityChecker, "witness-peer")
-	affinityCheckerReplicaCountMismatchCounter    = checkerCounter.WithLabelValues(affinityChecker, "replica-count-mismatch")
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")

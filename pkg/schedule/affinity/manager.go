@@ -190,7 +190,7 @@ func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule)
 	}
 }
 
-func (m *Manager) updateAffinityGroupsPeer(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -238,6 +238,13 @@ func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
 	m.affinityRegionCount -= groupInfo.AffinityRegionCount
 	groupInfo.AffinityRegionCount = 0
 	groupInfo.AffinityVer++
+}
+
+// ExpireAffinityGroup changes the Group state to groupExpired.
+func (m *Manager) ExpireAffinityGroup(groupID string) {
+	m.Lock()
+	defer m.Unlock()
+	m.updateGroupStateLocked(groupID, groupExpired)
 }
 
 func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule) {

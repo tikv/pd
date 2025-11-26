@@ -328,7 +328,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}
 
 	// Step 3: Save the information in memory.
-	return m.updateAffinityGroupsPeer(groupID, leaderStoreID, voterStoreIDs)
+	return m.updateGroupPeers(groupID, leaderStoreID, voterStoreIDs)
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
