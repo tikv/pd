@@ -293,10 +293,3 @@ type GroupKeyRanges struct {
 	KeyRanges []keyutil.KeyRange
 	GroupID   string
 }
-
-// GroupWithRanges represents a group with its associated key ranges.
-// TODO: remove it
-type GroupWithRanges struct {
-	Group     *Group
-	KeyRanges []keyutil.KeyRange
-}

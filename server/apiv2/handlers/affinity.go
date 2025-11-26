@@ -128,7 +128,7 @@ func CreateAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	groupsWithRanges := make([]affinity.GroupWithRanges, 0, len(req.AffinityGroups))
+	changes := make([]affinity.GroupKeyRanges, 0, len(req.AffinityGroups))
 	for groupID, input := range req.AffinityGroups {
 		if err := validateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -149,19 +149,15 @@ func CreateAffinityGroups(c *gin.Context) {
 			keyRanges = append(keyRanges, kr.toKeyutilKeyRange())
 		}
 
-		groupsWithRanges = append(groupsWithRanges, affinity.GroupWithRanges{
-			Group: &affinity.Group{
-				ID:            groupID,
-				LeaderStoreID: 0,
-				VoterStoreIDs: nil,
-			},
+		changes = append(changes, affinity.GroupKeyRanges{
+			GroupID:   groupID,
 			KeyRanges: keyRanges,
 		})
 	}
 
-	// Save affinity groups with their key ranges
+	// Create affinity groups with their key ranges
 	// The manager will handle storage persistence, label creation, and in-memory updates atomically
-	if err := manager.SaveAffinityGroups(groupsWithRanges); err != nil {
+	if err := manager.CreateAffinityGroups(changes); err != nil {
 		if errs.ErrAffinityGroupContent.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
@@ -174,12 +170,12 @@ func CreateAffinityGroups(c *gin.Context) {
 	resp := AffinityGroupsResponse{
 		AffinityGroups: make(map[string]*affinity.GroupState, len(req.AffinityGroups)),
 	}
-	for _, gwr := range groupsWithRanges {
-		state := manager.GetAffinityGroupState(gwr.Group.ID)
+	for _, change := range changes {
+		state := manager.GetAffinityGroupState(change.GroupID)
 		if state == nil {
 			state = &affinity.GroupState{}
 		}
-		resp.AffinityGroups[gwr.Group.ID] = state
+		resp.AffinityGroups[change.GroupID] = state
 	}
 	c.IndentedJSON(http.StatusOK, resp)
 }
@@ -215,7 +211,7 @@ func BatchDeleteAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	if err := manager.BatchDeleteAffinityGroups(req.IDs, req.Force); err != nil {
+	if err := manager.DeleteAffinityGroups(req.IDs, req.Force); err != nil {
 		if errs.ErrAffinityGroupNotFound.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
 			return
@@ -274,8 +270,12 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 		return
 	}
 
+	// Convert []GroupKeyRange to []GroupKeyRanges by grouping by GroupID
+	groupedAddOps := groupKeyRangesByGroupID(addOps)
+	groupedRemoveOps := groupKeyRangesByGroupID(removeOps)
+
 	// Call manager to perform batch modify
-	if err := manager.BatchModifyGroupRanges(addOps, removeOps); err != nil {
+	if err := manager.UpdateAffinityGroupKeyRanges(groupedAddOps, groupedRemoveOps); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -329,7 +329,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 		return
 	}
 
-	state, err := manager.UpdateGroupPeers(groupID, req.LeaderStoreID, req.VoterStoreIDs)
+	state, err := manager.UpdateAffinityGroupPeers(groupID, req.LeaderStoreID, req.VoterStoreIDs)
 	if err != nil {
 		if errs.ErrAffinityGroupNotFound.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
@@ -376,7 +376,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 
 	// Delete the affinity group from manager
-	err = manager.DeleteAffinityGroup(groupID, force)
+	err = manager.DeleteAffinityGroups([]string{groupID}, force)
 	if err != nil {
 		if errs.ErrAffinityGroupContent.Equal(err) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -490,4 +490,27 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 		}
 	}
 	return result, nil
+}
+
+// groupKeyRangesByGroupID converts []GroupKeyRange to []GroupKeyRanges by grouping ranges by GroupID.
+func groupKeyRangesByGroupID(ranges []affinity.GroupKeyRange) []affinity.GroupKeyRanges {
+	grouped := make(map[string][]keyutil.KeyRange)
+	order := []string{} // Preserve order of first occurrence
+
+	for _, r := range ranges {
+		if _, exists := grouped[r.GroupID]; !exists {
+			order = append(order, r.GroupID)
+		}
+		grouped[r.GroupID] = append(grouped[r.GroupID], r.KeyRange)
+	}
+
+	result := make([]affinity.GroupKeyRanges, 0, len(grouped))
+	for _, groupID := range order {
+		result = append(result, affinity.GroupKeyRanges{
+			GroupID:   groupID,
+			KeyRanges: grouped[groupID],
+		})
+	}
+
+	return result
 }

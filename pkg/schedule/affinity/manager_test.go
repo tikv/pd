@@ -25,6 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 )
 
@@ -43,16 +44,18 @@ func TestIsRegionAffinity(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	// Create affinity group
-	group := &Group{
-		ID:            "test_group",
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group}})
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "test_group"}})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers("test_group", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 
 	// Test 1: Region not belonging to any affinity group should return false
@@ -148,21 +151,22 @@ func TestBasicGroupOperations(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	// Create a group
-	group1 := &Group{
-		ID:            "group1",
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{1},
-	}
-	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group1}})
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "group1"}})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers("group1", 1, []uint64{1})
 	re.NoError(err)
 	re.True(manager.IsGroupExist("group1"))
 
 	// Delete the group (no key ranges, so force=false should work)
-	err = manager.DeleteAffinityGroup("group1", false)
+	err = manager.DeleteAffinityGroups([]string{"group1"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
 }

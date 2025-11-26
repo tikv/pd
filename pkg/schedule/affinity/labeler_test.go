@@ -43,8 +43,12 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	// Create manager without region labeler for basic validation testing
-	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	// Create manager with region labeler
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	validate := func(ranges []GroupKeyRange) error {
@@ -101,27 +105,24 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	// Create two groups without key ranges for basic testing
-	groupsWithRanges := []GroupWithRanges{
-		{
-			Group: &Group{
-				ID:            "group1",
-				LeaderStoreID: 1,
-				VoterStoreIDs: []uint64{1},
-			},
-		},
-		{
-			Group: &Group{
-				ID:            "group2",
-				LeaderStoreID: 1,
-				VoterStoreIDs: []uint64{1},
-			},
-		},
-	}
-	err = manager.SaveAffinityGroups(groupsWithRanges)
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{
+		{GroupID: "group1"},
+		{GroupID: "group2"},
+	})
+	re.NoError(err)
+
+	// Set peers for the groups
+	_, err = manager.UpdateAffinityGroupPeers("group1", 1, []uint64{1})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers("group2", 1, []uint64{1})
 	re.NoError(err)
 
 	// Verify groups were created
@@ -129,7 +130,9 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re.True(manager.IsGroupExist("group2"))
 
 	// Create a new manager to simulate restart
-	manager2, err := NewManager(ctx, store, storeInfos, conf, nil)
+	regionLabeler2, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager2, err := NewManager(ctx, store, storeInfos, conf, regionLabeler2)
 	re.NoError(err)
 
 	// Verify groups were loaded from storage
@@ -165,15 +168,13 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	gwr := GroupWithRanges{
-		Group: &Group{
-			ID:            "persist",
-			LeaderStoreID: 1,
-			VoterStoreIDs: []uint64{1},
-		},
-		KeyRanges: []keyutil.KeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}},
-	}
-	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{gwr}))
+	keyRanges := []keyutil.KeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
+		GroupID:   "persist",
+		KeyRanges: keyRanges,
+	}}))
+	_, err = manager.UpdateAffinityGroupPeers("persist", 1, []uint64{1})
+	re.NoError(err)
 
 	// RangeCount should be recorded and label rule created.
 	state := manager.GetAffinityGroupState("persist")
@@ -188,16 +189,21 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re.NotNil(state2)
 	re.Equal(1, state2.RangeCount)
 
-	// Remove all ranges and ensure cache/label are cleared.
-	ranges := []GroupKeyRange{{
-		KeyRange: keyutil.KeyRange{
-			StartKey: []byte{0x00},
-			EndKey:   []byte{0x10},
-		},
-		GroupID: "persist",
+	// Update ranges and ensure cache/label are updated.
+	ranges := []keyutil.KeyRange{{
+		StartKey: []byte{0x00},
+		EndKey:   []byte{0x10},
 	}}
-	re.NoError(manager2.updateGroupRanges("persist", ranges))
-	re.NoError(manager2.updateGroupRanges("persist", nil))
+	re.NoError(manager2.UpdateAffinityGroupKeyRanges(
+		[]GroupKeyRanges{{GroupID: "persist", KeyRanges: ranges}},
+		nil,
+	))
+
+	// Remove all ranges and ensure cache/label are cleared.
+	re.NoError(manager2.UpdateAffinityGroupKeyRanges(
+		nil,
+		[]GroupKeyRanges{{GroupID: "persist", KeyRanges: ranges}},
+	))
 	state3 := manager2.GetAffinityGroupState("persist")
 	re.NotNil(state3)
 	re.Equal(0, state3.RangeCount)
@@ -227,12 +233,9 @@ func TestLabelRuleIntegration(t *testing.T) {
 	re.NoError(err)
 
 	// Test: Group with no key ranges should not create label rule
-	group1 := &Group{
-		ID:            "group_no_label",
-		LeaderStoreID: 1,
-		VoterStoreIDs: []uint64{1},
-	}
-	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group1}})
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "group_no_label"}})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers("group_no_label", 1, []uint64{1})
 	re.NoError(err)
 
 	labelRuleID := GetLabelRuleID("group_no_label")
@@ -243,7 +246,79 @@ func TestLabelRuleIntegration(t *testing.T) {
 	re.True(manager.IsGroupExist("group_no_label"))
 
 	// Delete group (no key ranges, so force=false should work)
-	err = manager.DeleteAffinityGroup("group_no_label", false)
+	err = manager.DeleteAffinityGroups([]string{"group_no_label"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group_no_label"))
+}
+
+// TestUpdateAffinityGroupKeyRangesAddToEmptyGroup documents the current failure
+// when adding key ranges to a group created without initial ranges.
+func TestUpdateAffinityGroupKeyRangesAddToEmptyGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	// Create a group without key ranges or peers.
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "empty-group"}}))
+
+	// Adding ranges should succeed; currently it returns "label rule not found".
+	err = manager.UpdateAffinityGroupKeyRanges(
+		[]GroupKeyRanges{{
+			GroupID: "empty-group",
+			KeyRanges: []keyutil.KeyRange{{
+				StartKey: []byte{0x00},
+				EndKey:   []byte{0x01},
+			}},
+		}},
+		nil,
+	)
+	re.NoError(err)
+}
+
+// TestDeleteAffinityGroupsForceMissing verifies force deletion tolerates missing IDs.
+func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	// Create a group with a key range.
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
+		GroupID: "with-range",
+		KeyRanges: []keyutil.KeyRange{{
+			StartKey: []byte{0x00},
+			EndKey:   []byte{0x10},
+		}},
+	}}))
+
+	// TODO: Do we need to fix this?
+	// Force delete should tolerate missing IDs and remove existing groups with ranges.
+	err = manager.DeleteAffinityGroups([]string{"missing-group", "with-range"}, true)
+	re.NoError(err)
+	re.False(manager.IsGroupExist("with-range"))
 }

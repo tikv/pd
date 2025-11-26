@@ -25,6 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 )
 
@@ -42,11 +43,15 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 	}
 	conf := mockconfig.NewTestOptions()
 
-	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	group := &Group{ID: "g", LeaderStoreID: 0, VoterStoreIDs: nil}
-	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{{Group: group}}))
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group.ID}}))
 
 	// First observation makes group effective with store 1.
 	region1 := core.NewRegionInfo(
@@ -96,12 +101,17 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	storeInfos.PutStore(store2)
 
 	conf := mockconfig.NewTestOptions()
-	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	group := &Group{ID: "avail", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
-	re.NoError(manager.SaveAffinityGroups([]GroupWithRanges{{Group: group}}))
-	_, err = manager.UpdateGroupPeers("avail", 1, []uint64{1, 2})
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group.ID}}))
+	_, err = manager.UpdateAffinityGroupPeers("avail", 1, []uint64{1, 2})
 	re.NoError(err)
 	state := manager.GetAffinityGroupState("avail")
 	re.True(state.IsAffinitySchedulingAllowed)
@@ -144,8 +154,12 @@ func TestStoreHealthCheck(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
+	// Create region labeler
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
 	// Create affinity manager
-	manager, err := NewManager(ctx, store, storeInfos, conf, nil)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
 	// Create a test affinity group with healthy stores
@@ -154,7 +168,9 @@ func TestStoreHealthCheck(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2},
 	}
-	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group1}})
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group1.ID}})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers(group1.ID, group1.LeaderStoreID, group1.VoterStoreIDs)
 	re.NoError(err)
 
 	// Create a test affinity group with unhealthy store
@@ -163,7 +179,9 @@ func TestStoreHealthCheck(t *testing.T) {
 		LeaderStoreID: 3,
 		VoterStoreIDs: []uint64{3, 2},
 	}
-	err = manager.SaveAffinityGroups([]GroupWithRanges{{Group: group2}})
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group2.ID}})
+	re.NoError(err)
+	_, err = manager.UpdateAffinityGroupPeers(group2.ID, group2.LeaderStoreID, group2.VoterStoreIDs)
 	re.NoError(err)
 
 	// Verify initial state - all groups should be in effect
