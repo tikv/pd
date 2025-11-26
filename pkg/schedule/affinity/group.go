@@ -126,7 +126,7 @@ type GroupState struct {
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
 func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
-	if region == nil || g.IsBalanceSchedulingAllowed {
+	if region == nil || !g.IsAffinitySchedulingAllowed {
 		return false
 	}
 	// Compare the Leader
@@ -269,16 +269,6 @@ func (m *Manager) AdjustGroup(g *Group) error {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("leader must be in voter stores")
 	}
 	return nil
-}
-
-// IsRegionAffinity checks if a region conforms to its affinity group distribution requirements.
-// Returns true if the region:
-// Belongs to an affinity group and satisfies all distribution constraints:
-//   - Leader is on the expected store
-//   - All voters are on the expected stores
-func (m *Manager) IsRegionAffinity(region *core.RegionInfo) bool {
-	_, isAffinity := m.GetRegionAffinityGroupState(region)
-	return isAffinity
 }
 
 // GroupKeyRange represents a key range with group id.

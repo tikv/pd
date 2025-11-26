@@ -103,20 +103,20 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// Region doesn't belong to any affinity group
 		return nil
 	}
-	// If the Group is not effective, provide the healthy Region information and fetch it again.
+	// If the Group is not affinity scheduling allowed, provide the available Region information and fetch it again.
 	if !group.IsAffinitySchedulingAllowed {
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
-	// Check if the group is in effect
+	// Recheck after fetching.
 	if group == nil || !group.IsAffinitySchedulingAllowed {
-		affinityCheckerGroupNotInEffectCounter.Inc()
+		affinityCheckerGroupScheduleDisallowedCounter.Inc()
 		return nil
 	}
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
-		return c.MergeCheck(region)
+		return c.MergeCheck(region, group)
 	}
 
 	// Create operator to adjust region according to affinity group
@@ -239,48 +239,14 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 // It follows similar logic to merge_checker but with affinity-specific constraints:
 // - Does NOT skip recently split or recently started regions (as requested)
 // - Only merges regions within the same affinity group
-func (c *AffinityChecker) MergeCheck(region *core.RegionInfo) []*operator.Operator {
+func (c *AffinityChecker) MergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
 	affinityMergeCheckerCounter.Inc()
-
-	if c.IsPaused() {
-		affinityMergeCheckerPausedCounter.Inc()
-		return nil
-	}
-
-	// Check if region has a leader
-	if region.GetLeader() == nil {
-		affinityMergeCheckerNoLeaderCounter.Inc()
-		return nil
-	}
-
-	// Check if region belongs to an affinity group and is an affinity region
-	group, _ := c.affinityManager.GetRegionAffinityGroupState(region)
-	if group == nil {
-		// Region doesn't belong to any affinity group
-		affinityMergeCheckerNoAffinityGroupCounter.Inc()
-		return nil
-	}
-
-	if !c.affinityManager.IsRegionAffinity(region) {
-		affinityMergeCheckerNotAffinityRegionCounter.Inc()
-		return nil
-	}
 
 	// Region is not small enough
 	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
 	maxKeys := maxSize * config.RegionSizeToKeysRatio
 	if !region.NeedMerge(maxSize, maxKeys) {
 		affinityMergeCheckerNoNeedCounter.Inc()
-		return nil
-	}
-
-	if !filter.IsRegionHealthy(region) {
-		affinityMergeCheckerUnhealthyRegionCounter.Inc()
-		return nil
-	}
-
-	if !filter.IsRegionReplicated(c.cluster, region) {
-		affinityMergeCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
 
@@ -333,14 +299,14 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 	}
 
 	// Check if adjacent region belongs to the same affinity group
-	adjacentGroup, _ := c.affinityManager.GetRegionAffinityGroupState(adjacent)
+	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent)
 	if adjacentGroup == nil || adjacentGroup.ID != group.ID {
 		// Adjacent region is not in the same affinity group
 		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
 		return false
 	}
 
-	if !c.affinityManager.IsRegionAffinity(adjacent) {
+	if !isAffinity {
 		affinityMergeCheckerAdjNotAffinityCounter.Inc()
 		return false
 	}

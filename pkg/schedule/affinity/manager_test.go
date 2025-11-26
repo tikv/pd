@@ -29,8 +29,8 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
-// TestIsRegionAffinity tests the IsRegionAffinity method of Manager.
-func TestIsRegionAffinity(t *testing.T) {
+// TestGetRegionAffinityGroupState tests the GetRegionAffinityGroupState method of Manager.
+func TestGetRegionAffinityGroupState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -67,13 +67,15 @@ func TestIsRegionAffinity(t *testing.T) {
 		}},
 		&metapb.Peer{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
 	)
-	re.False(manager.IsRegionAffinity(region1), "Region not in group should return false")
+	_, isAffinity := manager.GetRegionAffinityGroupState(region1)
+	re.False(isAffinity, "Region not in group should return false")
 
 	// Add region to group
 	manager.SetRegionGroup(1, "test_group")
 
 	// Test 2: Region conforming to affinity requirements should return true
-	re.True(manager.IsRegionAffinity(region1), "Region conforming to affinity should return true")
+	_, isAffinity = manager.GetRegionAffinityGroupState(region1)
+	re.True(isAffinity, "Region conforming to affinity should return true")
 
 	// Test 3: Region with wrong leader should return false
 	region2 := core.NewRegionInfo(
@@ -85,7 +87,8 @@ func TestIsRegionAffinity(t *testing.T) {
 		&metapb.Peer{Id: 22, StoreId: 2, Role: metapb.PeerRole_Voter}, // Leader on store 2, not 1
 	)
 	manager.SetRegionGroup(2, "test_group")
-	re.False(manager.IsRegionAffinity(region2), "Region with wrong leader should return false")
+	_, isAffinity = manager.GetRegionAffinityGroupState(region2)
+	re.False(isAffinity, "Region with wrong leader should return false")
 
 	// Test 4: Region with wrong voter stores should return false
 	region3 := core.NewRegionInfo(
@@ -97,7 +100,8 @@ func TestIsRegionAffinity(t *testing.T) {
 		&metapb.Peer{Id: 31, StoreId: 1, Role: metapb.PeerRole_Voter},
 	)
 	manager.SetRegionGroup(3, "test_group")
-	re.False(manager.IsRegionAffinity(region3), "Region with wrong voter stores should return false")
+	_, isAffinity = manager.GetRegionAffinityGroupState(region3)
+	re.False(isAffinity, "Region with wrong voter stores should return false")
 
 	// Test 5: Region with different number of voters should return false
 	region4 := core.NewRegionInfo(
@@ -108,7 +112,8 @@ func TestIsRegionAffinity(t *testing.T) {
 		&metapb.Peer{Id: 41, StoreId: 1, Role: metapb.PeerRole_Voter},
 	)
 	manager.SetRegionGroup(4, "test_group")
-	re.False(manager.IsRegionAffinity(region4), "Region with wrong number of voters should return false")
+	_, isAffinity = manager.GetRegionAffinityGroupState(region4)
+	re.False(isAffinity, "Region with wrong number of voters should return false")
 
 	// Test 6: Region without leader should return false
 	region5 := core.NewRegionInfo(
@@ -120,7 +125,8 @@ func TestIsRegionAffinity(t *testing.T) {
 		nil, // No leader
 	)
 	manager.SetRegionGroup(5, "test_group")
-	re.False(manager.IsRegionAffinity(region5), "Region without leader should return false")
+	_, isAffinity = manager.GetRegionAffinityGroupState(region5)
+	re.False(isAffinity, "Region without leader should return false")
 
 	// Test 7: Group not in effect should return false
 	groupInfo := manager.GetGroups()["test_group"]
@@ -134,7 +140,8 @@ func TestIsRegionAffinity(t *testing.T) {
 		&metapb.Peer{Id: 61, StoreId: 1, Role: metapb.PeerRole_Voter},
 	)
 	manager.SetRegionGroup(6, "test_group")
-	re.False(manager.IsRegionAffinity(region6), "Group not in effect should return false")
+	_, isAffinity = manager.GetRegionAffinityGroupState(region6)
+	re.False(isAffinity, "Group not in effect should return false")
 }
 
 // TestBasicGroupOperations tests basic group CRUD operations

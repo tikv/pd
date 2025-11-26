@@ -732,10 +732,17 @@ type AffinityGroup struct {
 // AffinityGroupState defines the runtime state of an affinity group.
 type AffinityGroupState struct {
 	AffinityGroup
-	Effect              bool `json:"effect"`
-	RangeCount          int  `json:"range_count"`
-	RegionCount         int  `json:"region_count"`
-	AffinityRegionCount int  `json:"affinity_region_count"`
+	IsBalanceSchedulingAllowed  bool `json:"is_balance_scheduling_allowed"`
+	IsAffinitySchedulingAllowed bool `json:"is_affinity_scheduling_allowed"`
+	RangeCount                  int  `json:"range_count"`
+	RegionCount                 int  `json:"region_count"`
+	AffinityRegionCount         int  `json:"affinity_region_count"`
+}
+
+// IsAvailable indicates that the AffinityGroup has completed affinity scheduling.
+// nolint
+func (s *AffinityGroupState) IsAvailable() bool {
+	return s.IsAffinitySchedulingAllowed && s.AffinityRegionCount == s.RegionCount
 }
 
 // AffinityGroupsResponse defines the success response for affinity group operations.
