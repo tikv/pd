@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"context"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -211,6 +213,47 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re.NotNil(state3)
 	re.Equal(0, state3.RangeCount)
 	re.Nil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))
+}
+
+func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	// Inject a leftover label rule for a non-existent group "ghost".
+	plan := regionLabeler.NewPlan()
+	rule := &labeler.LabelRule{
+		ID:       GetLabelRuleID("ghost"),
+		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: "ghost"}},
+		RuleType: labeler.KeyRange,
+		Data: []any{
+			map[string]any{"start_key": hex.EncodeToString([]byte{0x01}), "end_key": hex.EncodeToString([]byte{0x02})},
+		},
+	}
+	re.NoError(plan.SetLabelRule(rule))
+	re.NoError(endpoint.RunBatchOpInTxn(ctx, store, plan.CommitOps()))
+	plan.Apply()
+
+	// Manager initialization should ignore the unknown label rule.
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	re.False(manager.IsGroupExist("ghost"))
+
+	// Creating a new group with overlapping range should succeed (ghost is ignored).
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{
+		GroupID: "real",
+		KeyRanges: []keyutil.KeyRange{{
+			StartKey: []byte{0x01},
+			EndKey:   []byte{0x02},
+		}},
+	}})
+	re.NoError(err)
 }
 
 // TestLabelRuleIntegration tests basic label rule creation and deletion

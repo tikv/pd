@@ -332,7 +332,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
-// Remove operations are executed before add operations to handle range migration scenarios.
+// Note: Firstly add first, secondly validate without considering remove, then remove finnaly.
 func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRanges) error {
 	toAdd := make(map[string][]GroupKeyRange, len(addOps))
 	toRemove := make(map[string][]GroupKeyRange, len(removeOps))
@@ -692,6 +692,13 @@ func (m *Manager) loadRegionLabel() error {
 			return true
 		}
 
+		if _, exists := m.groups[groupID]; !exists {
+			log.Debug("found label rule for unknown affinity group, skip rebuilding",
+				zap.String("group-id", groupID),
+				zap.String("rule-id", rule.ID))
+			return true
+		}
+
 		ranges, err := extractKeyRangesFromLabelRule(rule)
 		if err != nil {
 			log.Warn("failed to extract key ranges from label rule during rebuild",
@@ -708,13 +715,7 @@ func (m *Manager) loadRegionLabel() error {
 		}
 
 		// Associate the label rule with the group
-		if _, ok = m.keyRanges[groupID]; !ok {
-			log.Warn("found label rule for unknown affinity group",
-				zap.String("group-id", groupID),
-				zap.String("rule-id", rule.ID))
-		} else {
-			m.updateGroupLabelRuleLocked(groupID, rule)
-		}
+		m.updateGroupLabelRuleLocked(groupID, rule)
 
 		return true
 	})

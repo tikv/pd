@@ -222,13 +222,20 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		storeID := learner.GetStoreId()
 		// Only add learner if it's not already in the voters list
 		// (in case there's a conflict, voters take precedence)
-		if _, exists := roles[storeID]; !exists {
+		if existingRole, exists := roles[storeID]; !exists {
 			roles[storeID] = placement.Learner
+		} else if existingRole != placement.Learner {
+			affinityCheckerLearnerPeerConflictCounter.Inc()
+			log.Debug("learner peer conflicts with affinity voter, voter takes precedence",
+				zap.Uint64("region-id", region.GetID()),
+				zap.String("group-id", group.ID),
+				zap.Uint64("store-id", storeID),
+				zap.String("conflicting-role", string(existingRole)))
+			return nil
 		}
 	}
 
 	// Build target peers map with same roles
-	// TODO: Consider preserving witness flags in the future if needed
 	peers := make(map[uint64]*metapb.Peer)
 	for storeID, role := range roles {
 		peers[storeID] = &metapb.Peer{

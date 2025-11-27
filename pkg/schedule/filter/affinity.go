@@ -48,6 +48,15 @@ func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusOK
 }
 
+// For affinity regions, we use calculation: (maxSize + buffer) * multiplier
+// Derived from default values:
+//   - Default MaxMergeRegionSize = 54MB
+//   - Default region-split-size = 256MB
+const (
+	affinityRegionSizeBufferMB   = 10
+	affinityRegionSizeMultiplier = 4
+)
+
 // AllowAutoSplit returns true if the region can be auto split
 func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reason pdpb.AutoSplitReason) bool {
 	if region == nil {
@@ -62,15 +71,15 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 		return true
 	}
 
-	maxSize := int64(cluster.GetCheckerConfig().GetMaxAffinityMergeRegionSize())
-	if maxSize == 0 {
+	configSize := int64(cluster.GetCheckerConfig().GetMaxAffinityMergeRegionSize())
+	if configSize == 0 {
 		return true
 	}
 
 	if affinityManager := cluster.GetAffinityManager(); affinityManager != nil {
 		_, isAffinity := affinityManager.GetRegionAffinityGroupState(region)
 		if isAffinity {
-			maxSize = (maxSize + 10) * 4
+			maxSize := (configSize + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
 			maxKeys := maxSize * config.RegionSizeToKeysRatio
 			// Only block splitting when the Region is in the affinity state.
 			// But still allow splitting if the Region size is too big.

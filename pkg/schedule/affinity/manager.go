@@ -34,6 +34,10 @@ import (
 const (
 	// labelKey is the key for affinity group id in region label.
 	labelKey = "affinity_group"
+	// defaultDegradedExpirationSeconds is the default expiration time for a degraded group.
+	// After a group becomes degraded , it will automatically
+	// expire after this duration if the stores don't recover.
+	defaultDegradedExpirationSeconds = 600 // 10 minutes
 )
 
 type regionCache struct {
@@ -133,8 +137,7 @@ func (m *Manager) IsAvailable() bool {
 }
 
 func (*Manager) getExpiredAt() uint64 {
-	// TODO: How to make the decision?
-	return uint64(time.Now().Unix()) + 600
+	return uint64(time.Now().Unix()) + defaultDegradedExpirationSeconds
 }
 
 func (m *Manager) initGroupLocked(group *Group) {
@@ -345,16 +348,7 @@ func (m *Manager) InvalidCache(regionID uint64) {
 
 	m.Lock()
 	defer m.Unlock()
-	cache, ok := m.regions[regionID]
-	if !ok {
-		return
-	}
-	if cache.isAffinity && cache.affinityVer == cache.groupInfo.AffinityVer {
-		cache.groupInfo.AffinityRegionCount--
-		m.affinityRegionCount--
-	}
-	delete(m.regions, regionID)
-	delete(cache.groupInfo.Regions, regionID)
+	m.deleteCacheLocked(regionID)
 }
 
 func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) {
