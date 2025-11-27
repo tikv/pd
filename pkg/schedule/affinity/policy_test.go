@@ -207,5 +207,5 @@ func TestStoreHealthCheck(t *testing.T) {
 	manager.checkStoresAvailability()
 
 	// Group2 should be restored to effect state
-	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
+	re.True(manager.groups["group2"].IsAffinitySchedulingAllowed())
 }

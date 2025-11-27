@@ -511,6 +511,7 @@ func (m *Manager) getCurrentRanges(groupID string) ([]GroupKeyRange, error) {
 
 // applyRemoveOps filters out ranges that match remove operations.
 // Optimized with a map for O(n+m) complexity instead of O(n*m).
+// currentRanges has been sorted by start key and not overlapping.
 func applyRemoveOps(currentRanges []GroupKeyRange, removes []GroupKeyRange) ([]GroupKeyRange, error) {
 	if len(removes) == 0 {
 		return currentRanges, nil
@@ -613,6 +614,11 @@ func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) ([]GroupKeyRange, er
 // checkKeyRangesOverlap checks if two key ranges overlap.
 // Returns true if [start1, end1) and [start2, end2) have any overlap.
 func checkKeyRangesOverlap(start1, end1, start2, end2 []byte) bool {
+	// If the start or end keys are the same, they overlap
+	if bytes.Equal(start1, start2) || bytes.Equal(end1, end2) {
+		return true
+	}
+
 	// Handle empty keys (representing infinity)
 	if len(start1) == 0 && len(end1) == 0 {
 		return true // Range covers everything
@@ -656,12 +662,7 @@ func (m *Manager) validateNoKeyRangeOverlap(newRanges []GroupKeyRange) error {
 	// Then, check for overlaps with existing key ranges from in-memory cache
 	// This avoids repeated labeler lock acquisition for better performance
 	for _, newRange := range newRanges {
-		for groupID, existingRanges := range m.keyRanges {
-			// Skip if it's the same group (updating existing group)
-			if newRange.GroupID == groupID {
-				continue
-			}
-
+		for _, existingRanges := range m.keyRanges {
 			for _, existingRange := range existingRanges {
 				if checkKeyRangesOverlap(
 					newRange.StartKey, newRange.EndKey,
