@@ -92,7 +92,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	// make sure the ts won't fall back
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
-		t.tsoMux.logical = 0
+		t.tsoMux.logical = t.uniqueIndex
 	}
 }
 
@@ -114,7 +114,7 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physica
 		return 0, t.uniqueIndex
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
-	t.tsoMux.logical += count*t.maxIndex + t.uniqueIndex
+	t.tsoMux.logical += count * t.maxIndex
 	logical = t.tsoMux.logical
 	return physical, logical
 }
@@ -399,6 +399,6 @@ func (t *timestampOracle) resetTimestamp() {
 	defer t.tsoMux.Unlock()
 	log.Info("reset the timestamp in memory", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.tsoMux.physical = typeutil.ZeroTime
-	t.tsoMux.logical = 0
+	t.tsoMux.logical = t.uniqueIndex
 	t.lastSavedTime.Store(typeutil.ZeroTime)
 }

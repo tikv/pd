@@ -81,6 +81,40 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+func TestUniqueIndex(t *testing.T) {
+	re := require.New(t)
+	testUniqueIndex(re, 2, 1)
+	testUniqueIndex(re, 2, 0)
+}
+
+func testUniqueIndex(re *require.Assertions, maxIndex int64, uniqueIndex int64) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.TSOMaxIndex = maxIndex
+		conf.TSOUniqueIndex = uniqueIndex
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	endpointsWithWrongURL := append([]string{}, endpoints...)
+	// inject wrong http scheme
+	for i := range endpointsWithWrongURL {
+		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
+	}
+	cli := setupCli(ctx, re, endpointsWithWrongURL)
+	defer cli.Close()
+
+	var l1 int64
+	testutil.Eventually(re, func() bool {
+		_, l1, err = cli.GetTS(context.TODO())
+		return err == nil
+	})
+	re.Equal(uniqueIndex, l1%maxIndex)
+}
+
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
