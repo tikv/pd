@@ -313,6 +313,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.isSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.markSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.unmarkSnapshotRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/pitr-restore-mode", adminHandler.isPitrRestoreMode, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/pitr-restore-mode", adminHandler.markPitrRestoreMode, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/pitr-restore-mode", adminHandler.unmarkPitrRestoreMode, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.recoverAllocID, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)

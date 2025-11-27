@@ -110,7 +110,54 @@ func TestPlacementRule(t *testing.T) {
 	re.Error(err)
 }
 
-func TestBalanceRangePlan(t *testing.T) {
+func TestIsBalanced(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "", ""}))
+	re.NoError(err)
+	sc := scheduler.(*balanceRangeScheduler)
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 1)
+	}
+	tc.AddLeaderRegionWithRange(1, fmt.Sprintf("%20d", 1), fmt.Sprintf("%20d", 2), 1, 2, 3)
+
+	// only one region, so it is balanced
+	re.False(sc.IsScheduleAllowed(tc))
+	re.True(sc.isBalanced())
+	re.Equal(finished, sc.job.Status)
+	// add more regions
+	for i := range 10 {
+		tc.AddLeaderRegionWithRange(uint64(i+2), fmt.Sprintf("%20d", i), fmt.Sprintf("%20d", i+1), 1, 2, 3)
+	}
+	now := time.Now()
+	re.NoError(sc.conf.addJob(&balanceRangeSchedulerJob{
+		Engine:  core.EngineTiKV,
+		Rule:    core.LeaderScatter,
+		Ranges:  []keyutil.KeyRange{keyutil.NewKeyRange("", "")},
+		Start:   &now,
+		Timeout: 10 * time.Minute,
+	}))
+	km := tc.GetKeyRangeManager()
+	re.True(km.IsEmpty())
+	re.True(sc.IsScheduleAllowed(tc))
+	re.False(sc.isBalanced())
+	re.Equal(running, sc.job.Status)
+	re.False(km.IsEmpty())
+
+	// cancel this job
+	re.NoError(sc.conf.deleteJob(1))
+	re.Equal(cancelled, sc.job.Status)
+	re.False(km.IsEmpty())
+	// no any pending jobs
+	re.False(sc.IsScheduleAllowed(tc))
+	// must clean the job status
+	re.True(km.IsEmpty())
+}
+
+func TestPrepareBalanceRange(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -139,7 +186,9 @@ func TestTIKVEngine(t *testing.T) {
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
-	re.True(scheduler.IsScheduleAllowed(tc))
+	re.NoError(err)
+	// no any stores
+	re.False(scheduler.IsScheduleAllowed(tc))
 	km := tc.GetKeyRangeManager()
 	kr := keyutil.NewKeyRange("", "")
 	ranges := km.GetNonOverlappingKeyRanges(&kr)
@@ -164,6 +213,11 @@ func TestTIKVEngine(t *testing.T) {
 	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
 	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
 	// case1: transfer leader from store 1 to store 3
+	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
@@ -174,6 +228,7 @@ func TestTIKVEngine(t *testing.T) {
 	// case2: move leader from store 1 to store 4
 	tc.AddLeaderRegionWithRange(6, "160", "180", 3, 1, 3)
 	tc.AddLeaderStore(4, 0)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
@@ -232,7 +287,8 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(100+i), strconv.Itoa(100+i+1),
 			1, uint64(follower1), uint64(follower2))
 	}
-	// case1: store 1 has 100 peers, the others has 50 peer, it suiter for the location label setting.
+	// case1: store 1 has 100 peers, the others has 50 peer, it suited for the location label setting.
+	re.False(scheduler.IsScheduleAllowed(tc))
 	op, _ := scheduler.Schedule(tc, true)
 	re.Empty(op)
 
@@ -242,6 +298,11 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(100+i), strconv.Itoa(200+i), strconv.Itoa(200+i+1),
 			1, 2, 4)
 	}
+	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"peer-scatter", "tikv", "1h", "test", "100", "300"}))
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ := scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	re.Len(ops, 1)
@@ -253,6 +314,7 @@ func TestLocationLabel(t *testing.T) {
 		opt := core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 24 * 10))
 		tc.PutStore(store.Clone(opt))
 	}
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	re.Len(ops, 1)
@@ -294,6 +356,7 @@ func TestTIFLASHEngine(t *testing.T) {
 			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
 	re.NoError(err)
 	// tiflash-4 only has 1 region, so it doesn't need to balance
+	re.False(scheduler.IsScheduleAllowed(tc))
 	ops, _ := scheduler.Schedule(tc, false)
 	re.Empty(ops)
 
@@ -301,6 +364,11 @@ func TestTIFLASHEngine(t *testing.T) {
 	for i := 2; i <= 3; i++ {
 		tc.AddRegionWithLearner(uint64(i), 1, []uint64{2, 3}, []uint64{4})
 	}
+	scheduler, err = CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
+	re.NoError(err)
+	re.True(scheduler.IsScheduleAllowed(tc))
 	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
@@ -388,12 +456,12 @@ func TestJobGC(t *testing.T) {
 	}
 	re.NoError(conf.addJob(job))
 	re.NoError(conf.deleteJob(1))
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Len(conf.jobs, 1)
 
 	expiredTime := now.Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &expiredTime
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Empty(conf.jobs)
 }
 
@@ -425,16 +493,16 @@ func TestPersistFail(t *testing.T) {
 	re.ErrorContains(conf.deleteJob(1), errMsg)
 	re.NotEqual(cancelled, conf.jobs[0].Status)
 
-	re.ErrorContains(conf.begin(0), errMsg)
+	re.ErrorContains(conf.beginLocked(0), errMsg)
 	re.NotEqual(running, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = running
-	re.ErrorContains(conf.finish(0), errMsg)
+	re.ErrorContains(conf.finishLocked(0), errMsg)
 	re.NotEqual(finished, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = cancelled
 	finishedTime := time.Now().Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &finishedTime
-	re.ErrorContains(conf.gc(), errMsg)
+	re.ErrorContains(conf.gcLocked(), errMsg)
 	re.Len(conf.jobs, 1)
 }

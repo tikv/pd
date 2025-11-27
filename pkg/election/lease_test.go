@@ -26,7 +26,7 @@ import (
 
 func TestLease(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Create the lease.
@@ -85,7 +85,7 @@ func TestLeaseKeepAlive(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Create the lease.

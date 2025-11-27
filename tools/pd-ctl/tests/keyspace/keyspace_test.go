@@ -150,7 +150,7 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 
 func (suite *keyspaceTestSuite) TestShowKeyspace() {
 	re := suite.Require()
-	keyspaceName := "DEFAULT"
+	keyspaceName := constant.DefaultKeyspaceName
 	keyspaceID := uint32(0)
 	var k1, k2 api.KeyspaceMeta
 	// Show by name.
@@ -261,7 +261,7 @@ func (suite *keyspaceTestSuite) TestListKeyspace() {
 	re.NoError(json.Unmarshal(output, &resp))
 	re.Len(resp.Keyspaces, 11)
 	re.Empty(resp.NextPageToken) // No next page token since we load them all.
-	re.Equal("DEFAULT", resp.Keyspaces[0].GetName())
+	re.Equal(constant.DefaultKeyspaceName, resp.Keyspaces[0].GetName())
 	for i, meta := range resp.Keyspaces[1:] {
 		re.Equal(fmt.Sprintf("test_keyspace_%d", i), meta.GetName())
 		re.Equal(fmt.Sprintf("bar_%d", i), meta.Config["foo"])
@@ -288,7 +288,7 @@ func (suite *keyspaceTestSuite) TestKeyspaceGroupUninitialized() {
 	kgm := leaderServer.GetKeyspaceGroupManager()
 	leaderServer.SetKeyspaceGroupManager(nil)
 	defer leaderServer.SetKeyspaceGroupManager(kgm)
-	keyspaceName := "DEFAULT"
+	keyspaceName := constant.DefaultKeyspaceName
 	keyspaceID := uint32(0)
 	args := []string{"-u", suite.pdAddr, "keyspace", "show", "name", keyspaceName}
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)

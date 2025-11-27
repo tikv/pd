@@ -51,7 +51,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -1525,7 +1524,7 @@ func TestStaleTermHeartbeat(t *testing.T) {
 		Term:            5,
 		ApproximateSize: 10,
 	}
-	flowRoundDivisor := leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit
+	flowRoundDivisor := core.GetFlowRoundDivisorByDigit(leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit)
 	region := core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
@@ -1626,7 +1625,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	leader = tc.WaitLeader()
 	re.NotEmpty(leader)
 	leaderServer = tc.GetLeaderServer()
-	rc1 := leaderServer.GetServer().GetRaftCluster()
+	rc1 := leaderServer.GetRaftCluster()
 	re.NotNil(rc1)
 	err = rc1.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
@@ -1651,7 +1650,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	leader = tc.WaitLeader()
 	re.NotEmpty(leader)
 	leaderServer = tc.GetLeaderServer()
-	rc = leaderServer.GetServer().GetRaftCluster()
+	rc = leaderServer.GetRaftCluster()
 	re.NotNil(rc)
 	err = rc.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
@@ -2000,9 +1999,8 @@ func TestExternalTimestamp(t *testing.T) {
 		ts = resp.GetTimestamp()
 		// get global ts
 		req2 := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      1,
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  1,
 		}
 		re.NoError(tsoClient.Send(req2))
 		resp2, err := tsoClient.Recv()
@@ -2024,9 +2022,8 @@ func TestExternalTimestamp(t *testing.T) {
 		re.NoError(err)
 		// get global ts again
 		req5 := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      1,
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  1,
 		}
 		re.NoError(tsoClient.Send(req5))
 		resp5, err := tsoClient.Recv()

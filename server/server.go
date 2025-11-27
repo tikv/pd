@@ -65,6 +65,7 @@ import (
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -172,6 +173,8 @@ type Server struct {
 	keyspaceManager *keyspace.Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
+	// metering writer
+	meteringWriter *metering.Writer
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -296,9 +299,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	failpoint.Inject("useGlobalRegistry", func() {
-		s.registry = registry.ServerServiceRegistry
-	})
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the microservices REST path.
@@ -481,6 +481,17 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	// Only start the metering writer if a valid metering config is provided.
+	if len(s.cfg.Metering.Type) > 0 {
+		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
+		if err != nil {
+			log.Warn("failed to initialize the metering writer", errs.ZapError(err))
+		} else {
+			s.meteringWriter.Start()
+		}
+	} else {
+		log.Info("no metering config provided, the metering writer will not be started")
+	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
@@ -534,6 +545,9 @@ func (s *Server) Close() {
 	}
 	if s.tsoAllocator != nil {
 		s.tsoAllocator.Close()
+	}
+	if s.meteringWriter != nil {
+		s.meteringWriter.Stop()
 	}
 
 	if s.client != nil {
@@ -915,6 +929,11 @@ func (s *Server) SetKeyspaceGroupManager(keyspaceGroupManager *keyspace.GroupMan
 	s.keyspaceGroupManager = keyspaceGroupManager
 }
 
+// GetMeteringWriter returns the metering writer.
+func (s *Server) GetMeteringWriter() *metering.Writer {
+	return s.meteringWriter
+}
+
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
@@ -1056,7 +1075,7 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range rc.GetStores() {
-				if !s.IsRemoved() && s.IsTiFlash() {
+				if !s.IsRemoved() && !s.IsTiKV() {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
@@ -1964,6 +1983,36 @@ func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
 func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	log.Info("unmark snapshot recovering")
 	_, err := s.client.Delete(ctx, keypath.RecoveringMarkPath())
+	// if other client already unmarked, return success too
+	return err
+}
+
+// MarkPitrRestoreMode mark pd that we're pitr restore mode
+func (s *Server) MarkPitrRestoreMode() error {
+	log.Info("mark pitr restore mode")
+	markPath := keypath.PitrRestoreModeMarkPath()
+	// the value doesn't matter, set to a static string
+	_, err := kv.NewSlowLogTxn(s.client).
+		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
+		Then(clientv3.OpPut(markPath, "on")).
+		Commit()
+	// if other client already marked, return success too
+	return err
+}
+
+// IsPitrRestoreMode check whether pitr-restore-mode-mark marked
+func (s *Server) IsPitrRestoreMode(ctx context.Context) (bool, error) {
+	resp, err := s.client.Get(ctx, keypath.PitrRestoreModeMarkPath())
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
+}
+
+// UnmarkPitrRestoreMode unmark pitr restore mode mark
+func (s *Server) UnmarkPitrRestoreMode(ctx context.Context) error {
+	log.Info("unmark pitr restore mode")
+	_, err := s.client.Delete(ctx, keypath.PitrRestoreModeMarkPath())
 	// if other client already unmarked, return success too
 	return err
 }

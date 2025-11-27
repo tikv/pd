@@ -698,7 +698,7 @@ func TestBucketHeartbeat(t *testing.T) {
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.Error(cluster.processReportBuckets(buckets))
+	re.Error(cluster.processRegionBuckets(buckets))
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
@@ -711,18 +711,18 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1]))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	re.NoError(cluster.processReportBuckets(buckets))
+	re.NoError(cluster.processRegionBuckets(buckets))
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case3: the bucket version is same.
-	re.NoError(cluster.processReportBuckets(buckets))
+	re.NoError(cluster.processRegionBuckets(buckets))
 	// case4: the bucket version is changed.
 	newBuckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.NoError(cluster.processReportBuckets(newBuckets))
+	re.NoError(cluster.processRegionBuckets(newBuckets))
 	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case5: region update should inherit buckets.
@@ -1092,12 +1092,12 @@ func TestConcurrentReportBucket(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
-		err := cluster.processReportBuckets(bucket1)
+		err := cluster.processRegionBuckets(bucket1)
 		re.NoError(err)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
-	re.NoError(cluster.processReportBuckets(bucket2))
+	re.NoError(cluster.processRegionBuckets(bucket2))
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }
@@ -3119,7 +3119,7 @@ func TestShouldRun(t *testing.T) {
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(7, tc.GetClusterNotFromStorageRegionsCnt())
+	re.Equal(7, tc.GetNotFromStorageRegionsCnt())
 }
 
 func TestShouldRunWithNonLeaderRegions(t *testing.T) {
@@ -3162,7 +3162,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(9, tc.GetClusterNotFromStorageRegionsCnt())
+	re.Equal(9, tc.GetNotFromStorageRegionsCnt())
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())
@@ -3175,10 +3175,11 @@ func TestAddScheduler(t *testing.T) {
 	defer cleanup()
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), len(sc.DefaultSchedulers))
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	// Remove all default schedulers (dynamically adjusts for NextGen vs Classic)
+	for _, schedulerConfig := range sc.DefaultSchedulers {
+		schedulerType := types.ConvertOldStrToType[schedulerConfig.Type]
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3286,10 +3287,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+2)
 
 	// remove all default schedulers
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	for _, schedulerConfig := range sc.DefaultSchedulers {
+		schedulerType := types.ConvertOldStrToType[schedulerConfig.Type]
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3399,11 +3400,10 @@ func TestRemoveScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+1)
 
 	// remove all schedulers
-	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	for _, schedulerType := range types.DefaultSchedulers {
+		re.NoError(controller.RemoveScheduler(schedulerType.String()))
+	}
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
@@ -3918,6 +3918,78 @@ func TestConcurrentStoreStats(t *testing.T) {
 	wg.Wait()
 }
 
+func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	// Add stores with low space to the cluster.
+	storeCount := uint64(3)
+	for i := uint64(1); i <= storeCount; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			Version:       "2.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Preparing,
+		}
+		err = cluster.PutMetaStore(store)
+		re.NoError(err)
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100 * 1024, // 100 GiB
+			Available:   1 * 1024,   // 1 GiB
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	re.Equal(int(storeCount), cluster.GetStoreCount())
+
+	upStoreCount := 0
+	for _, s := range cluster.GetStores() {
+		isUp, _ := cluster.checkStore(s.GetID())
+		if isUp {
+			upStoreCount++
+		}
+	}
+	re.Equal(0, upStoreCount, "upStoreCount should be 0 when store is low space")
+
+	// Add stores to the cluster.
+	for i := uint64(1); i <= storeCount; i++ {
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100 * 1024, // 100 GiB
+			Available:   50 * 1024,  // 50 GiB
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	for _, s := range cluster.GetStores() {
+		isUp, _ := cluster.checkStore(s.GetID())
+		if isUp {
+			upStoreCount++
+		}
+	}
+	re.Equal(int(storeCount), upStoreCount, "upStoreCount should be 3 when store is not low space")
+}
+
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
@@ -4081,7 +4153,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 		}
 		requests = append(requests, request)
 	}
-	flowRoundDivisor := opt.GetPDServerConfig().FlowRoundByDigit
+	flowRoundDivisor := core.GetFlowRoundDivisorByDigit(opt.GetPDServerConfig().FlowRoundByDigit)
 
 	// Reset timer after setup
 	b.ResetTimer()

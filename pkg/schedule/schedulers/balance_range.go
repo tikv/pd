@@ -46,6 +46,7 @@ import (
 var (
 	defaultJobTimeout = 30 * time.Minute
 	reserveDuration   = 7 * 24 * time.Hour
+	reportInterval    = 10 * time.Second
 )
 
 type balanceRangeSchedulerHandler struct {
@@ -150,8 +151,8 @@ func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r 
 }
 
 type balanceRangeSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
+	syncutil.Mutex
 	jobs []*balanceRangeSchedulerJob
 }
 
@@ -199,11 +200,9 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 	return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
 }
 
-func (conf *balanceRangeSchedulerConfig) gc() error {
+func (conf *balanceRangeSchedulerConfig) gcLocked() error {
 	needGC := false
 	gcIdx := 0
-	conf.Lock()
-	defer conf.Unlock()
 	for idx, job := range conf.jobs {
 		if job.isComplete() && job.expired(reserveDuration) {
 			needGC = true
@@ -247,9 +246,7 @@ func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (conf *balanceRangeSchedulerConfig) begin(index int) error {
-	conf.Lock()
-	defer conf.Unlock()
+func (conf *balanceRangeSchedulerConfig) beginLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != pending {
 		return errors.New("the job is not pending")
@@ -261,10 +258,7 @@ func (conf *balanceRangeSchedulerConfig) begin(index int) error {
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) finish(index int) error {
-	conf.Lock()
-	defer conf.Unlock()
-
+func (conf *balanceRangeSchedulerConfig) finishLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != running {
 		return errors.New("the job is not running")
@@ -276,9 +270,7 @@ func (conf *balanceRangeSchedulerConfig) finish(index int) error {
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob) {
-	conf.RLock()
-	defer conf.RUnlock()
+func (conf *balanceRangeSchedulerConfig) peekLocked() (int, *balanceRangeSchedulerJob) {
 	for index, job := range conf.jobs {
 		if job.isComplete() {
 			continue
@@ -334,14 +326,18 @@ func (job *balanceRangeSchedulerJob) expired(dur time.Duration) bool {
 	return now.Sub(*job.Finish) > dur
 }
 
+func (job *balanceRangeSchedulerJob) shouldFinished() bool {
+	return time.Since(*job.Start) > job.Timeout
+}
+
 func (job *balanceRangeSchedulerJob) isComplete() bool {
 	return job.Status == finished || job.Status == cancelled
 }
 
 // EncodeConfig serializes the config.
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
-	s.conf.RLock()
-	defer s.conf.RUnlock()
+	s.conf.Lock()
+	defer s.conf.Unlock()
 	return EncodeConfig(s.conf.jobs)
 }
 
@@ -349,7 +345,6 @@ func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
 	if err := s.conf.load(&jobs); err != nil {
 		return err
@@ -372,6 +367,25 @@ type balanceRangeScheduler struct {
 	expectScoreMap map[uint64]float64
 	job            *balanceRangeSchedulerJob
 	solver         *solver
+	lastReportTime time.Time
+}
+
+func (s *balanceRangeScheduler) report() {
+	now := time.Now()
+	if now.Sub(s.lastReportTime) < reportInterval {
+		return
+	}
+	for storeID, score := range s.scoreMap {
+		storeStr := strconv.FormatUint(storeID, 10)
+		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(score)
+		if expect, ok := s.expectScoreMap[storeID]; ok {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(expect)
+		} else {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
+		}
+	}
+	balanceRangeJobGauge.WithLabelValues().Set(float64(s.job.JobID))
+	s.lastReportTime = now
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -379,36 +393,95 @@ func (s *balanceRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	s.handler.ServeHTTP(w, r)
 }
 
+func (s *balanceRangeScheduler) isBalanced() bool {
+	diff := 0
+	for storeID, score := range s.scoreMap {
+		if expect, ok := s.expectScoreMap[storeID]; ok {
+			if expect > score {
+				diff += int(expect - score)
+			} else {
+				diff += int(score - expect)
+			}
+		}
+	}
+	return diff <= 1
+}
+
 // IsScheduleAllowed checks if the scheduler is allowed to schedule new operators.
 func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
+		return false
 	}
-	if err := s.conf.gc(); err != nil {
+	return s.checkJob(cluster)
+}
+
+func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	if err := s.conf.gcLocked(); err != nil {
 		log.Error("balance range jobs gc failed", errs.ZapError(err))
 		return false
 	}
-	index, job := s.conf.peek()
-	if job != nil {
-		if job.Status == pending {
-			if err := s.conf.begin(index); err != nil {
-				return false
-			}
-			km := cluster.GetKeyRangeManager()
-			km.Append(job.Ranges)
+	// If the running job has been cancelled, it needs to stop the job.
+	if s.job != nil && s.job.Status == cancelled {
+		s.cleanJobStatus(cluster, s.job)
+	}
+
+	index, job := s.conf.peekLocked()
+	// all jobs are completed
+	if job == nil {
+		balanceRangeNoJobCounter.Inc()
+		return false
+	}
+
+	if job.Status == pending {
+		if err := s.conf.beginLocked(index); err != nil {
+			return false
 		}
-		// todo: add other conditions such as the diff of the score between the source and target store.
-		if time.Since(*job.Start) > job.Timeout {
-			if err := s.conf.finish(index); err != nil {
-				return false
-			}
-			km := cluster.GetKeyRangeManager()
-			km.Delete(job.Ranges)
-			balanceRangeExpiredCounter.Inc()
+		km := cluster.GetKeyRangeManager()
+		km.Append(job.Ranges)
+	}
+	if job.shouldFinished() {
+		if err := s.conf.finishLocked(index); err != nil {
+			balancePersistFailedCounter.Inc()
+			return false
+		}
+		s.cleanJobStatus(cluster, job)
+		balanceRangeExpiredCounter.Inc()
+		log.Info("balance key range job finished due to timeout", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+	}
+
+	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+	err := s.prepare(cluster, opInfluence, job)
+	if err != nil {
+		log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
+		return false
+	}
+	if s.isBalanced() {
+		if err = s.conf.finishLocked(index); err != nil {
+			balancePersistFailedCounter.Inc()
+			return false
+		}
+		s.cleanJobStatus(cluster, job)
+		balanceRangeBalancedCounter.Inc()
+		log.Info("balance key range job finished due to balanced", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+		return false
+	}
+	return true
+}
+
+func (s *balanceRangeScheduler) cleanJobStatus(cluster sche.SchedulerCluster, job *balanceRangeSchedulerJob) {
+	km := cluster.GetKeyRangeManager()
+	km.Delete(job.Ranges)
+	for storeID := range s.scoreMap {
+		storeStr := strconv.FormatUint(storeID, 10)
+		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(0)
+		if _, ok := s.expectScoreMap[storeID]; ok {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
 		}
 	}
-	return allowed
 }
 
 // BalanceRangeCreateOption is used to create a scheduler with an option.
@@ -437,20 +510,9 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
-	_, job := s.conf.peek()
-	if job == nil {
-		balanceRangeNoJobCounter.Inc()
-		return nil, nil
-	}
+	job := s.job
 	defer s.filterCounter.Flush()
 
-	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
-
-	err := s.prepare(cluster, opInfluence, job)
-	if err != nil {
-		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
-		return nil, nil
-	}
 	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	sources := filter.SelectSourceStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
 	solver := s.solver
@@ -569,10 +631,9 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 			balanceRangeCreateOpFailCounter.Inc()
 			return nil
 		}
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(solver.targetStoreID(), 10)
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(s.score(sourceID), 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(s.score(targetID), 'f', 2, 64))
@@ -625,7 +686,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		}
 	}
 	if len(sources) <= 1 {
-		return errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
+		return errs.ErrNoStoreToBeSelected.FastGenByArgs()
 	}
 	// storeID <--> score mapping
 	scoreMap := make(map[uint64]float64, len(sources))
@@ -658,6 +719,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	s.expectScoreMap = expectScoreMap
 	s.solver = solver
 	s.job = job
+	s.report()
 	return nil
 }
 

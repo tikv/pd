@@ -24,6 +24,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -634,7 +635,35 @@ func (c *TestCluster) RunInitialServers() error {
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
-	return RunServers(servers)
+	return RunServersWithRetry(servers, 3)
+}
+
+// RunServersWithRetry starts to run multiple TestServer with retry logic.
+func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
+	var lastErr error
+	for range maxRetries {
+		lastErr = RunServers(servers)
+		if lastErr == nil {
+			return nil
+		}
+
+		// If the error is related to etcd start cancellation, we should retry
+		if strings.Contains(lastErr.Error(), "ErrCancelStartEtcd") ||
+			strings.Contains(lastErr.Error(), "ErrStartEtcd") {
+			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
+			// Stop any partially started servers before retrying
+			for _, s := range servers {
+				if s.State() == Running {
+					_ = s.Stop()
+				}
+			}
+			continue
+		}
+
+		// For other errors, don't retry
+		return lastErr
+	}
+	return errors.Wrapf(lastErr, "failed to start servers after %d retries", maxRetries)
 }
 
 // StopAll is used to stop all servers.
@@ -792,11 +821,11 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	return cluster.HandleRegionHeartbeat(region)
 }
 
-// HandleReportBuckets processes BucketInfo reports from the client.
-func (c *TestCluster) HandleReportBuckets(b *metapb.Buckets) error {
+// HandleRegionBuckets processes BucketInfo reports from the client.
+func (c *TestCluster) HandleRegionBuckets(b *metapb.Buckets) error {
 	leader := c.GetLeader()
 	cluster := c.servers[leader].GetRaftCluster()
-	return cluster.HandleReportBuckets(b)
+	return cluster.HandleRegionBuckets(b)
 }
 
 // Join is used to add a new TestServer into the cluster.

@@ -140,6 +140,7 @@ type StoreSetInformer interface {
 	GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
+	GetAvgNetworkSlowScore(id uint64) uint64
 }
 
 // StoreSetController is used to control stores' status.
@@ -148,7 +149,9 @@ type StoreSetController interface {
 	ResumeLeaderTransfer(id uint64, d constant.Direction)
 
 	SlowStoreEvicted(id uint64) error
+	StoppingStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
+	StoppingStoreRecovered(id uint64)
 	SlowTrendEvicted(id uint64) error
 	SlowTrendRecovered(id uint64)
 }

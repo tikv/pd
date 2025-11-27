@@ -284,6 +284,15 @@ func createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.Cli
 	return forwardStream, forwardCtx, cancelForward, err
 }
 
+func createRegionBucketsSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_RegionBucketsClient, context.Context, context.CancelFunc, error) {
+	done := make(chan struct{})
+	forwardCtx, cancelForward := context.WithCancel(ctx)
+	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
+	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionBuckets(forwardCtx)
+	done <- struct{}{}
+	return forwardStream, forwardCtx, cancelForward, err
+}
+
 func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream schedulingpb.Scheduling_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
@@ -354,6 +363,37 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 			errCh <- errors.WithStack(err)
 			return
 		}
+	}
+}
+
+func forwardRegionBucketsToScheduling(forwardStream schedulingpb.Scheduling_RegionBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err == io.EOF {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+
+		schedulingpbErr := resp.GetHeader().GetError()
+		if schedulingpbErr != nil {
+			// TODO: handle more error types if needed.
+			if schedulingpbErr.Type == schedulingpb.ErrorType_NOT_BOOTSTRAPPED {
+				response := &pdpb.ReportBucketsResponse{
+					Header: grpcutil.NotBootstrappedHeader(),
+				}
+				if err := server.send(response); err != nil {
+					errCh <- errors.WithStack(err)
+					return
+				}
+			}
+		}
+		// ignore other error types or success responses for now.
 	}
 }
 

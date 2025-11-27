@@ -44,9 +44,10 @@ const (
 	storeLeaderWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/leader" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/leader"
 	storeRegionWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/region" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/region"
 
-	serviceMiddlewarePathFormat = "/pd/%d/service_middleware"                  // "/pd/{cluster_id}/service_middleware"
-	replicationModePathFormat   = "/pd/%d/replication_mode/%s"                 // "/pd/{cluster_id}/replication_mode/{mode}"
-	recoveringMarkPathFormat    = "/pd/%d/cluster/markers/snapshot-recovering" // "/pd/{cluster_id}/cluster/markers/snapshot-recovering"
+	serviceMiddlewarePathFormat   = "/pd/%d/service_middleware"                  // "/pd/{cluster_id}/service_middleware"
+	replicationModePathFormat     = "/pd/%d/replication_mode/%s"                 // "/pd/{cluster_id}/replication_mode/{mode}"
+	recoveringMarkPathFormat      = "/pd/%d/cluster/markers/snapshot-recovering" // "/pd/{cluster_id}/cluster/markers/snapshot-recovering"
+	pitrRestoreModeMarkPathFormat = "/pd/%d/cluster/markers/pitr-restore-mode"   // "/pd/{cluster_id}/cluster/markers/pitr-restore-mode"
 
 	memberBinaryDeployPathFormat   = "/pd/%d/member/%d/deploy_path"     // "/pd/{cluster_id}/member/{member_id}/deploy_path"
 	memberGitHashPath              = "/pd/%d/member/%d/git_hash"        // "/pd/{cluster_id}/member/{member_id}/git_hash"
@@ -57,7 +58,7 @@ const (
 	// ruleConfigPrefixFormat is used to watch rulePathFormat and ruleGroupPathFormat, so it should be the parent directory of them.
 	ruleCommonPrefixFormat  = "/pd/%d/rule"            // "/pd/{cluster_id}/rule"
 	ruleGroupPathFormat     = "/pd/%d/rule_group/%s"   // "/pd/{cluster_id}/rule_group/{group_id}"
-	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
+	regionLabelPathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
 	// Maintenance task path format
@@ -109,9 +110,9 @@ const (
 	// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
 	// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
 	// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-	msExpectedPrimaryPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
-	msTsoDefaultExpectedPrimaryPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msExpectedPrimaryPathFormat            = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
+	msTsoDefaultExpectedPrimaryPathFormat  = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKeyspaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
 	// resource group path
 	keyspaceResourceGroupSettingsPathPrefixFormat = "resource_group/keyspace/settings/"      // "resource_group/keyspace/settings/"
@@ -201,6 +202,11 @@ func ExternalTimestampPath() string {
 // RecoveringMarkPath returns the path to save the recovering mark.
 func RecoveringMarkPath() string {
 	return fmt.Sprintf(recoveringMarkPathFormat, ClusterID())
+}
+
+// PitrRestoreModeMarkPath returns the path to save the pitr restore mode mark.
+func PitrRestoreModeMarkPath() string {
+	return fmt.Sprintf(pitrRestoreModeMarkPathFormat, ClusterID())
 }
 
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.

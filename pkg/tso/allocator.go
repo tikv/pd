@@ -43,9 +43,6 @@ import (
 )
 
 const (
-	// GlobalDCLocation is the Global TSO Allocator's DC location label.
-	// Deprecated: This is a legacy label, it should be removed in the future.
-	GlobalDCLocation = "global"
 	// maxUpdateTSORetryCount is the max retry count for updating TSO.
 	// When encountering a network partition, manually retrying may help the next request succeed with the new endpoint according to https://github.com/etcd-io/etcd/issues/8711
 	maxUpdateTSORetryCount = 3
@@ -101,9 +98,9 @@ func NewAllocator(
 			tsoMux:                 &tsoObject{},
 			uniqueIndex:            uniqueIndex,
 			maxIndex:               maxIndex,
-			metrics:                newTSOMetrics(keyspaceGroupIDStr, GlobalDCLocation),
+			metrics:                newTSOMetrics(keyspaceGroupIDStr),
 		},
-		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr, GlobalDCLocation),
+		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr),
 		logFields: []zap.Field{
 			logutil.CondUint32("keyspace-group-id", keyspaceGroupID, keyspaceGroupID > 0),
 			zap.String("name", member.Name()),

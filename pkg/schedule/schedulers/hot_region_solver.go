@@ -172,6 +172,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			return
 		}
 		if bs.isAvailable(bs.cur) && bs.betterThan(bs.best) {
+			if !bs.isReadyToBuild() {
+				return
+			}
 			if newOps := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
 				clone := *bs.cur
@@ -276,9 +279,19 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		return false
 	}
 	isSplit := bs.ops[0].Kind() == operator.OpSplit
-	if !isSplit && bs.best.srcStore.IsTiFlash() != bs.best.dstStore.IsTiFlash() {
-		hotSchedulerNotSameEngineCounter.Inc()
-		return false
+	// Ensure source and destination stores have the exact same engine type.
+	// We need to distinguish between TiKV, TiFlash Write, and TiFlash Compute nodes.
+	if !isSplit {
+		srcIsTiFlashWrite := bs.best.srcStore.IsTiFlashWrite()
+		dstIsTiFlashWrite := bs.best.dstStore.IsTiFlashWrite()
+		srcIsTiFlashCompute := bs.best.srcStore.IsTiFlashCompute()
+		dstIsTiFlashCompute := bs.best.dstStore.IsTiFlashCompute()
+
+		// Check if engine types match exactly
+		if srcIsTiFlashWrite != dstIsTiFlashWrite || srcIsTiFlashCompute != dstIsTiFlashCompute {
+			hotSchedulerNotSameEngineCounter.Inc()
+			return false
+		}
 	}
 	maxZombieDur := bs.calcMaxZombieDur()
 
@@ -341,7 +354,9 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 		}
 		return bs.sche.conf.getRegionsStatZombieDuration()
 	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
+		// TiFlash Write nodes (TiFlash Compute nodes are filtered out in filterSrcStores)
+		// use RegionsStatZombieDuration, while TiKV uses StoreStatZombieDuration.
+		if bs.best.srcStore.IsTiFlashWrite() {
 			return bs.sche.conf.getRegionsStatZombieDuration()
 		}
 		return bs.sche.conf.getStoreStatZombieDuration()
@@ -358,8 +373,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
 		srcToleranceRatio := confSrcToleranceRatio
-		if detail.IsTiFlash() {
-			if !confEnableForTiFlash {
+		if !detail.IsTiKV() {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
@@ -601,8 +616,8 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 	for _, detail := range candidates {
 		store := detail.StoreInfo
 		dstToleranceRatio := confDstToleranceRatio
-		if detail.IsTiFlash() {
-			if !confEnableForTiFlash {
+		if !detail.IsTiKV() {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
@@ -705,12 +720,9 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serialize running when each 2 store's pending influence is close.
 func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
-	srcStoreID := bs.cur.srcStore.GetID()
-	dstStoreID := bs.cur.dstStore.GetID()
 	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
 	srcPending, dstPending := bs.cur.getPendingLoad(dim)
 	if reverse {
-		srcStoreID, dstStoreID = dstStoreID, srcStoreID
 		srcRate, dstRate = dstRate, srcRate
 		srcPending, dstPending = dstPending, srcPending
 	}
@@ -719,7 +731,6 @@ func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
 		return false
 	}
 	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(srcStoreID, 10), strconv.FormatUint(dstStoreID, 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
@@ -846,12 +857,10 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 }
 
 func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
-	if !bs.isReadyToBuild() {
-		return nil
-	}
-
+	enabledBucket := bs.GetStoreConfig().IsEnableRegionBucket()
 	splitRegions := make([]*core.RegionInfo, 0)
-	if bs.opTy == movePeer {
+
+	if bs.opTy == movePeer && enabledBucket {
 		for _, region := range []*core.RegionInfo{bs.cur.region, bs.cur.revertRegion} {
 			if region == nil {
 				continue
@@ -1084,7 +1093,7 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
-		balanceDirectionCounter.WithLabelValues(bs.sche.GetName(), sourceLabel, targetLabel))
+	)
 	op.Counters = append(op.Counters,
 		hotSchedulerNewOperatorCounter,
 		opCounter(typ))

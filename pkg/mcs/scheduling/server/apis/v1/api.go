@@ -16,8 +16,10 @@ package apis
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -34,6 +36,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
@@ -106,9 +109,9 @@ func NewService(srv *scheserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", mcsutils.PromHandler())
 	apiHandlerEngine.GET("status", mcsutils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
-	root.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
@@ -131,13 +134,16 @@ func NewService(srv *scheserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.PUT("/log", changeLogLevel)
-	router.DELETE("cache/regions", deleteAllRegionCache)
-	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
+	redirector := multiservicesapi.ServiceRedirector()
+	router.DELETE("cache/regions", redirector, deleteAllRegionCache)
+	router.DELETE("cache/regions/:id", redirector, deleteRegionCacheByID)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
 func (s *Service) RegisterSchedulersRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("schedulers")
+	router.Use(redirector)
 	router.GET("", getSchedulers)
 	router.GET("/diagnostic/:name", getDiagnosticResult)
 	router.GET("/config", getSchedulerConfig)
@@ -149,14 +155,18 @@ func (s *Service) RegisterSchedulersRouter() {
 
 // RegisterCheckersRouter registers the router of the checkers handler.
 func (s *Service) RegisterCheckersRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("checkers")
+	router.Use(redirector)
 	router.GET("/:name", getCheckerByName)
 	router.POST("/:name", pauseOrResumeChecker)
 }
 
 // RegisterHotspotRouter registers the router of the hotspot handler.
 func (s *Service) RegisterHotspotRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("hotspot")
+	router.Use(redirector)
 	router.GET("/regions/write", getHotWriteRegions)
 	router.GET("/regions/read", getHotReadRegions)
 	router.GET("/regions/history", getHistoryHotRegions)
@@ -166,7 +176,9 @@ func (s *Service) RegisterHotspotRouter() {
 
 // RegisterOperatorsRouter registers the router of the operators handler.
 func (s *Service) RegisterOperatorsRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("operators")
+	router.Use(redirector)
 	router.GET("", getOperators)
 	router.POST("", createOperator)
 	router.DELETE("", deleteOperators)
@@ -177,14 +189,18 @@ func (s *Service) RegisterOperatorsRouter() {
 
 // RegisterStoresRouter registers the router of the stores handler.
 func (s *Service) RegisterStoresRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("stores")
+	router.Use(redirector)
 	router.GET("", getAllStores)
 	router.GET("/:id", getStoreByID)
 }
 
 // RegisterRegionsRouter registers the router of the regions handler.
 func (s *Service) RegisterRegionsRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("regions")
+	router.Use(redirector)
 	router.GET("", getAllRegions)
 	router.GET("/:id", getRegionByID)
 	router.GET("/count", getRegionCount)
@@ -197,8 +213,11 @@ func (s *Service) RegisterRegionsRouter() {
 
 // RegisterConfigRouter registers the router of the config handler.
 func (s *Service) RegisterConfigRouter() {
+	// /config should not be redirected.
 	router := s.root.Group("config")
 	router.GET("", getConfig)
+	redirector := multiservicesapi.ServiceRedirector()
+	router.Use(redirector)
 
 	rules := router.Group("rules")
 	rules.GET("", getAllRules)
@@ -232,8 +251,25 @@ func (s *Service) RegisterConfigRouter() {
 
 // RegisterPrimaryRouter registers the router of the primary handler.
 func (s *Service) RegisterPrimaryRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("primary")
+	router.Use(redirector)
 	router.POST("transfer", transferPrimary)
+}
+
+// getHealth returns the health status of the TSO service.
+func getHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
+	if svr.GetParticipant().IsPrimaryElected() {
+		c.String(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no primary elected")
 }
 
 // @Tags     admin
@@ -265,9 +301,50 @@ func changeLogLevel(c *gin.Context) {
 // @Router   /config [get]
 func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	cfg := svr.GetConfig()
-	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, cfg)
+	localCfg := svr.GetConfig()
+	if svr.IsServing() {
+		c.IndentedJSON(http.StatusOK, localCfg)
+		return
+	}
+
+	// If the server is not serving, it means it is a follower.
+	// We need to get the dynamic config from the primary server.
+	// If no primary server is found, return an error.
+	// Or if the primary server is itself but not serving, return an error.
+	primaryAddrs := svr.GetParticipant().GetServingUrls()
+	if len(primaryAddrs) == 0 || primaryAddrs[0] == svr.GetAddr() {
+		c.String(http.StatusServiceUnavailable, "no available primary server found, cannot get dynamic config")
+		return
+	}
+
+	primaryURL := fmt.Sprintf("%s%s/config", primaryAddrs[0], APIPathPrefix)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, primaryURL, nil)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "failed to create request to primary: "+err.Error())
+		return
+	}
+	resp, err := svr.GetHTTPClient().Do(req)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "failed to request primary: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		c.String(resp.StatusCode, fmt.Sprintf("primary returned non-200 status: %s", string(body)))
+		return
+	}
+	var primaryCfg config.Config
+	if err := json.NewDecoder(resp.Body).Decode(&primaryCfg); err != nil {
+		c.String(http.StatusInternalServerError, "failed to decode primary's config: "+err.Error())
+		return
+	}
+
+	// Schedule and Replication are dynamic configs managed by primary, so we need to merge them.
+	mergedCfg := localCfg
+	mergedCfg.Schedule = primaryCfg.Schedule
+	mergedCfg.Replication = primaryCfg.Replication
+	c.IndentedJSON(http.StatusOK, &mergedCfg)
 }
 
 // @Tags     admin

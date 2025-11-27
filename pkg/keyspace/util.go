@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -36,8 +37,8 @@ const (
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
 	// Valid name must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 	// numbers (0-9), hyphens (-), and underscores (_).
-	// currently, we enforce this rule to tidb_service_scope and keyspace_name.
-	namePattern = "^[-A-Za-z0-9_]{1,64}$"
+	// currently, we enforce this rule to keyspace_name.
+	namePattern = "^[-A-Za-z0-9_]{1,20}$"
 )
 
 var (
@@ -161,6 +162,39 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 	}
 }
 
+// ParseKeyspaceIDFromLabelRule parses the keyspace ID from the label rule.
+// It will return the keyspace ID and a boolean indicating whether the label
+// rule is a keyspace label rule.
+func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
+	// Validate the ID matches the expected format "keyspaces/<id>".
+	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
+		return 0, false
+	}
+	// Retrieve the keyspace ID.
+	keyspaceID, err := strconv.ParseUint(
+		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
+		endpoint.SpaceIDBase, 32,
+	)
+	if err != nil {
+		return 0, false
+	}
+	// Double check the keyspace ID from the label rule.
+	var idFromLabel uint64
+	for _, label := range rule.Labels {
+		if label.Key == regionLabelKey {
+			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
+			if err != nil {
+				return 0, false
+			}
+			break
+		}
+	}
+	if keyspaceID != idFromLabel {
+		return 0, false
+	}
+	return uint32(keyspaceID), true
+}
+
 // indexedHeap is a heap with index.
 type indexedHeap struct {
 	items []*endpoint.KeyspaceGroup
@@ -260,7 +294,7 @@ func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
 }
 
 // GetBootstrapKeyspaceID returns the Keyspace ID used for bootstrapping.
-// Legacy: constant.DefaultKeyspaceID
+// Classic: constant.DefaultKeyspaceID
 // NextGen: constant.SystemKeyspaceID
 func GetBootstrapKeyspaceID() uint32 {
 	if kerneltype.IsNextGen() {
@@ -270,7 +304,7 @@ func GetBootstrapKeyspaceID() uint32 {
 }
 
 // GetBootstrapKeyspaceName returns the Keyspace Name used for bootstrapping.
-// Legacy: constant.DefaultKeyspaceName
+// Classic: constant.DefaultKeyspaceName
 // NextGen: constant.SystemKeyspaceName
 func GetBootstrapKeyspaceName() string {
 	if kerneltype.IsNextGen() {

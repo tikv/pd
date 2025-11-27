@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -88,6 +89,8 @@ type Config struct {
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	Controller ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
@@ -257,8 +260,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 

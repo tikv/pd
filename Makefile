@@ -14,6 +14,7 @@ dev-basic: build check basic-test
 
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
+TEST_TAGS ?=
 BUILD_CGO_ENABLED := 0
 BUILD_TOOL_CGO_ENABLED := 0
 BUILD_GOEXPERIMENT ?=
@@ -57,6 +58,8 @@ endif
 
 ifeq ($(NEXT_GEN), 1)
 	BUILD_TAGS += nextgen
+	BUILD_TAGS += without_dashboard
+	TEST_TAGS = nextgen
 endif
 
 RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
@@ -95,6 +98,7 @@ ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
 	PD_SERVER_DEP += dashboard-replace-distro-info
 endif
 PD_SERVER_DEP += dashboard-ui
+PD_SERVER_DEP += generate-easyjson
 
 pre-build: ${PD_SERVER_DEP}
 
@@ -133,7 +137,7 @@ regions-dump:
 stores-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
 pd-ut: pd-xprog
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '$(TEST_TAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
 pd-xprog:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
 
@@ -214,6 +218,10 @@ generate-errdoc: install-tools
 check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
+
+generate-easyjson: install-tools
+	@echo "generating easyjson..."
+	easyjson -all ./pkg/response/region.go
 
 .PHONY: check static tidy generate-errdoc check-plugin
 

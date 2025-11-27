@@ -30,116 +30,104 @@ import (
 const (
 	unknown   = "unknown"
 	labelType = "label"
+
+	clusterStatusStoreUpCount           = "store_up_count"
+	clusterStatusStoreDisconnectedCount = "store_disconnected_count"
+	clusterStatusStoreSlowCount         = "store_slow_count"
+	clusterStatusStoreDownCount         = "store_down_count"
+	clusterStatusStoreUnhealthCount     = "store_unhealth_count"
+	clusterStatusStoreOfflineCount      = "store_offline_count"
+	clusterStatusStoreTombstoneCount    = "store_tombstone_count"
+	clusterStatusStoreLowSpaceCount     = "store_low_space_count"
+	clusterStatusStorePreparingCount    = "store_preparing_count"
+	clusterStatusStoreServingCount      = "store_serving_count"
+	clusterStatusStoreRemovingCount     = "store_removing_count"
+	clusterStatusStoreRemovedCount      = "store_removed_count"
+
+	clusterStatusRegionCount     = "region_count"
+	clusterStatusLeaderCount     = "leader_count"
+	clusterStatusWitnessCount    = "witness_count"
+	clusterStatusLearnerCount    = "learner_count"
+	clusterStatusStorageSize     = "storage_size"
+	clusterStatusStorageCapacity = "storage_capacity"
 )
 
-var (
-	// tikv status counters.
-	tikvUpCounter          = clusterStatusGauge.WithLabelValues("store_up_count", "tikv")
-	tikvDiconnectedCounter = clusterStatusGauge.WithLabelValues("store_disconnected_count", "tikv")
-	tikvDownCounter        = clusterStatusGauge.WithLabelValues("store_down_count", "tikv")
-	tikvUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tikv")
-	tikvOfflineCounter     = clusterStatusGauge.WithLabelValues("store_offline_count", "tikv")
-	tikvTombstoneCounter   = clusterStatusGauge.WithLabelValues("store_tombstone_count", "tikv")
-	tikvLowSpaceCounter    = clusterStatusGauge.WithLabelValues("store_low_space_count", "tikv")
-	tikvPreparingCounter   = clusterStatusGauge.WithLabelValues("store_preparing_count", "tikv")
-	tikvServingCounter     = clusterStatusGauge.WithLabelValues("store_serving_count", "tikv")
-	tikvRemovingCounter    = clusterStatusGauge.WithLabelValues("store_removing_count", "tikv")
-	tikvRemovedCounter     = clusterStatusGauge.WithLabelValues("store_removed_count", "tikv")
-
-	// tiflash status counters.
-	tiflashUpCounter          = clusterStatusGauge.WithLabelValues("store_up_count", "tiflash")
-	tiflashDiconnectedCounter = clusterStatusGauge.WithLabelValues("store_disconnected_count", "tiflash")
-	tiflashDownCounter        = clusterStatusGauge.WithLabelValues("store_down_count", "tiflash")
-	tiflashUnhealthCounter    = clusterStatusGauge.WithLabelValues("store_unhealth_count", "tiflash")
-	tiflashOfflineCounter     = clusterStatusGauge.WithLabelValues("store_offline_count", "tiflash")
-	tiflashTombstoneCounter   = clusterStatusGauge.WithLabelValues("store_tombstone_count", "tiflash")
-	tiflashLowSpaceCounter    = clusterStatusGauge.WithLabelValues("store_low_space_count", "tiflash")
-	tiflashPreparingCounter   = clusterStatusGauge.WithLabelValues("store_preparing_count", "tiflash")
-	tiflashServingCounter     = clusterStatusGauge.WithLabelValues("store_serving_count", "tiflash")
-	tiflashRemovingCounter    = clusterStatusGauge.WithLabelValues("store_removing_count", "tiflash")
-	tiflashRemovedCounter     = clusterStatusGauge.WithLabelValues("store_removed_count", "tiflash")
-
-	// Store status metrics.
-	storeRegionCountGauge     = clusterStatusGauge.WithLabelValues("region_count", "all")
-	storeLeaderCountGauge     = clusterStatusGauge.WithLabelValues("leader_count", "all")
-	storeWitnessCountGauge    = clusterStatusGauge.WithLabelValues("witness_count", "all")
-	storeLearnerCountGauge    = clusterStatusGauge.WithLabelValues("learner_count", "all")
-	storeStorageSizeGauge     = clusterStatusGauge.WithLabelValues("storage_size", "all")
-	storeStorageCapacityGauge = clusterStatusGauge.WithLabelValues("storage_capacity", "all")
-)
+var storeStatuses = []string{
+	clusterStatusStoreUpCount,
+	clusterStatusStoreDisconnectedCount,
+	clusterStatusStoreSlowCount,
+	clusterStatusStoreDownCount,
+	clusterStatusStoreUnhealthCount,
+	clusterStatusStoreOfflineCount,
+	clusterStatusStoreTombstoneCount,
+	clusterStatusStoreLowSpaceCount,
+	clusterStatusStorePreparingCount,
+	clusterStatusStoreServingCount,
+	clusterStatusStoreRemovingCount,
+	clusterStatusStoreRemovedCount,
+}
 
 type storeStatistics struct {
-	opt             config.ConfProvider
-	StorageSize     uint64
-	StorageCapacity uint64
-	RegionCount     int
-	LeaderCount     int
-	LearnerCount    int
-	WitnessCount    int
-	LabelCounter    map[string][]uint64
-
-	engineStatistics map[string]*storeStatusStatistics
+	opt          config.ConfProvider
+	LabelCounter map[string][]uint64
 }
 
-type storeStatusStatistics struct {
-	opt        config.ConfProvider
-	Up         int
-	Disconnect int
-	Unhealthy  int
-	Down       int
-	Offline    int
-	Tombstone  int
-	LowSpace   int
-	Slow       int
-	Preparing  int
-	Serving    int
-	Removing   int
-	Removed    int
+func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
+	return &storeStatistics{
+		opt:          opt,
+		LabelCounter: make(map[string][]uint64),
+	}
 }
 
-func (s *storeStatusStatistics) observe(store *core.StoreInfo) {
+func (s *storeStatistics) observeStoreStatus(store *core.StoreInfo) map[string]float64 {
+	result := map[string]float64{
+		clusterStatusStoreUpCount:           0,
+		clusterStatusStoreDisconnectedCount: 0,
+		clusterStatusStoreSlowCount:         0,
+		clusterStatusStoreDownCount:         0,
+		clusterStatusStoreUnhealthCount:     0,
+		clusterStatusStoreOfflineCount:      0,
+		clusterStatusStoreTombstoneCount:    0,
+		clusterStatusStoreLowSpaceCount:     0,
+		clusterStatusStorePreparingCount:    0,
+		clusterStatusStoreServingCount:      0,
+		clusterStatusStoreRemovingCount:     0,
+		clusterStatusStoreRemovedCount:      0,
+	}
+
 	// Store state.
 	isDown := false
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
 			isDown = true
-			s.Down++
+			result[clusterStatusStoreDownCount]++
 		} else if store.IsUnhealthy() {
-			s.Unhealthy++
+			result[clusterStatusStoreUnhealthCount]++
 		} else if store.IsDisconnected() {
-			s.Disconnect++
+			result[clusterStatusStoreDisconnectedCount]++
 		} else if store.IsSlow() {
-			s.Slow++
+			result[clusterStatusStoreSlowCount]++
 		} else {
-			s.Up++
+			result[clusterStatusStoreUpCount]++
 		}
 		if store.IsPreparing() {
-			s.Preparing++
+			result[clusterStatusStorePreparingCount]++
 		} else {
-			s.Serving++
+			result[clusterStatusStoreServingCount]++
 		}
 	case metapb.NodeState_Removing:
-		s.Offline++
-		s.Removing++
+		result[clusterStatusStoreOfflineCount]++
+		result[clusterStatusStoreRemovingCount]++
 	case metapb.NodeState_Removed:
-		s.Tombstone++
-		s.Removed++
-		return
+		result[clusterStatusStoreTombstoneCount]++
+		result[clusterStatusStoreRemovedCount]++
+		return result
 	}
 	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
-		s.LowSpace++
+		result[clusterStatusStoreLowSpaceCount]++
 	}
-}
-
-func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
-	statistics := make(map[string]*storeStatusStatistics, 1)
-	statistics[core.EngineTiKV] = &storeStatusStatistics{opt: opt}
-	return &storeStatistics{
-		opt:              opt,
-		LabelCounter:     make(map[string][]uint64),
-		engineStatistics: statistics,
-	}
+	return result
 }
 
 func (s *storeStatistics) observe(store *core.StoreInfo) {
@@ -156,31 +144,23 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
-	// Store state.
-	var statistics *storeStatusStatistics
-	if store.IsTiFlash() {
-		statistics = s.engineStatistics[core.EngineTiFlash]
-		if statistics == nil {
-			s.engineStatistics[core.EngineTiFlash] = &storeStatusStatistics{opt: s.opt}
-			statistics = s.engineStatistics[core.EngineTiFlash]
-		}
-	} else {
-		// tikv statistics has been initialized in newStoreStatistics.
-		statistics = s.engineStatistics[core.EngineTiKV]
+	engine := store.Engine()
+	storeStatusStats := s.observeStoreStatus(store)
+	for statusType, value := range storeStatusStats {
+		clusterStatusGauge.WithLabelValues(statusType, engine, id).Set(value)
 	}
-	statistics.observe(store)
 	// skip tombstone store avoid to overwrite metrics
 	if store.GetNodeState() == metapb.NodeState_Removed {
 		return
 	}
 
 	// Store stats.
-	s.StorageSize += store.StorageSize()
-	s.StorageCapacity += store.GetCapacity()
-	s.RegionCount += store.GetRegionCount()
-	s.LeaderCount += store.GetLeaderCount()
-	s.WitnessCount += store.GetWitnessCount()
-	s.LearnerCount += store.GetLearnerCount()
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageSize, engine, id).Set(float64(store.StorageSize()))
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageCapacity, engine, id).Set(float64(store.GetCapacity()))
+	clusterStatusGauge.WithLabelValues(clusterStatusRegionCount, engine, id).Set(float64(store.GetRegionCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLeaderCount, engine, id).Set(float64(store.GetLeaderCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusWitnessCount, engine, id).Set(float64(store.GetWitnessCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLearnerCount, engine, id).Set(float64(store.GetLearnerCount()))
 	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
 	if ok {
 		cap := limit.GetCap()
@@ -246,46 +226,6 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 
 func (s *storeStatistics) collect() {
 	placementStatusGauge.Reset()
-
-	// tikv store status metrics.
-	tikvStatistics, ok := s.engineStatistics[core.EngineTiKV]
-	if ok {
-		tikvUpCounter.Set(float64(tikvStatistics.Up))
-		tikvDiconnectedCounter.Set(float64(tikvStatistics.Disconnect))
-		tikvDownCounter.Set(float64(tikvStatistics.Down))
-		tikvUnhealthCounter.Set(float64(tikvStatistics.Unhealthy))
-		tikvOfflineCounter.Set(float64(tikvStatistics.Offline))
-		tikvTombstoneCounter.Set(float64(tikvStatistics.Tombstone))
-		tikvLowSpaceCounter.Set(float64(tikvStatistics.LowSpace))
-		tikvPreparingCounter.Set(float64(tikvStatistics.Preparing))
-		tikvServingCounter.Set(float64(tikvStatistics.Serving))
-		tikvRemovingCounter.Set(float64(tikvStatistics.Removing))
-		tikvRemovedCounter.Set(float64(tikvStatistics.Removed))
-	}
-
-	// tiflash store status metrics.
-	tiflashStatistics, ok := s.engineStatistics[core.EngineTiFlash]
-	if ok {
-		tiflashUpCounter.Set(float64(tiflashStatistics.Up))
-		tiflashDiconnectedCounter.Set(float64(tiflashStatistics.Disconnect))
-		tiflashDownCounter.Set(float64(tiflashStatistics.Down))
-		tiflashUnhealthCounter.Set(float64(tiflashStatistics.Unhealthy))
-		tiflashOfflineCounter.Set(float64(tiflashStatistics.Offline))
-		tiflashTombstoneCounter.Set(float64(tiflashStatistics.Tombstone))
-		tiflashLowSpaceCounter.Set(float64(tiflashStatistics.LowSpace))
-		tiflashPreparingCounter.Set(float64(tiflashStatistics.Preparing))
-		tiflashServingCounter.Set(float64(tiflashStatistics.Serving))
-		tiflashRemovingCounter.Set(float64(tiflashStatistics.Removing))
-		tiflashRemovedCounter.Set(float64(tiflashStatistics.Removed))
-	}
-
-	// Store status metrics.
-	storeRegionCountGauge.Set(float64(s.RegionCount))
-	storeLeaderCountGauge.Set(float64(s.LeaderCount))
-	storeWitnessCountGauge.Set(float64(s.WitnessCount))
-	storeLearnerCountGauge.Set(float64(s.LearnerCount))
-	storeStorageSizeGauge.Set(float64(s.StorageSize))
-	storeStorageCapacityGauge.Set(float64(s.StorageCapacity))
 
 	// Current scheduling configurations of the cluster
 	configs := make(map[string]float64)
@@ -374,6 +314,7 @@ func ResetStoreStatistics(storeAddress string, id string) {
 	for _, m := range metrics {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
 	}
+	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 }
 
 type storeStatisticsMap struct {
@@ -402,8 +343,8 @@ func (m *storeStatisticsMap) Collect() {
 // Reset resets the metrics.
 func Reset() {
 	storeStatusGauge.Reset()
-	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()
+	clusterStatusGauge.Reset()
 	ResetRegionStatsMetrics()
 	ResetLabelStatsMetrics()
 	ResetHotCacheStatusMetrics()

@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 
 func TestAddMember(t *testing.T) {
 	re := require.New(t)
-	servers, client1, clean := NewTestEtcdCluster(t, 1)
+	servers, client1, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
@@ -60,7 +60,7 @@ func TestAddMember(t *testing.T) {
 
 func TestMemberHelpers(t *testing.T) {
 	re := require.New(t)
-	servers, client1, clean := NewTestEtcdCluster(t, 1)
+	servers, client1, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
@@ -94,7 +94,7 @@ func TestMemberHelpers(t *testing.T) {
 
 func TestEtcdKVGet(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := NewTestEtcdCluster(t, 1)
+	_, client, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	keys := []string{"test/key1", "test/key2", "test/key3", "test/key4", "test/key5"}
@@ -132,7 +132,7 @@ func TestEtcdKVGet(t *testing.T) {
 
 func TestEtcdKVPutWithTTL(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := NewTestEtcdCluster(t, 1)
+	_, client, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	_, err := EtcdKVPutWithTTL(context.TODO(), client, "test/ttl1", "val1", 2)
@@ -162,7 +162,7 @@ func TestEtcdClientSync(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 
-	servers, client1, clean := NewTestEtcdCluster(t, 1)
+	servers, client1, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
@@ -187,8 +187,18 @@ func TestEtcdClientSync(t *testing.T) {
 		}
 	}
 
-	_, err = RemoveEtcdMember(client1, memIDToRemove)
-	re.NoError(err)
+	// Use testutil.Eventually to handle potential transient errors during member removal.
+	// The removed member will be shut down immediately, which may cause the removal RPC
+	// to fail with "server stopped", but we verify success by checking the member list.
+	testutil.Eventually(re, func() bool {
+		_, err := RemoveEtcdMember(client1, memIDToRemove)
+		if err == nil {
+			return true
+		}
+		// Verify if the member was actually removed by checking the member list
+		listResp, listErr := ListEtcdMembers(client1.Ctx(), client1)
+		return listErr == nil && len(listResp.Members) == 1
+	})
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
@@ -211,7 +221,7 @@ func checkEtcdClientHealth(re *require.Assertions, client *clientv3.Client) {
 func TestEtcdScaleInAndOut(t *testing.T) {
 	re := require.New(t)
 	// Start a etcd server.
-	servers, _, clean := NewTestEtcdCluster(t, 1)
+	servers, _, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
@@ -228,17 +238,23 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	defer etcd2.Close()
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
-	// scale in etcd1
-	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	// Create a client connected to etcd2 to perform the removal
+	cfg2 := etcd2.Config()
+	client3, err := CreateEtcdClient(nil, cfg2.ListenClientUrls)
 	re.NoError(err)
-	checkMembers(re, client2, []*embed.Etcd{etcd2})
+	defer client3.Close()
+
+	// scale in etcd1 using client3 (connected to etcd2)
+	_, err = RemoveEtcdMember(client3, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	checkMembers(re, client3, []*embed.Etcd{etcd2})
 }
 
 func TestRandomKillEtcd(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Start a etcd server.
-	etcds, client1, clean := NewTestEtcdCluster(t, 3)
+	etcds, client1, clean := NewTestEtcdCluster(t, 3, nil)
 	defer clean()
 	checkEtcdEndpointNum(re, client1, 3)
 
@@ -283,7 +299,7 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 func checkEtcdWithHangLeader(t *testing.T) error {
 	re := require.New(t)
 	// Start a etcd server.
-	servers, _, clean := NewTestEtcdCluster(t, 1)
+	servers, _, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
 

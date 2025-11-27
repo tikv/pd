@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package install
+package utils
 
-import (
-	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/mcs/scheduling/server"
+import "github.com/prometheus/client_golang/prometheus"
 
-	// init API group
-	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
-)
-
-func init() {
-	Install(registry.ServerServiceRegistry)
-}
-
-// Install registers the API group and grpc service.
-func Install(register *registry.ServiceRegistry) {
-	register.RegisterService("Scheduling", server.NewService[*server.Server])
+// SingleLabel build a labels map containing only a single label
+func SingleLabel(key, value string) prometheus.Labels {
+	return prometheus.Labels{key: value}
 }

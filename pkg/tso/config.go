@@ -24,8 +24,8 @@ import (
 type ServiceConfig interface {
 	// GetName returns the Name
 	GetName() string
-	// GeBackendEndpoints returns the BackendEndpoints
-	GeBackendEndpoints() string
+	// GetBackendEndpoints returns the BackendEndpoints
+	GetBackendEndpoints() string
 	// GetListenAddr returns the ListenAddr
 	GetListenAddr() string
 	// GetAdvertiseListenAddr returns the AdvertiseListenAddr

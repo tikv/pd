@@ -14,7 +14,13 @@
 
 package statistics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"strconv"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/tikv/pd/pkg/core"
+)
 
 var (
 	hotCacheStatusGauge = prometheus.NewGaugeVec(
@@ -47,7 +53,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "status",
 			Help:      "Status of the cluster.",
-		}, []string{"type", "engine"})
+		}, []string{"type", "engine", "store"})
 
 	placementStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -91,14 +97,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
 		}, []string{"type"})
 
-	hotCacheFlowQueueStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "hotcache",
-			Name:      "flow_queue_status",
-			Help:      "Status of the hotspot flow queue.",
-		}, []string{"type"})
-
 	hotPeerSummary = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -124,6 +122,13 @@ func init() {
 	prometheus.MustRegister(StoreLimitGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
-	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 	prometheus.MustRegister(hotPeerSummary)
+}
+
+// DeleteClusterStatusMetrics deletes the cluster status metrics of a store.
+func DeleteClusterStatusMetrics(store *core.StoreInfo) {
+	engine := store.Engine()
+	for _, status := range storeStatuses {
+		clusterStatusGauge.DeleteLabelValues(status, engine, strconv.FormatUint(store.GetID(), 10))
+	}
 }

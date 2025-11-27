@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
@@ -135,6 +136,14 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 		re.Equal(uint32(i+1), created.Id)
 		checkCreateRequest(re, request, created)
 
+		name, err := manager.GetKeyspaceNameByID(created.Id)
+		re.NoError(err)
+		re.Equal(created.Name, name)
+
+		name, err = manager.GetEnabledKeyspaceNameByID(created.Id)
+		re.NoError(err)
+		re.Equal(created.Name, name)
+
 		loaded, err := manager.LoadKeyspace(request.Name)
 		re.NoError(err)
 		re.Equal(uint32(i+1), loaded.Id)
@@ -187,7 +196,7 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 			cfg[GCManagementType] = tc.gcManagementType
 		}
 		req := &CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("test_gc_management_type_%d", idx),
+			Name:       fmt.Sprintf("gc_mgmt_type_%d", idx),
 			CreateTime: now,
 			Config:     cfg,
 		}
@@ -296,12 +305,14 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		_, err = manager.UpdateKeyspaceConfig(createRequest.Name, mutations)
 		re.Error(err)
 	}
-	// Changing config of DEFAULT keyspace is allowed.
-	updated, err := manager.UpdateKeyspaceConfig(constant.DefaultKeyspaceName, mutations)
+	// Changing config of bootstrap keyspace is allowed.
+	bootstrapKeyspaceName := GetBootstrapKeyspaceName()
+	updated, err := manager.UpdateKeyspaceConfig(bootstrapKeyspaceName, mutations)
 	re.NoError(err)
 	// remove auto filled fields
 	delete(updated.Config, TSOKeyspaceGroupIDKey)
 	delete(updated.Config, UserKindKey)
+	delete(updated.Config, GCManagementType)
 	checkMutations(re, nil, updated.Config, mutations)
 }
 
@@ -312,15 +323,33 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
 		re.NoError(err)
+		meta, err := manager.LoadKeyspace(createRequest.Name)
+		re.NoError(err)
+		re.Equal(createRequest.Name, meta.GetName())
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
+		id := meta.GetId()
+
 		oldTime := time.Now().Unix()
 		// Archiving an ENABLED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, oldTime)
 		re.Error(err)
+		state, err := manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, state)
+		name, err := manager.GetEnabledKeyspaceNameByID(id)
+		re.NoError(err)
+		re.Equal(createRequest.Name, name)
 		// Disabling an ENABLED keyspace is allowed. Should update StateChangedAt.
 		updated, err := manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, oldTime)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
 		re.Equal(oldTime, updated.StateChangedAt)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.Error(err)
+		re.Empty(name)
 
 		newTime := time.Now().Unix()
 		// Disabling an DISABLED keyspace is allowed. Should NOT update StateChangedAt.
@@ -328,17 +357,43 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
 		re.Equal(oldTime, updated.StateChangedAt)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.Error(err)
+		re.Empty(name)
 		// Archiving a DISABLED keyspace is allowed. Should update StateChangeAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, newTime)
 		re.NoError(err)
 		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, updated.State)
 		re.Equal(newTime, updated.StateChangedAt)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.Error(err)
+		re.Empty(name)
 		// Changing state of an ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
-		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(constant.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
 		re.Error(err)
+		re.Empty(name)
+		// Changing state of bootstrap keyspace is not allowed.
+		bootstrapKeyspaceName := GetBootstrapKeyspaceName()
+		_, err = manager.UpdateKeyspaceState(bootstrapKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+		re.Error(err)
+		id = GetBootstrapKeyspaceID()
+		state, err = manager.GetKeyspaceStateByID(id)
+		re.NoError(err)
+		re.Equal(keyspacepb.KeyspaceState_ENABLED, state)
+		name, err = manager.GetEnabledKeyspaceNameByID(id)
+		re.NoError(err)
+		re.Equal(bootstrapKeyspaceName, name)
 	}
 }
 
@@ -355,26 +410,55 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 		re.NoError(err)
 	}
 
-	// Load all keyspaces including the default keyspace.
+	// Load all keyspaces including the bootstrap keyspace.
 	keyspaces, err := manager.LoadRangeKeyspace(0, 0)
 	re.NoError(err)
 	re.Len(keyspaces, total+1)
-	for i := range keyspaces {
-		re.Equal(uint32(i), keyspaces[i].Id)
-		if i != 0 {
-			checkCreateRequest(re, requests[i-1], keyspaces[i])
+
+	// In next-gen mode, the bootstrap keyspace has SystemKeyspaceID instead of DefaultKeyspaceID (0).
+	// So the keyspaces will be ordered as: [1, 2, 3, ..., 100, SystemKeyspaceID]
+	// In legacy mode, they will be ordered as: [0, 1, 2, 3, ..., 100]
+	if kerneltype.IsNextGen() {
+		// For next-gen: expect keyspaces [1, 2, ..., 100, SystemKeyspaceID]
+		for i := range keyspaces {
+			if i < total {
+				// User-created keyspaces with IDs 1-100
+				re.Equal(uint32(i+1), keyspaces[i].Id)
+				checkCreateRequest(re, requests[i], keyspaces[i])
+			} else {
+				// Bootstrap keyspace with SystemKeyspaceID
+				re.Equal(constant.SystemKeyspaceID, keyspaces[i].Id)
+			}
+		}
+	} else {
+		// For classic: expect keyspaces [0, 1, 2, ..., 100]
+		for i := range keyspaces {
+			re.Equal(uint32(i), keyspaces[i].Id)
+			if i != 0 {
+				checkCreateRequest(re, requests[i-1], keyspaces[i])
+			}
 		}
 	}
 
 	// Load first 50 keyspaces.
-	// Result should be keyspaces with id 0 - 49.
 	keyspaces, err = manager.LoadRangeKeyspace(0, 50)
 	re.NoError(err)
-	re.Len(keyspaces, 50)
-	for i := range keyspaces {
-		re.Equal(uint32(i), keyspaces[i].Id)
-		if i != 0 {
-			checkCreateRequest(re, requests[i-1], keyspaces[i])
+
+	if kerneltype.IsNextGen() {
+		// In next-gen mode, result should be keyspaces with id 1 - 50.
+		re.Len(keyspaces, 50)
+		for i := range keyspaces {
+			re.Equal(uint32(i+1), keyspaces[i].Id)
+			checkCreateRequest(re, requests[i], keyspaces[i])
+		}
+	} else {
+		// In legacy mode, result should be keyspaces with id 0 - 49.
+		re.Len(keyspaces, 50)
+		for i := range keyspaces {
+			re.Equal(uint32(i), keyspaces[i].Id)
+			if i != 0 {
+				checkCreateRequest(re, requests[i-1], keyspaces[i])
+			}
 		}
 	}
 
@@ -390,21 +474,43 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	}
 
 	// Attempts to load 30 keyspaces starting from keyspace with id 90.
-	// Scan result should be keyspaces with id 90-100.
 	loadStart = 90
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 30)
 	re.NoError(err)
-	re.Len(keyspaces, 11)
-	for i := range keyspaces {
-		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
-		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
+
+	if kerneltype.IsNextGen() {
+		// In next-gen mode, scan result should be keyspaces with id 90-100 plus SystemKeyspaceID.
+		re.Len(keyspaces, 12)
+		for i := range keyspaces {
+			if i < 11 {
+				// User-created keyspaces with IDs 90-100
+				re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+				checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
+			} else {
+				// System keyspace with SystemKeyspaceID
+				re.Equal(constant.SystemKeyspaceID, keyspaces[i].Id)
+			}
+		}
+	} else {
+		// In legacy mode, scan result should be keyspaces with id 90-100.
+		re.Len(keyspaces, 11)
+		for i := range keyspaces {
+			re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+			checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
+		}
 	}
 
 	// Loading starting from non-existing keyspace ID should result in empty result.
 	loadStart = 900
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 0)
 	re.NoError(err)
-	re.Empty(keyspaces)
+	if kerneltype.IsNextGen() {
+		// In next-gen mode, only SystemKeyspaceID is greater than 900.
+		re.Len(keyspaces, 1)
+		re.Equal(constant.SystemKeyspaceID, keyspaces[0].Id)
+	} else {
+		re.Empty(keyspaces)
+	}
 
 	// Scanning starting from a non-zero illegal index should result in error.
 	loadStart = math.MaxUint32
@@ -599,6 +705,104 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 			re.NotContains(defaultKeyspaceGroup.Keyspaces, keyspaceID)
 		}
 	}
+}
+
+func TestIterateKeyspaces(t *testing.T) {
+	re := require.New(t)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	testWithKeyspaces := func(keyspaceIDs []uint32, keyspaceNames []string, expectedLoadRangeCount int) {
+		re.Len(keyspaceNames, len(keyspaceIDs))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+		allocator := mockid.NewIDAllocator()
+		kgm := NewKeyspaceGroupManager(ctx, store, nil)
+		manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm)
+
+		re.NoError(kgm.Bootstrap(ctx))
+		re.NoError(manager.Bootstrap())
+
+		now := time.Now().Unix()
+		for i, id := range keyspaceIDs {
+			name := keyspaceNames[i]
+			_, err := manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{
+				ID:   &id,
+				Name: name,
+				Config: map[string]string{
+					"test_cfg": strconv.FormatUint(uint64(id), 10),
+				},
+				CreateTime: now,
+			})
+			re.NoError(err)
+		}
+
+		// Add the reserved keyspace to the keyspace list for later check.
+		if kerneltype.IsNextGen() {
+			keyspaceIDs = append(keyspaceIDs, constant.SystemKeyspaceID)
+			keyspaceNames = append(keyspaceNames, constant.SystemKeyspaceName)
+		} else {
+			keyspaceIDs = append([]uint32{constant.DefaultKeyspaceID}, keyspaceIDs...)
+			keyspaceNames = append([]string{constant.DefaultKeyspaceName}, keyspaceNames...)
+		}
+
+		loadRangeCounter := 0
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange", func() {
+			loadRangeCounter++
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange"))
+		}()
+
+		it := manager.IterateKeyspaces()
+		i := 0
+		for ; ; i++ {
+			meta, ok, err := it.Next()
+			re.NoError(err)
+			if !ok {
+				break
+			}
+			re.Equal(keyspaceIDs[i], meta.Id)
+			re.Equal(keyspaceNames[i], meta.Name)
+			if meta.Id != constant.DefaultKeyspaceID && meta.Id != constant.SystemKeyspaceID {
+				re.Equal(strconv.FormatUint(uint64(meta.Id), 10), meta.Config["test_cfg"])
+			}
+		}
+		re.Equal(len(keyspaceIDs), i)
+		re.Equal(expectedLoadRangeCount, loadRangeCounter)
+	}
+
+	testWithNKeyspaces := func(idStart int, n int, idStep int, expectedLoadRangeCount int) {
+		keyspaceIDs := make([]uint32, n)
+		keyspaceNames := make([]string, n)
+		for i := range n {
+			id := uint32(idStart + i*idStep)
+			keyspaceIDs[i] = id
+			keyspaceNames[i] = fmt.Sprintf("ks%d", id)
+		}
+		testWithKeyspaces(keyspaceIDs, keyspaceNames, expectedLoadRangeCount)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize", "return(5)"))
+
+	testWithKeyspaces([]uint32{}, []string{}, 2)
+	testWithKeyspaces([]uint32{1, 2}, []string{"ks1", "ks2"}, 2)
+	testWithKeyspaces([]uint32{1, 2, 3, 4, 5, 6}, []string{"ks1", "ks2", "ks3", "ks4", "ks5", "ks6"}, 3)
+	testWithKeyspaces([]uint32{10, 20, 30, 40, 50, 60}, []string{"ks10", "ks20", "ks30", "ks40", "ks50", "ks60"}, 3)
+	testWithNKeyspaces(1, 18, 1, 5)
+	testWithNKeyspaces(1, 19, 2, 5)
+	testWithNKeyspaces(100, 20, 2, 6)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize"))
+
+	testWithNKeyspaces(1, 999, 1, 11)
+	testWithNKeyspaces(1, 1000, 10, 12)
 }
 
 // Benchmark the keyspace assignment patrol.

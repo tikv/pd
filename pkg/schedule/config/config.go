@@ -587,9 +587,10 @@ var defaultSchedulersInit = func() SchedulerConfigs {
 		{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
 		{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
 		{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
 	}
 	if !kerneltype.IsNextGen() {
-		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]})
+		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictStoppingStoreScheduler]})
 	}
 	return defaultSchedulers
 }

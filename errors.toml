@@ -146,11 +146,6 @@ error = '''
 can not remove store %d since there are no extra up store to store the leader
 '''
 
-["PD:core:ErrSlowStoreEvicted"]
-error = '''
-store %v is evicted as a slow store
-'''
-
 ["PD:core:ErrSlowTrendEvicted"]
 error = '''
 store %v is evicted as a slow store by trend
@@ -428,7 +423,7 @@ trying to set a GC barrier on ts %d which is already behind the txn safe point %
 
 ["PD:gc:ErrGCOnInvalidKeyspace"]
 error = '''
-trying to manage GC in keyspace %v where keyspace level GC is not enabled
+trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled
 '''
 
 ["PD:gc:ErrGCSafePointExceedsTxnSafePoint"]
@@ -896,6 +891,11 @@ error = '''
 unknown interval growth type error
 '''
 
+["PD:scheduler:ErrNoStoreToBeSelected"]
+error = '''
+no store to be selected
+'''
+
 ["PD:scheduler:ErrScheduleConfigNotExist"]
 error = '''
 the config does not exist
@@ -908,7 +908,7 @@ wrong scheduler config %s
 
 ["PD:scheduler:ErrSchedulerCreateFuncNotRegistered"]
 error = '''
-create func of %v is not registered
+create func is not registered
 '''
 
 ["PD:scheduler:ErrSchedulerDuplicated"]

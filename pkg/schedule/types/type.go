@@ -50,6 +50,8 @@ const (
 	EvictSlowStoreScheduler CheckerSchedulerType = "evict-slow-store-scheduler"
 	// EvictSlowTrendScheduler is evict leader by slow trend scheduler name.
 	EvictSlowTrendScheduler CheckerSchedulerType = "evict-slow-trend-scheduler"
+	// EvictStoppingStoreScheduler is evict stopping store scheduler name.
+	EvictStoppingStoreScheduler CheckerSchedulerType = "evict-stopping-store-scheduler"
 	// GrantLeaderScheduler is grant leader scheduler name.
 	GrantLeaderScheduler CheckerSchedulerType = "grant-leader-scheduler"
 	// GrantHotRegionScheduler is grant hot region scheduler name.
@@ -88,6 +90,7 @@ var (
 		EvictLeaderScheduler:           "evict-leader",
 		EvictSlowStoreScheduler:        "evict-slow-store",
 		EvictSlowTrendScheduler:        "evict-slow-trend",
+		EvictStoppingStoreScheduler:    "evict-stopping-store",
 		GrantLeaderScheduler:           "grant-leader",
 		GrantHotRegionScheduler:        "grant-hot-region",
 		BalanceHotRegionScheduler:      "hot-region",
@@ -111,6 +114,7 @@ var (
 		"evict-leader":            EvictLeaderScheduler,
 		"evict-slow-store":        EvictSlowStoreScheduler,
 		"evict-slow-trend":        EvictSlowTrendScheduler,
+		"evict-stopping-store":    EvictStoppingStoreScheduler,
 		"grant-leader":            GrantLeaderScheduler,
 		"grant-hot-region":        GrantHotRegionScheduler,
 		"hot-region":              BalanceHotRegionScheduler,
@@ -126,17 +130,18 @@ var (
 
 	// StringToSchedulerType is a map to convert the scheduler string to the CheckerSchedulerType.
 	StringToSchedulerType = map[string]CheckerSchedulerType{
-		"balance-leader-scheduler":     BalanceLeaderScheduler,
-		"balance-region-scheduler":     BalanceRegionScheduler,
-		"balance-witness-scheduler":    BalanceWitnessScheduler,
-		"evict-leader-scheduler":       EvictLeaderScheduler,
-		"evict-slow-store-scheduler":   EvictSlowStoreScheduler,
-		"evict-slow-trend-scheduler":   EvictSlowTrendScheduler,
-		"grant-leader-scheduler":       GrantLeaderScheduler,
-		"grant-hot-region-scheduler":   GrantHotRegionScheduler,
-		"balance-hot-region-scheduler": BalanceHotRegionScheduler,
-		"random-merge-scheduler":       RandomMergeScheduler,
-		"scatter-range-scheduler":      ScatterRangeScheduler,
+		"balance-leader-scheduler":       BalanceLeaderScheduler,
+		"balance-region-scheduler":       BalanceRegionScheduler,
+		"balance-witness-scheduler":      BalanceWitnessScheduler,
+		"evict-leader-scheduler":         EvictLeaderScheduler,
+		"evict-slow-store-scheduler":     EvictSlowStoreScheduler,
+		"evict-slow-trend-scheduler":     EvictSlowTrendScheduler,
+		"evict-stopping-store-scheduler": EvictStoppingStoreScheduler,
+		"grant-leader-scheduler":         GrantLeaderScheduler,
+		"grant-hot-region-scheduler":     GrantHotRegionScheduler,
+		"balance-hot-region-scheduler":   BalanceHotRegionScheduler,
+		"random-merge-scheduler":         RandomMergeScheduler,
+		"scatter-range-scheduler":        ScatterRangeScheduler,
 		// TODO: remove `scatter-range` after remove `NewScatterRangeSchedulerCommand` from pd-ctl
 		"scatter-range":                     ScatterRangeScheduler,
 		"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
@@ -159,9 +164,10 @@ var (
 			BalanceLeaderScheduler,
 			BalanceRegionScheduler,
 			BalanceHotRegionScheduler,
+			EvictSlowStoreScheduler,
 		}
 		if !kerneltype.IsNextGen() {
-			defaultSchedulers = append(defaultSchedulers, EvictSlowStoreScheduler)
+			defaultSchedulers = append(defaultSchedulers, EvictStoppingStoreScheduler)
 		}
 		return defaultSchedulers
 	}

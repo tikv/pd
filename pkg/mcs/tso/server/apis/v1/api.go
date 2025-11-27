@@ -89,9 +89,9 @@ func NewService(srv *tsoserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	apiHandlerEngine.GET("status", utils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
-	root.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
@@ -100,6 +100,8 @@ func NewService(srv *tsoserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterKeyspaceGroupRouter()
+	// Deprecated, kept for compatibility.
+	// Use /health instead.
 	s.RegisterHealthRouter()
 	s.RegisterConfigRouter()
 	s.RegisterPrimaryRouter()
@@ -109,20 +111,21 @@ func NewService(srv *tsoserver.Service) *Service {
 // RegisterAdminRouter registers the router of the TSO admin handler.
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
-	router.POST("/reset-ts", ResetTS)
+	// reset-ts needs to be forwarded to the primary.
+	router.POST("/reset-ts", multiservicesapi.ServiceRedirector(), resetTS)
 	router.PUT("/log", changeLogLevel)
 }
 
 // RegisterKeyspaceGroupRouter registers the router of the TSO keyspace group handler.
 func (s *Service) RegisterKeyspaceGroupRouter() {
 	router := s.root.Group("keyspace-groups")
-	router.GET("/members", GetKeyspaceGroupMembers)
+	router.GET("/members", getKeyspaceGroupMembers)
 }
 
 // RegisterHealthRouter registers the router of the health handler.
 func (s *Service) RegisterHealthRouter() {
 	router := s.root.Group("health")
-	router.GET("", GetHealth)
+	router.GET("", getHealth)
 }
 
 // RegisterConfigRouter registers the router of the config handler.
@@ -134,7 +137,8 @@ func (s *Service) RegisterConfigRouter() {
 // RegisterPrimaryRouter registers the router of the primary handler.
 func (s *Service) RegisterPrimaryRouter() {
 	router := s.root.Group("primary")
-	router.POST("transfer", transferPrimary)
+	// Transferring primary needs to be forwarded to the primary.
+	router.POST("transfer", multiservicesapi.ServiceRedirector(), transferPrimary)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -181,7 +185,7 @@ type ResetTSParams struct {
 //	reset ts to input ts if it > current ts and < upper bound, error if not in that range
 //
 // during EBS based restore, we call this to make sure ts of pd >= resolved_ts in backup.
-func ResetTS(c *gin.Context) {
+func resetTS(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	var param ResetTSParams
 	if err := c.ShouldBindJSON(&param); err != nil {
@@ -221,16 +225,20 @@ func ResetTS(c *gin.Context) {
 	c.String(http.StatusOK, "Reset ts successfully.")
 }
 
-// GetHealth returns the health status of the TSO service.
-func GetHealth(c *gin.Context) {
+// getHealth returns the health status of the TSO service.
+func getHealth(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	if svr.IsClosed() {
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
 	allocator, err := svr.GetKeyspaceGroupManager().GetAllocator(constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	if allocator.GetMember().(*member.Participant).IsPrimaryElected() {
-		c.IndentedJSON(http.StatusOK, "ok")
+		c.String(http.StatusOK, "ok")
 		return
 	}
 
@@ -245,8 +253,8 @@ type KeyspaceGroupMember struct {
 	PrimaryID uint64 `json:"primary_id"`
 }
 
-// GetKeyspaceGroupMembers gets the keyspace group members that the TSO service is serving.
-func GetKeyspaceGroupMembers(c *gin.Context) {
+// getKeyspaceGroupMembers gets the keyspace group members that the TSO service is serving.
+func getKeyspaceGroupMembers(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	kgm := svr.GetKeyspaceGroupManager()
 	keyspaceGroups := kgm.GetKeyspaceGroups()
@@ -272,11 +280,13 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 // @Tags     config
 // @Summary  Get full config.
 // @Produce  json
-// @Success  200  {object}  config.Config
+// @Success  200  {object}  tsoserver.Config
 // @Router   /config [get]
 func getConfig(c *gin.Context) {
+	var config *tsoserver.Config
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
-	c.IndentedJSON(http.StatusOK, svr.GetConfig())
+	config = svr.GetConfig()
+	c.IndentedJSON(http.StatusOK, config)
 }
 
 // TransferPrimary transfers the primary member to `new_primary`.

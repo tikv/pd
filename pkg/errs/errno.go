@@ -131,7 +131,6 @@ var (
 	ErrStoreDestroyed         = errors.Normalize("store %v has been physically destroyed", errors.RFCCodeText("PD:core:ErrStoreDestroyed"))
 	ErrStoreUnhealthy         = errors.Normalize("store %v is unhealthy", errors.RFCCodeText("PD:core:ErrStoreUnhealthy"))
 	ErrStoreServing           = errors.Normalize("store %v has been serving", errors.RFCCodeText("PD:core:ErrStoreServing"))
-	ErrSlowStoreEvicted       = errors.Normalize("store %v is evicted as a slow store", errors.RFCCodeText("PD:core:ErrSlowStoreEvicted"))
 	ErrSlowTrendEvicted       = errors.Normalize("store %v is evicted as a slow store by trend", errors.RFCCodeText("PD:core:ErrSlowTrendEvicted"))
 	ErrStoresNotEnough        = errors.Normalize("can not remove store %v since the number of up stores would be %v while need %v", errors.RFCCodeText("PD:core:ErrStoresNotEnough"))
 	ErrNoStoreForRegionLeader = errors.Normalize("can not remove store %d since there are no extra up store to store the leader", errors.RFCCodeText("PD:core:ErrNoStoreForRegionLeader"))
@@ -189,8 +188,9 @@ var (
 	ErrSchedulerConfig                  = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
 	ErrCacheOverflow                    = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
 	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
-	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
+	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
 	ErrSchedulerTiKVSplitDisabled       = errors.Normalize("tikv split region disabled", errors.RFCCodeText("PD:scheduler:ErrSchedulerTiKVSplitDisabled"))
+	ErrNoStoreToBeSelected              = errors.Normalize("no store to be selected", errors.RFCCodeText("PD:scheduler:ErrNoStoreToBeSelected"))
 )
 
 // checker errors
@@ -540,7 +540,7 @@ var (
 
 // GC errors
 var (
-	ErrGCOnInvalidKeyspace                 = errors.Normalize("trying to manage GC in keyspace %v where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
+	ErrGCOnInvalidKeyspace                 = errors.Normalize("trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
 	ErrDecreasingGCSafePoint               = errors.Normalize("trying to update GC safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingGCSafePoint"))
 	ErrGCSafePointExceedsTxnSafePoint      = errors.Normalize("trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v", errors.RFCCodeText("PD:gc:ErrGCSafePointExceedsTxnSafePoint"))
 	ErrDecreasingTxnSafePoint              = errors.Normalize("trying to update txn safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingTxnSafePoint"))

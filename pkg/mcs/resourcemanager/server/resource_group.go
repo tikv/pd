@@ -273,13 +273,16 @@ func (rg *ResourceGroup) RequestRU(
 	}
 	// Then, try to apply the service limit.
 	grantedTokens := tb.GetTokens()
-	limitedTokens := sl.applyServiceLimit(now, grantedTokens)
+	limitedTokens, minTrickleTimeMs := sl.applyServiceLimit(now, grantedTokens)
 	if limitedTokens < grantedTokens {
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
 		if rg.getBurstLimitLocked() > 0 {
 			rg.RUSettings.RU.reservedServiceTokens += grantedTokens - limitedTokens
 		}
+	}
+	if trickleTimeMs < minTrickleTimeMs {
+		trickleTimeMs = minTrickleTimeMs
 	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }

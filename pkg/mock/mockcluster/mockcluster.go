@@ -128,6 +128,9 @@ func (mc *Cluster) AllocID(uint32) (uint64, uint32, error) {
 	return mc.Alloc(1)
 }
 
+// GetPrepareRegionCount returns the count of regions that are in prepare state.
+func (*Cluster) GetPrepareRegionCount() (int, error) { return 0, nil }
+
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (*Cluster) UpdateRegionsLabelLevelStats(_ []*core.RegionInfo) {}
 
@@ -768,9 +771,13 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, othe
 	var followerStoreIDs []uint64
 	var learnerStoreIDs []uint64
 	for _, storeID := range otherPeerStoreIDs {
-		if store := mc.GetStore(storeID); store != nil && store.IsTiFlash() {
+		store := mc.GetStore(storeID)
+		if store == nil {
+			continue
+		}
+		if store.IsTiFlashWrite() {
 			learnerStoreIDs = append(learnerStoreIDs, storeID)
-		} else {
+		} else if store.IsTiKV() {
 			followerStoreIDs = append(followerStoreIDs, storeID)
 		}
 	}

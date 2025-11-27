@@ -50,13 +50,14 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 // Service is the gRPC service for resource manager.
 type Service struct {
-	ctx     context.Context
+	ctx context.Context
+	*Server
 	manager *Manager
 	// settings
 }
 
 // NewService creates a new resource manager service.
-func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService[T factoryProvider](svr bs.Server) registry.RegistrableService {
 	manager := NewManager[T](svr)
 
 	return &Service{

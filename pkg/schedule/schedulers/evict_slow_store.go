@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -24,7 +25,7 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
@@ -52,6 +53,11 @@ const (
 	//    to 2 in one store, it is considered a slow store.
 	networkSlowStoreIssueThreshold       = 95 // Threshold for detecting network issues with a specific store
 	networkSlowStoreFluctuationThreshold = 10 // Threshold for detecting network fluctuations with other stores
+
+	// Why 6? Store heartbeat reports a score every 10 seconds. Therefore, if the average
+	// score of all six store heartbeats is above 99, it indicates that network jitter has
+	// occurred within all six 10-second intervals.
+	maxNetworkEvictThresholdTriggerCount = 6
 	slowStoreRecoverThreshold            = 1
 	// Currently only support one network slow store
 	defaultMaxNetworkSlowStore = 1
@@ -60,8 +66,9 @@ const (
 type slowStoreType string
 
 const (
-	diskSlowStore    slowStoreType = "disk"
-	networkSlowStore slowStoreType = "network"
+	diskSlowStore       slowStoreType = "disk"
+	networkSlowStore    slowStoreType = "network"
+	networkEvictedStore slowStoreType = "network-evicted"
 )
 
 type evictSlowStoreSchedulerConfig struct {
@@ -69,15 +76,20 @@ type evictSlowStoreSchedulerConfig struct {
 
 	cluster *core.BasicCluster
 	// Last timestamp of the chosen slow store for eviction.
-	lastSlowStoreCaptureTS     time.Time
-	isRecovered                bool
-	networkSlowStoreCaptureTSs map[uint64]time.Time
+	lastSlowStoreCaptureTS time.Time
+	isRecovered            bool
+
+	// The value should be nil when store is slow. Once the store's
+	// score becomes 1, the store prepares to recover and record the
+	// timestamp.
+	networkSlowStoreRecoverStartAts map[uint64]*time.Time
 	// Duration gap for recovering the candidate, unit: s.
 	RecoverySec uint64 `json:"recovery-duration"`
 	// EvictedStores is only used by disk slow store scheduler
-	EvictedStores           []uint64 `json:"evict-stores"`
-	EnableNetworkSlowStore  bool     `json:"enable-network-slow-store"`
-	PausedNetworkSlowStores []uint64 `json:"network-slow-stores"`
+	EvictedStores            []uint64 `json:"evict-stores"`
+	EnableNetworkSlowStore   bool     `json:"enable-network-slow-store"`
+	PausedNetworkSlowStores  []uint64 `json:"paused-network-slow-stores"`
+	EvictedNetworkSlowStores []uint64 `json:"evicted-network-slow-stores"`
 	// TODO: We only add batch for evict-slow-store-scheduler now.
 	// If necessary, we also need to support evict-slow-trend-scheduler.
 	Batch int `json:"batch"`
@@ -85,43 +97,56 @@ type evictSlowStoreSchedulerConfig struct {
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
-		lastSlowStoreCaptureTS:     time.Time{},
-		RecoverySec:                defaultRecoverySec,
-		EvictedStores:              make([]uint64, 0),
-		Batch:                      EvictLeaderBatchSize,
-		EnableNetworkSlowStore:     true,
-		PausedNetworkSlowStores:    make([]uint64, 0),
-		networkSlowStoreCaptureTSs: make(map[uint64]time.Time),
+		baseDefaultSchedulerConfig:      newBaseDefaultSchedulerConfig(),
+		lastSlowStoreCaptureTS:          time.Time{},
+		RecoverySec:                     defaultRecoverySec,
+		EvictedStores:                   make([]uint64, 0),
+		Batch:                           EvictLeaderBatchSize,
+		EnableNetworkSlowStore:          false,
+		PausedNetworkSlowStores:         make([]uint64, 0),
+		EvictedNetworkSlowStores:        make([]uint64, 0),
+		networkSlowStoreRecoverStartAts: make(map[uint64]*time.Time),
 	}
 }
 
-func (conf *evictSlowStoreSchedulerConfig) clone() *evictSlowStoreSchedulerConfig {
-	conf.RLock()
-	defer conf.RUnlock()
-	return &evictSlowStoreSchedulerConfig{
-		RecoverySec: conf.RecoverySec,
-		Batch:       conf.Batch,
+func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error {
+	var (
+		oldLastSlowStoreCaptureTS          = conf.lastSlowStoreCaptureTS
+		oldNetworkSlowStoreRecoverStartAts = make(map[uint64]*time.Time)
+		oldIsRecovered                     = conf.isRecovered
+		oldEvictedStores                   = conf.EvictedStores
+		oldPausedNetworkSlowStores         = conf.PausedNetworkSlowStores
+		oldEvictedNetworkSlowStores        = conf.EvictedNetworkSlowStores
+		oldRecoverySec                     = conf.RecoverySec
+		oldBatch                           = conf.Batch
+	)
+	for k, v := range conf.networkSlowStoreRecoverStartAts {
+		oldNetworkSlowStoreRecoverStartAts[k] = v
 	}
+	updateFn()
+	if err := conf.save(); err != nil {
+		conf.lastSlowStoreCaptureTS = oldLastSlowStoreCaptureTS
+		conf.networkSlowStoreRecoverStartAts = oldNetworkSlowStoreRecoverStartAts
+		conf.isRecovered = oldIsRecovered
+		conf.EvictedStores = oldEvictedStores
+		conf.PausedNetworkSlowStores = oldPausedNetworkSlowStores
+		conf.EvictedNetworkSlowStores = oldEvictedNetworkSlowStores
+		conf.RecoverySec = oldRecoverySec
+		conf.Batch = oldBatch
+		return err
+	}
+	return nil
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 	conf.RLock()
 	defer conf.RUnlock()
-	return conf.EvictedStores
+
+	return append(conf.EvictedStores, conf.EvictedNetworkSlowStores...)
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
-	if conf.evictStore() != id {
-		return nil
-	}
+func (*evictSlowStoreSchedulerConfig) getKeyRangesByID(uint64) []keyutil.KeyRange {
 	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
-}
-
-func (conf *evictSlowStoreSchedulerConfig) getEnableNetworkSlowStore() bool {
-	conf.RLock()
-	defer conf.RUnlock()
-	return conf.EnableNetworkSlowStore
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getBatch() int {
@@ -131,10 +156,12 @@ func (conf *evictSlowStoreSchedulerConfig) getBatch() int {
 }
 
 func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
-	if len(conf.getStores()) == 0 {
+	conf.RLock()
+	defer conf.RUnlock()
+	if len(conf.EvictedStores) == 0 {
 		return 0
 	}
-	return conf.getStores()[0]
+	return conf.EvictedStores[0]
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getPausedNetworkSlowStores() []uint64 {
@@ -143,68 +170,62 @@ func (conf *evictSlowStoreSchedulerConfig) getPausedNetworkSlowStores() []uint64
 	return conf.PausedNetworkSlowStores
 }
 
-func (conf *evictSlowStoreSchedulerConfig) pauseNetworkSlowStore(storeID uint64) error {
-	conf.Lock()
-	defer conf.Unlock()
-	oldValue := conf.PausedNetworkSlowStores
-	conf.PausedNetworkSlowStores = append(conf.PausedNetworkSlowStores, storeID)
-	err := conf.save()
-	if err != nil {
-		log.Warn("failed to persist evict slow store config",
-			zap.Uint64("store-id", storeID),
-			zap.Error(err))
-		conf.PausedNetworkSlowStores = oldValue
-	}
-	return err
+func (conf *evictSlowStoreSchedulerConfig) getEvictNetworkSlowStores() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.EvictedNetworkSlowStores
 }
 
-func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStore(storeID uint64, cluster sche.SchedulerCluster) {
-	conf.Lock()
-	defer conf.Unlock()
+func (conf *evictSlowStoreSchedulerConfig) deleteNetworkSlowStoreLocked(storeID uint64, cluster sche.SchedulerCluster) {
+	log.Info("deleting network slow store",
+		zap.Uint64("store-id", storeID))
 
-	oldPausedNetworkSlowStores := conf.PausedNetworkSlowStores
-	conf.PausedNetworkSlowStores = slices.DeleteFunc(conf.PausedNetworkSlowStores, func(val uint64) bool {
-		return val == storeID
-	})
-	if err := conf.save(); err != nil {
+	needRecoverEvict := slices.Contains(conf.EvictedNetworkSlowStores, storeID)
+	if err := conf.persistLocked(func() {
+		conf.PausedNetworkSlowStores = slices.DeleteFunc(conf.PausedNetworkSlowStores, func(val uint64) bool {
+			return val == storeID
+		})
+		conf.EvictedNetworkSlowStores = slices.DeleteFunc(conf.EvictedNetworkSlowStores, func(val uint64) bool {
+			return val == storeID
+		})
+	}); err != nil {
 		log.Warn("failed to persist evict slow store config",
 			zap.Uint64("store-id", storeID),
 			zap.Error(err))
-		conf.PausedNetworkSlowStores = oldPausedNetworkSlowStores
 		return
 	}
 	cluster.ResumeLeaderTransfer(storeID, constant.In)
+	if needRecoverEvict {
+		log.Info("recovered network evicted slow store", zap.Uint64("store-id", storeID))
+		cluster.SlowStoreRecovered(storeID)
+		evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkEvictedStore))
+	}
+
 	evictedSlowStoreStatusGauge.DeleteLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore))
-	delete(conf.networkSlowStoreCaptureTSs, storeID)
+	delete(conf.networkSlowStoreRecoverStartAts, storeID)
 }
 
-func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStore(storeID uint64, cluster sche.SchedulerCluster) {
+func (conf *evictSlowStoreSchedulerConfig) addNetworkSlowStoreLocked(storeID uint64, cluster sche.SchedulerCluster) {
 	log.Info("detected network slow store, start to pause scheduler",
 		zap.Uint64("store-id", storeID))
-	conf.networkSlowStoreCaptureTSs[storeID] = time.Now()
 	if err := cluster.PauseLeaderTransfer(storeID, constant.In); err != nil {
 		log.Warn("failed to pause leader transfer for network slow store",
 			zap.Uint64("store-id", storeID),
 			zap.Error(err))
 		return
 	}
-	if err := conf.pauseNetworkSlowStore(storeID); err != nil {
+
+	err := conf.persistLocked(func() {
+		conf.PausedNetworkSlowStores = append(conf.PausedNetworkSlowStores, storeID)
+		conf.networkSlowStoreRecoverStartAts[storeID] = nil
+	})
+	if err != nil {
 		log.Warn("failed to persist evict slow store config",
 			zap.Uint64("store-id", storeID),
 			zap.Error(err))
 		cluster.ResumeLeaderTransfer(storeID, constant.In)
-		return
 	}
 	evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Set(1)
-}
-
-func (conf *evictSlowStoreSchedulerConfig) getRecoverySec() uint64 {
-	conf.RLock()
-	defer conf.RUnlock()
-	failpoint.Inject("transientRecoveryGap", func() {
-		failpoint.Return(0)
-	})
-	return conf.RecoverySec
 }
 
 // readyForRecovery checks whether the last captured candidate is ready for recovery.
@@ -221,9 +242,10 @@ func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
-	conf.EvictedStores = []uint64{id}
-	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.save()
+	return conf.persistLocked(func() {
+		conf.EvictedStores = []uint64{id}
+		conf.lastSlowStoreCaptureTS = time.Now()
+	})
 }
 
 func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bool) error {
@@ -236,9 +258,10 @@ func (conf *evictSlowStoreSchedulerConfig) tryUpdateRecoverStatus(isRecovered bo
 
 	conf.Lock()
 	defer conf.Unlock()
-	conf.lastSlowStoreCaptureTS = time.Now()
-	conf.isRecovered = isRecovered
-	return conf.save()
+	return conf.persistLocked(func() {
+		conf.lastSlowStoreCaptureTS = time.Now()
+		conf.isRecovered = isRecovered
+	})
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldID uint64, err error) {
@@ -246,9 +269,10 @@ func (conf *evictSlowStoreSchedulerConfig) clearEvictedAndPersist() (oldID uint6
 	conf.Lock()
 	defer conf.Unlock()
 	if oldID > 0 {
-		conf.EvictedStores = []uint64{}
-		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.save()
+		err = conf.persistLocked(func() {
+			conf.EvictedStores = []uint64{}
+			conf.lastSlowStoreCaptureTS = time.Time{}
+		})
 	}
 	return
 }
@@ -274,45 +298,68 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
-	if input["recovery-duration"] != nil && !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+	recoveryDurationGapFloat, inputRecoveryDuration := input["recovery-duration"].(float64)
+	if input["recovery-duration"] != nil && !inputRecoveryDuration {
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 
-	batch := handler.config.getBatch()
-	batchFloat, ok := input["batch"].(float64)
-	if input["batch"] != nil && !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'batch'").Error())
+	batchFloat, inputBatch := input["batch"].(float64)
+	if input["batch"] != nil && !inputBatch {
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'batch'").Error())
 		return
 	}
-	if ok {
+	if inputBatch {
 		if batchFloat < 1 || batchFloat > 10 {
 			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
-		batch = (int)(batchFloat)
+	}
+
+	enableNetworkSlowStore, inputEnableNetworkSlowStore := input["enable-network-slow-store"].(bool)
+	if input["enable-network-slow-store"] != nil && !inputEnableNetworkSlowStore {
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'enable-network-slow-store'").Error())
+		return
 	}
 
 	handler.config.Lock()
 	defer handler.config.Unlock()
-	prevRecoverySec := handler.config.RecoverySec
-	prevBatch := handler.config.Batch
 	recoverySec := uint64(recoveryDurationGapFloat)
-	handler.config.RecoverySec = recoverySec
-	handler.config.Batch = batch
-	if err := handler.config.save(); err != nil {
+
+	if err := handler.config.persistLocked(func() {
+		if inputRecoveryDuration {
+			handler.config.RecoverySec = recoverySec
+		}
+		if inputBatch {
+			handler.config.Batch = int(batchFloat)
+		}
+		if inputEnableNetworkSlowStore {
+			handler.config.EnableNetworkSlowStore = enableNetworkSlowStore
+		}
+	}); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		handler.config.RecoverySec = prevRecoverySec
-		handler.config.Batch = prevBatch
 		return
 	}
-	log.Info("evict-slow-store-scheduler update config", zap.Uint64("prev-recovery-duration", prevRecoverySec), zap.Uint64("cur-recovery-duration", recoverySec), zap.Int("prev-batch", prevBatch), zap.Int("cur-batch", batch))
+	log.Info("evict-slow-store-scheduler update config",
+		zap.Uint64("cur-recovery-duration", recoverySec),
+		zap.Float64("cur-batch", batchFloat),
+		zap.Bool("cur-enable-network-slow-store", enableNetworkSlowStore),
+	)
+
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
 func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.clone()
+	handler.config.RLock()
+	defer handler.config.RUnlock()
+	conf := &evictSlowStoreSchedulerConfig{
+		RecoverySec:              handler.config.RecoverySec,
+		Batch:                    handler.config.Batch,
+		EvictedStores:            handler.config.EvictedStores,
+		EnableNetworkSlowStore:   handler.config.EnableNetworkSlowStore,
+		PausedNetworkSlowStores:  handler.config.PausedNetworkSlowStores,
+		EvictedNetworkSlowStores: handler.config.EvictedNetworkSlowStores,
+	}
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -362,40 +409,60 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.RecoverySec = newCfg.RecoverySec
 	s.conf.EvictedStores = newCfg.EvictedStores
 	s.conf.PausedNetworkSlowStores = newCfg.PausedNetworkSlowStores
+	s.conf.EvictedNetworkSlowStores = newCfg.EvictedNetworkSlowStores
+	s.conf.EnableNetworkSlowStore = newCfg.EnableNetworkSlowStore
 	s.conf.Batch = newCfg.Batch
 	return nil
 }
 
 // PrepareConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
+	errs := make([]error, 0)
+
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
-		return cluster.SlowStoreEvicted(evictStore)
+		if err := cluster.SlowStoreEvicted(evictStore); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	for _, storeID := range s.conf.getPausedNetworkSlowStores() {
-		// only support one network slow store now
-		return cluster.PauseLeaderTransfer(storeID, constant.In)
+		s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
+		if err := cluster.PauseLeaderTransfer(storeID, constant.In); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	for _, storeID := range s.conf.getEvictNetworkSlowStores() {
+		if err := cluster.SlowStoreEvicted(storeID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // CleanConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 	networkSlowStores := s.conf.getPausedNetworkSlowStores()
+	s.conf.Lock()
+	defer s.conf.Unlock()
 	for _, storeID := range networkSlowStores {
-		s.conf.deleteNetworkSlowStore(storeID, cluster)
+		s.conf.deleteNetworkSlowStoreLocked(storeID, cluster)
 	}
 }
 
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
-	err := s.conf.setStoreAndPersist(storeID)
-	if err != nil {
-		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", storeID))
+	if err := cluster.SlowStoreEvicted(storeID); err != nil {
+		log.Info("failed to evict slow store", zap.Uint64("store-id", storeID), zap.Error(err))
 		return err
 	}
 
-	return cluster.SlowStoreEvicted(storeID)
+	if err := s.conf.setStoreAndPersist(storeID); err != nil {
+		log.Info("failed to persist evicted slow store", zap.Uint64("store-id", storeID), zap.Error(err))
+		cluster.SlowStoreRecovered(storeID)
+		return err
+	}
+
+	return nil
 }
 
 func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
@@ -428,96 +495,168 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 // Schedule implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
-	if s.conf.getEnableNetworkSlowStore() {
-		s.scheduleNetworkSlowStore(cluster)
-	}
-	return s.scheduleDiskSlowStore(cluster), nil
+	s.scheduleNetworkSlowStore(cluster)
+	s.scheduleDiskSlowStore(cluster)
+	return s.schedulerEvictLeader(cluster), nil
 }
 
 func (s *evictSlowStoreScheduler) scheduleNetworkSlowStore(cluster sche.SchedulerCluster) {
-	// Try to recover network slow stores that have become normal
-	s.tryRecoverNetworkSlowStores(cluster)
+	// If necessary, we can split the lock into finer granularity
+	s.conf.Lock()
+	defer s.conf.Unlock()
 
-	// Activate paused network slow stores if capacity allows
-	s.activatePausedNetworkSlowStores(cluster)
+	if s.conf.EnableNetworkSlowStore {
+		// Try to recover network slow stores that have become normal
+		s.tryRecoverNetworkSlowStores(cluster)
 
-	// Detect and handle new network slow stores
-	s.detectAndHandleNetworkSlowStores(cluster)
+		// Activate paused network slow stores if capacity allows
+		s.activatePausedNetworkSlowStores(cluster)
+
+		// Detect and handle new network slow stores
+		s.detectAndHandleNetworkSlowStores(cluster)
+
+		s.tryEvictLeaderFromNetworkSlowStores(cluster)
+	} else {
+		// Clear network slow stores if the feature is disabled
+		for _, storeID := range s.conf.PausedNetworkSlowStores {
+			s.conf.deleteNetworkSlowStoreLocked(storeID, cluster)
+		}
+		clear(s.conf.networkSlowStoreRecoverStartAts)
+	}
+}
+
+func (s *evictSlowStoreScheduler) tryEvictLeaderFromNetworkSlowStores(cluster sche.SchedulerCluster) {
+	for storeID, startTime := range s.conf.networkSlowStoreRecoverStartAts {
+		if !slices.Contains(s.conf.PausedNetworkSlowStores, storeID) {
+			continue
+		}
+
+		if startTime != nil {
+			// Already recovering
+			continue
+		}
+
+		if slices.Contains(s.conf.EvictedNetworkSlowStores, storeID) {
+			continue
+		}
+
+		store := cluster.GetStore(storeID)
+		if store == nil {
+			continue
+		}
+
+		if store.GetNetworkSlowTriggers() >= maxNetworkEvictThresholdTriggerCount {
+			if err := cluster.SlowStoreEvicted(storeID); err != nil {
+				log.Info("failed to evict slow store",
+					zap.Uint64("store-id", storeID),
+					zap.Error(err))
+				continue
+			}
+			if err := s.conf.persistLocked(func() {
+				s.conf.EvictedNetworkSlowStores = append(s.conf.EvictedNetworkSlowStores, storeID)
+			}); err != nil {
+				log.Warn("failed to persist evicted network slow store",
+					zap.Uint64("store-id", storeID),
+					zap.Error(err))
+				cluster.SlowStoreRecovered(storeID)
+			}
+			log.Info("evicted network slow store", zap.Uint64("store-id", storeID))
+			evictedSlowStoreStatusGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkEvictedStore)).Set(1)
+		}
+	}
 }
 
 // tryRecoverNetworkSlowStores attempts to recover network slow stores that have returned to normal
 func (s *evictSlowStoreScheduler) tryRecoverNetworkSlowStores(cluster sche.SchedulerCluster) {
-	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
-	recoveryGap := s.conf.getRecoverySec()
+	var (
+		networkSlowStoreRecoverStartAts = s.conf.networkSlowStoreRecoverStartAts
+		recoveryGap                     = s.conf.RecoverySec
+		storesStillSlow                 = make([]uint64, 0)
+		storesPrepareToRecover          = make([]uint64, 0)
+	)
+	failpoint.Inject("transientRecoveryGap", func() {
+		recoveryGap = 0
+	})
 
-	for storeID, startTime := range networkSlowStoreCaptureTSs {
+	for storeID, startTime := range networkSlowStoreRecoverStartAts {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsRemoved() || store.IsRemoving() {
 			log.Info("network slow store has been removed",
 				zap.Uint64("store-id", storeID))
-			s.conf.deleteNetworkSlowStore(storeID, cluster)
+			s.conf.deleteNetworkSlowStoreLocked(storeID, cluster)
 			continue
 		}
 
-		if shouldRecoverNetworkSlowStore(store, startTime, networkSlowStoreCaptureTSs, recoveryGap) {
-			s.conf.deleteNetworkSlowStore(storeID, cluster)
+		networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
+		avgScore := calculateAvgScore(networkSlowScores)
+
+		// Recover the slow store only if the recoveryGap time is
+		// continuously less than or equal to slowStoreRecoverThreshold.
+		if avgScore > slowStoreRecoverThreshold {
+			storesStillSlow = append(storesStillSlow, storeID)
+			continue
+		}
+
+		if startTime == nil {
+			storesPrepareToRecover = append(storesPrepareToRecover, storeID)
+			continue
+		}
+
+		if uint64(time.Since(*startTime).Seconds()) >= recoveryGap {
+			s.conf.deleteNetworkSlowStoreLocked(storeID, cluster)
 		}
 	}
-}
 
-// shouldRecoverNetworkSlowStore checks if a network slow store should be recovered
-func shouldRecoverNetworkSlowStore(
-	store *core.StoreInfo,
-	startTime time.Time,
-	networkSlowStoreCaptureTSs map[uint64]time.Time,
-	recoveryGap uint64,
-) bool {
-	networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
-	return calculateAvgScore(networkSlowScores) <= slowStoreRecoverThreshold &&
-		uint64(time.Since(startTime).Seconds()) >= recoveryGap
+	for _, storeID := range storesStillSlow {
+		s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
+	}
+	for _, storeID := range storesPrepareToRecover {
+		now := time.Now()
+		s.conf.networkSlowStoreRecoverStartAts[storeID] = &now
+	}
 }
 
 // activatePausedNetworkSlowStores activates paused network slow stores if capacity allows
 func (s *evictSlowStoreScheduler) activatePausedNetworkSlowStores(cluster sche.SchedulerCluster) {
-	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
-	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
+	pausedNetworkSlowStores := s.conf.PausedNetworkSlowStores
+	networkSlowStoreRecoverStartAts := s.conf.networkSlowStoreRecoverStartAts
 
-	if len(pausedNetworkSlowStores) < defaultMaxNetworkSlowStore && len(networkSlowStoreCaptureTSs) > 0 {
+	if len(pausedNetworkSlowStores) < defaultMaxNetworkSlowStore && len(networkSlowStoreRecoverStartAts) > 0 {
 		var slowStoreID uint64
-		for storeID := range networkSlowStoreCaptureTSs {
+		for storeID := range networkSlowStoreRecoverStartAts {
 			slowStoreID = storeID
 			break
 		}
-		s.conf.addNetworkSlowStore(slowStoreID, cluster)
+		s.conf.addNetworkSlowStoreLocked(slowStoreID, cluster)
 	}
 }
 
 // detectAndHandleNetworkSlowStores detects new network slow stores and handles them
 func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.SchedulerCluster) {
 	stores := cluster.GetStores()
-	networkSlowStoreCaptureTSs := s.conf.networkSlowStoreCaptureTSs
-	pausedNetworkSlowStores := s.conf.getPausedNetworkSlowStores()
+	networkSlowStoreRecoverStartAts := s.conf.networkSlowStoreRecoverStartAts
+	pausedNetworkSlowStores := s.conf.PausedNetworkSlowStores
 
 	// Build problematic network map
-	problematicNetwork := buildProblematicNetworkMap(stores, networkSlowStoreCaptureTSs)
+	problematicNetwork := buildProblematicNetworkMap(stores, networkSlowStoreRecoverStartAts)
 
 	// Evaluate each store for network slowness
 	for _, store := range stores {
-		if shouldSkipStoreEvaluation(store, problematicNetwork, networkSlowStoreCaptureTSs) {
+		if shouldSkipStoreEvaluation(store, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			continue
 		}
 
-		if isNetworkSlowStore(store, stores, problematicNetwork, networkSlowStoreCaptureTSs) {
+		if isNetworkSlowStore(store, stores, problematicNetwork, networkSlowStoreRecoverStartAts) {
 			storeID := store.GetID()
 
 			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
 				failpoint.InjectCall("evictSlowStoreTriggerLimit")
 				slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Inc()
-				s.conf.networkSlowStoreCaptureTSs[storeID] = time.Now()
+				s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
 				continue
 			}
 
-			s.conf.addNetworkSlowStore(storeID, cluster)
+			s.conf.addNetworkSlowStoreLocked(storeID, cluster)
 		}
 	}
 }
@@ -525,17 +664,17 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 // buildProblematicNetworkMap builds a map of stores with problematic network connections
 func buildProblematicNetworkMap(
 	stores []*core.StoreInfo,
-	networkSlowStoreCaptureTSs map[uint64]time.Time,
+	networkSlowStoreRecoverStartAts map[uint64]*time.Time,
 ) map[uint64]map[uint64]struct{} {
 	problematicNetwork := make(map[uint64]map[uint64]struct{})
 
 	for _, store := range stores {
 		storeID := store.GetID()
-		if _, exist := networkSlowStoreCaptureTSs[storeID]; exist {
+		if _, exist := networkSlowStoreRecoverStartAts[storeID]; exist {
 			continue
 		}
 
-		networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
+		networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
 		if len(networkSlowScores) < 2 {
 			continue
 		}
@@ -564,11 +703,11 @@ func buildProblematicNetworkMap(
 func shouldSkipStoreEvaluation(
 	store *core.StoreInfo,
 	problematicNetwork map[uint64]map[uint64]struct{},
-	networkSlowStoreCaptureTSs map[uint64]time.Time,
+	networkSlowStoreRecoverStartAts map[uint64]*time.Time,
 ) bool {
 	storeID := store.GetID()
 	_, hasProblematicNetwork := problematicNetwork[storeID]
-	_, alreadySlowStore := networkSlowStoreCaptureTSs[storeID]
+	_, alreadySlowStore := networkSlowStoreRecoverStartAts[storeID]
 
 	return !hasProblematicNetwork || alreadySlowStore
 }
@@ -578,10 +717,10 @@ func isNetworkSlowStore(
 	store *core.StoreInfo,
 	allStores []*core.StoreInfo,
 	problematicNetwork map[uint64]map[uint64]struct{},
-	networkSlowStoreCaptureTSs map[uint64]time.Time,
+	networkSlowStoreRecoverStartAts map[uint64]*time.Time,
 ) bool {
 	storeID := store.GetID()
-	networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreCaptureTSs)
+	networkSlowScores := filterNetworkSlowScores(store.GetNetworkSlowScores(), networkSlowStoreRecoverStartAts)
 
 	// Can not detect slow stores with less than 3 scores
 	if len(networkSlowScores) <= 2 {
@@ -589,7 +728,7 @@ func isNetworkSlowStore(
 	}
 
 	// Check if all other stores report problems with this store
-	if len(problematicNetwork[storeID]) >= len(allStores)-1-len(networkSlowStoreCaptureTSs) {
+	if len(problematicNetwork[storeID]) >= len(allStores)-1-len(networkSlowStoreRecoverStartAts) {
 		return true
 	}
 
@@ -614,18 +753,18 @@ func isNetworkSlowStore(
 // filterNetworkSlowScores removes already slow stores from network slow scores to avoid duplicate detection
 func filterNetworkSlowScores(
 	scores map[uint64]uint64,
-	networkSlowStoreCaptureTSs map[uint64]time.Time,
+	networkSlowStoreRecoverStartAts map[uint64]*time.Time,
 ) map[uint64]uint64 {
 	filteredScores := make(map[uint64]uint64)
 	for storeID, score := range scores {
-		if _, isSlowStore := networkSlowStoreCaptureTSs[storeID]; !isSlowStore {
+		if _, isSlowStore := networkSlowStoreRecoverStartAts[storeID]; !isSlowStore {
 			filteredScores[storeID] = score
 		}
 	}
 	return filteredScores
 }
 
-func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCluster) []*operator.Operator {
+func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCluster) {
 	if s.conf.evictStore() != 0 {
 		store := cluster.GetStore(s.conf.evictStore())
 		storeIDStr := strconv.FormatUint(store.GetID(), 10)
@@ -636,31 +775,31 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 				zap.Uint64("store-id", store.GetID()))
 			evictedSlowStoreStatusGauge.DeleteLabelValues(storeIDStr, string(diskSlowStore))
 			s.cleanupEvictLeader(cluster)
-			return nil
+			return
 		}
 		// recover slow store if its score is below the threshold.
 		if store.GetSlowScore() <= slowStoreRecoverThreshold {
 			if err := s.conf.tryUpdateRecoverStatus(true); err != nil {
 				log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
-				return nil
+				return
 			}
 
 			if !s.conf.readyForRecovery() {
-				return nil
+				return
 			}
 
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
 			evictedSlowStoreStatusGauge.DeleteLabelValues(storeIDStr, string(diskSlowStore))
 			s.cleanupEvictLeader(cluster)
-			return nil
+			return
 		}
 		// If the slow store is still slow or slow again, we can continue to evict leaders from it.
 		if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
 			log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
-			return nil
+			return
 		}
-		return s.schedulerEvictLeader(cluster)
+		return
 	}
 
 	var slowStore *core.StoreInfo
@@ -673,14 +812,14 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
 			// Do nothing if there is more than one slow store.
 			if slowStore != nil {
-				return nil
+				return
 			}
 			slowStore = store
 		}
 	}
 
 	if slowStore == nil || slowStore.GetSlowScore() < slowStoreEvictThreshold {
-		return nil
+		return
 	}
 
 	// If there is only one slow store, evict leaders from that store.
@@ -689,12 +828,11 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 	err := s.prepareEvictLeader(cluster, slowStore.GetID())
 	if err != nil {
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
-		return nil
+		return
 	}
 	// Record the slow store evicted status.
 	storeIDStr := strconv.FormatUint(slowStore.GetID(), 10)
 	evictedSlowStoreStatusGauge.WithLabelValues(storeIDStr, string(diskSlowStore)).Set(1)
-	return s.schedulerEvictLeader(cluster)
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.

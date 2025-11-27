@@ -156,7 +156,7 @@ func TestGetSetRule(t *testing.T) {
 
 func TestTxnWithEtcd(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	store := storage.NewStorageWithEtcdBackend(client)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -424,6 +424,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 	checkRuleInMemoryAndStorage(re, labeler, "rule2", true)
 	re.Nil(labeler.GetLabelRule("rule2"))
 	// rule2 should be physically clear.
+	labeler.checkAndClearExpiredLabels()
 	checkRuleInMemoryAndStorage(re, labeler, "rule2", false)
 
 	re.Empty(labeler.GetRegionLabel(region, "k2"))

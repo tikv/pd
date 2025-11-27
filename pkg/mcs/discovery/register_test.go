@@ -31,7 +31,7 @@ import (
 
 func TestRegister(t *testing.T) {
 	re := require.New(t)
-	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	etcd, cfg := servers[0], servers[0].Config()
 
