@@ -34,3 +34,6 @@ tmp*
 .specstory/
 .cursorindexingignore
 .gocache/
+# Failpoint generated files
+*__failpoint_stash__
+binding__failpoint_binding__.go

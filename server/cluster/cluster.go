@@ -908,6 +908,10 @@ func (c *RaftCluster) Stop() {
 		c.Unlock()
 		return
 	}
+	// Failpoint to simulate slow shutdown while holding the lock
+	failpoint.Inject("slowStopSchedulingJobs", func() {
+		time.Sleep(35 * time.Second) // Exceed go-deadlock 30s timeout
+	})
 	c.running = false
 	c.cancel()
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
