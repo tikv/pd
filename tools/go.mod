@@ -7,6 +7,11 @@ replace (
 	github.com/tikv/pd/client => ../client
 )
 
+// When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
+// kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
+// After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
+replace github.com/pingcap/kvproto => github.com/hundundm/kvproto v0.0.0-20251126155736-721eaf36c9e4
+
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5

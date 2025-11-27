@@ -15,8 +15,13 @@
 package filter
 
 import (
+	"strconv"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/plan"
 )
@@ -41,4 +46,42 @@ func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
 		}
 	}
 	return statusOK
+}
+
+// AllowAutoSplit returns true if the region can be auto split
+func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reason pdpb.AutoSplitReason) bool {
+	if region == nil {
+		// The default behavior is to allow it.
+		return true
+	}
+
+	switch reason {
+	case pdpb.AutoSplitReason_SIZE, pdpb.AutoSplitReason_LOAD:
+	default:
+		// For ADMIN type, splitting is always allowed.
+		return true
+	}
+
+	maxSize := int64(cluster.GetCheckerConfig().GetMaxAffinityMergeRegionSize())
+	if maxSize == 0 {
+		return true
+	}
+
+	if affinityManager := cluster.GetAffinityManager(); affinityManager != nil {
+		_, isAffinity := affinityManager.GetRegionAffinityGroupState(region)
+		if isAffinity {
+			maxSize = (maxSize + 10) * 4
+			maxKeys := maxSize * config.RegionSizeToKeysRatio
+			// Only block splitting when the Region is in the affinity state.
+			// But still allow splitting if the Region size is too big.
+			if region.GetApproximateSize() < maxSize && region.GetApproximateKeys() < maxKeys {
+				sourceID := strconv.FormatUint(region.GetLeader().GetStoreId(), 10)
+				filterSourceCounter.WithLabelValues("split-deny-by-affinity", reason.String(), sourceID).Inc()
+				return false
+			}
+		}
+	}
+
+	// The default behavior is to allow it.
+	return true
 }

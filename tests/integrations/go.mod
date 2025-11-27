@@ -8,6 +8,11 @@ replace (
 	github.com/tikv/pd/tests/integrations/mcs => ./mcs
 )
 
+// When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
+// kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
+// After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
+replace github.com/pingcap/kvproto => github.com/hundundm/kvproto v0.0.0-20251126155736-721eaf36c9e4
+
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/docker/go-units v0.5.0
