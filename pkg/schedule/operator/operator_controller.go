@@ -526,6 +526,8 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		}
 		// replace old operator
 		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
+			_ = op.Cancel()
+			oc.buryOperator(op)
 			log.Debug("operator changed during replace, skip this add",
 				zap.Uint64("region-id", regionID),
 				zap.Reflect("old", oldOp),
