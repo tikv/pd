@@ -414,14 +414,8 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 	// Step 3: Create the change plan for the Label
 	for _, op := range addOps {
-		labelRuleID := GetLabelRuleID(op.GroupID)
-		if err := plan.DeleteLabelRule(labelRuleID); err != nil {
-			log.Error("failed to delete label rule for affinity group",
-				zap.String("group-id", op.GroupID),
-				zap.String("label-rule-id", labelRuleID),
-				zap.Error(err))
-			return err
-		}
+		// For addOps, directly SetLabelRule (Save will overwrite the old value).
+		// No need to Delete first.
 		labelRule := MakeLabelRuleFromRanges(op.GroupID, toAdd[op.GroupID])
 		if err := plan.SetLabelRule(labelRule); err != nil {
 			log.Error("failed to create label rule",
@@ -433,22 +427,26 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		newAddedLabelRules[op.GroupID] = labelRule
 	}
 	for _, op := range removeOps {
-		labelRuleID := GetLabelRuleID(op.GroupID)
-		if err := plan.DeleteLabelRule(labelRuleID); err != nil {
-			log.Error("failed to delete label rule for affinity group",
-				zap.String("group-id", op.GroupID),
-				zap.String("label-rule-id", labelRuleID),
-				zap.Error(err))
-			return err
-		}
 		ranges := toRemove[op.GroupID]
 		var labelRule *labeler.LabelRule
+
 		if len(ranges) > 0 {
+			// If there are still ranges after removal, SetLabelRule (overwrite the old value).
 			labelRule = MakeLabelRuleFromRanges(op.GroupID, ranges)
 			if err := plan.SetLabelRule(labelRule); err != nil {
 				log.Error("failed to create label rule",
 					zap.String("failed-group-id", op.GroupID),
 					zap.Int("total-groups", len(addOps)+len(removeOps)),
+					zap.Error(err))
+				return err
+			}
+		} else {
+			// If no ranges remain after removal, DeleteLabelRule.
+			labelRuleID := GetLabelRuleID(op.GroupID)
+			if err := plan.DeleteLabelRule(labelRuleID); err != nil {
+				log.Error("failed to delete label rule for affinity group",
+					zap.String("group-id", op.GroupID),
+					zap.String("label-rule-id", labelRuleID),
 					zap.Error(err))
 				return err
 			}

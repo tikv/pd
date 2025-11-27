@@ -368,7 +368,7 @@ func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) 
 }
 
 // GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
-func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (*GroupState, bool) {
+func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (group *GroupState, isAffinity bool) {
 	if region == nil || !m.IsAvailable() {
 		return nil, false
 	}

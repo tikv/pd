@@ -34,11 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-const (
-	// nolint:unused
-	affinityLabel = "affinity"
-)
-
 // AffinityChecker groups regions with affinity labels together by affinity group.
 // It ensures regions adhere to affinity group constraints by creating operators.
 type AffinityChecker struct {

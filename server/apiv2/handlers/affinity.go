@@ -15,12 +15,11 @@
 package handlers
 
 import (
+	"bytes"
 	"net/http"
 	"regexp"
 
 	"github.com/gin-gonic/gin"
-
-	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -67,7 +66,6 @@ type CreateAffinityGroupInput struct {
 // CreateAffinityGroupsRequest defines the body for the POST request.
 type CreateAffinityGroupsRequest struct {
 	AffinityGroups map[string]CreateAffinityGroupInput `json:"affinity_groups"`
-	TableGroup     string                              `json:"table_group,omitempty"`
 }
 
 // AffinityGroupsResponse defines the success response for the POST request.
@@ -122,7 +120,6 @@ func CreateAffinityGroups(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	// TODO: validate TableGroup if necessary
 	if len(req.AffinityGroups) == 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupContent.GenWithStackByArgs("no affinity groups provided").Error())
 		return
@@ -146,6 +143,11 @@ func CreateAffinityGroups(c *gin.Context) {
 		// Convert AffinityKeyRange to keyutil.KeyRange
 		var keyRanges []keyutil.KeyRange
 		for _, kr := range input.Ranges {
+			// Validate key range
+			if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
+				c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+				return
+			}
 			keyRanges = append(keyRanges, kr.toKeyutilKeyRange())
 		}
 
@@ -180,9 +182,6 @@ func CreateAffinityGroups(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, resp)
 }
 
-// TODO: add more tests for CreateAffinityGroups and DeleteAffinityGroup
-// after AllocAffinityGroup is ready.
-
 // BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
 // @Tags     affinity-groups
 // @Summary  Delete multiple affinity groups in batch.
@@ -207,20 +206,20 @@ func BatchDeleteAffinityGroups(c *gin.Context) {
 	}
 
 	if len(req.IDs) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "no group ids provided")
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrEmptyRequest.GenWithStackByArgs("no group ids provided").Error())
 		return
 	}
 
-	if err := manager.DeleteAffinityGroups(req.IDs, req.Force); err != nil {
-		if errs.ErrAffinityGroupNotFound.Equal(err) {
-			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
-			return
-		}
-		if errs.ErrAffinityGroupContent.Equal(err) {
+	// Validate all group IDs
+	for _, id := range req.IDs {
+		if err := validateGroupID(id); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+	}
+
+	err = manager.DeleteAffinityGroups(req.IDs, req.Force)
+	if handleAffinityError(c, err) {
 		return
 	}
 
@@ -253,20 +252,30 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 	}
 
 	if len(req.Add) == 0 && len(req.Remove) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "no add or remove operations provided")
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrEmptyRequest.GenWithStackByArgs("no add or remove operations provided").Error())
 		return
+	}
+
+	// Check if any group appears in both add and remove operations.
+	addGroups := make(map[string]bool)
+	for _, op := range req.Add {
+		addGroups[op.ID] = true
+	}
+	for _, op := range req.Remove {
+		if addGroups[op.ID] {
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupConflict.GenWithStackByArgs(op.ID).Error())
+			return
+		}
 	}
 
 	// Validate and convert operations in one pass
 	affectedGroups := make(map[string]bool)
 	addOps, err := convertAndValidateRangeOps(req.Add, manager, affectedGroups)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+	if handleAffinityError(c, err) {
 		return
 	}
 	removeOps, err := convertAndValidateRangeOps(req.Remove, manager, affectedGroups)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+	if handleAffinityError(c, err) {
 		return
 	}
 
@@ -275,8 +284,8 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 	groupedRemoveOps := groupKeyRangesByGroupID(removeOps)
 
 	// Call manager to perform batch modify
-	if err := manager.UpdateAffinityGroupKeyRanges(groupedAddOps, groupedRemoveOps); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+	err = manager.UpdateAffinityGroupKeyRanges(groupedAddOps, groupedRemoveOps)
+	if handleAffinityError(c, err) {
 		return
 	}
 
@@ -329,17 +338,9 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 		return
 	}
 
+	// Note: Duplicate store ID and leader-in-voters validation is performed by AdjustGroup in the manager layer
 	state, err := manager.UpdateAffinityGroupPeers(groupID, req.LeaderStoreID, req.VoterStoreIDs)
-	if err != nil {
-		if errs.ErrAffinityGroupNotFound.Equal(err) {
-			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
-			return
-		}
-		if errs.ErrAffinityGroupContent.Equal(err) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-			return
-		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+	if handleAffinityError(c, err) {
 		return
 	}
 
@@ -366,9 +367,20 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
+	if err := validateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Read force parameter from query string, default to false
-	force := c.DefaultQuery("force", "false") == "true"
+	var queryParams struct {
+		Force bool `form:"force"`
+	}
+	if err := c.ShouldBindQuery(&queryParams); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	force := queryParams.Force
 
 	if !manager.IsGroupExist(groupID) {
 		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
@@ -377,12 +389,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 
 	// Delete the affinity group from manager
 	err = manager.DeleteAffinityGroups([]string{groupID}, force)
-	if err != nil {
-		if errs.ErrAffinityGroupContent.Equal(err) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-			return
-		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+	if handleAffinityError(c, err) {
 		return
 	}
 
@@ -434,6 +441,10 @@ func GetAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
+	if err := validateGroupID(groupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	groupState := manager.GetAffinityGroupState(groupID)
 	if groupState == nil {
 		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
@@ -443,6 +454,7 @@ func GetAffinityGroup(c *gin.Context) {
 }
 
 const (
+	// TODO: we need to ensure special characters in the id.
 	// idPattern is a regex that specifies acceptable characters of the id.
 	// Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
 	// numbers (0-9), hyphens (-), and underscores (_).
@@ -457,7 +469,45 @@ func validateGroupID(id string) error {
 		return err
 	}
 	if !isIDValid {
-		return errors.Errorf("illegal id %s, should contain only alphanumerical and underline", id)
+		return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
+	}
+	return nil
+}
+
+// handleAffinityError maps affinity-related errors to HTTP status codes and writes the response.
+// Returns true if the error has been handled and a response has been written.
+func handleAffinityError(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errs.ErrAffinityGroupNotFound.Equal(err):
+		c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+	case errs.ErrAffinityGroupContent.Equal(err),
+		errs.ErrInvalidGroupID.Equal(err),
+		errs.ErrEmptyRequest.Equal(err),
+		errs.ErrAffinityGroupConflict.Equal(err):
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+	default:
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+	}
+	return true
+}
+
+// validateKeyRange checks if a key range is valid.
+// It ensures that StartKey < EndKey unless both are empty (representing the entire key space).
+func validateKeyRange(startKey, endKey []byte) error {
+	// Both empty means the entire key space, which is valid
+	if len(startKey) == 0 && len(endKey) == 0 {
+		return nil
+	}
+	// If only one is empty, it's invalid
+	if len(startKey) == 0 || len(endKey) == 0 {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("key range must have both start_key and end_key, or both empty for entire key space")
+	}
+	// StartKey must be less than EndKey
+	if bytes.Compare(startKey, endKey) >= 0 {
+		return errs.ErrAffinityGroupContent.FastGenByArgs("start_key must be less than end_key")
 	}
 	return nil
 }
@@ -468,7 +518,7 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 	var result []affinity.GroupKeyRange
 	for _, op := range ops {
 		if err := validateGroupID(op.ID); err != nil {
-			return nil, errors.Errorf("invalid group id: %s", op.ID)
+			return nil, err
 		}
 		if !manager.IsGroupExist(op.ID) {
 			return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(op.ID)
@@ -480,6 +530,10 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 
 		// Convert ranges to GroupKeyRange format
 		for _, kr := range op.Ranges {
+			// Validate key range
+			if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
+				return nil, err
+			}
 			result = append(result, affinity.GroupKeyRange{
 				KeyRange: keyutil.KeyRange{
 					StartKey: kr.StartKey,
