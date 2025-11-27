@@ -132,7 +132,7 @@ func (m *Manager) IsAvailable() bool {
 	return len(m.groups) > 0
 }
 
-func (*Manager) getExpireAt() uint64 {
+func (*Manager) getExpiredAt() uint64 {
 	// TODO: How to make the decision?
 	return uint64(time.Now().Unix()) + 600
 }
@@ -150,7 +150,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 			VoterStoreIDs:   append([]uint64(nil), group.VoterStoreIDs...),
 		},
 		State:               groupDegraded,
-		DegradedExpireAt:    m.getExpireAt(),
+		DegradedExpiredAt:   m.getExpiredAt(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
 		Regions:             make(map[uint64]regionCache),
@@ -228,7 +228,7 @@ func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
 		// Do nothing if the original state is already groupDegraded or groupExpired.
 		if groupInfo.State == groupAvailable {
 			groupInfo.State = groupDegraded
-			groupInfo.DegradedExpireAt = m.getExpireAt()
+			groupInfo.DegradedExpiredAt = m.getExpiredAt()
 		}
 	} else {
 		groupInfo.State = state

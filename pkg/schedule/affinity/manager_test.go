@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -176,4 +177,52 @@ func TestBasicGroupOperations(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group1"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
+}
+
+// TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
+func TestRegionCountStaleCache(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for i := 1; i < 7; i++ {
+		storeInfos.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)}))
+	}
+
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+
+	// Region matches old peers (1,2).
+	region := core.NewRegionInfo(
+		&metapb.Region{Id: 100, Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
+			{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
+		}},
+		&metapb.Peer{Id: 101, StoreId: 1},
+	)
+	manager.SetRegionGroup(region.GetID(), "g")
+	_, isAffinity := manager.GetRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo := manager.GetGroups()["g"]
+	re.Equal(1, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 1)
+
+	// Change peers, which bumps AffinityVer and invalidates affinity for the cached region.
+	_, err = manager.UpdateAffinityGroupPeers("g", 4, []uint64{4, 5, 6})
+	re.NoError(err)
+	group2 := manager.GetAffinityGroupState("g")
+
+	// Region cache should be cleared when group changes.
+	re.Zero(group2.AffinityRegionCount)
+	re.Zero(group2.RegionCount)
 }

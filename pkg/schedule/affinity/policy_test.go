@@ -209,3 +209,50 @@ func TestStoreHealthCheck(t *testing.T) {
 	// Group2 should be restored to effect state
 	re.True(manager.groups["group2"].IsAffinitySchedulingAllowed())
 }
+
+// TestDegradedGroupShouldExpire verifies a degraded group should move to expired even when
+// the set of unavailable stores does not change.
+func TestDegradedGroupShouldExpire(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
+	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store2)
+
+	conf := mockconfig.NewTestOptions()
+
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	// Create a healthy group first.
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "expire"}}))
+	_, err = manager.UpdateAffinityGroupPeers("expire", 1, []uint64{1, 2})
+	re.NoError(err)
+
+	// Make store2 unhealthy so the group becomes degraded.
+	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
+	storeInfos.PutStore(store2Down)
+	manager.checkStoresAvailability()
+
+	groupInfo := manager.GetGroups()["expire"]
+	re.Equal(groupDegraded, groupInfo.State.toGroupState())
+
+	// Force the degraded state to be considered expired.
+	manager.Lock()
+	groupInfo.DegradedExpiredAt = uint64(time.Now().Add(-time.Hour).Unix())
+	manager.Unlock()
+
+	// Run availability check again without changing the unavailable store set.
+	manager.checkStoresAvailability()
+	re.True(groupInfo.IsExpired())
+}
