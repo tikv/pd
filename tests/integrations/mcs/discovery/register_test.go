@@ -75,6 +75,7 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 func (suite *serverRegisterTestSuite) TestServerRegister() {
 	for range 3 {
 		suite.checkServerRegister(constant.TSOServiceName)
+		suite.checkServerRegister(constant.ResourceManagerServiceName)
 	}
 }
 
