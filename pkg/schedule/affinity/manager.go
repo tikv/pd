@@ -162,7 +162,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 	}
 }
 
-func (m *Manager) groupsNotExist(groups []*Group) error {
+func (m *Manager) noGroupsExist(groups []*Group) error {
 	m.RLock()
 	defer m.RUnlock()
 	for _, group := range groups {
@@ -173,7 +173,7 @@ func (m *Manager) groupsNotExist(groups []*Group) error {
 	return nil
 }
 
-func (m *Manager) groupsExistAll(groupIDs []string) error {
+func (m *Manager) allGroupsExist(groupIDs []string) error {
 	m.RLock()
 	defer m.RUnlock()
 	for _, groupID := range groupIDs {
@@ -189,8 +189,14 @@ func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule)
 	defer m.Unlock()
 	for i, group := range groups {
 		m.initGroupLocked(group)
-		m.updateGroupLabelRuleLocked(group.ID, labelRules[i])
+		m.updateGroupLabelRuleLocked(group.ID, labelRules[i], false)
 	}
+}
+
+func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
+	m.affinityRegionCount -= groupInfo.AffinityRegionCount
+	groupInfo.AffinityRegionCount = 0
+	groupInfo.AffinityVer++
 }
 
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
@@ -205,10 +211,7 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 	groupInfo.State = groupAvailable
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)
-	// Reset Statistics
-	m.affinityRegionCount -= groupInfo.AffinityRegionCount
-	groupInfo.AffinityRegionCount = 0
-	groupInfo.AffinityVer++
+	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil
 }
@@ -237,10 +240,7 @@ func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
 		groupInfo.State = state
 	}
 
-	// Reset Statistics
-	m.affinityRegionCount -= groupInfo.AffinityRegionCount
-	groupInfo.AffinityRegionCount = 0
-	groupInfo.AffinityVer++
+	m.resetCountLocked(groupInfo)
 }
 
 // ExpireAffinityGroup changes the Group state to groupExpired.
@@ -250,7 +250,7 @@ func (m *Manager) ExpireAffinityGroup(groupID string) {
 	m.updateGroupStateLocked(groupID, groupExpired)
 }
 
-func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule) {
+func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule, needClear bool) {
 	rangeCount := 0
 	if labelRule != nil {
 		if ranges, ok := labelRule.Data.([]*labeler.KeyRangeRule); ok {
@@ -261,35 +261,41 @@ func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.
 	if !ok {
 		log.Error("group not initialized", zap.String("group-id", groupID))
 	} else {
-		// Reset Statistics
-		m.affinityRegionCount -= groupInfo.AffinityRegionCount
-		groupInfo.AffinityRegionCount = 0
-		groupInfo.AffinityVer++
+		if needClear {
+			m.clearGroupCacheLocked(groupID)
+		} else {
+			m.resetCountLocked(groupInfo)
+		}
 		// Set LabelRule
 		groupInfo.LabelRule = labelRule
 		groupInfo.RangeCount = rangeCount
 	}
 }
 
-func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule) {
+func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
 	m.Lock()
 	defer m.Unlock()
 	for groupID, labelRule := range labels {
-		m.updateGroupLabelRuleLocked(groupID, labelRule)
+		m.updateGroupLabelRuleLocked(groupID, labelRule, needClear)
 	}
 }
 
-func (m *Manager) deleteGroupLocked(groupID string) {
+func (m *Manager) clearGroupCacheLocked(groupID string) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return
 	}
 
-	delete(m.groups, groupID)
-	m.affinityRegionCount -= groupInfo.AffinityRegionCount
+	m.resetCountLocked(groupInfo)
 	for regionID := range groupInfo.Regions {
 		delete(m.regions, regionID)
 	}
+	groupInfo.Regions = make(map[uint64]regionCache)
+}
+
+func (m *Manager) deleteGroupLocked(groupID string) {
+	m.clearGroupCacheLocked(groupID)
+	delete(m.groups, groupID)
 }
 
 func (m *Manager) deleteGroups(groupIDs []string) {
@@ -315,11 +321,12 @@ func (m *Manager) deleteCacheLocked(regionID uint64) {
 
 func (m *Manager) saveCache(region *core.RegionInfo, group *GroupState) *regionCache {
 	regionID := region.GetID()
-	cache := &regionCache{}
-	cache.isAffinity = group.isRegionAffinity(region)
-	cache.region = region
-	cache.groupInfo = group.groupInfoPtr
-	cache.affinityVer = group.affinityVer
+	cache := &regionCache{
+		region:      region,
+		groupInfo:   group.groupInfoPtr,
+		affinityVer: group.affinityVer,
+		isAffinity:  group.isRegionAffinity(region),
+	}
 	// Save cache
 	m.Lock()
 	defer m.Unlock()
@@ -355,7 +362,7 @@ func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) 
 	m.RLock()
 	defer m.RUnlock()
 	cache, ok := m.regions[region.GetID()]
-	if ok && cache.affinityVer == cache.groupInfo.AffinityVer {
+	if ok {
 		return &cache, newGroupState(cache.groupInfo)
 	}
 	return nil, nil
@@ -366,12 +373,11 @@ func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (group *G
 	if region == nil || !m.IsAvailable() {
 		return nil, false
 	}
-	cache, group := m.getCache(region)
-	if cache == nil || group == nil || region != cache.region {
+	var cache *regionCache
+	cache, group = m.getCache(region)
+	if cache == nil || group == nil || cache.affinityVer != group.affinityVer || region != cache.region {
 		groupID := m.regionLabeler.GetRegionLabel(region, labelKey)
-		if groupID != "" {
-			group = m.GetAffinityGroupState(groupID)
-		}
+		group = m.GetAffinityGroupState(groupID)
 		if group == nil {
 			return nil, false
 		}
@@ -391,6 +397,9 @@ func (m *Manager) IsGroupExist(id string) bool {
 
 // GetAffinityGroupState gets the runtime state of an affinity group.
 func (m *Manager) GetAffinityGroupState(id string) *GroupState {
+	if id == "" {
+		return nil
+	}
 	m.RLock()
 	defer m.RUnlock()
 	groupInfo, ok := m.groups[id]
@@ -413,7 +422,6 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 
 // GetGroups returns the internal groups map.
 // Used for testing only.
-// TODO: Move these tests.
 func (m *Manager) GetGroups() map[string]*runtimeGroupInfo {
 	m.RLock()
 	defer m.RUnlock()

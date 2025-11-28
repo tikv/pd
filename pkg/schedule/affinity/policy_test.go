@@ -53,7 +53,7 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 	group := &Group{ID: "g", LeaderStoreID: 0, VoterStoreIDs: nil}
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: group.ID}}))
 
-	// First observation makes group effective with store 1.
+	// First observation makes group available with store 1.
 	region1 := core.NewRegionInfo(
 		&metapb.Region{
 			Id:       10,
