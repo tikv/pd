@@ -205,13 +205,13 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []keyutil.Ke
 func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 	conf.Lock()
 	var resp any
+	keyRanges := conf.StoreIDWithRanges[id]
 	last, err := conf.removeStoreLocked(id)
 	if err != nil {
 		conf.Unlock()
 		return resp, err
 	}
 
-	keyRanges := conf.StoreIDWithRanges[id]
 	err = conf.save()
 	if err != nil {
 		conf.resetStoreLocked(id, keyRanges)

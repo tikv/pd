@@ -12,19 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build tools
-// +build tools
+package utils
 
-package tools
+import "github.com/prometheus/client_golang/prometheus"
 
-import (
-	_ "github.com/AlekSi/gocov-xml"
-	_ "github.com/axw/gocov/gocov"
-	_ "github.com/mailru/easyjson/easyjson"
-	_ "github.com/pingcap/errors/errdoc-gen"
-	_ "github.com/pingcap/failpoint/failpoint-ctl"
-	_ "github.com/rleungx/leakcheck/cmd/leakcheck"
-	_ "github.com/swaggo/swag/cmd/swag"
-	_ "golang.org/x/tools/cmd/goimports"
-	_ "gotest.tools/gotestsum"
-)
+// SingleLabel build a labels map containing only a single label
+func SingleLabel(key, value string) prometheus.Labels {
+	return prometheus.Labels{key: value}
+}

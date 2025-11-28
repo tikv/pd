@@ -38,10 +38,15 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 
 // WithFlowRoundByDigit set the digit, which use to round to the nearest number
 func WithFlowRoundByDigit(digit int) RegionCreateOption {
-	flowRoundDivisor := uint64(math.Pow10(digit))
+	divisor := GetFlowRoundDivisorByDigit(digit)
 	return func(region *RegionInfo) {
-		region.flowRoundDivisor = flowRoundDivisor
+		region.flowRoundDivisor = divisor
 	}
+}
+
+// GetFlowRoundDivisorByDigit get the flow round divisor by digit
+func GetFlowRoundDivisorByDigit(digit int) uint64 {
+	return uint64(math.Pow10(digit))
 }
 
 // WithPendingPeers sets the pending peers for the region.

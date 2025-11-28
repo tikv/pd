@@ -133,6 +133,7 @@ func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	s.regionSyncer = NewRegionSyncer(s.serverLoopCtx, s.basicCluster, s.GetEtcdClient(), s.GetTLSConfig(), s.Name(),
 		s.GetAdvertiseListenAddr())
+	s.regionSyncer.wg.Add(2)
 	go s.regionSyncer.syncLoop()
 	go s.regionSyncer.updatePDMemberLoop()
 	s.regionSyncer.startSyncWithLeader()
@@ -153,7 +154,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	if err := s.GetListener().Close(); err != nil {
-		log.Error("close listener meet error", errs.ZapError(err))
+		log.Warn("close listener meet error", errs.ZapError(err))
 	}
 	s.CloseClientConns()
 	s.serverLoopWg.Wait()
@@ -269,9 +270,6 @@ func (s *Server) startCluster() (err error) {
 }
 
 func (s *Server) stopCluster() {
-	if s.serverLoopCancel != nil {
-		s.serverLoopCancel()
-	}
 	s.regionSyncer.Stop()
 	s.metaWatcher.Close()
 }

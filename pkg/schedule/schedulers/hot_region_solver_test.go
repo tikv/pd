@@ -254,11 +254,18 @@ func TestMaxZombieDuration(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		src := &statistics.StoreLoadDetail{
-			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
-		}
+		var src *statistics.StoreLoadDetail
 		if testCase.isTiFlash {
-			src.SetEngineAsTiFlash()
+			store := core.NewStoreInfoWithLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+			}
+		} else {
+			// Create a TiKV store for non-TiFlash cases
+			store := core.NewStoreInfoWithLabel(1, map[string]string{})
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+			}
 		}
 		bs := &balanceSolver{
 			sche:          hb.(*hotScheduler),
