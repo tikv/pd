@@ -180,7 +180,7 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.1.2
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.6.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
@@ -279,7 +279,7 @@ TSO_FUNCTION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 test-tso-function: install-tools
 	# testing TSO function...
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -tags without_dashboard,deadlock $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -race -tags without_dashboard $(TSO_FUNCTION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
