@@ -17,7 +17,6 @@ package pd
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"runtime/trace"
 	"strings"
 	"sync"
