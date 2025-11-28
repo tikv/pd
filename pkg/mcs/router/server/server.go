@@ -157,7 +157,6 @@ func (s *Server) Close() {
 		log.Warn("close listener meet error", errs.ZapError(err))
 	}
 	s.CloseClientConns()
-	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
 	if s.GetClient() != nil {
