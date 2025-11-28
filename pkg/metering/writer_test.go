@@ -16,6 +16,7 @@ package metering
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/metering_sdk/config"
 	meteringreader "github.com/pingcap/metering_sdk/reader/metering"
 	"github.com/pingcap/metering_sdk/storage"
@@ -281,11 +283,13 @@ func TestMeteringDataReadWriteSingleCategory(t *testing.T) {
 	re.Len(readData, 3)
 
 	// Verify the data content.
+	verifyReadData(re, readData, testData)
+}
+
+func verifyReadData(re *require.Assertions, readData []map[string]any, testData []any) {
 	for i, record := range readData {
 		data := record["data"].(map[string]any)
 		originalData := testData[i].(map[string]any)
-
-		// Compare each field individually to handle type conversion issues.
 		re.Equal(originalData["id"], int(data["id"].(float64)))
 		re.Equal(originalData["value"], data["value"])
 		re.Equal(originalData["timestamp"], int64(data["timestamp"].(float64)))
@@ -383,4 +387,59 @@ func TestMeteringDataReadWriteEmptyData(t *testing.T) {
 	// Try to read data for non-existent category.
 	nonExistentData := readMeteringData(ctx, re, reader, "non-existent", ts)
 	re.Nil(nonExistentData)
+}
+
+func TestMeteringDataReadWriteWithRetry(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create writer and reader using helper function.
+	writer, reader := newLocalWriter(ctx, re, t.TempDir())
+	defer writer.Stop()
+
+	// Create and register a collector.
+	category := "test-category"
+	collector := newMockCollector(category)
+	writer.RegisterCollector(collector)
+
+	// Add some test data.
+	testData := []any{
+		map[string]any{"id": 1, "value": "test1", "timestamp": time.Now().Unix()},
+		map[string]any{"id": 2, "value": "test2", "timestamp": time.Now().Unix()},
+		map[string]any{"id": 3, "value": "test3", "timestamp": time.Now().Unix()},
+	}
+
+	// Inject the mock write error with `writeMaxAttempts` times to make sure all the attempts fail.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/metering/mockWriteError", fmt.Sprintf("return(%d)", writeMaxAttempts)))
+
+	ts := time.Now().Truncate(time.Minute).Unix()
+	// Collect and flush the data.
+	for _, data := range testData {
+		collector.Collect(data)
+	}
+	writer.flushMeteringData(ctx, ts)
+
+	// Should not read any data since all the attempts failed.
+	readData := readMeteringData(ctx, re, reader, category, ts)
+	re.Empty(readData)
+
+	// Inject the mock write error with `writeMaxAttempts-1` times to make sure the last attempt will succeed.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/metering/mockWriteError", fmt.Sprintf("return(%d)", writeMaxAttempts-1)))
+
+	// Collect and flush the data again.
+	for _, data := range testData {
+		collector.Collect(data)
+	}
+	writer.flushMeteringData(ctx, ts)
+
+	// Should read the data since the last attempt succeeded.
+	readData = readMeteringData(ctx, re, reader, category, ts)
+	re.NotNil(readData)
+	re.Len(readData, 3)
+
+	// Verify the data content.
+	verifyReadData(re, readData, testData)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/metering/mockWriteError"))
 }
