@@ -282,7 +282,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	if len(services) > 0 && !cfg.MicroService.IsResourceManagerFallbackEnabled() {
+	if len(services) > 0 && !cfg.Microservice.IsResourceManagerFallbackEnabled() {
 		// redirect http requests for resource manager in API mode
 		serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
 	}
