@@ -287,7 +287,7 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(100+i), strconv.Itoa(100+i+1),
 			1, uint64(follower1), uint64(follower2))
 	}
-	// case1: store 1 has 100 peers, the others has 50 peer, it suited for the location label setting.
+	// case1: store 1 has 100 peers, the others has 50 peer, it is suited for the location label setting.
 	re.False(scheduler.IsScheduleAllowed(tc))
 	op, _ := scheduler.Schedule(tc, true)
 	re.Empty(op)
