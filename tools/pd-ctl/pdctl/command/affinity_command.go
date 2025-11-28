@@ -30,7 +30,7 @@ import (
 	"github.com/pingcap/errors"
 
 	pd "github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/tools/pd-ctl/helper/tidb/codec"
+	"github.com/tikv/pd/pkg/codec"
 )
 
 const (
@@ -500,9 +500,8 @@ func tableKeyRange(id int64) (start []byte, end []byte) {
 }
 
 func encodeTablePrefix(id int64) []byte {
-	key := make([]byte, 0, 9)
-	key = append(key, 't')
-	return codec.EncodeInt(key, id)
+	key := codec.GenerateTableKey(id)
+	return codec.EncodeBytes(key)
 }
 
 func partitionGroupID(tableID, partitionID int64) string {
