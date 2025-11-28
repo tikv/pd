@@ -104,24 +104,24 @@ func (m *Manager) generateUnavailableStores() map[uint64]condition {
 	stores := m.storeSetInformer.GetStores()
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
-		if !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) {
-			unavailableStores[store.GetID()] = storeEvictLeader
-			continue
-		}
-		if store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving() {
+		switch {
+		// Check the groupExpired-related store state first
+		case store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving():
 			unavailableStores[store.GetID()] = storeRemovingOrRemoved
-		} else if store.IsUnhealthy() {
-			// Use IsUnavailable (10min) to avoid frequent state flapping
-			// IsUnavailable: DownTime > 10min (storeUnavailableDuration)
-			// IsDisconnected: DownTime > 20s (storeDisconnectDuration) - too sensitive
+		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
-		} else if store.IsLowSpace(lowSpaceRatio) {
+
+		// Then check the groupDegraded-related store state
+		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()):
+			unavailableStores[store.GetID()] = storeEvictLeader
+		case store.IsDisconnected():
+			unavailableStores[store.GetID()] = storeDisconnected
+		case store.IsLowSpace(lowSpaceRatio):
 			unavailableStores[store.GetID()] = storeLowSpace
-		} else if store.IsPreparing() {
+		case store.IsPreparing():
 			unavailableStores[store.GetID()] = storePreparing
 		}
 		// Note: We intentionally do NOT check:
-		// - IsDisconnected(): Too sensitive (20s), would cause frequent flapping
 		// - IsSlow(): Performance issue, not availability issue
 	}
 	return unavailableStores

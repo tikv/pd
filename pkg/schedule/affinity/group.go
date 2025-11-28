@@ -34,7 +34,7 @@ const (
 	// groupDegraded indicates that the current Group does not generate affinity scheduling but still disallows other balancing scheduling.
 	// All values greater than groupAvailable and less than or equal to groupDegraded represent groupDegraded states.
 	// The groupDegraded state should have an expiration time. After it expires, it should be treated as groupExpired.
-	storeDown
+	storeDisconnected
 	storeLowSpace
 	storePreparing
 	storeEvictLeader
@@ -42,6 +42,7 @@ const (
 
 	// groupExpired indicates that the current Group does not generate affinity scheduling and allows other balancing scheduling.
 	// All values greater than groupDegraded and less than or equal to groupExpired represent groupExpired states.
+	storeDown
 	storeRemovingOrRemoved
 	groupExpired
 
