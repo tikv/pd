@@ -18,6 +18,8 @@
 package tempurl
 
 import (
+	"net"
+
 	"github.com/cakturk/go-netstat/netstat"
 
 	"github.com/pingcap/log"
@@ -25,8 +27,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-func environmentCheck(addr string) bool {
-	valid, err := checkAddr(addr[len("http://"):])
+func environmentCheck(port string) bool {
+	valid, err := checkPort(port)
 	if err != nil {
 		log.Error("check port status failed", errs.ZapError(err))
 		return false
@@ -34,12 +36,17 @@ func environmentCheck(addr string) bool {
 	return valid
 }
 
-func checkAddr(addr string) (bool, error) {
+func checkPort(port string) (bool, error) {
 	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
-		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
+		_, p, err := net.SplitHostPort(s.LocalAddr.String())
+		if err != nil {
+			return false
+		}
+		return p == port
 	})
 	if err != nil {
 		return false, errs.ErrNetstatTCPSocks.Wrap(err)
 	}
+	// If any sockets exist (LISTEN, ESTABLISHED, TIME_WAIT, etc.), the port is not available
 	return len(tabs) < 1, nil
 }

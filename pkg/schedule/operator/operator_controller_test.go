@@ -1024,8 +1024,12 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(3, 1)
 	tc.AddRegionStore(4, 1)
 	tc.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	// Remove store 3 to simulate the scenario where store 3 is gone
+	store3 := tc.GetStore(3)
+	tc.GetBasicCluster().DeleteStore(store3)
 	steps := []OpStep{
 		RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
 	}

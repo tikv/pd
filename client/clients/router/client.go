@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"github.com/pingcap/kvproto/pkg/routerpb"
 	"net/url"
 	"runtime/trace"
 	"sync"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
@@ -611,46 +611,6 @@ batchLoop:
 			if retry {
 				continue connectionCtxChoosingLoop
 			}
-			//// Check whether allow the follower to handle this batch of requests.
-			//allowFollowerHandle := c.option.GetEnableFollowerHandle()
-			//if allowFollowerHandle {
-			//	// We need to ensure all requests in a same batch allow to be handled by the follower.
-			//	// IMPROVE: separate into the follower and leader handle batches.
-			//	c.batchController.IterCollectedRequests(func(req *Request) bool {
-			//		if !req.options.AllowFollowerHandle {
-			//			allowFollowerHandle = false
-			//			return false
-			//		}
-			//		return true
-			//	})
-			//}
-			// Check if the follower handle is enabled again before choosing the stream connection.
-			//allowFollowerHandle = allowFollowerHandle && c.option.GetEnableFollowerHandle()
-			//// Choose a stream connection to send the router request later.
-			//var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
-			//if allowFollowerHandle {
-			//	connectionCtx = c.conCtxMgr.RandomlyPick()
-			//} else {
-			//	connectionCtx = c.conCtxMgr.GetConnectionCtx(c.getLeaderURL())
-			//}
-			//if connectionCtx == nil {
-			//	log.Info("[router] router stream connection is not ready")
-			//	c.updateConnection(ctx)
-			//	continue connectionCtxChoosingLoop
-			//}
-			//streamCtx, streamURL, stream = connectionCtx.Ctx, connectionCtx.StreamURL, connectionCtx.Stream
-			// Check if the stream connection is canceled.
-			//select {
-			//case <-streamCtx.Done():
-			//	log.Info("[router] router stream connection is canceled", zap.String("stream-url", streamURL))
-			//	c.conCtxMgr.Release(streamURL)
-			//	if c.option.GetEnableRouterServiceHandler() {
-			//		c.routerConCtxMgr.Release(streamURL)
-			//	}
-			//	continue connectionCtxChoosingLoop
-			//default:
-			//}
-			// The stream connection is ready, break the loop.
 			break connectionCtxChoosingLoop
 		}
 

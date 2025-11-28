@@ -235,7 +235,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	var fastFailover bool
 	// If the store to which the original peer belongs is TiFlash, the new peer cannot be set to witness, nor can it perform fast failover
-	if c.isWitnessEnabled() && !c.cluster.GetStore(peer.StoreId).IsTiFlash() {
+	if c.isWitnessEnabled() && c.cluster.GetStore(peer.StoreId).IsTiKV() {
 		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
 		// exceeds the threshold(30min), quickly add a witness to speed up failover, then promoted
 		// to non-witness gradually to improve availability.

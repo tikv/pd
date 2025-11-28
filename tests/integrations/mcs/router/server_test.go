@@ -16,9 +16,6 @@ package router
 
 import (
 	"context"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/client/clients/router"
-	"github.com/tikv/pd/pkg/versioninfo"
 	"testing"
 	"time"
 
@@ -26,14 +23,17 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/core"
 	rs "github.com/tikv/pd/pkg/mcs/router/server"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
 
@@ -49,10 +49,9 @@ type serverTestSuite struct {
 	pdLeader         *tests.TestServer
 	backendEndpoints string
 
+	tsoCleanup    context.CancelFunc
+	routerCleanup context.CancelFunc
 	routerServer  *rs.Server
-	routerCleanup func()
-
-	tsoCleanup func()
 }
 
 func TestServerTestSuite(t *testing.T) {
@@ -212,6 +211,10 @@ func (suite *serverTestSuite) TestBasicSync() {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop"))
 	}()
+	regions := tests.InitRegions(10)
+	for _, region := range regions {
+		re.NoError(suite.cluster.HandleRegionHeartbeat(region))
+	}
 	tc, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	re.NoError(err)
 	defer cleanup()

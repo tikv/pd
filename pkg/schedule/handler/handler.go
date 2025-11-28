@@ -1017,7 +1017,10 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 	for _, store := range stores {
 		id := store.GetID()
 		if loads, ok := storesLoads[id]; ok {
-			if store.IsTiFlash() {
+			if store.IsTiFlashCompute() {
+				continue
+			}
+			if store.IsTiFlashWrite() {
 				stats.BytesWriteStats[id] = loads[utils.StoreRegionsWriteBytes]
 				stats.KeysWriteStats[id] = loads[utils.StoreRegionsWriteKeys]
 			} else {
