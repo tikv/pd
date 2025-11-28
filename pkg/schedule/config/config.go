@@ -82,7 +82,9 @@ const (
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
 
-	defaultMaxAffinityMergeRegionSize = 0
+	// defaultMaxAffinityMergeRegionSize is the default maximum size of affinity region when regions can be merged.
+	// It means 1024 MB, according https://docs.pingcap.com/tidb/stable/tune-region-performance/#use-region-split-size-to-adjust-region-size
+	defaultMaxAffinityMergeRegionSize = 1024
 
 	// RegionSizeToKeysRatio is the ratio between region size and region keys.
 	RegionSizeToKeysRatio = 10000

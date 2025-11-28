@@ -117,7 +117,7 @@ func NewAffinityCommand() *cobra.Command {
 
 	cmd.AddCommand(
 		newAffinityCreateCommand(),
-		newAffinityGetCommand(),
+		newAffinityShowCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
 		newAffinityListCommand(),
@@ -134,11 +134,11 @@ func newAffinityCreateCommand() *cobra.Command {
 	return cmd
 }
 
-func newAffinityGetCommand() *cobra.Command {
+func newAffinityShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get",
-		Short: "get affinity group states for the target table",
-		Run:   affinityGetCommandFunc,
+		Use:   "show",
+		Short: "show affinity group states for the target table",
+		Run:   affinityShowCommandFunc,
 	}
 	return cmd
 }
@@ -194,7 +194,7 @@ func affinityCreateCommandFunc(cmd *cobra.Command, _ []string) {
 	jsonPrint(cmd, resp)
 }
 
-func affinityGetCommandFunc(cmd *cobra.Command, _ []string) {
+func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
 	defs, err := loadAffinityGroupDefinitions(cmd)
 	if err != nil {
 		cmd.Println(err)
@@ -210,7 +210,7 @@ func affinityGetCommandFunc(cmd *cobra.Command, _ []string) {
 			if strings.Contains(err.Error(), "404 Not Found") {
 				continue
 			}
-			cmd.Printf("Failed to get affinity group %s: %v\n", def.id, err)
+			cmd.Printf("Failed to show affinity group %s: %v\n", def.id, err)
 			return
 		}
 		result[def.id] = state
