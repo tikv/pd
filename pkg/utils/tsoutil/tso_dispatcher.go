@@ -197,7 +197,7 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
-	firstLogical := logical - int64(count*suffix)
+	firstLogical := logical - int64((count-1)*suffix)
 	return s.finishRequest(requests, physical, firstLogical, suffix)
 }
 

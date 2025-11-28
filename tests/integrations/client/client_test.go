@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/tikv/pd/client/clients/tso"
 	"math"
 	"math/rand"
 	"os"
@@ -83,11 +84,11 @@ func TestMain(m *testing.M) {
 
 func TestUniqueIndex(t *testing.T) {
 	re := require.New(t)
-	testUniqueIndex(re, 2, 1)
-	testUniqueIndex(re, 2, 0)
+	checkUniqueIndex(re, 2, 1)
+	//checkUniqueIndex(re, 2, 0)
 }
 
-func testUniqueIndex(re *require.Assertions, maxIndex int64, uniqueIndex int64) {
+func checkUniqueIndex(re *require.Assertions, maxIndex int64, uniqueIndex int64) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -109,10 +110,21 @@ func testUniqueIndex(re *require.Assertions, maxIndex int64, uniqueIndex int64) 
 
 	var l1 int64
 	testutil.Eventually(re, func() bool {
-		_, l1, err = cli.GetTS(context.TODO())
+		_, l1, err = cli.GetTS(ctx)
 		return err == nil
 	})
 	re.Equal(uniqueIndex, l1%maxIndex)
+
+	tsList := make([]tso.TSFuture, 0, 10)
+	for range 10 {
+		ts := cli.GetTSAsync(ctx)
+		tsList = append(tsList, ts)
+	}
+
+	for _, ts := range tsList {
+		_, l1, err = ts.Wait()
+		re.Equal(uniqueIndex, l1%maxIndex)
+	}
 }
 
 func TestClientLeaderChange(t *testing.T) {

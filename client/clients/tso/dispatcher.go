@@ -107,7 +107,7 @@ func newTSODispatcher(
 			New: func() any {
 				return batch.NewController[*Request](
 					maxBatchSize*2,
-					tsoRequestFinisher(0, 0, invalidStreamID),
+					tsoRequestFinisher(0, 0, 0, invalidStreamID),
 					metrics.TSOBestBatchSize,
 				)
 			},
@@ -454,10 +454,10 @@ func (td *tsoDispatcher) processRequests(
 			sourceStreamID:      stream.streamID,
 		}
 		// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
-		firstLogical := result.logical - int64(result.count) + 1
+		firstLogical := result.logical - int64(result.count-1)*int64(result.suffix)
 		// Do the check before releasing the token.
 		td.checkMonotonicity(tsoInfoBeforeReq, curTSOInfo, firstLogical)
-		td.doneCollectedRequests(tbc, result.physical, firstLogical, stream.streamID)
+		td.doneCollectedRequests(tbc, result.physical, firstLogical, int64(result.suffix), stream.streamID)
 	}
 
 	err := stream.processRequests(
@@ -472,11 +472,11 @@ func (td *tsoDispatcher) processRequests(
 	return nil
 }
 
-func tsoRequestFinisher(physical, firstLogical int64, streamID string) batch.FinisherFunc[*Request] {
+func tsoRequestFinisher(physical, firstLogical int64, suffix int64, streamID string) batch.FinisherFunc[*Request] {
 	return func(idx int, tsoReq *Request, err error) {
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx
-		tsoReq.physical, tsoReq.logical = physical, firstLogical+int64(idx)
+		tsoReq.physical, tsoReq.logical = physical, firstLogical+int64(idx)*suffix
 		tsoReq.streamID = streamID
 		tsoReq.TryDone(err)
 		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()
@@ -485,12 +485,12 @@ func tsoRequestFinisher(physical, firstLogical int64, streamID string) batch.Fin
 
 func (td *tsoDispatcher) cancelCollectedRequests(tbc *batch.Controller[*Request], streamID string, err error) {
 	td.tokenCh <- struct{}{}
-	tbc.FinishCollectedRequests(tsoRequestFinisher(0, 0, streamID), err)
+	tbc.FinishCollectedRequests(tsoRequestFinisher(0, 0, 0, streamID), err)
 }
 
-func (td *tsoDispatcher) doneCollectedRequests(tbc *batch.Controller[*Request], physical, firstLogical int64, streamID string) {
+func (td *tsoDispatcher) doneCollectedRequests(tbc *batch.Controller[*Request], physical, firstLogical int64, suffix int64, streamID string) {
 	td.tokenCh <- struct{}{}
-	tbc.FinishCollectedRequests(tsoRequestFinisher(physical, firstLogical, streamID), nil)
+	tbc.FinishCollectedRequests(tsoRequestFinisher(physical, firstLogical, suffix, streamID), nil)
 }
 
 // checkMonotonicity checks whether the monotonicity of the TSO allocation is violated.

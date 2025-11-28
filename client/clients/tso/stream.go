@@ -116,6 +116,7 @@ func checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done cha
 type tsoRequestResult struct {
 	physical, logical   int64
 	count               uint32
+	suffix              uint32
 	respKeyspaceGroupID uint32
 }
 
@@ -149,6 +150,7 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
+		suffix:              resp.GetTimestamp().GetSuffixBits(),
 		respKeyspaceGroupID: constants.DefaultKeyspaceGroupID,
 	}, nil
 }
@@ -180,6 +182,7 @@ func (s tsoTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
+		suffix:              resp.GetTimestamp().GetSuffixBits(),
 		respKeyspaceGroupID: resp.GetHeader().GetKeyspaceGroupId(),
 	}, nil
 }
