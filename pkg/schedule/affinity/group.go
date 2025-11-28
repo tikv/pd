@@ -271,13 +271,6 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	return nil
 }
 
-// GroupKeyRange represents a key range with group id.
-// TODO: change []GroupKeyRange to GroupKeyRanges
-type GroupKeyRange struct {
-	keyutil.KeyRange
-	GroupID string
-}
-
 // GroupKeyRanges represents key ranges with group id.
 type GroupKeyRanges struct {
 	KeyRanges []keyutil.KeyRange

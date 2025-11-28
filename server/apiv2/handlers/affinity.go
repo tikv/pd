@@ -283,12 +283,8 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	// Convert []GroupKeyRange to []GroupKeyRanges by grouping by GroupID
-	groupedAddOps := groupKeyRangesByGroupID(addOps)
-	groupedRemoveOps := groupKeyRangesByGroupID(removeOps)
-
 	// Call manager to perform batch modify
-	err = manager.UpdateAffinityGroupKeyRanges(groupedAddOps, groupedRemoveOps)
+	err = manager.UpdateAffinityGroupKeyRanges(addOps, removeOps)
 	if handleAffinityError(c, err) {
 		return
 	}
@@ -517,10 +513,12 @@ func validateKeyRange(startKey, endKey []byte) error {
 	return nil
 }
 
-// convertAndValidateRangeOps validates group operations and converts them to GroupKeyRange format.
+// convertAndValidateRangeOps validates group operations and converts them to GroupKeyRanges format.
 // It updates affectedGroups with all groups encountered.
-func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupKeyRange, error) {
-	var result []affinity.GroupKeyRange
+// Multiple operations for the same group are automatically merged.
+func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity.Manager, affectedGroups map[string]bool) ([]affinity.GroupKeyRanges, error) {
+	grouped := make(map[string][]keyutil.KeyRange)
+
 	for _, op := range ops {
 		if err := validateGroupID(op.ID); err != nil {
 			return nil, err
@@ -533,43 +531,27 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 			return nil, errs.ErrAffinityGroupContent.FastGenByArgs("no key ranges provided")
 		}
 
-		// Convert ranges to GroupKeyRange format
+		// Validate and merge ranges for this group
 		for _, kr := range op.Ranges {
 			// Validate key range
 			if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
 				return nil, err
 			}
-			result = append(result, affinity.GroupKeyRange{
-				KeyRange: keyutil.KeyRange{
-					StartKey: kr.StartKey,
-					EndKey:   kr.EndKey,
-				},
-				GroupID: op.ID,
+			grouped[op.ID] = append(grouped[op.ID], keyutil.KeyRange{
+				StartKey: kr.StartKey,
+				EndKey:   kr.EndKey,
 			})
 		}
 	}
-	return result, nil
-}
 
-// groupKeyRangesByGroupID converts []GroupKeyRange to []GroupKeyRanges by grouping ranges by GroupID.
-func groupKeyRangesByGroupID(ranges []affinity.GroupKeyRange) []affinity.GroupKeyRanges {
-	grouped := make(map[string][]keyutil.KeyRange)
-	order := []string{} // Preserve order of first occurrence
-
-	for _, r := range ranges {
-		if _, exists := grouped[r.GroupID]; !exists {
-			order = append(order, r.GroupID)
-		}
-		grouped[r.GroupID] = append(grouped[r.GroupID], r.KeyRange)
-	}
-
+	// Convert to slice (order is not significant as it will be converted to map later)
 	result := make([]affinity.GroupKeyRanges, 0, len(grouped))
-	for _, groupID := range order {
+	for groupID, keyRanges := range grouped {
 		result = append(result, affinity.GroupKeyRanges{
 			GroupID:   groupID,
-			KeyRanges: grouped[groupID],
+			KeyRanges: keyRanges,
 		})
 	}
 
-	return result
+	return result, nil
 }

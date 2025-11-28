@@ -87,18 +87,18 @@ func MakeLabelRule(groupKeyRanges *GroupKeyRanges) *labeler.LabelRule {
 	}
 }
 
-// MakeLabelRuleFromRanges MakeLabelRule makes the label rule.
-func MakeLabelRuleFromRanges(groupID string, ranges []GroupKeyRange) *labeler.LabelRule {
+// MakeLabelRuleFromRanges makes the label rule from GroupKeyRanges.
+func MakeLabelRuleFromRanges(gkr GroupKeyRanges) *labeler.LabelRule {
 	var labelData []any
-	for _, kr := range ranges {
+	for _, kr := range gkr.KeyRanges {
 		labelData = append(labelData, map[string]any{
 			"start_key": hex.EncodeToString(kr.StartKey),
 			"end_key":   hex.EncodeToString(kr.EndKey),
 		})
 	}
 	return &labeler.LabelRule{
-		ID:       GetLabelRuleID(groupID),
-		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: groupID}},
+		ID:       GetLabelRuleID(gkr.GroupID),
+		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: gkr.GroupID}},
 		RuleType: labeler.KeyRange,
 		Data:     labelData,
 	}
@@ -130,16 +130,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	}
 
 	// Step 2: Convert and validate key ranges no overlaps
-	var allNewRanges []GroupKeyRange
-	for _, change := range changes {
-		for _, kr := range change.KeyRanges {
-			allNewRanges = append(allNewRanges, GroupKeyRange{
-				KeyRange: kr,
-				GroupID:  change.GroupID,
-			})
-		}
-	}
-	if err := m.validateNoKeyRangeOverlap(allNewRanges); err != nil {
+	if err := m.validateNoKeyRangeOverlap(changes); err != nil {
 		return err
 	}
 
@@ -183,14 +174,10 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	for i, change := range changes {
 		// Update key ranges cache for this group
 		if len(change.KeyRanges) > 0 {
-			ranges := make([]GroupKeyRange, 0, len(change.KeyRanges))
-			for _, kr := range change.KeyRanges {
-				ranges = append(ranges, GroupKeyRange{
-					KeyRange: kr,
-					GroupID:  change.GroupID,
-				})
+			m.keyRanges[change.GroupID] = GroupKeyRanges{
+				KeyRanges: change.KeyRanges,
+				GroupID:   change.GroupID,
 			}
-			m.keyRanges[change.GroupID] = ranges
 		} else {
 			// No key ranges, remove from cache if exists
 			delete(m.keyRanges, change.GroupID)
@@ -229,7 +216,7 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 		seen[groupID] = struct{}{}
 		// Check if group has key ranges when force is false
 		if !force {
-			if ranges, exists := m.keyRanges[groupID]; exists && len(ranges) > 0 {
+			if ranges, exists := m.keyRanges[groupID]; exists && len(ranges.KeyRanges) > 0 {
 				return errs.ErrAffinityGroupContent.FastGenByArgs(
 					"affinity group " + groupID + " has key ranges, use force=true to delete")
 			}
@@ -332,15 +319,16 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 }
 
 // UpdateAffinityGroupKeyRanges batch modifies key ranges for multiple affinity groups.
-// Note: Firstly add first, secondly validate without considering remove, then remove finnaly.
+// Note: Validates add and remove operations separately, then applies both atomically in a single transaction.
+// Currently migration (removing a range from group A and adding the same range to group B in one request)
+// is not supported because add validation checks overlaps against existing ranges before removals are applied.
 func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRanges) error {
-	toAdd := make(map[string][]GroupKeyRange, len(addOps))
-	toRemove := make(map[string][]GroupKeyRange, len(removeOps))
+	toAdd := make(map[string]GroupKeyRanges, len(addOps))
+	toRemove := make(map[string]GroupKeyRanges, len(removeOps))
 	newAddedLabelRules := make(map[string]*labeler.LabelRule, len(addOps))
 	newRemovedLabelRules := make(map[string]*labeler.LabelRule, len(removeOps))
 
 	plan := m.regionLabeler.NewPlan()
-	var allNewRanges []GroupKeyRange
 
 	// Step 0: Validate that a Group is either fully added or fully removed.
 	for _, op := range addOps {
@@ -350,7 +338,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		if _, exists := toAdd[op.GroupID]; exists {
 			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
 		}
-		toAdd[op.GroupID] = nil
+		toAdd[op.GroupID] = GroupKeyRanges{}
 	}
 	for _, op := range removeOps {
 		if len(op.KeyRanges) == 0 {
@@ -362,32 +350,35 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		if _, exists := toAdd[op.GroupID]; exists {
 			return errs.ErrAffinityGroupExist.GenWithStackByArgs(op.GroupID)
 		}
-		toRemove[op.GroupID] = nil
+		toRemove[op.GroupID] = GroupKeyRanges{}
 	}
 
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
 	// Step 1: Validate the added KeyRanges.
+	var newRangesToValidate []GroupKeyRanges
 	for _, op := range addOps {
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
 		if err != nil {
 			return err
 		}
-		// Set to add operations and collect new ranges
-		for _, keyRange := range op.KeyRanges {
-			groupKeyRange := GroupKeyRange{
-				KeyRange: keyRange,
-				GroupID:  op.GroupID,
-			}
-			currentRanges = append(currentRanges, groupKeyRange)
-			allNewRanges = append(allNewRanges, groupKeyRange)
+
+		// Merge current ranges with new ranges to add
+		toAdd[op.GroupID] = GroupKeyRanges{
+			GroupID:   op.GroupID,
+			KeyRanges: append(append([]keyutil.KeyRange(nil), currentRanges.KeyRanges...), op.KeyRanges...),
 		}
-		toAdd[op.GroupID] = currentRanges
+
+		// Collect new ranges for overlap validation
+		newRangesToValidate = append(newRangesToValidate, GroupKeyRanges{
+			KeyRanges: op.KeyRanges,
+			GroupID:   op.GroupID,
+		})
 	}
 	// Validate no overlaps with newly added ranges
-	if len(allNewRanges) > 0 {
-		if err := m.validateNoKeyRangeOverlap(allNewRanges); err != nil {
+	if len(newRangesToValidate) > 0 {
+		if err := m.validateNoKeyRangeOverlap(newRangesToValidate); err != nil {
 			return err
 		}
 	}
@@ -398,14 +389,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		if err != nil {
 			return err
 		}
-		removeRanges := make([]GroupKeyRange, 0, len(op.KeyRanges))
-		for _, keyRange := range op.KeyRanges {
-			removeRanges = append(removeRanges, GroupKeyRange{
-				KeyRange: keyRange,
-				GroupID:  op.GroupID,
-			})
-		}
-		currentRanges, err = applyRemoveOps(currentRanges, removeRanges)
+		currentRanges, err = applyRemoveOps(currentRanges, op)
 		if err != nil {
 			return err
 		}
@@ -416,7 +400,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	for _, op := range addOps {
 		// For addOps, directly SetLabelRule (Save will overwrite the old value).
 		// No need to Delete first.
-		labelRule := MakeLabelRuleFromRanges(op.GroupID, toAdd[op.GroupID])
+		labelRule := MakeLabelRuleFromRanges(toAdd[op.GroupID])
 		if err := plan.SetLabelRule(labelRule); err != nil {
 			log.Error("failed to create label rule",
 				zap.String("failed-group-id", op.GroupID),
@@ -430,9 +414,9 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		ranges := toRemove[op.GroupID]
 		var labelRule *labeler.LabelRule
 
-		if len(ranges) > 0 {
+		if len(ranges.KeyRanges) > 0 {
 			// If there are still ranges after removal, SetLabelRule (overwrite the old value).
-			labelRule = MakeLabelRuleFromRanges(op.GroupID, ranges)
+			labelRule = MakeLabelRuleFromRanges(ranges)
 			if err := plan.SetLabelRule(labelRule); err != nil {
 				log.Error("failed to create label rule",
 					zap.String("failed-group-id", op.GroupID),
@@ -469,7 +453,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		m.keyRanges[groupID] = currentRanges
 	}
 	for groupID, currentRanges := range toRemove {
-		if len(currentRanges) > 0 {
+		if len(currentRanges.KeyRanges) > 0 {
 			m.keyRanges[groupID] = currentRanges
 		} else {
 			delete(m.keyRanges, groupID)
@@ -482,10 +466,10 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 }
 
 // getCurrentRanges retrieves the current key ranges for a group.
-func (m *Manager) getCurrentRanges(groupID string) ([]GroupKeyRange, error) {
+func (m *Manager) getCurrentRanges(groupID string) (GroupKeyRanges, error) {
 	// Try cache first
-	if ranges := m.keyRanges[groupID]; ranges != nil {
-		return append([]GroupKeyRange(nil), ranges...), nil
+	if gkr, ok := m.keyRanges[groupID]; ok {
+		return gkr, nil
 	}
 
 	// Parse from label rule
@@ -496,14 +480,14 @@ func (m *Manager) getCurrentRanges(groupID string) ([]GroupKeyRange, error) {
 		_, exists := m.groups[groupID]
 		m.RUnlock()
 		if exists {
-			return nil, nil
+			return GroupKeyRanges{GroupID: groupID}, nil
 		}
-		return nil, errors.Errorf("label rule not found for group %s", groupID)
+		return GroupKeyRanges{}, errors.Errorf("label rule not found for group %s", groupID)
 	}
 
 	dataSlice, ok := labelRule.Data.([]*labeler.KeyRangeRule)
 	if !ok {
-		return nil, errors.Errorf("invalid label rule data type for group %s, got type %T", groupID, labelRule.Data)
+		return GroupKeyRanges{}, errors.Errorf("invalid label rule data type for group %s, got type %T", groupID, labelRule.Data)
 	}
 
 	return parseKeyRangesFromData(dataSlice, groupID)
@@ -512,28 +496,28 @@ func (m *Manager) getCurrentRanges(groupID string) ([]GroupKeyRange, error) {
 // applyRemoveOps filters out ranges that match remove operations.
 // Optimized with a map for O(n+m) complexity instead of O(n*m).
 // currentRanges has been sorted by start key and not overlapping.
-func applyRemoveOps(currentRanges []GroupKeyRange, removes []GroupKeyRange) ([]GroupKeyRange, error) {
-	if len(removes) == 0 {
+func applyRemoveOps(currentRanges GroupKeyRanges, removes GroupKeyRanges) (GroupKeyRanges, error) {
+	if len(removes.KeyRanges) == 0 {
 		return currentRanges, nil
 	}
 
 	// Build a set of ranges to remove for O(1) lookup
 	// Use hex encoding to avoid key collisions
-	removeSet := make(map[string]GroupKeyRange, len(removes))
-	for _, remove := range removes {
+	removeSet := make(map[string]keyutil.KeyRange, len(removes.KeyRanges))
+	for _, remove := range removes.KeyRanges {
 		key := hex.EncodeToString(remove.StartKey)
 		if _, exists := removeSet[key]; exists {
-			return nil, errs.ErrAffinityGroupExist.GenWithStackByArgs(remove.GroupID)
+			return GroupKeyRanges{}, errs.ErrAffinityGroupExist.GenWithStackByArgs(removes.GroupID)
 		}
 		removeSet[key] = remove
 	}
 
-	var filtered []GroupKeyRange
-	for _, current := range currentRanges {
+	var filtered []keyutil.KeyRange
+	for _, current := range currentRanges.KeyRanges {
 		key := hex.EncodeToString(current.StartKey)
 		if remove, exists := removeSet[key]; exists {
 			if !bytes.Equal(remove.EndKey, current.EndKey) {
-				return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(remove.GroupID)
+				return GroupKeyRanges{}, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(removes.GroupID)
 			}
 			delete(removeSet, key)
 		} else {
@@ -541,43 +525,46 @@ func applyRemoveOps(currentRanges []GroupKeyRange, removes []GroupKeyRange) ([]G
 		}
 	}
 
-	for _, remove := range removeSet {
+	if len(removeSet) > 0 {
 		// There exists a Range that does not appear in currentRanges.
-		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(remove.GroupID)
+		return GroupKeyRanges{}, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(removes.GroupID)
 	}
 
-	return filtered, nil
+	return GroupKeyRanges{
+		KeyRanges: filtered,
+		GroupID:   currentRanges.GroupID,
+	}, nil
 }
 
 // parseKeyRangesFromData parses key ranges from []*labeler.KeyRangeRule format (from label rule).
-func parseKeyRangesFromData(data []*labeler.KeyRangeRule, groupID string) ([]GroupKeyRange, error) {
+func parseKeyRangesFromData(data []*labeler.KeyRangeRule, groupID string) (GroupKeyRanges, error) {
 	if len(data) == 0 {
-		return nil, nil
+		return GroupKeyRanges{GroupID: groupID}, nil
 	}
 
-	var ranges []GroupKeyRange
+	var keyRanges []keyutil.KeyRange
 	for _, item := range data {
 		if item == nil {
 			continue
 		}
 		startKey, err := decodeHexKey(item.StartKeyHex, groupID, "start")
 		if err != nil {
-			return nil, err
+			return GroupKeyRanges{}, err
 		}
 
 		endKey, err := decodeHexKey(item.EndKeyHex, groupID, "end")
 		if err != nil {
-			return nil, err
+			return GroupKeyRanges{}, err
 		}
-		ranges = append(ranges, GroupKeyRange{
-			KeyRange: keyutil.KeyRange{
-				StartKey: startKey,
-				EndKey:   endKey,
-			},
-			GroupID: groupID,
+		keyRanges = append(keyRanges, keyutil.KeyRange{
+			StartKey: startKey,
+			EndKey:   endKey,
 		})
 	}
-	return ranges, nil
+	return GroupKeyRanges{
+		KeyRanges: keyRanges,
+		GroupID:   groupID,
+	}, nil
 }
 
 // decodeHexKey decodes a hex string and returns an error if decoding fails.
@@ -593,19 +580,19 @@ func decodeHexKey(hexStr, groupID, keyType string) ([]byte, error) {
 }
 
 // extractKeyRangesFromLabelRule extracts key ranges from a label rule data.
-func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) ([]GroupKeyRange, error) {
+func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) (GroupKeyRanges, error) {
 	if rule == nil || rule.Data == nil {
-		return nil, nil
+		return GroupKeyRanges{}, nil
 	}
 
 	groupID, ok := parseAffinityGroupIDFromLabelRule(rule)
 	if !ok {
-		return nil, nil
+		return GroupKeyRanges{}, nil
 	}
 
 	dataSlice, ok := rule.Data.([]*labeler.KeyRangeRule)
 	if !ok {
-		return nil, errs.ErrAffinityGroupContent.FastGenByArgs("invalid label rule data format")
+		return GroupKeyRanges{}, errs.ErrAffinityGroupContent.FastGenByArgs("invalid label rule data format")
 	}
 
 	return parseKeyRangesFromData(dataSlice, groupID)
@@ -641,36 +628,65 @@ func checkKeyRangesOverlap(start1, end1, start2, end2 []byte) bool {
 	return true
 }
 
+// flattenKeyRange is used to flatten all ranges for easier comparison
+type flattenKeyRange struct {
+	keyutil.KeyRange
+	groupID string
+}
+
 // validateNoKeyRangeOverlap validates that the given key ranges do not overlap with existing ones.
 // It should be called with the manager lock held.
 // Uses in-memory keyRanges cache to avoid repeated labeler access and reduce lock contention.
-func (m *Manager) validateNoKeyRangeOverlap(newRanges []GroupKeyRange) error {
-	// First, check for overlaps within the new ranges themselves
-	for i := range newRanges {
-		for j := i + 1; j < len(newRanges); j++ {
+func (m *Manager) validateNoKeyRangeOverlap(newRanges []GroupKeyRanges) error {
+	var allNewRanges []flattenKeyRange
+	for _, gkr := range newRanges {
+		for _, kr := range gkr.KeyRanges {
+			allNewRanges = append(allNewRanges, flattenKeyRange{
+				KeyRange: kr,
+				groupID:  gkr.GroupID,
+			})
+		}
+	}
+
+	// Step 1: Check for overlaps within the new ranges themselves
+	// This is O(N²) where N is the total number of new ranges across all groups
+	for i := range allNewRanges {
+		for j := i + 1; j < len(allNewRanges); j++ {
 			if checkKeyRangesOverlap(
-				newRanges[i].StartKey, newRanges[i].EndKey,
-				newRanges[j].StartKey, newRanges[j].EndKey,
+				allNewRanges[i].StartKey, allNewRanges[i].EndKey,
+				allNewRanges[j].StartKey, allNewRanges[j].EndKey,
 			) {
+				if allNewRanges[i].groupID == allNewRanges[j].groupID {
+					return errs.ErrAffinityGroupContent.FastGenByArgs(
+						"key ranges overlap within group " + allNewRanges[i].groupID)
+				}
 				return errs.ErrAffinityGroupContent.FastGenByArgs(
-					"key ranges overlap within the same request: group " +
-						newRanges[i].GroupID + " and " + newRanges[j].GroupID)
+					"key range overlaps between groups: " +
+						allNewRanges[i].groupID + " and " + allNewRanges[j].groupID)
 			}
 		}
 	}
 
-	// Then, check for overlaps with existing key ranges from in-memory cache
-	// This avoids repeated labeler lock acquisition for better performance
-	for _, newRange := range newRanges {
-		for _, existingRanges := range m.keyRanges {
-			for _, existingRange := range existingRanges {
+	// Step 2: Check new ranges against ALL existing ranges
+	// This is O(N × G×R) where N is new ranges, G is existing groups, R is ranges per group
+	// We must check against all existing groups, including those being updated,
+	// to catch cases like:
+	// - Adding ranges to group A and group B, where A's new range overlaps with B's existing range
+	// - Adding duplicate range to the same group
+	for _, newRange := range allNewRanges {
+		for _, existingGKR := range m.keyRanges {
+			for _, existingRange := range existingGKR.KeyRanges {
 				if checkKeyRangesOverlap(
 					newRange.StartKey, newRange.EndKey,
 					existingRange.StartKey, existingRange.EndKey,
 				) {
+					if newRange.groupID == existingGKR.GroupID {
+						return errs.ErrAffinityGroupContent.FastGenByArgs(
+							"key range overlaps with existing ranges in group " + newRange.groupID)
+					}
 					return errs.ErrAffinityGroupContent.FastGenByArgs(
-						"key range overlaps with existing group: new group " +
-							newRange.GroupID + " overlaps with group " + existingRange.GroupID)
+						"key range overlaps between groups: " +
+							newRange.groupID + " and " + existingGKR.GroupID)
 				}
 			}
 		}
@@ -683,7 +699,7 @@ func (m *Manager) validateNoKeyRangeOverlap(newRanges []GroupKeyRange) error {
 // It should be called with the manager lock held.
 func (m *Manager) loadRegionLabel() error {
 	// Collect all key ranges from label rules and populate in-memory cache
-	var allRanges []GroupKeyRange
+	var allRanges []GroupKeyRanges
 
 	m.regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
 		groupID, ok := parseAffinityGroupIDFromLabelRule(rule)
@@ -699,7 +715,7 @@ func (m *Manager) loadRegionLabel() error {
 			return true
 		}
 
-		ranges, err := extractKeyRangesFromLabelRule(rule)
+		gkr, err := extractKeyRangesFromLabelRule(rule)
 		if err != nil {
 			log.Warn("failed to extract key ranges from label rule during rebuild",
 				zap.String("rule-id", rule.ID),
@@ -708,10 +724,10 @@ func (m *Manager) loadRegionLabel() error {
 			return true
 		}
 
-		if len(ranges) > 0 {
-			allRanges = append(allRanges, ranges...)
+		if len(gkr.KeyRanges) > 0 {
+			allRanges = append(allRanges, gkr)
 			// Populate in-memory key ranges cache
-			m.keyRanges[groupID] = ranges
+			m.keyRanges[groupID] = gkr
 		}
 
 		// Associate the label rule with the group
@@ -722,21 +738,44 @@ func (m *Manager) loadRegionLabel() error {
 
 	// Validate that all key ranges are non-overlapping
 	for i := range allRanges {
-		for j := i + 1; j < len(allRanges); j++ {
-			if checkKeyRangesOverlap(
-				allRanges[i].StartKey, allRanges[i].EndKey,
-				allRanges[j].StartKey, allRanges[j].EndKey,
-			) {
-				return errs.ErrAffinityGroupContent.FastGenByArgs(
-					"found overlapping key ranges during rebuild: group " +
-						allRanges[i].GroupID + " overlaps with group " + allRanges[j].GroupID)
+		// Check within the same group
+		for idx1 := range allRanges[i].KeyRanges {
+			for idx2 := idx1 + 1; idx2 < len(allRanges[i].KeyRanges); idx2++ {
+				if checkKeyRangesOverlap(
+					allRanges[i].KeyRanges[idx1].StartKey, allRanges[i].KeyRanges[idx1].EndKey,
+					allRanges[i].KeyRanges[idx2].StartKey, allRanges[i].KeyRanges[idx2].EndKey,
+				) {
+					return errs.ErrAffinityGroupContent.FastGenByArgs(
+						"found overlapping key ranges within group " + allRanges[i].GroupID + " during rebuild")
+				}
+			}
+		}
+		// Check between different groups
+		for _, rangeI := range allRanges[i].KeyRanges {
+			for j := i + 1; j < len(allRanges); j++ {
+				for _, rangeJ := range allRanges[j].KeyRanges {
+					if checkKeyRangesOverlap(
+						rangeI.StartKey, rangeI.EndKey,
+						rangeJ.StartKey, rangeJ.EndKey,
+					) {
+						return errs.ErrAffinityGroupContent.FastGenByArgs(
+							"found overlapping key ranges during rebuild: group " +
+								allRanges[i].GroupID + " overlaps with group " + allRanges[j].GroupID)
+					}
+				}
 			}
 		}
 	}
 
 	log.Info("rebuilt group-label mapping",
 		zap.Int("total-groups", len(m.keyRanges)),
-		zap.Int("total-ranges", len(allRanges)))
+		zap.Int("total-ranges", func() int {
+			total := 0
+			for _, gkr := range allRanges {
+				total += len(gkr.KeyRanges)
+			}
+			return total
+		}()))
 
 	return nil
 }

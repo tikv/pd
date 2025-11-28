@@ -53,41 +53,49 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	validate := func(ranges []GroupKeyRange) error {
+	validate := func(ranges []GroupKeyRanges) error {
 		manager.Lock()
 		defer manager.Unlock()
 		return manager.validateNoKeyRangeOverlap(ranges)
 	}
 
 	// Test 1: Non-overlapping ranges should succeed
-	keyRanges1 := []GroupKeyRange{
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, GroupID: "group1"},
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("c"), EndKey: []byte("d")}, GroupID: "group1"},
+	keyRanges1 := []GroupKeyRanges{
+		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
+			{StartKey: []byte("a"), EndKey: []byte("b")},
+			{StartKey: []byte("c"), EndKey: []byte("d")},
+		}},
 	}
 	err = validate(keyRanges1)
 	re.NoError(err, "Non-overlapping ranges should pass validation")
 
 	// Test 2: Overlapping ranges within same request should fail
-	keyRanges2 := []GroupKeyRange{
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, GroupID: "group1"},
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("d")}, GroupID: "group1"},
+	keyRanges2 := []GroupKeyRanges{
+		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
+			{StartKey: []byte("a"), EndKey: []byte("c")},
+			{StartKey: []byte("b"), EndKey: []byte("d")},
+		}},
 	}
 	err = validate(keyRanges2)
 	re.Error(err, "Overlapping ranges should fail validation")
 	re.Contains(err.Error(), "overlap")
 
 	// Test 3: Adjacent ranges (not overlapping) should succeed
-	keyRanges3 := []GroupKeyRange{
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, GroupID: "group1"},
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("b"), EndKey: []byte("c")}, GroupID: "group1"},
+	keyRanges3 := []GroupKeyRanges{
+		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
+			{StartKey: []byte("a"), EndKey: []byte("b")},
+			{StartKey: []byte("b"), EndKey: []byte("c")},
+		}},
 	}
 	err = validate(keyRanges3)
 	re.NoError(err, "Adjacent ranges should pass validation")
 
 	// Test 5: Duplicate range should fail validation
-	keyRangesDup := []GroupKeyRange{
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, GroupID: "group1"},
-		{KeyRange: keyutil.KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, GroupID: "group1"},
+	keyRangesDup := []GroupKeyRanges{
+		{GroupID: "group1", KeyRanges: []keyutil.KeyRange{
+			{StartKey: []byte("a"), EndKey: []byte("c")},
+			{StartKey: []byte("a"), EndKey: []byte("c")},
+		}},
 	}
 	err = validate(keyRangesDup)
 	re.Error(err, "Duplicate ranges should fail validation")
@@ -491,4 +499,90 @@ func TestPartialOverlapSameGroup(t *testing.T) {
 		[]GroupKeyRanges{{GroupID: "g", KeyRanges: []keyutil.KeyRange{rOld}}},
 	)
 	re.Error(err)
+}
+
+// TestNewGroupOverlapWithExistingGroup verifies that adding a new group's ranges
+// that overlap with an existing group's ranges is correctly rejected.
+// This test validates the fix for the regression where group A's new ranges
+// vs group B's existing ranges were not being checked.
+func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	// Create group A with range [0x00, 0x20]
+	rangeA := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x20}}
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
+		GroupID:   "groupA",
+		KeyRanges: []keyutil.KeyRange{rangeA},
+	}}))
+
+	// Try to create group B with overlapping range [0x10, 0x30]
+	// This should be rejected because it overlaps with group A's existing range
+	rangeB := keyutil.KeyRange{StartKey: []byte{0x10}, EndKey: []byte{0x30}}
+	err = manager.CreateAffinityGroups([]GroupKeyRanges{{
+		GroupID:   "groupB",
+		KeyRanges: []keyutil.KeyRange{rangeB},
+	}})
+	re.Error(err, "New group B's range should be rejected due to overlap with existing group A")
+	re.Contains(err.Error(), "overlap")
+
+	// Verify group B was not created
+	re.False(manager.IsGroupExist("groupB"))
+
+	// Create group C without ranges first
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "groupC"}}))
+
+	// Try to add range to group C that overlaps with group A
+	// This should also be rejected
+	err = manager.UpdateAffinityGroupKeyRanges(
+		[]GroupKeyRanges{{
+			GroupID:   "groupC",
+			KeyRanges: []keyutil.KeyRange{rangeB},
+		}},
+		nil,
+	)
+	re.Error(err, "Adding overlapping range to group C should be rejected")
+	re.Contains(err.Error(), "overlap")
+
+	// Now test the critical case: batch update with multiple groups
+	// Create group D with range [0x40, 0x50]
+	rangeD := keyutil.KeyRange{StartKey: []byte{0x40}, EndKey: []byte{0x50}}
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
+		GroupID:   "groupD",
+		KeyRanges: []keyutil.KeyRange{rangeD},
+	}}))
+
+	// Create group E without ranges
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "groupE"}}))
+
+	// Try to add ranges to both group C and group E in a single batch,
+	// where group C's new range [0x45, 0x55] overlaps with group D's existing range [0x40, 0x50]
+	rangeC := keyutil.KeyRange{StartKey: []byte{0x45}, EndKey: []byte{0x55}} // overlaps with D
+	rangeE := keyutil.KeyRange{StartKey: []byte{0x60}, EndKey: []byte{0x70}} // no overlap
+	err = manager.UpdateAffinityGroupKeyRanges(
+		[]GroupKeyRanges{
+			{GroupID: "groupC", KeyRanges: []keyutil.KeyRange{rangeC}},
+			{GroupID: "groupE", KeyRanges: []keyutil.KeyRange{rangeE}},
+		},
+		nil,
+	)
+	// This is the key test: C's new range vs D's existing range should be detected
+	// This validates that when updating multiple groups in a batch,
+	// the validation correctly checks new ranges against ALL existing ranges,
+	// not just the groups being updated
+	re.Error(err, "Batch update should detect overlap between C's new range and D's existing range")
+	re.Contains(err.Error(), "overlap")
 }
