@@ -256,6 +256,8 @@ var (
 
 	// Affinity merge checker metrics
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")
+	affinityMergeCheckerDisabledCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-disabled")
+	affinityMergeCheckerGlobalDisabledCounter       = checkerCounter.WithLabelValues(affinityChecker, "merge-global-disabled")
 	affinityMergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(affinityChecker, "merge-no-need")
 	affinityMergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-no-target")
 	affinityMergeCheckerTargetTooBigCounter         = checkerCounter.WithLabelValues(affinityChecker, "merge-target-too-big")

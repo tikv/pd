@@ -362,7 +362,7 @@ func TestStateChangeRegionCount(t *testing.T) {
 
 	// Verify group state changed
 	groupInfo := manager.GetGroups()["state-test"]
-	re.False(groupInfo.IsAffinitySchedulingAllowed())
+	re.False(groupInfo.IsAffinitySchedulingEnabled())
 
 	// Verify cache is cleared
 	groupState2 := manager.GetAffinityGroupState("state-test")
@@ -592,7 +592,7 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify group is available
 	groupState := manager.GetAffinityGroupState("expiration-test")
-	re.True(groupState.IsAffinitySchedulingAllowed)
+	re.True(groupState.AffinitySchedulingEnabled)
 
 	// Make store 2 unhealthy to trigger degraded state
 	store2 := storeInfos.GetStore(2)
@@ -603,7 +603,7 @@ func TestDegradedExpiration(t *testing.T) {
 	// Verify group became degraded
 	groupInfo := manager.GetGroups()["expiration-test"]
 	re.Equal(groupDegraded, groupInfo.State.toGroupState())
-	re.False(groupInfo.IsAffinitySchedulingAllowed())
+	re.False(groupInfo.IsAffinitySchedulingEnabled())
 
 	// Record the expiration time
 	manager.RLock()
@@ -629,5 +629,5 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify scheduling is still disallowed
 	groupState2 := manager.GetAffinityGroupState("expiration-test")
-	re.False(groupState2.IsAffinitySchedulingAllowed)
+	re.False(groupState2.AffinitySchedulingEnabled)
 }

@@ -106,10 +106,10 @@ func (g *Group) String() string {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type GroupState struct {
 	Group
-	// IsBalanceSchedulingAllowed indicates whether balance scheduling is allowed.
-	IsBalanceSchedulingAllowed bool `json:"is_balance_scheduling_allowed"`
-	// IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
-	IsAffinitySchedulingAllowed bool `json:"is_affinity_scheduling_allowed"`
+	// RegularSchedulingEnabled indicates whether balance scheduling is allowed.
+	RegularSchedulingEnabled bool `json:"regular_scheduling_enabled"`
+	// AffinitySchedulingEnabled indicates whether affinity scheduling is allowed.
+	AffinitySchedulingEnabled bool `json:"affinity_scheduling_enabled"`
 	// RangeCount indicates how many key ranges are associated with this group.
 	RangeCount int `json:"range_count"`
 	// RegionCount indicates how many Regions are currently in the group.
@@ -126,7 +126,7 @@ type GroupState struct {
 
 // IsRegionAffinity checks whether the Region is in an affinity state.
 func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
-	if region == nil || !g.IsAffinitySchedulingAllowed {
+	if region == nil || !g.AffinitySchedulingEnabled {
 		return false
 	}
 	// Compare the Leader
@@ -182,13 +182,13 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			LeaderStoreID:   g.LeaderStoreID,
 			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
 		},
-		IsBalanceSchedulingAllowed:  g.IsAllowBalanceScheduling(),
-		IsAffinitySchedulingAllowed: g.IsAffinitySchedulingAllowed(),
-		RangeCount:                  g.RangeCount,
-		RegionCount:                 len(g.Regions),
-		AffinityRegionCount:         g.AffinityRegionCount,
-		affinityVer:                 g.AffinityVer,
-		groupInfoPtr:                g,
+		RegularSchedulingEnabled:  g.IsRegularSchedulingEnabled(),
+		AffinitySchedulingEnabled: g.IsAffinitySchedulingEnabled(),
+		RangeCount:                g.RangeCount,
+		RegionCount:               len(g.Regions),
+		AffinityRegionCount:       g.AffinityRegionCount,
+		affinityVer:               g.AffinityVer,
+		groupInfoPtr:              g,
 	}
 }
 
@@ -221,13 +221,13 @@ func (g *runtimeGroupInfo) getState() condition {
 	return groupDegraded
 }
 
-// IsAffinitySchedulingAllowed indicates whether affinity scheduling is allowed.
-func (g *runtimeGroupInfo) IsAffinitySchedulingAllowed() bool {
+// IsAffinitySchedulingEnabled indicates whether affinity scheduling is allowed.
+func (g *runtimeGroupInfo) IsAffinitySchedulingEnabled() bool {
 	return g.IsAvailable() && g.LeaderStoreID != 0 && len(g.VoterStoreIDs) != 0
 }
 
-// IsAllowBalanceScheduling indicates whether balance scheduling is allowed.
-func (g *runtimeGroupInfo) IsAllowBalanceScheduling() bool {
+// IsRegularSchedulingEnabled indicates whether balance scheduling is allowed.
+func (g *runtimeGroupInfo) IsRegularSchedulingEnabled() bool {
 	return g.IsExpired() || g.LeaderStoreID == 0 || len(g.VoterStoreIDs) == 0
 }
 

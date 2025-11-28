@@ -101,7 +101,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// In some cases, the Group must be updated via ObserveAvailableRegion and then fetched again.
 	needRefetch := false
-	if group.IsAffinitySchedulingAllowed {
+	if group.AffinitySchedulingEnabled {
 		// If the Group is affinity scheduling allowed and the Region is not in the affinity state,
 		// we expect to schedule the Region to match the Group’s peers.
 		// Before doing so, check whether the Group’s peers are replicated.
@@ -121,7 +121,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
-	if group == nil || !group.IsAffinitySchedulingAllowed {
+	if group == nil || !group.AffinitySchedulingEnabled {
 		affinityCheckerGroupScheduleDisallowedCounter.Inc()
 		return nil
 	}
@@ -282,10 +282,18 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 // - Does NOT skip recently split or recently started regions (as requested)
 // - Only merges regions within the same affinity group
 func (c *AffinityChecker) MergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
+	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
+	if maxSize == 0 {
+		if c.conf.GetMaxMergeRegionSize() == 0 {
+			affinityMergeCheckerGlobalDisabledCounter.Inc()
+		} else {
+			affinityMergeCheckerDisabledCounter.Inc()
+		}
+		return nil
+	}
 	affinityMergeCheckerCounter.Inc()
 
 	// Region is not small enough
-	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
 	maxKeys := maxSize * config.RegionSizeToKeysRatio
 	if !region.NeedMerge(maxSize, maxKeys) {
 		affinityMergeCheckerNoNeedCounter.Inc()

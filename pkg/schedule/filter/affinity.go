@@ -41,7 +41,7 @@ func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
 func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
 	if f.affinityManager != nil {
 		group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
-		if group != nil && !group.IsBalanceSchedulingAllowed {
+		if group != nil && !group.RegularSchedulingEnabled {
 			return statusRegionAffinity
 		}
 	}
@@ -77,8 +77,8 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 	}
 
 	if affinityManager := cluster.GetAffinityManager(); affinityManager != nil {
-		_, isAffinity := affinityManager.GetRegionAffinityGroupState(region)
-		if isAffinity {
+		group, _ := affinityManager.GetRegionAffinityGroupState(region)
+		if group != nil && !group.RegularSchedulingEnabled {
 			maxSize := (configSize + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
 			maxKeys := maxSize * config.RegionSizeToKeysRatio
 			// Only block splitting when the Region is in the affinity state.

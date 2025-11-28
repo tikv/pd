@@ -40,7 +40,7 @@ var (
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// TODO: Improve the strategy.
-	if group == nil || !group.IsBalanceSchedulingAllowed {
+	if group == nil || !group.RegularSchedulingEnabled {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
