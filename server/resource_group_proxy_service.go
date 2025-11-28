@@ -18,10 +18,12 @@ import (
 	"context"
 	"io"
 
-	"github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/pingcap/kvproto/pkg/resource_manager"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 type resourceGroupProxyServer struct {

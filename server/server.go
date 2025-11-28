@@ -230,7 +230,6 @@ type Server struct {
 
 	registry                      *registry.ServiceRegistry
 	isKeyspaceGroupEnabled        bool
-	mode                          string
 	servicePrimaryMap             sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher             *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher      *etcdutil.LoopWatcher
