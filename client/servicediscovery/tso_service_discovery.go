@@ -173,6 +173,7 @@ func NewTSOServiceDiscovery(
 	log.Info("created tso service discovery",
 		zap.Uint64("cluster-id", c.clusterID),
 		zap.Uint32("keyspace-id", keyspaceID),
+		zap.Any("keyspace-meta", keyspaceMeta),
 		zap.String("default-discovery-key", c.defaultDiscoveryKey))
 
 	return c
@@ -447,8 +448,9 @@ func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceI
 			return errors.New("no TSO microservice available in microservice mode")
 		}
 		// Keyspace doesn't have tso_keyspace_group_id config, allow fallback
-		log.Debug("[tso] keyspace has no tso_keyspace_group_id config, allowing fallback to group 0",
+		log.Info("[tso] keyspace has no tso_keyspace_group_id config, allowing fallback to group 0",
 			zap.Uint32("keyspace-id", keyspaceID),
+			zap.Any("keyspace-meta", c.keyspaceMeta),
 			zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
 	}
 

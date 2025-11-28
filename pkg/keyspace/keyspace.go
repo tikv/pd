@@ -405,6 +405,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	log.Info("[keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
 		zap.String("keyspace-name", keyspace.GetName()),
+		zap.Any("keyspace", keyspace),
 	)
 	return keyspace, nil
 }
