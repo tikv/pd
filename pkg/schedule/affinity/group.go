@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/tikv/pd/pkg/core"
@@ -68,6 +69,15 @@ func (s condition) toGroupState() condition {
 		return groupDegraded
 	}
 	return groupExpired
+}
+
+func (s condition) affectsLeaderOnly() bool {
+	switch s {
+	case storeEvictLeader:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s condition) String() string {
@@ -181,7 +191,7 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 			ID:              g.ID,
 			CreateTimestamp: g.CreateTimestamp,
 			LeaderStoreID:   g.LeaderStoreID,
-			VoterStoreIDs:   append([]uint64(nil), g.VoterStoreIDs...),
+			VoterStoreIDs:   slices.Clone(g.VoterStoreIDs),
 		},
 		RegularSchedulingEnabled:  g.IsRegularSchedulingEnabled(),
 		AffinitySchedulingEnabled: g.IsAffinitySchedulingEnabled(),

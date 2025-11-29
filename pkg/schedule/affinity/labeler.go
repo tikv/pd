@@ -17,6 +17,7 @@ package affinity
 import (
 	"bytes"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"time"
 
@@ -275,11 +276,17 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
+	// To make it easier to compare using slices.Equal.
+	voterStoreIDs = slices.Clone(voterStoreIDs)
+	slices.Sort(voterStoreIDs)
+
 	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
 }
 
 // updateAffinityGroupPeersWithAffinityVer updates the leader and voter stores of an affinity group and marks it available.
-// If affinityVer is non-zero, its equality will be checked.
+// If affinityVer is non-zero (0 indicates an admin operation and is enforced)
+//   - Its equality will be checked.
+//   - Group must not change voterStoreIDs while it is not in the expired state.
 func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affinityVer uint64, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	// Step 0: Validate the correctness of leaderStoreID and voterStoreIDs.
 	if leaderStoreID == 0 || len(voterStoreIDs) == 0 {
@@ -293,21 +300,31 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		return nil, err
 	}
 
-	// Step 1: Check whether the Group exists and validate affinityVer.
+	// Step 1: Check whether the Group exists and validate.
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	group := m.GetAffinityGroupState(groupID)
-	if group == nil || (affinityVer != 0 && group.affinityVer != affinityVer) {
-		if affinityVer != 0 {
-			// No error is generated for changes with a non-zero affinityVer.
-			return nil, nil
-		}
+	if group == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	// When affinityVer is non-zero, it indicates a non-admin operation and triggers additional checks.
+	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
+	if affinityVer != 0 {
+		// If affinityVer is not equal, the update may come from stale statistics and will be ignored.
+		if group.affinityVer != affinityVer {
+			return group, nil
+		}
+		// Group must not change voterStoreIDs while it is not in the expired state.
+		// RegularSchedulingEnabled == IsExpired
+		// The VoterStoreIDs from the API and Observe are already sorted, so they can be compared directly
+		if !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
+			return group, nil
+		}
 	}
 
 	// Step 2: Save the Group in storage.
 	group.LeaderStoreID = leaderStoreID
-	group.VoterStoreIDs = append([]uint64{}, voterStoreIDs...)
+	group.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		return m.storage.SaveAffinityGroup(txn, groupID, &group.Group)
 	}); err != nil {
@@ -367,7 +384,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 		// Merge current ranges with new ranges to add
 		toAdd[op.GroupID] = GroupKeyRanges{
 			GroupID:   op.GroupID,
-			KeyRanges: append(append([]keyutil.KeyRange(nil), currentRanges.KeyRanges...), op.KeyRanges...),
+			KeyRanges: slices.Concat(currentRanges.KeyRanges, op.KeyRanges),
 		}
 
 		// Collect new ranges for overlap validation

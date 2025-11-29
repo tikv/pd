@@ -246,7 +246,7 @@ var (
 	affinityCheckerCounter                        = checkerCounter.WithLabelValues(affinityChecker, "check")
 	affinityCheckerPausedCounter                  = checkerCounter.WithLabelValues(affinityChecker, "paused")
 	affinityCheckerRegionNoLeaderCounter          = checkerCounter.WithLabelValues(affinityChecker, "region-no-leader")
-	affinityCheckerGroupScheduleDisallowedCounter = checkerCounter.WithLabelValues(affinityChecker, "group-not-in-effect")
+	affinityCheckerGroupSchedulingDisabledCounter = checkerCounter.WithLabelValues(affinityChecker, "group-scheduling-disabled")
 	affinityCheckerNewOpCounter                   = checkerCounter.WithLabelValues(affinityChecker, "new-operator")
 	affinityCheckerCreateOpFailedCounter          = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
 	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")

@@ -17,6 +17,7 @@ package affinity
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -150,7 +151,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 			ID:              group.ID,
 			CreateTimestamp: group.CreateTimestamp,
 			LeaderStoreID:   group.LeaderStoreID,
-			VoterStoreIDs:   append([]uint64(nil), group.VoterStoreIDs...),
+			VoterStoreIDs:   slices.Clone(group.VoterStoreIDs),
 		},
 		State:               groupDegraded,
 		DegradedExpiredAt:   m.getExpiredAt(),
@@ -210,7 +211,7 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 
 	groupInfo.State = groupAvailable
 	groupInfo.LeaderStoreID = leaderStoreID
-	groupInfo.VoterStoreIDs = append([]uint64(nil), voterStoreIDs...)
+	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	m.resetCountLocked(groupInfo)
 
 	return newGroupState(groupInfo), nil

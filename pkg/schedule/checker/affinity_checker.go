@@ -122,7 +122,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
 	if group == nil || !group.AffinitySchedulingEnabled {
-		affinityCheckerGroupScheduleDisallowedCounter.Inc()
+		affinityCheckerGroupSchedulingDisabledCounter.Inc()
 		return nil
 	}
 
