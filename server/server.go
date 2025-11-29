@@ -232,6 +232,7 @@ type Server struct {
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+	resourceManagerWatcher   *etcdutil.LoopWatcher
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -660,6 +661,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	if s.IsKeyspaceGroupEnabled() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
+		s.initResourceManagerPrimaryWatcher()
 	}
 }
 
@@ -2052,6 +2054,15 @@ func (s *Server) initSchedulingPrimaryWatcher() {
 	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
+}
+
+func (s *Server) initResourceManagerPrimaryWatcher() {
+	serviceName := mcs.ResourceManagerServiceName
+	primaryKey := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: mcs.ResourceManagerServiceName,
+	})
+	s.resourceManagerWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
+	s.resourceManagerWatcher.StartWatchLoop()
 }
 
 func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string) *etcdutil.LoopWatcher {
