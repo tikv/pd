@@ -453,3 +453,19 @@ func (m *Manager) SetRegionGroupForTest(regionID uint64, groupID string) {
 	m.regions[regionID] = cache
 	groupInfo.Regions[regionID] = cache
 }
+
+// DegradeAffinityGroupForTest sets the affinity group state to degraded.
+// Used for testing only.
+func (m *Manager) DegradeAffinityGroupForTest(groupID string) {
+	m.Lock()
+	defer m.Unlock()
+	m.updateGroupStateLocked(groupID, groupDegraded)
+}
+
+// RestoreAffinityGroupForTest sets the affinity group state to available.
+// Used for testing only.
+func (m *Manager) RestoreAffinityGroupForTest(groupID string) {
+	m.Lock()
+	defer m.Unlock()
+	m.updateGroupStateLocked(groupID, groupAvailable)
+}

@@ -21,10 +21,12 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	pdpb "github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -357,6 +359,12 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		re.NotNil(group)
 		re.False(group.AffinitySchedulingEnabled)
 		re.Equal(uint64(0), group.LeaderStoreID)
+
+		// Add a store to the cluster.
+		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
+			Header: testutil.NewRequestHeader(leader.GetClusterID()),
+			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
+		})
 
 		// Fake a healthy region that matches store 1.
 		region := core.NewRegionInfo(

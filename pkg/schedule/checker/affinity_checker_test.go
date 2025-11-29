@@ -117,46 +117,6 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
-func TestAffinityCheckerGroupState(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-	tc.AddLeaderRegion(1, 1, 2, 3)
-
-	affinityManager := tc.GetAffinityManager()
-	/* TODO: fix test
-	checker := NewAffinityChecker(tc, opt)
-	*/
-
-	// Create affinity group
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 2,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err := createAffinityGroupForTest(affinityManager, group)
-	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-
-	/* TODO: fix test
-	// Mark group as not in effect
-	internalGroupInfo := affinityManager.GetGroupsForTest()["test_group"]
-	if internalGroupInfo != nil {
-		internalGroupInfo.State =
-	}
-
-	// Check should return nil because group is not in effect
-	ops := checker.Check(tc.GetRegion(1))
-	re.Nil(ops)
-	*/
-}
-
 func TestAffinityCheckerPaused(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -199,9 +159,9 @@ func TestAffinityCheckerPaused(t *testing.T) {
 	re.Equal("affinity-move-region", ops[0].Desc())
 }
 
-// TestAvailabilityCheckAndOperatorGeneration tests the full flow:
+// TestAffinityCheckerGroupState tests the full flow:
 // Manager detects unhealthy store -> invalidates group -> checker skips operators -> store recovers -> checker creates operators
-func TestAvailabilityCheckAndOperatorGeneration(t *testing.T) {
+func TestAffinityCheckerGroupState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -246,23 +206,21 @@ func TestAvailabilityCheckAndOperatorGeneration(t *testing.T) {
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
 
-	/* TODO: fix test
 	// Simulate health check invalidating the group
-	groupInfo.Effect = false
+	affinityManager.DegradeAffinityGroupForTest("test_group")
 
-	// Checker should NOT create operator when group is not in effect
+	// Checker should NOT create operator when group is degraded
 	ops = affinityChecker.Check(tc.GetRegion(1))
-	re.Nil(ops, "Checker should not create operator for invalidated group")
+	re.Nil(ops, "Checker should not create operator for degraded group")
 
 	// Simulate health check restoring the group
-	groupInfo.Effect = true
+	affinityManager.RestoreAffinityGroupForTest("test_group")
 
 	// Checker should create operator again after group is restored
 	ops = affinityChecker.Check(tc.GetRegion(1))
 	re.NotNil(ops, "Checker should create operator for restored group")
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
-	*/
 }
 
 // TestHealthCheckWithOfflineStore tests that groups are invalidated when stores go offline.
