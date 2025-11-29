@@ -74,7 +74,7 @@ func CreateKeyspace(c *gin.Context) {
 	createParams := &CreateKeyspaceParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	req := &keyspace.CreateKeyspaceRequest{
@@ -117,7 +117,7 @@ func CreateKeyspaceByID(c *gin.Context) {
 	createParams := &CreateKeyspaceByIDParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	req := &keyspace.CreateKeyspaceByIDRequest{
@@ -336,7 +336,7 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 	configParams := &UpdateConfigParams{}
 	err := c.BindJSON(configParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	mutations := getMutations(configParams.Config)
@@ -407,7 +407,7 @@ func UpdateKeyspaceState(c *gin.Context) {
 	param := &UpdateStateParam{}
 	err := c.BindJSON(param)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	targetState, ok := keyspacepb.KeyspaceState_value[strings.ToUpper(param.State)]
