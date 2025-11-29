@@ -73,7 +73,7 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create transfer leader operator
 	ops := checker.Check(tc.GetRegion(1))
@@ -107,7 +107,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create move peer operator (from 4 to 3)
 	ops := checker.Check(tc.GetRegion(1))
@@ -117,7 +117,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
-func TestAffinityCheckerGroupNotInEffect(t *testing.T) {
+func TestAffinityCheckerGroupState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -142,11 +142,11 @@ func TestAffinityCheckerGroupNotInEffect(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	/* TODO: fix test
 	// Mark group as not in effect
-	internalGroupInfo := affinityManager.GetGroups()["test_group"]
+	internalGroupInfo := affinityManager.GetGroupsForTest()["test_group"]
 	if internalGroupInfo != nil {
 		internalGroupInfo.State =
 	}
@@ -180,7 +180,7 @@ func TestAffinityCheckerPaused(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Pause the checker (pause for 60 seconds)
 	checker.PauseOrResume(60)
@@ -199,9 +199,9 @@ func TestAffinityCheckerPaused(t *testing.T) {
 	re.Equal("affinity-move-region", ops[0].Desc())
 }
 
-// TestHealthCheckAndOperatorGeneration tests the full flow:
+// TestAvailabilityCheckAndOperatorGeneration tests the full flow:
 // Manager detects unhealthy store -> invalidates group -> checker skips operators -> store recovers -> checker creates operators
-func TestHealthCheckAndOperatorGeneration(t *testing.T) {
+func TestAvailabilityCheckAndOperatorGeneration(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -233,10 +233,10 @@ func TestHealthCheckAndOperatorGeneration(t *testing.T) {
 	re.NoError(err)
 
 	// Set region to group mapping
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Verify group is in effect initially
-	groupInfo := affinityManager.GetGroups()["test_group"]
+	groupInfo := affinityManager.GetGroupsForTest()["test_group"]
 	re.NotNil(groupInfo)
 	re.True(groupInfo.IsAffinitySchedulingEnabled())
 
@@ -297,7 +297,7 @@ func TestHealthCheckWithOfflineStore(t *testing.T) {
 	re.NoError(err)
 
 	// Verify group is in effect
-	groupInfo := affinityManager.GetGroups()["test_group"]
+	groupInfo := affinityManager.GetGroupsForTest()["test_group"]
 	re.True(groupInfo.IsAffinitySchedulingEnabled())
 
 	// Set store 2 offline (this triggers IsRemoving())
@@ -307,7 +307,7 @@ func TestHealthCheckWithOfflineStore(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Group should be invalidated because store 2 is removing
-	groupInfo = affinityManager.GetGroups()["test_group"]
+	groupInfo = affinityManager.GetGroupsForTest()["test_group"]
 	re.False(groupInfo.IsAffinitySchedulingEnabled(), "Group should be invalidated when store is removing")
 }
 
@@ -349,7 +349,7 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Group should be invalidated
-	groupInfo := affinityManager.GetGroups()["test_group"]
+	groupInfo := affinityManager.GetGroupsForTest()["test_group"]
 	re.False(groupInfo.IsAffinitySchedulingEnabled(), "Group should be invalidated when stores are down")
 
 	// Recover store 2 (store 3 still down)
@@ -359,7 +359,7 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Group should still be invalidated (store 3 still down)
-	groupInfo = affinityManager.GetGroups()["test_group"]
+	groupInfo = affinityManager.GetGroupsForTest()["test_group"]
 	re.False(groupInfo.IsAffinitySchedulingEnabled(), "Group should remain invalidated while any store is unhealthy")
 
 	// Recover store 3
@@ -369,7 +369,7 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Now group should be restored
-	groupInfo = affinityManager.GetGroups()["test_group"]
+	groupInfo = affinityManager.GetGroupsForTest()["test_group"]
 	re.True(groupInfo.IsAffinitySchedulingEnabled(), "Group should be restored when all stores are healthy")
 }
 
@@ -397,7 +397,7 @@ func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil because region is already aligned
 	ops := checker.Check(tc.GetRegion(1))
@@ -429,7 +429,7 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create move peer operator first (replace 4 with 3)
 	// NOT transfer leader, because target store doesn't have a peer
@@ -477,8 +477,8 @@ func TestAffinityCheckerMultipleGroups(t *testing.T) {
 	err = createAffinityGroupForTest(affinityManager, group2)
 	re.NoError(err)
 
-	affinityManager.SetRegionGroup(1, "group1")
-	affinityManager.SetRegionGroup(2, "group2")
+	affinityManager.SetRegionGroupForTest(1, "group1")
+	affinityManager.SetRegionGroupForTest(2, "group2")
 
 	// Check region 1 should create transfer leader operator
 	ops1 := checker.Check(tc.GetRegion(1))
@@ -515,7 +515,7 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	// Note: NOT calling affinityManager.SetRegionGroup(1, "test_group")
+	// Note: NOT calling affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil because region is not in any group
 	ops := checker.Check(tc.GetRegion(1))
@@ -546,7 +546,7 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Verify checker can create operator
 	ops := checker.Check(tc.GetRegion(1))
@@ -604,8 +604,8 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	re.NoError(err)
 
 	// Set both regions to the same group and mark them as affinity regions
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should create merge operator
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -655,8 +655,8 @@ func TestAffinityCheckerMergePath(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// Regions match affinity config, so Check should go to MergeCheck path.
 	ops := checker.Check(region1)
@@ -694,7 +694,7 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// MergeCheck should return nil (no adjacent regions)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -758,8 +758,8 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 	re.NoError(err)
 
 	// Assign regions to different groups
-	affinityManager.SetRegionGroup(1, "group1")
-	affinityManager.SetRegionGroup(2, "group2")
+	affinityManager.SetRegionGroupForTest(1, "group1")
+	affinityManager.SetRegionGroupForTest(2, "group2")
 
 	// MergeCheck should return nil (different groups)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -813,8 +813,8 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil (region1 is too large)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -868,8 +868,8 @@ func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil (region2 is not affinity-compliant due to wrong leader)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -907,7 +907,7 @@ func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// MergeCheck should return nil (region doesn't satisfy affinity requirements)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -959,7 +959,7 @@ func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// MergeCheck should return nil (region is unhealthy)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -1020,9 +1020,9 @@ func TestAffinityMergeCheckBothDirections(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
-	affinityManager.SetRegionGroup(3, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
+	affinityManager.SetRegionGroupForTest(3, "test_group")
 
 	// MergeCheck on region2 can merge with either prev (region1) or next (region3)
 	// When one-way merge is disabled, it should prefer next but can also merge with prev
@@ -1074,8 +1074,8 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because the combined size (21) exceeds the limit (20)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -1138,8 +1138,8 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil (Adjacent region is unhealthy)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -1179,7 +1179,7 @@ func TestAffinityCheckerComplexMove(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create a combo operator for the complex transformation
 	ops := checker.Check(tc.GetRegion(1))
@@ -1220,7 +1220,7 @@ func TestAffinityCheckerPartialOverlap(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1256,7 +1256,7 @@ func TestAffinityCheckerOperatorSteps(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1296,7 +1296,7 @@ func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1334,7 +1334,7 @@ func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1404,7 +1404,7 @@ func TestAffinityCheckerSameStoreOrder(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Should return nil since stores are the same (order doesn't matter)
 	ops := checker.Check(tc.GetRegion(1))
@@ -1440,7 +1440,7 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group1)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group_1")
+	affinityManager.SetRegionGroupForTest(1, "test_group_1")
 
 	// Should create operator when replica counts match
 	ops := checker.Check(tc.GetRegion(1))
@@ -1459,7 +1459,7 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 	}
 	err = createAffinityGroupForTest(affinityManager, group2)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(2, "test_group_2")
+	affinityManager.SetRegionGroupForTest(2, "test_group_2")
 
 	// Should create operator when replica counts match
 	ops = checker.Check(tc.GetRegion(2))
@@ -1478,7 +1478,7 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 	}
 	err = createAffinityGroupForTest(affinityManager, group3)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(3, "test_group_3")
+	affinityManager.SetRegionGroupForTest(3, "test_group_3")
 
 	// Should NOT create operator when replica counts don't match
 	ops = checker.Check(tc.GetRegion(3))
@@ -1544,7 +1544,7 @@ func TestAffinityCheckerOfflineStore(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// CreateMoveRegionOperator should handle offline store appropriately
 	ops := checker.Check(tc.GetRegion(1))
@@ -1583,7 +1583,7 @@ func TestAffinityCheckerDownStore(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	// May return nil or fail to create operator
@@ -1621,9 +1621,9 @@ func TestAffinityCheckerMultipleRegionsSameGroup(t *testing.T) {
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
 
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
-	affinityManager.SetRegionGroup(3, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
+	affinityManager.SetRegionGroupForTest(3, "test_group")
 
 	// Region 1: needs peer change (4->3) and leader transfer (1->2)
 	ops1 := checker.Check(tc.GetRegion(1))
@@ -1671,7 +1671,7 @@ func TestAffinityCheckerRegionNoLeader(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Should return nil because region has no leader
 	ops := checker.Check(region)
@@ -1712,7 +1712,7 @@ func TestAffinityCheckerUnhealthyRegion(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.Nil(ops, "Unhealthy region should be skipped")
@@ -1801,7 +1801,7 @@ func TestAffinityCheckerAbnormalReplicaCount(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.Nil(ops, "Region that is not fully replicated should be skipped")
@@ -1858,7 +1858,7 @@ func TestAffinityCheckerPreserveLearners(t *testing.T) {
 	}
 	err = createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.NotNil(ops)
@@ -1922,7 +1922,7 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 	}
 	err = createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.NotNil(ops)
@@ -1990,7 +1990,7 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	}
 	err = createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.NotNil(ops)
@@ -2064,7 +2064,7 @@ func TestAffinityCheckerWithWitnessPeers(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil for regions with witness peers
 	ops := checker.Check(region)
@@ -2100,7 +2100,7 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Wait for availability checker to mark the group as not schedulable.
 	time.Sleep(200 * time.Millisecond)
@@ -2139,7 +2139,7 @@ func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil because target store doesn't allow leader transfer in
 	ops := checker.Check(tc.GetRegion(1))
@@ -2174,7 +2174,7 @@ func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil because target store has reject-leader label
 	ops := checker.Check(tc.GetRegion(1))
@@ -2224,8 +2224,8 @@ func TestAffinityMergeCheckPeerStoreMismatch(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because peer stores don't match
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -2277,8 +2277,8 @@ func TestAffinityMergeCheckAdjacentAbnormalReplica(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because adjacent region has abnormal replica count
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -2341,8 +2341,8 @@ func TestAffinityMergeCheckPlacementSplitKeys(t *testing.T) {
 	}
 	err = createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because placement rules require split at key "b"
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -2403,8 +2403,8 @@ func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 	}
 	err = createAffinityGroupForTest(affinityManager, group)
 	re.NoError(err)
-	affinityManager.SetRegionGroup(1, "test_group")
-	affinityManager.SetRegionGroup(2, "test_group")
+	affinityManager.SetRegionGroupForTest(1, "test_group")
+	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because region labeler requires split at key "b"
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)

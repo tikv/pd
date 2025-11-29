@@ -421,17 +421,17 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	return result
 }
 
-// GetGroups returns the internal groups map.
+// GetGroupsForTest returns the internal groups map.
 // Used for testing only.
-func (m *Manager) GetGroups() map[string]*runtimeGroupInfo {
+func (m *Manager) GetGroupsForTest() map[string]*runtimeGroupInfo {
 	m.RLock()
 	defer m.RUnlock()
 	return m.groups
 }
 
-// SetRegionGroup sets the affinity group for a region.
+// SetRegionGroupForTest sets the affinity group for a region.
 // Used for testing only.
-func (m *Manager) SetRegionGroup(regionID uint64, groupID string) {
+func (m *Manager) SetRegionGroupForTest(regionID uint64, groupID string) {
 	m.Lock()
 	defer m.Unlock()
 	if groupID == "" {

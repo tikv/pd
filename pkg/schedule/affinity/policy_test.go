@@ -244,7 +244,7 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	storeInfos.PutStore(store2Down)
 	manager.checkStoresAvailability()
 
-	groupInfo := manager.GetGroups()["expire"]
+	groupInfo := manager.GetGroupsForTest()["expire"]
 	re.Equal(groupDegraded, groupInfo.State.toGroupState())
 
 	// Force the degraded state to be considered expired.

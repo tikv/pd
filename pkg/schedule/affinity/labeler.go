@@ -72,7 +72,7 @@ func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 }
 
 // MakeLabelRule makes the label rule for the given GroupKeyRanges.
-func MakeLabelRule(groupKeyRanges *GroupKeyRanges) *labeler.LabelRule {
+func MakeLabelRule(groupKeyRanges GroupKeyRanges) *labeler.LabelRule {
 	var labelData []any
 	for _, kr := range groupKeyRanges.KeyRanges {
 		labelData = append(labelData, map[string]any{
@@ -83,23 +83,6 @@ func MakeLabelRule(groupKeyRanges *GroupKeyRanges) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:       GetLabelRuleID(groupKeyRanges.GroupID),
 		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: groupKeyRanges.GroupID}},
-		RuleType: labeler.KeyRange,
-		Data:     labelData,
-	}
-}
-
-// MakeLabelRuleFromRanges makes the label rule from GroupKeyRanges.
-func MakeLabelRuleFromRanges(gkr GroupKeyRanges) *labeler.LabelRule {
-	var labelData []any
-	for _, kr := range gkr.KeyRanges {
-		labelData = append(labelData, map[string]any{
-			"start_key": hex.EncodeToString(kr.StartKey),
-			"end_key":   hex.EncodeToString(kr.EndKey),
-		})
-	}
-	return &labeler.LabelRule{
-		ID:       GetLabelRuleID(gkr.GroupID),
-		Labels:   []labeler.RegionLabel{{Key: labelKey, Value: gkr.GroupID}},
 		RuleType: labeler.KeyRange,
 		Data:     labelData,
 	}
@@ -140,7 +123,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	plan := m.regionLabeler.NewPlan()
 	for i, change := range changes {
 		if len(change.KeyRanges) > 0 {
-			labelRule := MakeLabelRule(&change)
+			labelRule := MakeLabelRule(change)
 			if err := plan.SetLabelRule(labelRule); err != nil {
 				log.Error("failed to create label rule",
 					zap.String("failed-group-id", change.GroupID),
@@ -417,7 +400,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	for _, op := range addOps {
 		// For addOps, directly SetLabelRule (Save will overwrite the old value).
 		// No need to Delete first.
-		labelRule := MakeLabelRuleFromRanges(toAdd[op.GroupID])
+		labelRule := MakeLabelRule(toAdd[op.GroupID])
 		if err := plan.SetLabelRule(labelRule); err != nil {
 			log.Error("failed to create label rule",
 				zap.String("failed-group-id", op.GroupID),
@@ -433,7 +416,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 
 		if len(ranges.KeyRanges) > 0 {
 			// If there are still ranges after removal, SetLabelRule (overwrite the old value).
-			labelRule = MakeLabelRuleFromRanges(ranges)
+			labelRule = MakeLabelRule(ranges)
 			if err := plan.SetLabelRule(labelRule); err != nil {
 				log.Error("failed to create label rule",
 					zap.String("failed-group-id", op.GroupID),
