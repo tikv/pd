@@ -1272,13 +1272,13 @@ func (suite *configTestSuite) checkMicroserviceConfig(cluster *pdTests.TestClust
 	re.NoError(err)
 	cfg := config.Config{}
 	re.NoError(json.Unmarshal(output, &cfg))
-	re.True(svr.GetMicroserviceConfig().EnableSchedulingFallback)
-	re.True(cfg.Microservice.EnableSchedulingFallback)
+	re.False(svr.GetMicroserviceConfig().EnableSchedulingFallback)
+	re.False(cfg.Microservice.EnableSchedulingFallback)
 	// config set enable-scheduling-fallback <value>
-	args := []string{"-u", pdAddr, "config", "set", "enable-scheduling-fallback", "false"}
+	args := []string{"-u", pdAddr, "config", "set", "enable-scheduling-fallback", "true"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.False(svr.GetMicroserviceConfig().EnableSchedulingFallback)
+	re.True(svr.GetMicroserviceConfig().EnableSchedulingFallback)
 }
 
 func (suite *configTestSuite) TestRegionRules() {
