@@ -31,11 +31,27 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // createAffinityGroupForTest is a test helper that creates an affinity group with the specified peers.
-func createAffinityGroupForTest(manager *affinity.Manager, group *affinity.Group) error {
-	if err := manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{GroupID: group.ID}}); err != nil {
+// If startKey and endKey are provided (both non-nil), creates the group with that key range.
+// Otherwise creates the group without key ranges.
+func createAffinityGroupForTest(manager *affinity.Manager, group *affinity.Group, startKey, endKey []byte) error {
+	var keyRanges []affinity.GroupKeyRanges
+	if startKey != nil || endKey != nil {
+		keyRanges = []affinity.GroupKeyRanges{{
+			GroupID: group.ID,
+			KeyRanges: []keyutil.KeyRange{{
+				StartKey: startKey,
+				EndKey:   endKey,
+			}},
+		}}
+	} else {
+		keyRanges = []affinity.GroupKeyRanges{{GroupID: group.ID}}
+	}
+
+	if err := manager.CreateAffinityGroups(keyRanges); err != nil {
 		return err
 	}
 	if group.LeaderStoreID != 0 || len(group.VoterStoreIDs) > 0 {
@@ -71,9 +87,8 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create transfer leader operator
 	ops := checker.Check(tc.GetRegion(1))
@@ -105,9 +120,8 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create move peer operator (from 4 to 3)
 	ops := checker.Check(tc.GetRegion(1))
@@ -138,9 +152,8 @@ func TestAffinityCheckerPaused(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Pause the checker (pause for 60 seconds)
 	checker.PauseOrResume(60)
@@ -189,11 +202,8 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-
-	// Set region to group mapping
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Verify group is in effect initially
 	groupInfo := affinityManager.GetGroupsForTest()["test_group"]
@@ -251,7 +261,7 @@ func TestHealthCheckWithOfflineStore(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// Verify group is in effect
@@ -296,7 +306,7 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
 	// Set stores 2 and 3 down
@@ -353,9 +363,8 @@ func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil because region is already aligned
 	ops := checker.Check(tc.GetRegion(1))
@@ -385,9 +394,8 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 		LeaderStoreID: 3,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create move peer operator first (replace 4 with 3)
 	// NOT transfer leader, because target store doesn't have a peer
@@ -430,13 +438,22 @@ func TestAffinityCheckerMultipleGroups(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{2, 3, 4},
 	}
-	err := createAffinityGroupForTest(affinityManager, group1)
+	err := createAffinityGroupForTest(affinityManager, group1, []byte(""), []byte("m"))
 	re.NoError(err)
-	err = createAffinityGroupForTest(affinityManager, group2)
+	err = createAffinityGroupForTest(affinityManager, group2, []byte("m"), []byte(""))
 	re.NoError(err)
 
-	affinityManager.SetRegionGroupForTest(1, "group1")
-	affinityManager.SetRegionGroupForTest(2, "group2")
+	// Manually set region metadata to have the right key ranges
+	region1 := tc.GetRegion(1).Clone(
+		core.WithStartKey([]byte("")),
+		core.WithEndKey([]byte("m")),
+	)
+	region2 := tc.GetRegion(2).Clone(
+		core.WithStartKey([]byte("m")),
+		core.WithEndKey([]byte("")),
+	)
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
 
 	// Check region 1 should create transfer leader operator
 	ops1 := checker.Check(tc.GetRegion(1))
@@ -465,17 +482,17 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 	affinityManager := tc.GetAffinityManager()
 	checker := NewAffinityChecker(tc, opt)
 
-	// Create an affinity group but don't assign region 1 to it
+	// Create an affinity group with a key range that doesn't include region 1
+	// Region 1 has default key range, so use ["z", "") to exclude it
 	group := &affinity.Group{
 		ID:            "test_group",
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte("z"), []byte(""))
 	re.NoError(err)
-	// Note: NOT calling affinityManager.SetRegionGroupForTest(1, "test_group")
 
-	// Check should return nil because region is not in any group
+	// Check should return nil because region 1 is not in the group's key range
 	ops := checker.Check(tc.GetRegion(1))
 	re.Nil(ops)
 }
@@ -502,9 +519,8 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Verify checker can create operator
 	ops := checker.Check(tc.GetRegion(1))
@@ -558,12 +574,8 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-
-	// Set both regions to the same group and mark them as affinity regions
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should create merge operator
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -611,10 +623,8 @@ func TestAffinityCheckerMergePath(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// Regions match affinity config, so Check should go to MergeCheck path.
 	ops := checker.Check(region1)
@@ -650,9 +660,8 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// MergeCheck should return nil (no adjacent regions)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -710,14 +719,10 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group1)
+	err := createAffinityGroupForTest(affinityManager, group1, []byte("a"), []byte("b"))
 	re.NoError(err)
-	err = createAffinityGroupForTest(affinityManager, group2)
+	err = createAffinityGroupForTest(affinityManager, group2, []byte("b"), []byte("c"))
 	re.NoError(err)
-
-	// Assign regions to different groups
-	affinityManager.SetRegionGroupForTest(1, "group1")
-	affinityManager.SetRegionGroupForTest(2, "group2")
 
 	// MergeCheck should return nil (different groups)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -769,10 +774,8 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil (region1 is too large)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -824,10 +827,8 @@ func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 		LeaderStoreID: 1, // Expect leader on store 1
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil (region2 is not affinity-compliant due to wrong leader)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -863,9 +864,8 @@ func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 		LeaderStoreID: 1, // Expect leader on store 1
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// MergeCheck should return nil (region doesn't satisfy affinity requirements)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -915,9 +915,8 @@ func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// MergeCheck should return nil (region is unhealthy)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -976,11 +975,8 @@ func TestAffinityMergeCheckBothDirections(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
-	affinityManager.SetRegionGroupForTest(3, "test_group")
 
 	// MergeCheck on region2 can merge with either prev (region1) or next (region3)
 	// When one-way merge is disabled, it should prefer next but can also merge with prev
@@ -1030,10 +1026,8 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because the combined size (21) exceeds the limit (20)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -1094,10 +1088,8 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil (Adjacent region is unhealthy)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -1135,9 +1127,8 @@ func TestAffinityCheckerComplexMove(t *testing.T) {
 		LeaderStoreID: 5,
 		VoterStoreIDs: []uint64{3, 5, 6},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should create a combo operator for the complex transformation
 	ops := checker.Check(tc.GetRegion(1))
@@ -1176,9 +1167,8 @@ func TestAffinityCheckerPartialOverlap(t *testing.T) {
 		LeaderStoreID: 4,
 		VoterStoreIDs: []uint64{1, 4, 5},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1212,9 +1202,8 @@ func TestAffinityCheckerOperatorSteps(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1252,9 +1241,8 @@ func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
 		LeaderStoreID: 3,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1290,9 +1278,8 @@ func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.NotNil(ops)
@@ -1329,7 +1316,7 @@ func TestAffinityCheckerLeaderNotInVoters(t *testing.T) {
 		LeaderStoreID: 4,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	// Should return error for invalid configuration
 	re.Error(err)
 	re.Contains(err.Error(), "leader must be in voter stores")
@@ -1360,9 +1347,8 @@ func TestAffinityCheckerSameStoreOrder(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{3, 1, 2}, // Different order
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Should return nil since stores are the same (order doesn't matter)
 	ops := checker.Check(tc.GetRegion(1))
@@ -1396,9 +1382,15 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{2},
 	}
-	err := createAffinityGroupForTest(affinityManager, group1)
+	err := createAffinityGroupForTest(affinityManager, group1, []byte(""), []byte("m"))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group_1")
+
+	// Set region 1 to have the right key range
+	region1 := tc.GetRegion(1).Clone(
+		core.WithStartKey([]byte("")),
+		core.WithEndKey([]byte("m")),
+	)
+	tc.PutRegion(region1)
 
 	// Should create operator when replica counts match
 	ops := checker.Check(tc.GetRegion(1))
@@ -1415,9 +1407,15 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 		LeaderStoreID: 8,
 		VoterStoreIDs: []uint64{6, 7, 8, 9, 10},
 	}
-	err = createAffinityGroupForTest(affinityManager, group2)
+	err = createAffinityGroupForTest(affinityManager, group2, []byte("m"), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(2, "test_group_2")
+
+	// Set region 2 to have the right key range
+	region2 := tc.GetRegion(2).Clone(
+		core.WithStartKey([]byte("m")),
+		core.WithEndKey([]byte("")),
+	)
+	tc.PutRegion(region2)
 
 	// Should create operator when replica counts match
 	ops = checker.Check(tc.GetRegion(2))
@@ -1434,9 +1432,8 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 		LeaderStoreID: 8,
 		VoterStoreIDs: []uint64{6, 7, 8, 9, 10}, // 5 replicas
 	}
-	err = createAffinityGroupForTest(affinityManager, group3)
+	err = createAffinityGroupForTest(affinityManager, group3, nil, nil)
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(3, "test_group_3")
 
 	// Should NOT create operator when replica counts don't match
 	ops = checker.Check(tc.GetRegion(3))
@@ -1467,7 +1464,7 @@ func TestAffinityCheckerStoreNotExist(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 4},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	// Should return error because store 4 doesn't exist
 	re.Error(err)
 	re.Contains(err.Error(), "voter store does not exist")
@@ -1500,9 +1497,8 @@ func TestAffinityCheckerOfflineStore(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 4},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// CreateMoveRegionOperator should handle offline store appropriately
 	ops := checker.Check(tc.GetRegion(1))
@@ -1539,9 +1535,8 @@ func TestAffinityCheckerDownStore(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 4},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	// May return nil or fail to create operator
@@ -1576,12 +1571,8 @@ func TestAffinityCheckerMultipleRegionsSameGroup(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
-	affinityManager.SetRegionGroupForTest(3, "test_group")
 
 	// Region 1: needs peer change (4->3) and leader transfer (1->2)
 	ops1 := checker.Check(tc.GetRegion(1))
@@ -1627,9 +1618,8 @@ func TestAffinityCheckerRegionNoLeader(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Should return nil because region has no leader
 	ops := checker.Check(region)
@@ -1668,9 +1658,8 @@ func TestAffinityCheckerUnhealthyRegion(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.Nil(ops, "Unhealthy region should be skipped")
@@ -1699,7 +1688,7 @@ func TestAffinityCheckerDuplicateStores(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 2}, // Duplicate store 2
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	// Should return error for duplicate stores
 	re.Error(err)
 	re.Contains(err.Error(), "duplicate voter store ID")
@@ -1728,7 +1717,7 @@ func TestAffinityCheckerEmptyVoterList(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{}, // Empty
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	// Should return error for empty voter list
 	re.Error(err)
 	re.Contains(err.Error(), "leader store ID and voter store IDs must be provided")
@@ -1757,9 +1746,8 @@ func TestAffinityCheckerAbnormalReplicaCount(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(tc.GetRegion(1))
 	re.Nil(ops, "Region that is not fully replicated should be skipped")
@@ -1814,9 +1802,8 @@ func TestAffinityCheckerPreserveLearners(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err = createAffinityGroupForTest(affinityManager, group)
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.NotNil(ops)
@@ -1878,9 +1865,8 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err = createAffinityGroupForTest(affinityManager, group)
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.NotNil(ops)
@@ -1946,9 +1932,8 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 6},
 	}
-	err = createAffinityGroupForTest(affinityManager, group)
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	ops := checker.Check(region)
 	re.NotNil(ops)
@@ -2020,9 +2005,8 @@ func TestAffinityCheckerWithWitnessPeers(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil for regions with witness peers
 	ops := checker.Check(region)
@@ -2056,9 +2040,8 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Wait for availability checker to mark the group as not schedulable.
 	time.Sleep(200 * time.Millisecond)
@@ -2095,9 +2078,8 @@ func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil because target store doesn't allow leader transfer in
 	ops := checker.Check(tc.GetRegion(1))
@@ -2130,9 +2112,8 @@ func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 		LeaderStoreID: 2,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
 
 	// Check should return nil because target store has reject-leader label
 	ops := checker.Check(tc.GetRegion(1))
@@ -2180,10 +2161,8 @@ func TestAffinityMergeCheckPeerStoreMismatch(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because peer stores don't match
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -2233,10 +2212,8 @@ func TestAffinityMergeCheckAdjacentAbnormalReplica(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err := createAffinityGroupForTest(affinityManager, group)
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because adjacent region has abnormal replica count
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -2297,10 +2274,8 @@ func TestAffinityMergeCheckPlacementSplitKeys(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err = createAffinityGroupForTest(affinityManager, group)
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because placement rules require split at key "b"
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
@@ -2359,10 +2334,8 @@ func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 		LeaderStoreID: 1,
 		VoterStoreIDs: []uint64{1, 2, 3},
 	}
-	err = createAffinityGroupForTest(affinityManager, group)
+	err = createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
-	affinityManager.SetRegionGroupForTest(1, "test_group")
-	affinityManager.SetRegionGroupForTest(2, "test_group")
 
 	// MergeCheck should return nil because region labeler requires split at key "b"
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
