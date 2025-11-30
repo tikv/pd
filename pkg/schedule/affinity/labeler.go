@@ -34,26 +34,27 @@ import (
 )
 
 const (
-	// labelRuleIDPrefix is the prefix for affinity group label rules.
-	labelRuleIDPrefix = "affinity_group/"
+	// LabelRuleIDPrefix is the prefix for affinity group label rules.
+	// This is exposed publicly to allow other packages (like watcher) to use it.
+	LabelRuleIDPrefix = "affinity_group/"
 )
 
 // GetLabelRuleID returns the label rule ID for an affinity group.
 // This ensures consistent naming between label creation and deletion.
 // Format: "affinity_group/{group_id}"
 func GetLabelRuleID(groupID string) string {
-	return labelRuleIDPrefix + groupID
+	return LabelRuleIDPrefix + groupID
 }
 
 // parseAffinityGroupIDFromLabelRule parses the affinity group ID from the label rule.
 // It will return the group ID and a boolean indicating whether the label rule is an affinity label rule.
 func parseAffinityGroupIDFromLabelRule(rule *labeler.LabelRule) (string, bool) {
 	// Validate the ID matches the expected format "affinity_group/{group_id}".
-	if rule == nil || !strings.HasPrefix(rule.ID, labelRuleIDPrefix) {
+	if rule == nil || !strings.HasPrefix(rule.ID, LabelRuleIDPrefix) {
 		return "", false
 	}
 	// Retrieve the group ID.
-	groupID := strings.TrimPrefix(rule.ID, labelRuleIDPrefix)
+	groupID := strings.TrimPrefix(rule.ID, LabelRuleIDPrefix)
 	if groupID == "" {
 		return "", false
 	}
@@ -590,12 +591,33 @@ func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) (GroupKeyRanges, err
 		return GroupKeyRanges{}, nil
 	}
 
-	dataSlice, ok := rule.Data.([]*labeler.KeyRangeRule)
-	if !ok {
+	switch data := rule.Data.(type) {
+	case []*labeler.KeyRangeRule:
+		return parseKeyRangesFromData(data, groupID)
+	case []any:
+		converted := make([]*labeler.KeyRangeRule, 0, len(data))
+		for _, item := range data {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				return GroupKeyRanges{}, errs.ErrInvalidLabelRuleFormat.FastGenByArgs("is not a map")
+			}
+			startKey, ok := entry["start_key"].(string)
+			if !ok {
+				return GroupKeyRanges{}, errs.ErrInvalidLabelRuleFormat.FastGenByArgs("missing or invalid 'start_key'")
+			}
+			endKey, ok := entry["end_key"].(string)
+			if !ok {
+				return GroupKeyRanges{}, errs.ErrInvalidLabelRuleFormat.FastGenByArgs("missing or invalid 'end_key'")
+			}
+			converted = append(converted, &labeler.KeyRangeRule{
+				StartKeyHex: startKey,
+				EndKeyHex:   endKey,
+			})
+		}
+		return parseKeyRangesFromData(converted, groupID)
+	default:
 		return GroupKeyRanges{}, errs.ErrAffinityGroupContent.FastGenByArgs("invalid label rule data format")
 	}
-
-	return parseKeyRangesFromData(dataSlice, groupID)
 }
 
 // checkKeyRangesOverlap checks if two key ranges overlap.

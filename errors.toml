@@ -46,6 +46,11 @@ error = '''
 invalid hex %s key '%s' for group '%s'
 '''
 
+["PD:affinity:ErrInvalidLabelRuleFormat"]
+error = '''
+invalid label rule data format %s
+'''
+
 ["PD:apiutil:ErrOptionNotExist"]
 error = '''
 the option %s does not exist

@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
@@ -111,9 +112,10 @@ type Server struct {
 	storage   *endpoint.StorageEndpoint
 
 	// for watching the PD meta info updates that are related to the scheduling.
-	configWatcher *config.Watcher
-	ruleWatcher   *rule.Watcher
-	metaWatcher   *meta.Watcher
+	configWatcher   *config.Watcher
+	ruleWatcher     *rule.Watcher
+	metaWatcher     *meta.Watcher
+	affinityWatcher *affinity.Watcher
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -510,6 +512,11 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Start the affinity watcher after the cluster is created.
+	err = s.startAffinityWatcher()
+	if err != nil {
+		return err
+	}
 	s.cluster.StartBackgroundJobs()
 	return nil
 }
@@ -537,10 +544,24 @@ func (s *Server) startRuleWatcher() (err error) {
 	return err
 }
 
+func (s *Server) startAffinityWatcher() (err error) {
+	s.affinityWatcher, err = affinity.NewWatcher(s.Context(), s.GetClient(), s.cluster.GetAffinityManager())
+	return err
+}
+
 func (s *Server) stopWatcher() {
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
-	s.metaWatcher.Close()
+	if s.affinityWatcher != nil {
+		s.affinityWatcher.Close()
+	}
+	if s.ruleWatcher != nil {
+		s.ruleWatcher.Close()
+	}
+	if s.metaWatcher != nil {
+		s.metaWatcher.Close()
+	}
+	if s.configWatcher != nil {
+		s.configWatcher.Close()
+	}
 }
 
 // GetPersistConfig returns the persist config.
