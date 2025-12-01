@@ -260,10 +260,6 @@ func (m *Manager) DeleteAffinityGroups(groupIDs []string, force bool) error {
 
 // UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group and marks it available.
 func (m *Manager) UpdateAffinityGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
-	// To make it easier to compare using slices.Equal.
-	voterStoreIDs = slices.Clone(voterStoreIDs)
-	slices.Sort(voterStoreIDs)
-
 	return m.updateAffinityGroupPeersWithAffinityVer(groupID, 0, leaderStoreID, voterStoreIDs)
 }
 
@@ -283,6 +279,9 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}); err != nil {
 		return nil, err
 	}
+	if err := m.hasUnavailableStore(leaderStoreID, voterStoreIDs); err != nil {
+		return nil, err
+	}
 
 	// Step 1: Check whether the Group exists and validate.
 	m.metaMutex.Lock()
@@ -291,6 +290,9 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	if group == nil {
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
+
+	voterStoreIDs = slices.Clone(voterStoreIDs)
+	slices.Sort(voterStoreIDs)
 	// When affinityVer is non-zero, it indicates a non-admin operation and triggers additional checks.
 	// Note: if the check fails, no changes are applied. The existing Group is returned as-is without error.
 	if affinityVer != 0 {
@@ -300,7 +302,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		}
 		// Group must not change voterStoreIDs while it is not in the expired state.
 		// RegularSchedulingEnabled == IsExpired
-		// The VoterStoreIDs from the API and Observe are already sorted, so they can be compared directly
+		// The VoterStoreIDs are already sorted, so they can be compared directly
 		if !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {
 			return group, nil
 		}

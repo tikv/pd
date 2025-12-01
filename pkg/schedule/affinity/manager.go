@@ -432,6 +432,18 @@ func (m *Manager) GetAffinityGroupState(id string) *GroupState {
 	return nil
 }
 
+// CheckAndGetAffinityGroupState returns the group state after validating the ID and presence.
+func (m *Manager) CheckAndGetAffinityGroupState(groupID string) (*GroupState, error) {
+	if err := ValidateGroupID(groupID); err != nil {
+		return nil, err
+	}
+	state := m.GetAffinityGroupState(groupID)
+	if state == nil {
+		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
+	}
+	return state, nil
+}
+
 // GetAllAffinityGroupStates returns all affinity groups.
 func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	m.RLock()

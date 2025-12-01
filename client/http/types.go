@@ -732,17 +732,26 @@ type AffinityGroup struct {
 // AffinityGroupState defines the runtime state of an affinity group.
 type AffinityGroupState struct {
 	AffinityGroup
-	RegularSchedulingEnabled  bool `json:"regular_scheduling_enabled"`
-	AffinitySchedulingEnabled bool `json:"affinity_scheduling_enabled"`
-	RangeCount                int  `json:"range_count"`
-	RegionCount               int  `json:"region_count"`
-	AffinityRegionCount       int  `json:"affinity_region_count"`
+	Phase               string `json:"phase"`
+	RangeCount          int    `json:"range_count"`
+	RegionCount         int    `json:"region_count"`
+	AffinityRegionCount int    `json:"affinity_region_count"`
 }
 
-// IsAvailable indicates that the AffinityGroup has completed affinity scheduling.
-// nolint
-func (s *AffinityGroupState) IsAvailable() bool {
-	return s.AffinitySchedulingEnabled && s.AffinityRegionCount == s.RegionCount
+// IsPending indicates that the Group is still determining the StoreIDs.
+// If the Group has no KeyRanges, it remains in pending forever.
+func (s *AffinityGroupState) IsPending() bool {
+	return s.Phase == "pending"
+}
+
+// IsPreparing indicates that the Group is scheduling Regions according to the required Peers.
+func (s *AffinityGroupState) IsPreparing() bool {
+	return s.Phase == "preparing"
+}
+
+// IsStable indicates that the Group has completed the required scheduling and is currently in a stable state.
+func (s *AffinityGroupState) IsStable() bool {
+	return s.Phase == "stable"
 }
 
 // AffinityGroupsResponse defines the success response for affinity group operations.

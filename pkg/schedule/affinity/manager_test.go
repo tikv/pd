@@ -17,6 +17,7 @@ package affinity
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -57,43 +58,47 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 
 	// Create affinity group
 	ranges := manager.createGroupForTest(re, "test_group", 6)
-	_, err = manager.UpdateAffinityGroupPeers("test_group", 1, []uint64{1, 2, 3})
-	re.NoError(err)
 
-	// Test 0: Region not belonging to any affinity group should return false
+	// Test 0: voterStoreIDs will be sorted.
+	_, err = manager.UpdateAffinityGroupPeers("test_group", 1, []uint64{3, 2, 1})
+	re.NoError(err)
+	groupInfo := manager.getGroupForTest(re, "test_group")
+	re.True(slices.Equal([]uint64{1, 2, 3}, groupInfo.VoterStoreIDs))
+
+	// Test 1: Region not belonging to any affinity group should return false
 	region1 := generateRegionForTest(1, []uint64{1, 2, 3}, nonOverlappingRange)
 	_, isAffinity := manager.GetRegionAffinityGroupState(region1)
 	re.False(isAffinity, "Region not in group should return false")
 
-	// Test 1: Region conforming to affinity requirements should return true
+	// Test 2: Region conforming to affinity requirements should return true
 	region1 = generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region1)
 	re.True(isAffinity, "Region conforming to affinity should return true")
 
-	// Test 2: Region with wrong leader should return false. Use the same RegionID to verify cache invalidation.
+	// Test 3: Region with wrong leader should return false. Use the same RegionID to verify cache invalidation.
 	region2 := generateRegionForTest(1, []uint64{2, 1, 3}, ranges[1])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region2)
 	re.False(isAffinity, "Region with wrong leader should return false")
 
-	// Test 3: Region with wrong voter stores should return false
+	// Test 4: Region with wrong voter stores should return false
 	region3 := generateRegionForTest(3, []uint64{1, 2, 4}, ranges[2])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region3)
 	re.False(isAffinity, "Region with wrong voter stores should return false")
 
-	// Test 4: Region with different number of voters should return false
+	// Test 5: Region with different number of voters should return false
 	region4 := generateRegionForTest(4, []uint64{1, 2}, ranges[3])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region4)
 	re.False(isAffinity, "Region with wrong number of voters should return false")
 
-	// Test 5: Region without leader should return false
+	// Test 6: Region without leader should return false
 	region5 := generateRegionForTest(5, []uint64{1, 2, 3}, ranges[4])
 	region5 = region5.Clone(core.WithLeader(nil))
 	_, isAffinity = manager.GetRegionAffinityGroupState(region5)
 	re.False(isAffinity, "Region without leader should return false")
 
-	// Test 6: Group not in effect should return false
+	// Test 7: Group not in effect should return false
 	manager.ExpireAffinityGroup("test_group")
-	groupInfo := manager.getGroupForTest(re, "test_group")
+	groupInfo = manager.getGroupForTest(re, "test_group")
 	re.Equal(groupExpired, groupInfo.State)
 	region6 := generateRegionForTest(6, []uint64{1, 2, 3}, ranges[5])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region6)
@@ -152,7 +157,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	ranges := manager.createGroupForTest(re, "g", 1)
+	ranges := manager.createGroupForTest(re, "g", 2)
 	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
@@ -167,10 +172,31 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.NoError(err)
 	group2 := manager.GetAffinityGroupState("g")
 	re.NotNil(group2)
-
-	// Region cache should be cleared when group changes.
 	re.Zero(group2.AffinityRegionCount)
 	manager.testCacheStale(re, region)
+
+	// Remove key ranges, which bumps AffinityVer and invalidates affinity for the cached region.
+	region = generateRegionForTest(200, []uint64{4, 5, 6}, ranges[0])
+	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(1, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 2)
+	re.NoError(manager.UpdateAffinityGroupKeyRanges(nil, []GroupKeyRanges{{GroupID: "g", KeyRanges: ranges[1:]}}))
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(0, groupInfo.AffinityRegionCount)
+	re.Empty(groupInfo.Regions)
+
+	// Add key ranges, which bumps AffinityVer and invalidates affinity for the cached region.
+	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(1, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 1)
+	re.NoError(manager.UpdateAffinityGroupKeyRanges([]GroupKeyRanges{{GroupID: "g", KeyRanges: ranges[1:]}}, nil))
+	groupInfo = manager.getGroupForTest(re, "g")
+	re.Equal(0, groupInfo.AffinityRegionCount)
+	re.Len(groupInfo.Regions, 1)
 }
 
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.

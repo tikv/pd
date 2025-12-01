@@ -187,18 +187,14 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	keyRanges := []keyutil.KeyRange{{StartKey: []byte{0x00}, EndKey: []byte{0x10}}}
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{
-		GroupID:   "persist",
-		KeyRanges: keyRanges,
-	}}))
+	keyRanges := manager.createGroupForTest(re, "persist", 10)
 	_, err = manager.UpdateAffinityGroupPeers("persist", 1, []uint64{1})
 	re.NoError(err)
 
 	// RangeCount should be recorded and label rule created.
 	state := manager.GetAffinityGroupState("persist")
 	re.NotNil(state)
-	re.Equal(1, state.RangeCount)
+	re.Equal(10, state.RangeCount)
 	re.NotNil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))
 
 	// Reload manager to verify persistence and loadRegionLabel integration.
@@ -206,18 +202,23 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	re.NoError(err)
 	state2 := manager2.GetAffinityGroupState("persist")
 	re.NotNil(state2)
-	re.Equal(1, state2.RangeCount)
+	re.Equal(10, state2.RangeCount)
 
-	// Remove all ranges and ensure cache/label are cleared.
-	ranges := []keyutil.KeyRange{{
-		StartKey: []byte{0x00},
-		EndKey:   []byte{0x10},
-	}}
+	// Remove ranges and ensure cache/label are cleared.
 	re.NoError(manager2.UpdateAffinityGroupKeyRanges(
 		nil,
-		[]GroupKeyRanges{{GroupID: "persist", KeyRanges: ranges}},
+		[]GroupKeyRanges{{GroupID: "persist", KeyRanges: keyRanges[:3]}},
 	))
 	state3 := manager2.GetAffinityGroupState("persist")
+	re.NotNil(state3)
+	re.Equal(7, state3.RangeCount)
+	re.NotNil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))
+
+	re.NoError(manager2.UpdateAffinityGroupKeyRanges(
+		nil,
+		[]GroupKeyRanges{{GroupID: "persist", KeyRanges: keyRanges[3:]}},
+	))
+	state3 = manager2.GetAffinityGroupState("persist")
 	re.NotNil(state3)
 	re.Equal(0, state3.RangeCount)
 	re.Nil(regionLabeler.GetLabelRule(GetLabelRuleID("persist")))

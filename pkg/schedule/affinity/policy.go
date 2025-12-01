@@ -15,7 +15,7 @@
 package affinity
 
 import (
-	"slices"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
 )
 
@@ -48,10 +49,6 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	voterStoreIDs := make([]uint64, len(region.GetVoters()))
 	for i, voter := range region.GetVoters() {
 		voterStoreIDs[i] = voter.GetStoreId()
-	}
-	slices.Sort(voterStoreIDs)
-	if m.hasUnavailableStore(leaderStoreID, voterStoreIDs) {
-		return
 	}
 	// TODO: Update asynchronously to avoid blocking the Checker.
 	_, _ = m.updateAffinityGroupPeersWithAffinityVer(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
@@ -183,14 +180,14 @@ func (m *Manager) setGroupStateChanges(unavailableStores map[uint64]condition, g
 	}
 }
 
-func (m *Manager) hasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) bool {
+func (m *Manager) hasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
 	m.RLock()
 	defer m.RUnlock()
 	for _, storeID := range voterStoreIDs {
 		state, ok := m.unavailableStores[storeID]
 		if ok && (!state.affectsLeaderOnly() || storeID == leaderStoreID) {
-			return true
+			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, state.storeStateString()))
 		}
 	}
-	return false
+	return nil
 }

@@ -22,7 +22,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	affapi "github.com/tikv/pd/pkg/schedule/affinity/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 )
 
@@ -82,7 +81,7 @@ func getAffinityGroup(c *gin.Context) {
 		return
 	}
 	groupID := c.Param("group_id")
-	groupState, err := affapi.GetGroupState(manager, groupID)
+	groupState, err := manager.CheckAndGetAffinityGroupState(groupID)
 	if err != nil {
 		switch {
 		case errs.ErrInvalidGroupID.Equal(err):

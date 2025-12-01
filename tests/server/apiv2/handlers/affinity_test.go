@@ -310,7 +310,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 			VoterStoreIDs: []uint64{1},
 		}
 		groupState := mustUpdateAffinityGroupPeers(re, serverAddr, "group-1", &updatePeersReq)
-		re.True(groupState.AffinitySchedulingEnabled)
+		re.Equal(affinity.PhasePending, groupState.Phase)
 		re.Equal(updatePeersReq.LeaderStoreID, groupState.LeaderStoreID)
 		re.ElementsMatch(updatePeersReq.VoterStoreIDs, groupState.VoterStoreIDs)
 
@@ -362,7 +362,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		manager := leader.GetServer().GetRaftCluster().GetAffinityManager()
 		group := manager.GetAffinityGroupState("first-win")
 		re.NotNil(group)
-		re.False(group.AffinitySchedulingEnabled)
+		re.Equal(affinity.PhasePending, group.Phase)
 		re.Equal(uint64(0), group.LeaderStoreID)
 
 		// Add a store to the cluster.
@@ -392,8 +392,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 			}
 			manager.ObserveAvailableRegion(region, group)
 			state = manager.GetAffinityGroupState("first-win")
-			return state != nil &&
-				state.AffinitySchedulingEnabled
+			return state != nil && state.Phase == affinity.PhaseStable
 		})
 		re.Equal(region.GetLeader().GetStoreId(), state.LeaderStoreID)
 		re.ElementsMatch([]uint64{region.GetLeader().GetStoreId()}, state.VoterStoreIDs)

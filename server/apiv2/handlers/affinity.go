@@ -22,7 +22,6 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
-	affapi "github.com/tikv/pd/pkg/schedule/affinity/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -127,7 +126,7 @@ func CreateAffinityGroups(c *gin.Context) {
 
 	changes := make([]affinity.GroupKeyRanges, 0, len(req.AffinityGroups))
 	for groupID, input := range req.AffinityGroups {
-		if err := affapi.ValidateGroupID(groupID); err != nil {
+		if err := affinity.ValidateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -213,7 +212,7 @@ func BatchDeleteAffinityGroups(c *gin.Context) {
 
 	// Validate all group IDs
 	for _, id := range req.IDs {
-		if err := affapi.ValidateGroupID(id); err != nil {
+		if err := affinity.ValidateGroupID(id); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -329,7 +328,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	if err := affapi.ValidateGroupID(groupID); err != nil {
+	if err := affinity.ValidateGroupID(groupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -368,7 +367,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	if err := affapi.ValidateGroupID(groupID); err != nil {
+	if err := affinity.ValidateGroupID(groupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -442,7 +441,7 @@ func GetAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	groupState, err := affapi.GetGroupState(manager, groupID)
+	groupState, err := manager.CheckAndGetAffinityGroupState(groupID)
 	if handleAffinityError(c, err) {
 		return
 	}
@@ -494,7 +493,7 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 	grouped := make(map[string][]keyutil.KeyRange)
 
 	for _, op := range ops {
-		if err := affapi.ValidateGroupID(op.ID); err != nil {
+		if err := affinity.ValidateGroupID(op.ID); err != nil {
 			return nil, err
 		}
 		if !manager.IsGroupExist(op.ID) {
