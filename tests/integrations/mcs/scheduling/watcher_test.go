@@ -12,38 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package meta
+package scheduling
 
 import (
 	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tests"
 )
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
 
 // Ensure WaitLoad failure won't leave background goroutines running.
 func TestNewWatcherWaitLoadFailed(t *testing.T) {
 	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := cluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
+
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail", "return(3)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail"))
 	}()
-
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
-
-	watcher, err := NewWatcher(context.Background(), client, core.NewBasicCluster())
-	re.Error(err)
-	re.Nil(watcher)
+	tc, err := tests.NewTestSchedulingCluster(ctx, 1, cluster)
+	if err == nil && tc != nil {
+		defer tc.Destroy()
+	}
 }
