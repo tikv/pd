@@ -52,13 +52,14 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 }
 
 // DeleteRegionCache removes a specific region from cache.
-// @Tags     admin
-// @Summary  Drop a specific region from cache.
-// @Param    id  path  integer  true  "Region Id"
-// @Produce  json
-// @Success  200  {string}  string  "The region is removed from server cache."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Router   /admin/cache/region/{id} [delete]
+//
+//	@Tags		admin
+//	@Summary	Drop a specific region from cache.
+//	@Param		id	path	integer	true	"Region Id"
+//	@Produce	json
+//	@Success	200	{string}	string	"The region is removed from server cache."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Router		/admin/cache/region/{id} [delete]
 func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -80,13 +81,14 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 }
 
 // DeleteRegionStorage removes a specific region from storage.
-// @Tags     admin
-// @Summary  Remove target region from region cache and storage.
-// @Param    id  path  integer  true  "Region Id"
-// @Produce  json
-// @Success  200  {string}  string  "The region is removed from server storage."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Router   /admin/storage/region/{id} [delete]
+//
+//	@Tags		admin
+//	@Summary	Remove target region from region cache and storage.
+//	@Param		id	path	integer	true	"Region Id"
+//	@Produce	json
+//	@Success	200	{string}	string	"The region is removed from server storage."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Router		/admin/storage/region/{id} [delete]
 func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -125,11 +127,12 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 }
 
 // DeleteAllRegionCache removes all regions from cache.
-// @Tags     admin
-// @Summary  Drop all regions from cache.
-// @Produce  json
-// @Success  200  {string}  string  "All regions are removed from server cache."
-// @Router   /admin/cache/regions [delete]
+//
+//	@Tags		admin
+//	@Summary	Drop all regions from cache.
+//	@Produce	json
+//	@Success	200	{string}	string	"All regions are removed from server cache."
+//	@Router		/admin/cache/regions [delete]
 func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
 	var err error
 	rc := getCluster(r)
