@@ -59,6 +59,7 @@ func NewWatcher(
 	}
 	err := w.initializeStoreWatcher()
 	if err != nil {
+		w.Close()
 		return nil, err
 	}
 	return w, nil
