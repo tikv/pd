@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
@@ -84,10 +83,6 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 
 // UpdateServiceGCSafePoint update the safepoint for a specific service.
 func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
-	// Global service safe point `endpoint.NativeBRServiceID` can always to be updated.
-	if manager.cfg.BlockSafePointV1 && serviceID != keypath.NativeBRServiceID {
-		return nil, false, blockServiceSafepointErr
-	}
 	if manager.cfg.BlockSafePointV1 {
 		return nil, false, blockServiceSafepointErr
 	}
