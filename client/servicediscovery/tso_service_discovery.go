@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -423,17 +424,36 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 }
 
 // hasKeyspaceGroupIDConfig checks if the keyspace has been assigned a keyspace group
-// by checking if tso_keyspace_group_id is present in its config.
-// Returns true if the keyspace has tso_keyspace_group_id configured, false otherwise.
-// If keyspaceMeta is nil (not passed from upper layer), returns false.
-func (c *tsoServiceDiscovery) hasKeyspaceGroupIDConfig() bool {
+// by checking if tso_keyspace_group_id is present in its config and not equal to 0.
+// Returns the keyspace group ID and true if the keyspace has tso_keyspace_group_id configured
+// with a non-zero value (should block fallback), false otherwise.
+// If keyspaceMeta is nil (not passed from upper layer), returns (0, false).
+// If the configured value is 0 (default group), returns (0, false) to allow fallback.
+func (c *tsoServiceDiscovery) hasKeyspaceGroupIDConfig() (uint32, bool) {
 	if c.keyspaceMeta == nil || c.keyspaceMeta.Config == nil {
-		return false
+		return 0, false
 	}
 
-	// Check if tso_keyspace_group_id exists in config
-	_, exists := c.keyspaceMeta.Config[constants.TSOKeyspaceGroupIDKey]
-	return exists
+	groupIDStr, exists := c.keyspaceMeta.Config[constants.TSOKeyspaceGroupIDKey]
+	if !exists {
+		return 0, false
+	}
+
+	groupID, parseErr := strconv.ParseUint(groupIDStr, 10, 32)
+	if parseErr != nil {
+		// If parsing fails, treat it as not configured, allow fallback
+		return 0, false
+	}
+
+	groupIDUint32 := uint32(groupID)
+
+	// If the keyspace group ID is 0 (default group), return false to allow fallback
+	if groupIDUint32 == constants.DefaultKeyspaceGroupID {
+		return 0, false
+	}
+
+	// The keyspace has been assigned to a non-default keyspace group
+	return groupIDUint32, true
 }
 
 // checkAndHandleFallbackInMicroserviceMode checks if fallback is allowed when TSO server is unavailable
@@ -441,6 +461,7 @@ func (c *tsoServiceDiscovery) hasKeyspaceGroupIDConfig() bool {
 // Only keyspaces with tso_keyspace_group_id in their config should not fallback.
 // This is to support backward compatibility for keyspaces that have not been assigned
 // to any keyspace group yet (they should still use the default group 0).
+// If the keyspace meta has tso_keyspace_group_id configured as 0, fallback to group 0 is allowed.
 func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceID uint32) error {
 	clusterInfo, err := c.serviceDiscovery.(*serviceDiscovery).getClusterInfo(
 		c.ctx, c.serviceDiscovery.GetServingURL(), UpdateMemberTimeout)
@@ -454,16 +475,18 @@ func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceI
 	// If we are in API_SVC_MODE (microservice mode), check if fallback is allowed
 	if len(clusterInfo.ServiceModes) > 0 && clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
 		// Check if the keyspace has been assigned a keyspace group
-		// Only keyspaces with tso_keyspace_group_id configured should not fallback
-		if c.hasKeyspaceGroupIDConfig() {
-			// This keyspace has been assigned to a keyspace group, don't fallback
+		// Only keyspaces with tso_keyspace_group_id configured (and not equal to 0) should not fallback
+		groupID, shouldBlockFallback := c.hasKeyspaceGroupIDConfig()
+		if shouldBlockFallback {
+			// This keyspace has been assigned to a non-default keyspace group, don't fallback
 			log.Warn("[tso] in microservice mode but no TSO server available - cannot fallback to group 0",
 				zap.Uint32("keyspace-id", keyspaceID),
+				zap.Uint32("keyspace-group-id", groupID),
 				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
 			return errors.New("no TSO microservice available in microservice mode")
 		}
-		// Keyspace doesn't have tso_keyspace_group_id config, allow fallback
-		log.Info("[tso] keyspace has no tso_keyspace_group_id config, allowing fallback to group 0",
+		// Keyspace doesn't have tso_keyspace_group_id config or it's configured as 0, allow fallback
+		log.Info("[tso] keyspace has no tso_keyspace_group_id config or configured as 0, allowing fallback to group 0",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Any("keyspace-meta", c.keyspaceMeta),
 			zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
