@@ -18,22 +18,27 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
+	mu              syncutil.Mutex
 	StoresInfluence map[uint64]*StoreInfluence
 }
 
 // NewOpInfluence creates a OpInfluence.
 func NewOpInfluence() *OpInfluence {
 	return &OpInfluence{
+		mu:              syncutil.Mutex{},
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
 }
 
 // Add adds another influence.
 func (m *OpInfluence) Add(other *OpInfluence) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for id, v := range other.StoresInfluence {
 		m.GetStoreInfluence(id).add(v)
 	}
@@ -41,6 +46,8 @@ func (m *OpInfluence) Add(other *OpInfluence) {
 
 // GetStoreInfluence get storeInfluence of specific store.
 func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	m.mu.Lock()
+	defer m.mu.Lock()
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
