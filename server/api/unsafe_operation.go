@@ -37,15 +37,18 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 }
 
 // RemoveFailedStores removes failed stores unsafely.
-// @Tags     unsafe
-// @Summary  Remove failed stores unsafely.
-// @Accept   json
-// @Param    body  body  object  true  "json params"
-// @Produce  json
+//
+//	@Tags		unsafe
+//	@Summary	Remove failed stores unsafely.
+//	@Accept		json
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//
 // Success 200 {string} string "Request has been accepted."
 // Failure 400 {string} string "The input is invalid."
 // Failure 500 {string} string "PD server failed to proceed the request."
-// @Router   /admin/unsafe/remove-failed-stores [post]
+//
+//	@Router		/admin/unsafe/remove-failed-stores [post]
 func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	var input map[string]any
@@ -80,11 +83,14 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 }
 
 // GetFailedStoresRemovalStatus gets the current status of failed stores removal.
-// @Tags     unsafe
-// @Summary  Show the current status of failed stores removal.
-// @Produce  json
+//
+//	@Tags		unsafe
+//	@Summary	Show the current status of failed stores removal.
+//	@Produce	json
+//
 // Success 200 {object} []StageOutput
-// @Router   /admin/unsafe/remove-failed-stores/show [get]
+//
+//	@Router		/admin/unsafe/remove-failed-stores/show [get]
 func (h *unsafeOperationHandler) GetFailedStoresRemovalStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	h.rd.JSON(w, http.StatusOK, rc.GetUnsafeRecoveryController().Show())

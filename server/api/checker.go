@@ -38,16 +38,17 @@ func newCheckerHandler(svr *server.Server, r *render.Render) *checkerHandler {
 
 // PauseOrResumeChecker pauses or resumes a specific checker.
 // FIXME: details of input json body params
-// @Tags     checker
-// @Summary  Pause or resume region merge.
-// @Accept   json
-// @Param    name  path  string  true  "The name of the checker."
-// @Param    body  body  object  true  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
-// @Failure  400  {string}  string  "Bad format request."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /checker/{name} [post]
+//
+//	@Tags		checker
+//	@Summary	Pause or resume region merge.
+//	@Accept		json
+//	@Param		name	path	string	true	"The name of the checker."
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"Pause or resume the scheduler successfully."
+//	@Failure	400	{string}	string	"Bad format request."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/checker/{name} [post]
 func (c *checkerHandler) PauseOrResumeChecker(w http.ResponseWriter, r *http.Request) {
 	var input map[string]int
 	if err := apiutil.ReadJSONRespondError(c.r, w, r.Body, &input); err != nil {
@@ -77,13 +78,14 @@ func (c *checkerHandler) PauseOrResumeChecker(w http.ResponseWriter, r *http.Req
 
 // GetCheckerStatus gets the status of a specific checker.
 // FIXME: details of input json body params
-// @Tags     checker
-// @Summary  Get if checker is paused
-// @Param    name  path  string  true  "The name of the scheduler."
-// @Produce  json
-// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /checker/{name} [get]
+//
+//	@Tags		checker
+//	@Summary	Get if checker is paused
+//	@Param		name	path	string	true	"The name of the scheduler."
+//	@Produce	json
+//	@Success	200	{string}	string	"Pause or resume the scheduler successfully."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/checker/{name} [get]
 func (c *checkerHandler) GetCheckerStatus(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	output, err := c.Handler.GetCheckerStatus(name)
