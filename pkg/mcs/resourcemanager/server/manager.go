@@ -740,7 +740,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 		case <-rcuTicker.C:
 			m.RLock()
 			names := make([]string, 0, len(rcuTrackers))
-			fillRates := make([]float64, 0, len(rcuTrackers))
+			rcuLimit := make([]float64, 0, len(rcuTrackers))
 			for name := range rcuTrackers {
 				if name == reservedDefaultGroupName {
 					continue
@@ -748,13 +748,13 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				group, ok := m.groups[name]
 				if ok {
 					names = append(names, name)
-					fillRates = append(fillRates, group.getFillRate())
+					rcuLimit = append(rcuLimit, max(group.getFillRate(), group.getBurstLimit()))
 				}
 			}
 			cpuMsCost := m.controllerConfig.RequestUnit.CPUMsCost
 			m.RUnlock()
 			for i, name := range names {
-				rcuTrackers[name].FlushMetrics(fillRates[i], cpuMsCost)
+				rcuTrackers[name].FlushMetrics(rcuLimit[i], cpuMsCost)
 			}
 
 		case <-pushMetricsTickerC:
@@ -859,7 +859,7 @@ func (t *rcuTracker) CollectConsumption(consume *rmpb.Consumption) {
 }
 
 // FlushMetrics calculates the RCU and updates the metrics.
-func (t *rcuTracker) FlushMetrics(fillRate float64, cpuMsCost float64) {
+func (t *rcuTracker) FlushMetrics(rcuLimit float64, cpuMsCost float64) {
 	if t.lastRU == 0 && t.lastCPUTimeMs == 0 {
 		t.lastRU, t.lastCPUTimeMs = t.totalRU, t.totalCPUTimeMs
 		t.lastFlushTime = time.Now()
@@ -876,7 +876,7 @@ func (t *rcuTracker) FlushMetrics(fillRate float64, cpuMsCost float64) {
 	t.lastFlushTime = time.Now()
 
 	t.rcuMetrics.Set(rcu)
-	if fillRate > 0 {
-		t.consumeRateMetrics.Set(rcu / fillRate)
+	if rcuLimit > 0 {
+		t.consumeRateMetrics.Set(rcu / rcuLimit)
 	}
 }
