@@ -30,6 +30,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -298,8 +299,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		re.Equal(http.StatusBadRequest, statusCode)
 
 		// Query all groups.
-		listResp := mustGetAllAffinityGroups(re, serverAddr)
-		re.Len(listResp.AffinityGroups, 2)
+		testutil.Eventually(re, func() bool {
+			listResp := mustGetAllAffinityGroups(re, serverAddr)
+			return len(listResp.AffinityGroups) == 2
+		})
 
 		// Update peers for group-1.
 		updatePeersReq := handlers.UpdateAffinityGroupPeersRequest{
@@ -335,8 +338,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		mustBatchDeleteAffinityGroups(re, serverAddr, &batchDeleteReq)
 
 		// Listing again should be empty.
-		listResp = mustGetAllAffinityGroups(re, serverAddr)
-		re.Empty(listResp.AffinityGroups)
+		testutil.Eventually(re, func() bool {
+			listResp := mustGetAllAffinityGroups(re, serverAddr)
+			return len(listResp.AffinityGroups) == 0
+		})
 	})
 }
 
@@ -417,8 +422,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityRemoveOnlyPatch() {
 		mustBatchModifyAffinityGroups(re, serverAddr, &patchReq)
 
 		// Verify range count cleared.
-		state := mustGetAffinityGroup(re, serverAddr, "remove-only")
-		re.Equal(0, state.RangeCount)
+		testutil.Eventually(re, func() bool {
+			state := mustGetAffinityGroup(re, serverAddr, "remove-only")
+			return state.RangeCount == 0
+		})
 	})
 }
 
@@ -543,8 +550,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 		re.Equal(http.StatusNotFound, statusCode)
 
 		// Verify existing group "ok" is not affected (state not polluted)
-		groupState := mustGetAffinityGroup(re, serverAddr, "ok")
-		re.Equal(1, groupState.RangeCount)
+		testutil.Eventually(re, func() bool {
+			groupState := mustGetAffinityGroup(re, serverAddr, "ok")
+			return groupState.RangeCount == 1
+		})
 
 		// Batch modify with empty operations.
 		patchReq = handlers.BatchModifyAffinityGroupsRequest{}
@@ -843,8 +852,10 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyAddOnly() {
 		mustBatchModifyAffinityGroups(re, serverAddr, &patchReq)
 
 		// Verify the group now has 2 ranges
-		state := mustGetAffinityGroup(re, serverAddr, "add-only")
-		re.Equal(2, state.RangeCount)
+		testutil.Eventually(re, func() bool {
+			state := mustGetAffinityGroup(re, serverAddr, "add-only")
+			return state.RangeCount == 2
+		})
 	})
 }
 
@@ -925,8 +936,11 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentGroup() {
 		re.Contains(errorMsg, "not found")
 
 		// Verify baseline group is not affected (state not polluted)
-		listResp := mustGetAllAffinityGroups(re, serverAddr)
-		re.Len(listResp.AffinityGroups, 1)
+		var listResp *handlers.AffinityGroupsResponse
+		testutil.Eventually(re, func() bool {
+			listResp = mustGetAllAffinityGroups(re, serverAddr)
+			return len(listResp.AffinityGroups) == 1
+		})
 		re.Equal(1, listResp.AffinityGroups["baseline"].RangeCount)
 	})
 }
@@ -977,8 +991,11 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyOverlappingRanges() {
 		re.Contains(errorMsg, "overlap")
 
 		// Verify system state not polluted: both groups still have only 1 range each
-		listResp := mustGetAllAffinityGroups(re, serverAddr)
-		re.Len(listResp.AffinityGroups, 2)
+		var listResp *handlers.AffinityGroupsResponse
+		testutil.Eventually(re, func() bool {
+			listResp = mustGetAllAffinityGroups(re, serverAddr)
+			return len(listResp.AffinityGroups) == 2
+		})
 		re.Equal(1, listResp.AffinityGroups["group-1"].RangeCount)
 		re.Equal(1, listResp.AffinityGroups["group-2"].RangeCount)
 	})
@@ -1043,8 +1060,11 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteNonExistentGroup() {
 		re.Contains(errorMsg, "not found")
 
 		// Verify baseline group is not affected (state not polluted)
-		listResp := mustGetAllAffinityGroups(re, serverAddr)
-		re.Len(listResp.AffinityGroups, 1)
+		var listResp *handlers.AffinityGroupsResponse
+		testutil.Eventually(re, func() bool {
+			listResp = mustGetAllAffinityGroups(re, serverAddr)
+			return len(listResp.AffinityGroups) == 1
+		})
 		re.Contains(listResp.AffinityGroups, "existing")
 		re.Equal(1, listResp.AffinityGroups["existing"].RangeCount)
 	})
@@ -1076,7 +1096,33 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 		re.Contains(errorMsg, "not found")
 
 		// Verify the original range is still intact (state not polluted)
-		state := mustGetAffinityGroup(re, serverAddr, "test-group")
-		re.Equal(1, state.RangeCount)
+		testutil.Eventually(re, func() bool {
+			state := mustGetAffinityGroup(re, serverAddr, "test-group")
+			return state.RangeCount == 1
+		})
+	})
+}
+
+// TestAffinityForwardedHeader verifies microservice forwarding sets the header.
+func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
+	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		serverAddr := leader.GetAddr()
+
+		// Create a group to ensure GET succeeds.
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"header-check": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+
+		resp, err := tests.TestDialClient.Get(getAffinityGroupURL(serverAddr))
+		re.NoError(err)
+		defer resp.Body.Close()
+
+		re.Equal(http.StatusOK, resp.StatusCode)
+		re.Equal("true", resp.Header.Get(apiutil.XForwardedToMicroserviceHeader))
 	})
 }

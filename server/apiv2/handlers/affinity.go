@@ -17,12 +17,12 @@ package handlers
 import (
 	"bytes"
 	"net/http"
-	"regexp"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	affapi "github.com/tikv/pd/pkg/schedule/affinity/apiutil"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -127,7 +127,7 @@ func CreateAffinityGroups(c *gin.Context) {
 
 	changes := make([]affinity.GroupKeyRanges, 0, len(req.AffinityGroups))
 	for groupID, input := range req.AffinityGroups {
-		if err := validateGroupID(groupID); err != nil {
+		if err := affapi.ValidateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -213,7 +213,7 @@ func BatchDeleteAffinityGroups(c *gin.Context) {
 
 	// Validate all group IDs
 	for _, id := range req.IDs {
-		if err := validateGroupID(id); err != nil {
+		if err := affapi.ValidateGroupID(id); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -329,7 +329,7 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	if err := validateGroupID(groupID); err != nil {
+	if err := affapi.ValidateGroupID(groupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -368,7 +368,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	if err := validateGroupID(groupID); err != nil {
+	if err := affapi.ValidateGroupID(groupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -442,37 +442,11 @@ func GetAffinityGroup(c *gin.Context) {
 	}
 
 	groupID := c.Param("group_id")
-	if err := validateGroupID(groupID); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	groupState := manager.GetAffinityGroupState(groupID)
-	if groupState == nil {
-		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
+	groupState, err := affapi.GetGroupState(manager, groupID)
+	if handleAffinityError(c, err) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, groupState)
-}
-
-const (
-	// TODO: we need to ensure special characters in the id.
-	// idPattern is a regex that specifies acceptable characters of the id.
-	// Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
-	// numbers (0-9), hyphens (-), and underscores (_).
-	idPattern = "^[-A-Za-z0-9_]{1,64}$"
-)
-
-// validateGroupID check if user provided id is legal.
-// It throws error when id contains illegal character.
-func validateGroupID(id string) error {
-	isIDValid, err := regexp.MatchString(idPattern, id)
-	if err != nil {
-		return err
-	}
-	if !isIDValid {
-		return errs.ErrInvalidGroupID.GenWithStackByArgs(id)
-	}
-	return nil
 }
 
 // handleAffinityError maps affinity-related errors to HTTP status codes and writes the response.
@@ -520,7 +494,7 @@ func convertAndValidateRangeOps(ops []GroupRangesModification, manager *affinity
 	grouped := make(map[string][]keyutil.KeyRange)
 
 	for _, op := range ops {
-		if err := validateGroupID(op.ID); err != nil {
+		if err := affapi.ValidateGroupID(op.ID); err != nil {
 			return nil, err
 		}
 		if !manager.IsGroupExist(op.ID) {

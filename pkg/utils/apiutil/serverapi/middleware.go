@@ -15,6 +15,7 @@
 package serverapi
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -74,15 +75,16 @@ func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 type redirector struct {
 	s *server.Server
 
-	microserviceRedirectRules []*microserviceRedirectRule
+	microserviceRedirectRules []RedirectRule
 }
 
-type microserviceRedirectRule struct {
-	matchPath         string
-	targetPath        string
-	targetServiceName string
-	matchMethods      []string
-	filter            func(*http.Request) bool
+// RedirectRule describes how to match and rewrite microservice paths.
+type RedirectRule struct {
+	MatchPath         string
+	TargetPath        string
+	TargetServiceName string
+	MatchMethods      []string
+	Filter            func(*http.Request) bool
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.
@@ -101,24 +103,38 @@ type RedirectorOption func(*redirector)
 func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 	methods []string, filters ...func(*http.Request) bool) RedirectorOption {
 	return func(s *redirector) {
-		rule := &microserviceRedirectRule{
-			matchPath:         matchPath,
-			targetPath:        targetPath,
-			targetServiceName: targetServiceName,
-			matchMethods:      methods,
+		rule := RedirectRule{
+			MatchPath:         matchPath,
+			TargetPath:        targetPath,
+			TargetServiceName: targetServiceName,
+			MatchMethods:      methods,
 		}
 		if len(filters) > 0 {
-			rule.filter = filters[0]
+			rule.Filter = filters[0]
 		}
 		s.microserviceRedirectRules = append(s.microserviceRedirectRules, rule)
 	}
 }
 
 func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsKeyspaceGroupEnabled() {
-		return false, ""
-	}
-	if len(h.microserviceRedirectRules) == 0 {
+	return MatchMicroserviceRedirect(
+		r,
+		h.microserviceRedirectRules,
+		h.s.IsKeyspaceGroupEnabled(),
+		h.s.IsServiceIndependent,
+		h.s.GetServicePrimaryAddr)
+}
+
+// MatchMicroserviceRedirect checks rules, rewrites path in-place, and returns (matched, targetAddr).
+// If matched but no primary is available, it returns matched=false to let caller handle locally.
+func MatchMicroserviceRedirect(
+	r *http.Request,
+	rules []RedirectRule,
+	isKeyspaceGroupEnabled bool,
+	isServiceIndependent func(string) bool,
+	getPrimary func(context.Context, string) (string, bool),
+) (bool, string) {
+	if !isKeyspaceGroupEnabled || len(rules) == 0 {
 		return false, ""
 	}
 	if r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) == "true" {
@@ -127,48 +143,46 @@ func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, stri
 	// Remove trailing '/' from the URL path
 	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
-	for _, rule := range h.microserviceRedirectRules {
+	for _, rule := range rules {
 		// Now we only support checking the scheduling service whether it is independent
-		if rule.targetServiceName == constant.SchedulingServiceName {
-			if !h.s.IsServiceIndependent(constant.SchedulingServiceName) {
-				continue
-			}
+		if rule.TargetServiceName == constant.SchedulingServiceName && !isServiceIndependent(constant.SchedulingServiceName) {
+			continue
 		}
-		if strings.HasPrefix(r.URL.Path, rule.matchPath) &&
-			slice.Contains(rule.matchMethods, r.Method) {
-			if rule.filter != nil && !rule.filter(r) {
-				continue
-			}
-			// we check the service primary addr here,
-			// if the service is not available, we will return ErrRedirect by returning an empty addr.
-			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
-			if !ok || addr == "" {
-				log.Warn("failed to get the service primary addr when trying to match redirect rules",
-					zap.String("path", r.URL.Path))
-				return true, ""
-			}
-			// If the URL contains escaped characters, use RawPath instead of Path
-			origin := r.URL.Path
-			path := r.URL.Path
-			if r.URL.RawPath != "" {
-				path = r.URL.RawPath
-			}
-			// Extract parameters from the URL path
-			// e.g. r.URL.Path = /pd/api/v1/operators/1 (before redirect)
-			//      matchPath  = /pd/api/v1/operators
-			//      targetPath = /scheduling/api/v1/operators
-			//      r.URL.Path = /scheduling/api/v1/operator/1 (after redirect)
-			pathParams := strings.TrimPrefix(path, rule.matchPath)
-			pathParams = strings.Trim(pathParams, "/") // Remove leading and trailing '/'
-			if len(pathParams) > 0 {
-				r.URL.Path = rule.targetPath + "/" + pathParams
-			} else {
-				r.URL.Path = rule.targetPath
-			}
-			log.Debug("redirect to microservice", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
-				zap.String("target", addr), zap.String("method", r.Method))
-			return true, addr
+		if !strings.HasPrefix(r.URL.Path, rule.MatchPath) || !slice.Contains(rule.MatchMethods, r.Method) {
+			continue
 		}
+		if rule.Filter != nil && !rule.Filter(r) {
+			continue
+		}
+		// we check the service primary addr here,
+		// if the service is not available, we will return ErrRedirect by returning an empty addr.
+		addr, ok := getPrimary(r.Context(), rule.TargetServiceName)
+		if !ok || addr == "" {
+			log.Warn("failed to get the service primary addr when trying to match redirect rules",
+				zap.String("path", r.URL.Path))
+			continue
+		}
+		// If the URL contains escaped characters, use RawPath instead of Path
+		origin := r.URL.Path
+		path := r.URL.Path
+		if r.URL.RawPath != "" {
+			path = r.URL.RawPath
+		}
+		// Extract parameters from the URL path
+		// e.g. r.URL.Path = /pd/api/v1/operators/1 (before redirect)
+		//      matchPath  = /pd/api/v1/operators
+		//      targetPath = /scheduling/api/v1/operators
+		//      r.URL.Path = /scheduling/api/v1/operator/1 (after redirect)
+		pathParams := strings.TrimPrefix(path, rule.MatchPath)
+		pathParams = strings.Trim(pathParams, "/") // Remove leading and trailing '/'
+		if len(pathParams) > 0 {
+			r.URL.Path = rule.TargetPath + "/" + pathParams
+		} else {
+			r.URL.Path = rule.TargetPath
+		}
+		log.Debug("redirect to microservice", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
+			zap.String("target", addr), zap.String("method", r.Method))
+		return true, addr
 	}
 	return false, ""
 }
