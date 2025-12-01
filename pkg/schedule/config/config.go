@@ -496,12 +496,13 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 }
 
 // GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
-// It returns 0 if the MaxMergeRegionSize is 0.
+// It returns 0 if the MaxMergeRegionSize is 0 or the MaxAffinityMergeRegionSize is 0.
+// It returns the greater one between the MaxMergeRegionSize and the MaxAffinityMergeRegionSize.
 func (c *ScheduleConfig) GetMaxAffinityMergeRegionSize() uint64 {
-	if c.MaxMergeRegionSize == 0 {
+	if c.MaxMergeRegionSize == 0 || c.MaxAffinityMergeRegionSize == 0 {
 		return 0
 	}
-	return c.MaxAffinityMergeRegionSize
+	return max(c.MaxAffinityMergeRegionSize, c.MaxMergeRegionSize)
 }
 
 func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {

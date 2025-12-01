@@ -569,13 +569,18 @@ func (o *PersistConfig) GetMaxMergeRegionSize() uint64 {
 }
 
 // GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
-// It returns 0 if the MaxMergeRegionSize is 0.
+// It returns 0 if the MaxMergeRegionSize is 0 or the MaxAffinityMergeRegionSize is 0.
+// It returns the greater one between the MaxMergeRegionSize and the MaxAffinityMergeRegionSize.
 func (o *PersistConfig) GetMaxAffinityMergeRegionSize() uint64 {
 	size, exist, err := o.getTTLUint(sc.MaxMergeRegionSizeKey)
 	if exist && err == nil && size == 0 {
 		return 0
 	}
-	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
+	affinitySize := o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
+	if affinitySize == 0 {
+		return 0
+	}
+	return max(affinitySize, size)
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
