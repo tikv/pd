@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // TestGetRegionAffinityGroupState tests the GetRegionAffinityGroupState method of Manager.
@@ -55,93 +56,46 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 	re.NoError(err)
 
 	// Create affinity group
-	err = manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "test_group"}})
-	re.NoError(err)
+	ranges := manager.createGroupForTest(re, "test_group", 6)
 	_, err = manager.UpdateAffinityGroupPeers("test_group", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 
-	// Test 1: Region not belonging to any affinity group should return false
-	region1 := core.NewRegionInfo(
-		&metapb.Region{Id: 1, Peers: []*metapb.Peer{
-			{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 13, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
-	)
+	// Test 0: Region not belonging to any affinity group should return false
+	region1 := generateRegionForTest(1, []uint64{1, 2, 3}, nonOverlappingRange)
 	_, isAffinity := manager.GetRegionAffinityGroupState(region1)
 	re.False(isAffinity, "Region not in group should return false")
 
-	// Add region to group
-	manager.SetRegionGroupForTest(1, "test_group")
-
-	// Test 2: Region conforming to affinity requirements should return true
+	// Test 1: Region conforming to affinity requirements should return true
+	region1 = generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region1)
 	re.True(isAffinity, "Region conforming to affinity should return true")
 
-	// Test 3: Region with wrong leader should return false
-	region2 := core.NewRegionInfo(
-		&metapb.Region{Id: 2, Peers: []*metapb.Peer{
-			{Id: 21, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 22, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 23, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 22, StoreId: 2, Role: metapb.PeerRole_Voter}, // Leader on store 2, not 1
-	)
-	manager.SetRegionGroupForTest(2, "test_group")
+	// Test 2: Region with wrong leader should return false. Use the same RegionID to verify cache invalidation.
+	region2 := generateRegionForTest(1, []uint64{2, 1, 3}, ranges[1])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region2)
 	re.False(isAffinity, "Region with wrong leader should return false")
 
-	// Test 4: Region with wrong voter stores should return false
-	region3 := core.NewRegionInfo(
-		&metapb.Region{Id: 3, Peers: []*metapb.Peer{
-			{Id: 31, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 32, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 33, StoreId: 4, Role: metapb.PeerRole_Voter}, // Store 4 instead of 3
-		}},
-		&metapb.Peer{Id: 31, StoreId: 1, Role: metapb.PeerRole_Voter},
-	)
-	manager.SetRegionGroupForTest(3, "test_group")
+	// Test 3: Region with wrong voter stores should return false
+	region3 := generateRegionForTest(3, []uint64{1, 2, 4}, ranges[2])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region3)
 	re.False(isAffinity, "Region with wrong voter stores should return false")
 
-	// Test 5: Region with different number of voters should return false
-	region4 := core.NewRegionInfo(
-		&metapb.Region{Id: 4, Peers: []*metapb.Peer{
-			{Id: 41, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 42, StoreId: 2, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 41, StoreId: 1, Role: metapb.PeerRole_Voter},
-	)
-	manager.SetRegionGroupForTest(4, "test_group")
+	// Test 4: Region with different number of voters should return false
+	region4 := generateRegionForTest(4, []uint64{1, 2}, ranges[3])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region4)
 	re.False(isAffinity, "Region with wrong number of voters should return false")
 
-	// Test 6: Region without leader should return false
-	region5 := core.NewRegionInfo(
-		&metapb.Region{Id: 5, Peers: []*metapb.Peer{
-			{Id: 51, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 52, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 53, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		nil, // No leader
-	)
-	manager.SetRegionGroupForTest(5, "test_group")
+	// Test 5: Region without leader should return false
+	region5 := generateRegionForTest(5, []uint64{1, 2, 3}, ranges[4])
+	region5 = region5.Clone(core.WithLeader(nil))
 	_, isAffinity = manager.GetRegionAffinityGroupState(region5)
 	re.False(isAffinity, "Region without leader should return false")
 
-	// Test 7: Group not in effect should return false
-	groupInfo := manager.GetGroupsForTest()["test_group"]
-	groupInfo.State = groupExpired
-	region6 := core.NewRegionInfo(
-		&metapb.Region{Id: 6, Peers: []*metapb.Peer{
-			{Id: 61, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 62, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 63, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 61, StoreId: 1, Role: metapb.PeerRole_Voter},
-	)
-	manager.SetRegionGroupForTest(6, "test_group")
+	// Test 6: Group not in effect should return false
+	manager.ExpireAffinityGroup("test_group")
+	groupInfo := manager.getGroupForTest(re, "test_group")
+	re.Equal(groupExpired, groupInfo.State)
+	region6 := generateRegionForTest(6, []uint64{1, 2, 3}, ranges[5])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region6)
 	re.False(isAffinity, "Group not in effect should return false")
 }
@@ -198,23 +152,13 @@ func TestRegionCountStaleCache(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "g"}}))
+	ranges := manager.createGroupForTest(re, "g", 1)
 	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 	re.NoError(err)
-
-	// Region matches old peers (1,2).
-	region := core.NewRegionInfo(
-		&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-			{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 101, StoreId: 1},
-	)
-	manager.SetRegionGroupForTest(region.GetID(), "g")
+	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
 	_, isAffinity := manager.GetRegionAffinityGroupState(region)
 	re.True(isAffinity)
-	groupInfo := manager.GetGroupsForTest()["g"]
+	groupInfo := manager.getGroupForTest(re, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 
@@ -222,10 +166,11 @@ func TestRegionCountStaleCache(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers("g", 4, []uint64{4, 5, 6})
 	re.NoError(err)
 	group2 := manager.GetAffinityGroupState("g")
+	re.NotNil(group2)
 
 	// Region cache should be cleared when group changes.
 	re.Zero(group2.AffinityRegionCount)
-	re.Zero(group2.RegionCount)
+	manager.testCacheStale(re, region)
 }
 
 // TestDeleteGroupClearsCache verifies that deleting a group clears all related region caches.
@@ -247,30 +192,13 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	re.NoError(err)
 
 	// Create a group and add regions
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "test-group"}}))
+	ranges := manager.createGroupForTest(re, "test-group", 1)
 	_, err = manager.UpdateAffinityGroupPeers("test-group", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 
 	// Create and associate multiple regions
-	region1 := core.NewRegionInfo(
-		&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-			{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 101, StoreId: 1},
-	)
-	region2 := core.NewRegionInfo(
-		&metapb.Region{Id: 200, Peers: []*metapb.Peer{
-			{Id: 201, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 202, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 203, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 201, StoreId: 1},
-	)
-
-	manager.SetRegionGroupForTest(region1.GetID(), "test-group")
-	manager.SetRegionGroupForTest(region2.GetID(), "test-group")
+	region1 := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
+	region2 := generateRegionForTest(200, []uint64{1, 2, 3}, ranges[0])
 
 	// Trigger cache population
 	_, isAffinity1 := manager.GetRegionAffinityGroupState(region1)
@@ -279,7 +207,7 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	re.True(isAffinity2)
 
 	// Verify regions are in cache
-	groupInfo := manager.GetGroupsForTest()["test-group"]
+	groupInfo := manager.getGroupForTest(re, "test-group")
 	re.Len(groupInfo.Regions, 2)
 	re.Equal(2, groupInfo.AffinityRegionCount)
 
@@ -291,11 +219,10 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	re.True(exists1)
 	re.True(exists2)
 
-	// Delete the group (no key ranges, so force=false should work)
-	err = manager.DeleteAffinityGroups([]string{"test-group"}, false)
-	re.NoError(err)
-
-	// Verify group is deleted
+	// Delete the group
+	re.Error(manager.DeleteAffinityGroups([]string{"test-group"}, false))
+	re.True(manager.IsGroupExist("test-group"))
+	re.NoError(manager.DeleteAffinityGroups([]string{"test-group"}, true))
 	re.False(manager.IsGroupExist("test-group"))
 
 	// Verify all regions are cleared from global cache
@@ -318,7 +245,7 @@ func TestStateChangeRegionCount(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i <= 3; i++ {
-		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)})
+		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i), NodeState: metapb.NodeState_Serving})
 		storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
 		storeInfos.PutStore(storeInfo)
 	}
@@ -330,25 +257,18 @@ func TestStateChangeRegionCount(t *testing.T) {
 	re.NoError(err)
 
 	// Create a group
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "state-test"}}))
+	ranges := manager.createGroupForTest(re, "state-test", 1)
 	_, err = manager.UpdateAffinityGroupPeers("state-test", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 
 	// Add regions to cache
-	region := core.NewRegionInfo(
-		&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-			{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 101, StoreId: 1},
-	)
-	manager.SetRegionGroupForTest(region.GetID(), "state-test")
+	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
 	_, isAffinity := manager.GetRegionAffinityGroupState(region)
 	re.True(isAffinity)
 
 	// Verify region is cached
 	groupState1 := manager.GetAffinityGroupState("state-test")
+	re.NotNil(groupState1)
 	re.Equal(1, groupState1.RegionCount)
 	re.Equal(1, groupState1.AffinityRegionCount)
 
@@ -361,20 +281,20 @@ func TestStateChangeRegionCount(t *testing.T) {
 	manager.checkStoresAvailability()
 
 	// Verify group state changed
-	groupInfo := manager.GetGroupsForTest()["state-test"]
+	groupInfo := manager.getGroupForTest(re, "state-test")
 	re.False(groupInfo.IsAffinitySchedulingEnabled())
 
 	// Verify cache is cleared
 	groupState2 := manager.GetAffinityGroupState("state-test")
-	re.Zero(groupState2.RegionCount, "RegionCount should be 0 after state change")
+	re.NotNil(groupState2)
+	manager.testCacheStale(re, region)
 	re.Zero(groupState2.AffinityRegionCount, "AffinityRegionCount should be 0 after state change")
 
 	// Verify global cache is also cleared
 	manager.RLock()
-	_, exists := manager.regions[100]
 	globalAffinityCount := manager.affinityRegionCount
 	manager.RUnlock()
-	re.False(exists, "region should be removed from global cache after state change")
+	manager.testCacheStale(re, region)
 	re.Zero(globalAffinityCount, "global affinity count should be 0")
 }
 
@@ -397,25 +317,18 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 	re.NoError(err)
 
 	// Create a group
-	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "invalid-test"}}))
+	ranges := manager.createGroupForTest(re, "invalid-test", 1)
 	_, err = manager.UpdateAffinityGroupPeers("invalid-test", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 
 	// Add region
-	region := core.NewRegionInfo(
-		&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-			{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
-			{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
-		}},
-		&metapb.Peer{Id: 101, StoreId: 1},
-	)
-	manager.SetRegionGroupForTest(region.GetID(), "invalid-test")
+	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
 	_, isAffinity := manager.GetRegionAffinityGroupState(region)
 	re.True(isAffinity)
 
 	// Verify region is in cache
 	groupState := manager.GetAffinityGroupState("invalid-test")
+	re.NotNil(groupState)
 	re.Equal(1, groupState.RegionCount)
 	re.Equal(1, groupState.AffinityRegionCount)
 
@@ -424,6 +337,7 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 
 	// Verify cache is cleared
 	groupState2 := manager.GetAffinityGroupState("invalid-test")
+	re.NotNil(groupState2)
 	re.Zero(groupState2.RegionCount)
 	re.Zero(groupState2.AffinityRegionCount)
 
@@ -437,6 +351,7 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 
 	// Verify still cleared
 	groupState3 := manager.GetAffinityGroupState("invalid-test")
+	re.NotNil(groupState3)
 	re.Zero(groupState3.RegionCount)
 	re.Zero(groupState3.AffinityRegionCount)
 
@@ -454,7 +369,7 @@ func TestConcurrentOperations(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i <= 5; i++ {
-		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)})
+		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i), NodeState: metapb.NodeState_Serving})
 		storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
 		storeInfos.PutStore(storeInfo)
 	}
@@ -466,26 +381,18 @@ func TestConcurrentOperations(t *testing.T) {
 	re.NoError(err)
 
 	// Create initial groups
-	for i := 1; i <= 3; i++ {
+	groups := make([][]keyutil.KeyRange, 3)
+	for i := range 3 {
 		groupID := fmt.Sprintf("concurrent-group-%d", i)
-		re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: groupID}}))
+		groups[i] = manager.createGroupForTest(re, groupID, 10)
 		_, err = manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
 		re.NoError(err)
 	}
 
 	// Create test regions
 	regions := make([]*core.RegionInfo, 10)
-	for i := range 10 {
-		regions[i] = core.NewRegionInfo(
-			&metapb.Region{Id: uint64(100 + i), Peers: []*metapb.Peer{
-				{Id: uint64(1000 + i*3), StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: uint64(1001 + i*3), StoreId: 2, Role: metapb.PeerRole_Voter},
-				{Id: uint64(1002 + i*3), StoreId: 3, Role: metapb.PeerRole_Voter},
-			}},
-			&metapb.Peer{Id: uint64(1000 + i*3), StoreId: 1},
-		)
-		groupID := fmt.Sprintf("concurrent-group-%d", (i%3)+1)
-		manager.SetRegionGroupForTest(regions[i].GetID(), groupID)
+	for i := range uint64(10) {
+		regions[i] = generateRegionForTest(100+i, []uint64{1, 2, 3}, groups[i%3][i])
 	}
 
 	// Run concurrent operations
@@ -500,7 +407,7 @@ func TestConcurrentOperations(t *testing.T) {
 			for range 50 {
 				region := regions[idx%len(regions)]
 				_, _ = manager.GetRegionAffinityGroupState(region)
-				groupID := fmt.Sprintf("concurrent-group-%d", (idx%3)+1)
+				groupID := fmt.Sprintf("concurrent-group-%d", idx%3)
 				_ = manager.GetAffinityGroupState(groupID)
 				_ = manager.IsGroupExist(groupID)
 			}
@@ -512,7 +419,7 @@ func TestConcurrentOperations(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			groupID := fmt.Sprintf("concurrent-group-%d", idx+1)
+			groupID := fmt.Sprintf("concurrent-group-%d", idx)
 			for j := range 10 {
 				_, err := manager.UpdateAffinityGroupPeers(groupID, uint64((j%3)+1), []uint64{1, 2, 3})
 				if err != nil {
@@ -557,7 +464,7 @@ func TestConcurrentOperations(t *testing.T) {
 	}
 
 	// Verify final state is consistent
-	for i := 1; i <= 3; i++ {
+	for i := range 3 {
 		groupID := fmt.Sprintf("concurrent-group-%d", i)
 		re.True(manager.IsGroupExist(groupID))
 		state := manager.GetAffinityGroupState(groupID)
@@ -574,7 +481,7 @@ func TestDegradedExpiration(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	for i := 1; i <= 3; i++ {
-		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i)})
+		storeInfo := core.NewStoreInfo(&metapb.Store{Id: uint64(i), Address: fmt.Sprintf("s%d", i), NodeState: metapb.NodeState_Serving})
 		storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
 		storeInfos.PutStore(storeInfo)
 	}
@@ -592,16 +499,17 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify group is available
 	groupState := manager.GetAffinityGroupState("expiration-test")
+	re.NotNil(groupState)
 	re.True(groupState.AffinitySchedulingEnabled)
 
 	// Make store 2 unhealthy to trigger degraded state
 	store2 := storeInfos.GetStore(2)
-	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
+	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Down)
 	manager.checkStoresAvailability()
 
 	// Verify group became degraded
-	groupInfo := manager.GetGroupsForTest()["expiration-test"]
+	groupInfo := manager.getGroupForTest(re, "expiration-test")
 	re.Equal(groupDegraded, groupInfo.State.toGroupState())
 	re.False(groupInfo.IsAffinitySchedulingEnabled())
 
@@ -629,5 +537,6 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify scheduling is still disallowed
 	groupState2 := manager.GetAffinityGroupState("expiration-test")
+	re.NotNil(groupState2)
 	re.False(groupState2.AffinitySchedulingEnabled)
 }

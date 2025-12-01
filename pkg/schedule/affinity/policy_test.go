@@ -36,8 +36,8 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
-	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"})
-	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1", NodeState: metapb.NodeState_Serving})
+	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2", NodeState: metapb.NodeState_Serving})
 	for _, s := range []*core.StoreInfo{store1, store2} {
 		storeInfos.PutStore(s.Clone(core.SetLastHeartbeatTS(time.Now())))
 	}
@@ -65,6 +65,7 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 	)
 	manager.ObserveAvailableRegion(region1, manager.GetAffinityGroupState("g"))
 	state := manager.GetAffinityGroupState("g")
+	re.NotNil(state)
 	re.True(state.AffinitySchedulingEnabled)
 	re.Equal(uint64(1), state.LeaderStoreID)
 	re.ElementsMatch([]uint64{1}, state.VoterStoreIDs)
@@ -81,6 +82,7 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 	)
 	manager.ObserveAvailableRegion(region2, manager.GetAffinityGroupState("g"))
 	state2 := manager.GetAffinityGroupState("g")
+	re.NotNil(state2)
 	re.True(state2.AffinitySchedulingEnabled)
 	re.Equal(uint64(1), state2.LeaderStoreID)
 	re.ElementsMatch([]uint64{1}, state2.VoterStoreIDs)
@@ -114,6 +116,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers("avail", 1, []uint64{1, 2})
 	re.NoError(err)
 	state := manager.GetAffinityGroupState("avail")
+	re.NotNil(state)
 	re.True(state.AffinitySchedulingEnabled)
 
 	// Simulate store 2 unavailable.
@@ -123,6 +126,7 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	manager.setGroupStateChanges(unavailable, groupStateChanges)
 
 	state2 := manager.GetAffinityGroupState("avail")
+	re.NotNil(state2)
 	re.False(state2.AffinitySchedulingEnabled)
 }
 
@@ -219,10 +223,10 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
-	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1"})
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "s1", NodeState: metapb.NodeState_Serving})
 	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store1)
-	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2"})
+	store2 := core.NewStoreInfo(&metapb.Store{Id: 2, Address: "s2", NodeState: metapb.NodeState_Serving})
 	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
@@ -238,13 +242,15 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "expire"}}))
 	_, err = manager.UpdateAffinityGroupPeers("expire", 1, []uint64{1, 2})
 	re.NoError(err)
+	manager.checkStoresAvailability()
+	groupInfo := manager.getGroupForTest(re, "expire")
+	re.Equal(groupAvailable, groupInfo.State.toGroupState())
 
 	// Make store2 unhealthy so the group becomes degraded.
-	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
-	storeInfos.PutStore(store2Down)
+	store2Disconnected := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
+	storeInfos.PutStore(store2Disconnected)
 	manager.checkStoresAvailability()
-
-	groupInfo := manager.GetGroupsForTest()["expire"]
+	groupInfo = manager.getGroupForTest(re, "expire")
 	re.Equal(groupDegraded, groupInfo.State.toGroupState())
 
 	// Force the degraded state to be considered expired.

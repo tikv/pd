@@ -255,6 +255,20 @@ func (m *Manager) ExpireAffinityGroup(groupID string) {
 	m.updateGroupStateLocked(groupID, groupExpired)
 }
 
+// DegradeAffinityGroup changes the Group state to groupDegraded.
+func (m *Manager) DegradeAffinityGroup(groupID string) {
+	m.Lock()
+	defer m.Unlock()
+	m.updateGroupStateLocked(groupID, groupDegraded)
+}
+
+// RestoreAffinityGroup changes the Group state to groupAvailable.
+func (m *Manager) RestoreAffinityGroup(groupID string) {
+	m.Lock()
+	defer m.Unlock()
+	m.updateGroupStateLocked(groupID, groupAvailable)
+}
+
 func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule, needClear bool) {
 	rangeCount := 0
 	if labelRule != nil {
@@ -427,55 +441,6 @@ func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 		result = append(result, newGroupState(groupInfo))
 	}
 	return result
-}
-
-// GetGroupsForTest returns the internal groups map.
-// Used for testing only.
-func (m *Manager) GetGroupsForTest() map[string]*runtimeGroupInfo {
-	m.RLock()
-	defer m.RUnlock()
-	return m.groups
-}
-
-// SetRegionGroupForTest sets the affinity group for a region.
-// Used for testing only.
-func (m *Manager) SetRegionGroupForTest(regionID uint64, groupID string) {
-	m.Lock()
-	defer m.Unlock()
-	if groupID == "" {
-		delete(m.regions, regionID)
-		return
-	}
-
-	groupInfo, ok := m.groups[groupID]
-	if !ok {
-		return
-	}
-
-	cache := regionCache{
-		region:      nil,
-		affinityVer: groupInfo.AffinityVer,
-		groupInfo:   groupInfo,
-	}
-
-	m.regions[regionID] = cache
-	groupInfo.Regions[regionID] = cache
-}
-
-// DegradeAffinityGroupForTest sets the affinity group state to degraded.
-// Used for testing only.
-func (m *Manager) DegradeAffinityGroupForTest(groupID string) {
-	m.Lock()
-	defer m.Unlock()
-	m.updateGroupStateLocked(groupID, groupDegraded)
-}
-
-// RestoreAffinityGroupForTest sets the affinity group state to available.
-// Used for testing only.
-func (m *Manager) RestoreAffinityGroupForTest(groupID string) {
-	m.Lock()
-	defer m.Unlock()
-	m.updateGroupStateLocked(groupID, groupAvailable)
 }
 
 // These methods are called by the watcher in microservice.

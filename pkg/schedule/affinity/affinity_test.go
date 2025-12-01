@@ -15,13 +15,77 @@
 package affinity
 
 import (
+	"fmt"
+	"maps"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func (m *Manager) getGroupForTest(re *require.Assertions, id string) *runtimeGroupInfo {
+	m.RLock()
+	defer m.RUnlock()
+	group, ok := m.groups[id]
+	re.True(ok)
+	// Return a cloned runtimeGroupInfo to ensure lock safety.
+	newGroup := *group
+	newGroup.Regions = maps.Clone(group.Regions)
+	return &newGroup
+}
+
+func (m *Manager) createGroupForTest(re *require.Assertions, id string, rangeCount int) []keyutil.KeyRange {
+	gkr := GroupKeyRanges{
+		KeyRanges: make([]keyutil.KeyRange, rangeCount),
+		GroupID:   id,
+	}
+	for i := range rangeCount {
+		gkr.KeyRanges[i] = keyutil.KeyRange{
+			StartKey: []byte(fmt.Sprintf("test-%s-%04d", id, i)),
+			EndKey:   []byte(fmt.Sprintf("test-%s-%04d", id, i+1)),
+		}
+	}
+	re.NoError(m.CreateAffinityGroups([]GroupKeyRanges{gkr}))
+	return gkr.KeyRanges
+}
+
+func (m *Manager) testCacheStale(re *require.Assertions, region *core.RegionInfo) {
+	cache, group := m.getCache(region)
+	if cache != nil && group != nil {
+		re.NotEqual(cache.affinityVer, group.affinityVer)
+	}
+}
+
+// generateRegionForTest generates a test Region from the given information,
+// where voterStoreIDs[0] is used as the leaderStoreID.
+func generateRegionForTest(id uint64, voterStoreIDs []uint64, keyRange keyutil.KeyRange) *core.RegionInfo {
+	peers := make([]*metapb.Peer, len(voterStoreIDs))
+	for i, storeID := range voterStoreIDs {
+		peers[i] = &metapb.Peer{
+			Id:      id*10 + uint64(i),
+			StoreId: storeID,
+		}
+	}
+	meta := &metapb.Region{
+		Id:       id,
+		StartKey: keyRange.StartKey,
+		EndKey:   keyRange.EndKey,
+		Peers:    peers,
+	}
+	return core.NewRegionInfo(meta, peers[0])
+}
+
+var nonOverlappingRange = keyutil.KeyRange{
+	StartKey: []byte("non-overlapping"),
+	EndKey:   []byte("noop"),
 }

@@ -206,9 +206,9 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	re.NoError(err)
 
 	// Verify group is in effect initially
-	groupInfo := affinityManager.GetGroupsForTest()["test_group"]
+	groupInfo := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupInfo)
-	re.True(groupInfo.IsAffinitySchedulingEnabled())
+	re.True(groupInfo.AffinitySchedulingEnabled)
 
 	// Checker should create operator for leader transfer (1 -> 2)
 	ops := affinityChecker.Check(tc.GetRegion(1))
@@ -217,14 +217,14 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	re.Equal("affinity-move-region", ops[0].Desc())
 
 	// Simulate health check invalidating the group
-	affinityManager.DegradeAffinityGroupForTest("test_group")
+	affinityManager.DegradeAffinityGroup("test_group")
 
 	// Checker should NOT create operator when group is degraded
 	ops = affinityChecker.Check(tc.GetRegion(1))
 	re.Nil(ops, "Checker should not create operator for degraded group")
 
 	// Simulate health check restoring the group
-	affinityManager.RestoreAffinityGroupForTest("test_group")
+	affinityManager.RestoreAffinityGroup("test_group")
 
 	// Checker should create operator again after group is restored
 	ops = affinityChecker.Check(tc.GetRegion(1))
@@ -265,8 +265,9 @@ func TestHealthCheckWithOfflineStore(t *testing.T) {
 	re.NoError(err)
 
 	// Verify group is in effect
-	groupInfo := affinityManager.GetGroupsForTest()["test_group"]
-	re.True(groupInfo.IsAffinitySchedulingEnabled())
+	groupInfo := affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(groupInfo)
+	re.True(groupInfo.AffinitySchedulingEnabled)
 
 	// Set store 2 offline (this triggers IsRemoving())
 	tc.SetStoreOffline(2)
@@ -275,8 +276,9 @@ func TestHealthCheckWithOfflineStore(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Group should be invalidated because store 2 is removing
-	groupInfo = affinityManager.GetGroupsForTest()["test_group"]
-	re.False(groupInfo.IsAffinitySchedulingEnabled(), "Group should be invalidated when store is removing")
+	groupInfo = affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(groupInfo)
+	re.False(groupInfo.AffinitySchedulingEnabled, "Group should be invalidated when store is removing")
 }
 
 // TestHealthCheckWithDownStores tests behavior when stores go down.
@@ -317,8 +319,9 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Group should be invalidated
-	groupInfo := affinityManager.GetGroupsForTest()["test_group"]
-	re.False(groupInfo.IsAffinitySchedulingEnabled(), "Group should be invalidated when stores are down")
+	groupInfo := affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(groupInfo)
+	re.False(groupInfo.AffinitySchedulingEnabled, "Group should be invalidated when stores are down")
 
 	// Recover store 2 (store 3 still down)
 	tc.SetStoreUp(2)
@@ -327,8 +330,9 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Group should still be invalidated (store 3 still down)
-	groupInfo = affinityManager.GetGroupsForTest()["test_group"]
-	re.False(groupInfo.IsAffinitySchedulingEnabled(), "Group should remain invalidated while any store is unhealthy")
+	groupInfo = affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(groupInfo)
+	re.False(groupInfo.AffinitySchedulingEnabled, "Group should remain invalidated while any store is unhealthy")
 
 	// Recover store 3
 	tc.SetStoreUp(3)
@@ -337,8 +341,9 @@ func TestHealthCheckWithDownStores(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Now group should be restored
-	groupInfo = affinityManager.GetGroupsForTest()["test_group"]
-	re.True(groupInfo.IsAffinitySchedulingEnabled(), "Group should be restored when all stores are healthy")
+	groupInfo = affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(groupInfo)
+	re.True(groupInfo.AffinitySchedulingEnabled, "Group should be restored when all stores are healthy")
 }
 
 // TestAffinityCheckerNoOperatorWhenAligned tests that no operator is created when region matches group.

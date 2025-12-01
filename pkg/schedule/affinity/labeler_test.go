@@ -437,6 +437,7 @@ func TestSameGroupNonOverlappingAdd(t *testing.T) {
 	re.NoError(err)
 
 	state := manager.GetAffinityGroupState("g")
+	re.NotNil(state)
 	re.Equal(2, state.RangeCount)
 }
 
