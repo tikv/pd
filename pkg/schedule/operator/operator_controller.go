@@ -521,6 +521,8 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 				zap.Uint64("region-id", regionID),
 				zap.Reflect("old", oldOp),
 				zap.Reflect("new", op))
+			_ = op.Cancel(AlreadyExist)
+			oc.buryOperator(op)
 			operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
 			return false
 		}
@@ -614,7 +616,7 @@ func (oc *Controller) ack(op *Operator) {
 
 // RemoveOperators removes all operators from the running operators.
 func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
-	removed := oc.removeOperatorsInner()
+	removed := oc.removeOperatorsWithoutBury()
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
@@ -630,7 +632,7 @@ func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
 	}
 }
 
-func (oc *Controller) removeOperatorsInner() []*Operator {
+func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
 	var removed []*Operator
 	oc.operators.Range(func(regionID, value any) bool {
 		op := value.(*Operator)
@@ -668,8 +670,7 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 
 func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
 	regionID := op.RegionID()
-	if cur, ok := oc.operators.Load(regionID); ok && cur.(*Operator) == op {
-		oc.operators.Delete(regionID)
+	if oc.operators.CompareAndDelete(regionID, op) {
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
