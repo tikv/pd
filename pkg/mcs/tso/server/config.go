@@ -45,6 +45,7 @@ const (
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
+	tsoMaxIndexUpperLimit            = 10
 )
 
 var _ tso.ServiceConfig = (*Config)(nil)
@@ -214,6 +215,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if c.TSOUpdatePhysicalInterval.Duration != defaultTSOUpdatePhysicalInterval {
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
+	}
+	if c.TSOMaxIndex > tsoMaxIndexUpperLimit {
+		return fmt.Errorf("tso max index:%d should be less than %d", c.TSOMaxIndex, tsoMaxIndexUpperLimit)
 	}
 
 	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
