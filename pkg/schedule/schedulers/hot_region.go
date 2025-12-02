@@ -1130,12 +1130,9 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serialize running when each 2 store's pending influence is close.
 func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
-	srcStoreID := bs.cur.srcStore.GetID()
-	dstStoreID := bs.cur.dstStore.GetID()
 	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
 	srcPending, dstPending := bs.cur.getPendingLoad(dim)
 	if reverse {
-		srcStoreID, dstStoreID = dstStoreID, srcStoreID
 		srcRate, dstRate = dstRate, srcRate
 		srcPending, dstPending = dstPending, srcPending
 	}
@@ -1144,7 +1141,6 @@ func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
 		return false
 	}
 	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(srcStoreID, 10), strconv.FormatUint(dstStoreID, 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
