@@ -463,8 +463,9 @@ func (c *tsoServiceDiscovery) hasKeyspaceGroupIDConfig() (uint32, bool) {
 // to any keyspace group yet (they should still use the default group 0).
 // If the keyspace meta has tso_keyspace_group_id configured as 0, fallback to group 0 is allowed.
 func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceID uint32) error {
-	clusterInfo, err := c.serviceDiscovery.(*serviceDiscovery).getClusterInfo(
-		c.ctx, c.serviceDiscovery.GetServingURL(), UpdateMemberTimeout)
+	srvDiscovery := c.serviceDiscovery.(*serviceDiscovery)
+	clusterInfo, err := srvDiscovery.getClusterInfo(
+		c.ctx, c.serviceDiscovery.GetServingURL(), srvDiscovery.option.Timeout)
 	if err != nil {
 		log.Warn("[tso] failed to get cluster info to check service mode",
 			zap.Uint32("keyspace-id", keyspaceID),
