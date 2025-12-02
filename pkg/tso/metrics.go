@@ -47,7 +47,7 @@ var (
 			Namespace: pdNamespace,
 			Subsystem: "cluster",
 			Name:      "tso_gap_millionseconds",
-			Help:      "The minimal (non-zero) TSO gap",
+			Help:      "The minimal (non-zero) TSO gap for each DC.",
 		}, []string{groupLabel, dcLabel})
 
 	tsoOpDuration = prometheus.NewHistogramVec(
