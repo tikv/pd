@@ -283,16 +283,16 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		log.Error("group not initialized", zap.String("group-id", groupID))
-	} else {
-		if needClear {
-			m.clearGroupCacheLocked(groupID)
-		} else {
-			m.resetCountLocked(groupInfo)
-		}
-		// Set LabelRule
-		groupInfo.LabelRule = labelRule
-		groupInfo.RangeCount = rangeCount
+		return
 	}
+	if needClear {
+		m.clearGroupCacheLocked(groupID)
+	} else {
+		m.resetCountLocked(groupInfo)
+	}
+	// Set LabelRule
+	groupInfo.LabelRule = labelRule
+	groupInfo.RangeCount = rangeCount
 }
 
 func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
