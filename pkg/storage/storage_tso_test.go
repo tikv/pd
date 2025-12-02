@@ -19,8 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"

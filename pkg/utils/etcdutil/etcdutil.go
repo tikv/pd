@@ -263,13 +263,18 @@ const (
 	etcdServerDisconnectedTimeout = 1 * time.Minute
 )
 
+// EtcdClientUsager marks the usager of the etcd client.
 type EtcdClientUsager string
 
 const (
-	DefaultEtcdClientUsager  EtcdClientUsager = "default-etcd-client"
-	ServerEtcdClientUsager   EtcdClientUsager = "server-etcd-client"
+	// DefaultEtcdClientUsager is the default etcd client usager, used for testing.
+	DefaultEtcdClientUsager EtcdClientUsager = "default-etcd-client"
+	// ServerEtcdClientUsager is the etcd client usager for server, most of the time.
+	ServerEtcdClientUsager EtcdClientUsager = "server-etcd-client"
+	// ElectionEtcdClientUsager is the etcd client usager for election and tso.
 	ElectionEtcdClientUsager EtcdClientUsager = "election-etcd-client"
-	McsEtcdClientUsager      EtcdClientUsager = "mcs-etcd-client"
+	// McsEtcdClientUsager is the etcd client usager for mcs.
+	McsEtcdClientUsager EtcdClientUsager = "mcs-etcd-client"
 )
 
 func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
@@ -303,9 +308,6 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, usager EtcdClient
 	tickerInterval := defaultDialKeepAliveTime
 	failpoint.Inject("fastTick", func() {
 		tickerInterval = 100 * time.Millisecond
-	})
-	failpoint.Inject("closeTick", func() {
-		failpoint.Return(client, err)
 	})
 	if enableChecker {
 		initHealthChecker(tickerInterval, tlsConfig, client, usager)

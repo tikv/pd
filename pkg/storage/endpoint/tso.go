@@ -44,7 +44,7 @@ var _ TSOStorage = (*StorageEndpoint)(nil)
 // we must ensure that all keyspace groups are merged into the default
 // keyspace group. This guarantees the monotonicity of the TSO by loading
 // the timestamp from a single key.
-func (se *StorageEndpoint) LoadTimestamp(ctx context.Context, groupID uint32) (time.Time, error) {
+func (se *StorageEndpoint) LoadTimestamp(_ context.Context, groupID uint32) (time.Time, error) {
 	key := keypath.TimestampPath(groupID)
 	value, err := se.Load(key)
 	if err != nil {

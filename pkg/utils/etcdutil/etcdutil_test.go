@@ -285,18 +285,16 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	var err error
 	// Test with enable check.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
-	err = checkEtcdWithHangLeader(t)
+	err = checkEtcdWithHangLeader(t, true)
 	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 
 	// Test with disable check.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/closeTick", "return(true)"))
-	err = checkEtcdWithHangLeader(t)
+	err = checkEtcdWithHangLeader(t, false)
 	re.Error(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeTick"))
 }
 
-func checkEtcdWithHangLeader(t *testing.T) error {
+func checkEtcdWithHangLeader(t *testing.T, enableChecker bool) error {
 	re := require.New(t)
 	// Start a etcd server.
 	servers, _, clean := NewTestEtcdCluster(t, 1, nil)
@@ -313,7 +311,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	// Create an etcd client with etcd1 as endpoint.
 	urls, err := etcdtypes.NewURLs([]string{proxyAddr})
 	re.NoError(err)
-	client1, err := CreateEtcdClient(nil, urls, DefaultEtcdClientUsager, true)
+	client1, err := CreateEtcdClient(nil, urls, DefaultEtcdClientUsager, enableChecker)
 	re.NoError(err)
 	defer client1.Close()
 

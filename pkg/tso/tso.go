@@ -48,6 +48,8 @@ const (
 	// and trigger unnecessary warnings about clock offset.
 	// It's an empirical value.
 	jetLagWarningThreshold = 150 * time.Millisecond
+
+	minStorageTimeout = 5 * time.Second
 )
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
@@ -75,9 +77,15 @@ type timestampOracle struct {
 	metrics *tsoMetrics
 }
 
+func (t *timestampOracle) getStoreageTimeout() time.Duration {
+	if t.saveInterval-time.Second < minStorageTimeout {
+		return minStorageTimeout
+	}
+	return t.saveInterval - time.Second
+}
+
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	timeout := t.saveInterval - time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), t.getStoreageTimeout())
 	defer cancel()
 	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
@@ -135,8 +143,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	timeout := t.saveInterval - time.Second
-	ctx, cancelCtx := context.WithTimeout(context.Background(), timeout)
+	ctx, cancelCtx := context.WithTimeout(context.Background(), t.getStoreageTimeout())
 	defer cancelCtx()
 	last, err := t.storage.LoadTimestamp(ctx, t.keyspaceGroupID)
 	if err != nil {
