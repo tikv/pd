@@ -70,8 +70,8 @@ type Manager struct {
 	// The following members are protected by RWMutex.
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
-	regions             map[uint64]regionCache
-	unavailableStores   map[uint64]condition
+	regions             map[uint64]regionCache       // {region_id} -> regionCache
+	unavailableStores   map[uint64]condition         // {store_id} -> condition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
@@ -283,16 +283,16 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		log.Error("group not initialized", zap.String("group-id", groupID))
-	} else {
-		if needClear {
-			m.clearGroupCacheLocked(groupID)
-		} else {
-			m.resetCountLocked(groupInfo)
-		}
-		// Set LabelRule
-		groupInfo.LabelRule = labelRule
-		groupInfo.RangeCount = rangeCount
+		return
 	}
+	if needClear {
+		m.clearGroupCacheLocked(groupID)
+	} else {
+		m.resetCountLocked(groupInfo)
+	}
+	// Set LabelRule
+	groupInfo.LabelRule = labelRule
+	groupInfo.RangeCount = rangeCount
 }
 
 func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {

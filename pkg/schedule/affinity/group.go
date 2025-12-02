@@ -146,7 +146,6 @@ type Group struct {
 	LeaderStoreID uint64 `json:"leader_store_id,omitempty"`
 	// VoterStoreIDs indicates which stores Voters should be on.
 	VoterStoreIDs []uint64 `json:"voter_store_ids,omitempty"`
-	// TODO: LearnerStoreIDs
 }
 
 func (g *Group) String() string {
@@ -198,7 +197,6 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 	}
 	slices.Sort(expected)
 	return slices.Equal(expected, g.VoterStoreIDs)
-	// TODO: Compare the Learners.
 }
 
 // runtimeGroupInfo contains meta information and runtime statistics for the Group.
@@ -299,7 +297,6 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	if err := ValidateGroupID(g.ID); err != nil {
 		return err
 	}
-	// TODO: Add more validation logic here if needed.
 	// If no distribution is provided, we will use the default distribution.
 	if g.LeaderStoreID == 0 && len(g.VoterStoreIDs) == 0 {
 		return nil

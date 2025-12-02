@@ -38,10 +38,18 @@ var (
 	availabilityCheckIntervalForTest time.Duration
 )
 
+// logEntry is used to collect log messages to print after releasing lock
+type logEntry struct {
+	level            string // "info", "warn"
+	groupID          string
+	unavailableStore uint64
+	state            condition
+}
+
 // ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
-	// TODO: Improve the strategy.
+	// In the future, we may want to use a more sophisticated strategy rather than first-win.
 	if group == nil || !group.RegularSchedulingEnabled {
 		return
 	}
@@ -50,7 +58,6 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	for i, voter := range region.GetVoters() {
 		voterStoreIDs[i] = voter.GetStoreId()
 	}
-	// TODO: Update asynchronously to avoid blocking the Checker.
 	_, _ = m.updateAffinityGroupPeersWithAffinityVer(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
 }
 
@@ -96,6 +103,18 @@ func (m *Manager) checkStoresAvailability() {
 	if isUnavailableStoresChanged {
 		m.setGroupStateChanges(unavailableStores, groupStateChanges)
 	}
+	m.collectMetrics()
+}
+
+// collectMetrics collects the global metrics of the affinity manager.
+func (m *Manager) collectMetrics() {
+	m.RLock()
+	defer m.RUnlock()
+
+	// Collect global metrics
+	groupCount.Set(float64(len(m.groups)))
+	regionCount.Set(float64(len(m.regions)))
+	affinityRegionCount.Set(float64(m.affinityRegionCount))
 }
 
 func (m *Manager) generateUnavailableStores() map[uint64]condition {
@@ -128,7 +147,6 @@ func (m *Manager) generateUnavailableStores() map[uint64]condition {
 
 func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (isUnavailableStoresChanged bool, groupStateChanges map[string]condition) {
 	m.RLock()
-	defer m.RUnlock()
 	// Validate whether unavailableStores has changed.
 	isUnavailableStoresChanged = len(m.unavailableStores) != len(unavailableStores)
 	if !isUnavailableStoresChanged {
@@ -139,10 +157,14 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 			}
 		}
 		if !isUnavailableStoresChanged {
+			m.RUnlock()
 			return false, nil
 		}
 	}
 	// Analyze which Groups have changed state
+	// Collect log messages to print after releasing lock
+	var logEntries []logEntry
+
 	groupStateChanges = make(map[string]condition)
 	for _, groupInfo := range m.groups {
 		var unavailableStore uint64
@@ -159,15 +181,35 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 		if newState != groupInfo.getState() {
 			groupStateChanges[groupInfo.ID] = newState
 			if unavailableStore != 0 {
-				log.Warn("affinity group invalidated due to unavailable stores",
-					zap.String("group-id", groupInfo.ID),
-					zap.Uint64("unavailable-store", unavailableStore),
-					zap.String("state", newState.String()))
+				logEntries = append(logEntries, logEntry{
+					level:            "warn",
+					groupID:          groupInfo.ID,
+					unavailableStore: unavailableStore,
+					state:            newState,
+				})
 			} else {
-				log.Info("affinity group become available", zap.String("group-id", groupInfo.ID))
+				logEntries = append(logEntries, logEntry{
+					level:   "info",
+					groupID: groupInfo.ID,
+				})
 			}
 		}
 	}
+	m.RUnlock()
+
+	// Log after releasing lock
+	for _, entry := range logEntries {
+		switch entry.level {
+		case "warn":
+			log.Warn("affinity group invalidated due to unavailable stores",
+				zap.String("group-id", entry.groupID),
+				zap.Uint64("unavailable-store", entry.unavailableStore),
+				zap.String("state", entry.state.String()))
+		case "info":
+			log.Info("affinity group become available", zap.String("group-id", entry.groupID))
+		}
+	}
+
 	return
 }
 
