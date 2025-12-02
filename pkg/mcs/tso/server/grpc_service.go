@@ -133,7 +133,12 @@ func (s *Service) FindGroupByKeyspaceID(
 	}
 
 	keyspaceID := request.GetKeyspaceId()
-	allocator, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	allocator, keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if request.GetModRevision() > modRevision {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),
+		}, nil
+	}
 	if err != nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
@@ -171,6 +176,7 @@ func (s *Service) FindGroupByKeyspaceID(
 			SplitState: splitState,
 			Members:    members,
 		},
+		ModRevision: modRevision,
 	}, nil
 }
 

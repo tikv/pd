@@ -556,6 +556,11 @@ error = '''
 keyspace group %v is in split state
 '''
 
+["PD:keyspace:ErrKeyspaceGroupModRevisionStale"]
+error = '''
+keyspace group mod revision is stale
+'''
+
 ["PD:keyspace:ErrKeyspaceGroupNotEnoughReplicas"]
 error = '''
 not enough replicas in the keyspace group

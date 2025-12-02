@@ -80,7 +80,6 @@ func NewService(srv *rmserver.Service) *Service {
 	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
-	endpoint.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		manager:          manager,
 		apiHandlerEngine: apiHandlerEngine,
@@ -100,6 +99,8 @@ func (s *Service) RegisterAdminRouter() {
 // RegisterRouter registers the router of the service.
 func (s *Service) RegisterRouter() {
 	configEndpoint := s.root.Group("/config")
+	configEndpoint.GET("", getConfig)
+	configEndpoint.Use(multiservicesapi.ServiceRedirector())
 	configEndpoint.POST("/group", s.postResourceGroup)
 	configEndpoint.PUT("/group", s.putResourceGroup)
 	configEndpoint.GET("/group/:name", s.getResourceGroup)
@@ -122,7 +123,7 @@ func (s *Service) handler() http.Handler {
 }
 
 func changeLogLevel(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Service)
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Server)
 	var level string
 	if err := c.Bind(&level); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
@@ -375,4 +376,15 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, limiter)
+}
+
+// GetConfig
+//
+// @Tags		ResourceManager
+// @Summary	Get the resource manager config.
+// @Success	200		{string}	json	format	of	rmserver.Config
+func getConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Server)
+	config := svr.GetConfig()
+	c.IndentedJSON(http.StatusOK, config)
 }
