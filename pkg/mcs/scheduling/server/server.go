@@ -522,7 +522,7 @@ func (s *Server) startCluster(context.Context) error {
 		return err
 	}
 	// Start the affinity watcher after the cluster is created.
-	err = s.startAffinityWatcher()
+	s.affinityWatcher, err = affinity.NewWatcher(s.Context(), s.GetClient(), cluster.GetAffinityManager())
 	if err != nil {
 		return err
 	}
@@ -548,17 +548,6 @@ func (s *Server) startMetaConfWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	return err
-}
-
-func (s *Server) startRuleWatcher() (err error) {
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
-		s.cluster.GetCoordinator().GetCheckerController(), s.cluster.GetRuleManager(), s.cluster.GetRegionLabeler())
-	return err
-}
-
-func (s *Server) startAffinityWatcher() (err error) {
-	s.affinityWatcher, err = affinity.NewWatcher(s.Context(), s.GetClient(), s.cluster.GetAffinityManager())
 	return err
 }
 
