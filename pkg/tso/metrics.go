@@ -133,7 +133,7 @@ type tsoMetrics struct {
 	globalTSOSyncRTTGauge prometheus.Gauge
 }
 
-func newTSOMetrics(groupID string, dcLocation string) *tsoMetrics {
+func newTSOMetrics(groupID, dcLocation string) *tsoMetrics {
 	return &tsoMetrics{
 		syncEvent:                    tsoCounter.WithLabelValues("sync", groupID, dcLocation),
 		skipSyncEvent:                tsoCounter.WithLabelValues("skip_sync", groupID, dcLocation),
