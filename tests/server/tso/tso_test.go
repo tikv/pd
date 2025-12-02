@@ -23,12 +23,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-<<<<<<< HEAD
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/tso"
-=======
 
->>>>>>> 7fa31c663 (metrics: clean up metrics (#9535))
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -49,46 +46,7 @@ func TestLoadTimestamp(t *testing.T) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
-<<<<<<< HEAD
 	defer cluster.Destroy()
-=======
-	s.env.PDCount = 2
-}
-
-func (s *tsoTestSuite) TearDownSuite() {
-	s.env.Cleanup()
-}
-
-func (s *tsoTestSuite) TearDownTest() {
-	s.env.Reset(s.Require())
-}
-
-func (s *tsoTestSuite) TestRequestFollower() {
-	s.env.RunTestInNonMicroserviceEnv(s.checkRequestFollower)
-}
-
-func (s *tsoTestSuite) checkRequestFollower(cluster *tests.TestCluster) {
-	re := s.Require()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var followerServer *tests.TestServer
-	for _, s := range cluster.GetServers() {
-		if s.GetConfig().Name != cluster.GetLeader() {
-			followerServer = s
-		}
-	}
-	re.NotNil(followerServer)
-
-	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
-	clusterID := followerServer.GetClusterID()
-	req := &pdpb.TsoRequest{
-		Header: testutil.NewRequestHeader(clusterID),
-		Count:  1,
-	}
-	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
-	tsoClient, err := grpcPDClient.Tso(ctx)
->>>>>>> 7fa31c663 (metrics: clean up metrics (#9535))
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 
@@ -174,8 +132,9 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header: testutil.NewRequestHeader(clusterID),
-		Count:  1,
+		Header:     testutil.NewRequestHeader(clusterID),
+		Count:      1,
+		DcLocation: tso.GlobalDCLocation,
 	}
 
 	ctx = grpcutil.BuildForwardContext(ctx, leaderServer.GetAddr())
@@ -189,49 +148,5 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 	// Test whether the number of existing DCs is as expected.
 	dcLocations, err := leaderServer.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
 	re.NoError(err)
-<<<<<<< HEAD
 	re.Equal(0, len(dcLocations))
-=======
-	defer func() {
-		err = tsoClient.CloseSend()
-		re.NoError(err)
-	}()
-
-	var (
-		maxDuration   time.Duration
-		lastTimestamp *pdpb.Timestamp
-	)
-	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
-	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
-	count := (1 << 18) / 10
-	for range 20 {
-		begin := time.Now()
-		req := &pdpb.TsoRequest{
-			Header: testutil.NewRequestHeader(clusterID),
-			Count:  uint32(count),
-		}
-		re.NoError(tsoClient.Send(req))
-		resp, err := tsoClient.Recv()
-		re.NoError(err)
-		// Record the max duration to validate whether the overflow is triggered later.
-		duration := time.Since(begin)
-		if duration > maxDuration {
-			maxDuration = duration
-		}
-		// Check the monotonicity of the timestamp.
-		timestamp := checkAndReturnTimestampResponse(re, req, resp)
-		re.NotNil(timestamp)
-		if lastTimestamp != nil {
-			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
-			re.GreaterOrEqual(curPhysical, lastPhysical)
-			// If the physical time is the same, the logical time must be strictly increasing.
-			if curPhysical == lastPhysical {
-				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
-			}
-		}
-		lastTimestamp = timestamp
-	}
-	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
-	re.Greater(maxDuration, s.updateInterval)
->>>>>>> 7fa31c663 (metrics: clean up metrics (#9535))
 }
