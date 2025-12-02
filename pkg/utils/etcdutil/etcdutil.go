@@ -263,6 +263,15 @@ const (
 	etcdServerDisconnectedTimeout = 1 * time.Minute
 )
 
+type EtcdClientUsager string
+
+const (
+	DefaultEtcdClientUsager  EtcdClientUsager = "default-etcd-client"
+	ServerEtcdClientUsager   EtcdClientUsager = "server-etcd-client"
+	ElectionEtcdClientUsager EtcdClientUsager = "election-etcd-client"
+	McsEtcdClientUsager      EtcdClientUsager = "mcs-etcd-client"
+)
+
 func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
 	if len(endpoints) == 0 {
 		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
@@ -281,7 +290,7 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, sourceOpt ...string) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, usager EtcdClientUsager, enableChecker bool) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
@@ -298,11 +307,9 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, sourceOpt ...stri
 	failpoint.Inject("closeTick", func() {
 		failpoint.Return(client, err)
 	})
-	source := "default-etcd-client"
-	if len(sourceOpt) > 0 {
-		source = sourceOpt[0]
+	if enableChecker {
+		initHealthChecker(tickerInterval, tlsConfig, client, usager)
 	}
-	initHealthChecker(tickerInterval, tlsConfig, client, source)
 
 	return client, err
 }

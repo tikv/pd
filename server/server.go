@@ -384,12 +384,12 @@ func (s *Server) startClient() error {
 	}
 	/* Starting two different etcd clients here is to avoid the throttling. */
 	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
-	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "server-etcd-client")
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ServerEtcdClientUsager, true)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
-	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "election-etcd-client")
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientUsager, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -468,7 +468,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
+	tsoStorage := storage.NewStorageWithEtcdBackend(s.electionClient)
+	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
@@ -753,7 +754,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(keypath.ClusterPath()), "=", 0)
-	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
+	resp, err := kv.NewSlowLogTxn(s.client.Ctx(), s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
 		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
@@ -1954,7 +1955,7 @@ func (s *Server) MarkSnapshotRecovering() error {
 	log.Info("mark snapshot recovering")
 	markPath := keypath.RecoveringMarkPath()
 	// the value doesn't matter, set to a static string
-	_, err := kv.NewSlowLogTxn(s.client).
+	_, err := kv.NewSlowLogTxn(s.ctx, s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
 		Then(clientv3.OpPut(markPath, "on")).
 		Commit()
@@ -1984,7 +1985,7 @@ func (s *Server) MarkPitrRestoreMode() error {
 	log.Info("mark pitr restore mode")
 	markPath := keypath.PitrRestoreModeMarkPath()
 	// the value doesn't matter, set to a static string
-	_, err := kv.NewSlowLogTxn(s.client).
+	_, err := kv.NewSlowLogTxn(s.ctx, s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
 		Then(clientv3.OpPut(markPath, "on")).
 		Commit()

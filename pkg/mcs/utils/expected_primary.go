@@ -60,7 +60,7 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 	path := keypath.ExpectedPrimaryPath(msParam)
 	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("primary", primary.output))
 	// write a flag to indicate the expected primary.
-	resp, err := kv.NewSlowLogTxn(client).
+	resp, err := kv.NewSlowLogTxn(client.Ctx(), client).
 		Then(clientv3.OpPut(path, primary.raw, clientv3.WithLease(leaseID))).
 		Commit()
 	if err != nil || !resp.Succeeded {

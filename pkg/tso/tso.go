@@ -76,7 +76,10 @@ type timestampOracle struct {
 }
 
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
+	timeout := t.saveInterval - time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
@@ -132,7 +135,10 @@ func (t *timestampOracle) syncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(t.keyspaceGroupID)
+	timeout := t.saveInterval - time.Second
+	ctx, cancelCtx := context.WithTimeout(context.Background(), timeout)
+	defer cancelCtx()
+	last, err := t.storage.LoadTimestamp(ctx, t.keyspaceGroupID)
 	if err != nil {
 		return err
 	}

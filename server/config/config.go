@@ -54,10 +54,11 @@ type Config struct {
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"`
-	ForceNewCluster   bool   `json:"force-new-cluster"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
+	Name                       string `toml:"name" json:"name"`
+	DataDir                    string `toml:"data-dir" json:"data-dir"`
+	ForceNewCluster            bool   `json:"force-new-cluster"`
+	EnableGRPCGateway          bool   `json:"enable-grpc-gateway"`
+	EnableLeaderClientAutoSync bool   `toml:"enable-leader-client-auto-sync" json:"enable-leader-client-auto-sync"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -214,8 +215,9 @@ const (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
 	DefaultMinResolvedTSPersistenceInterval = time.Second
 
-	defaultEnableGRPCGateway   = true
-	defaultDisableErrorVerbose = true
+	defaultEnableGRPCGateway          = true
+	defaultEnableLeaderClientAutoSync = false
+	defaultDisableErrorVerbose        = true
 
 	defaultDashboardAddress = "auto"
 
@@ -450,6 +452,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
+	}
+	if !configMetaData.IsDefined("enable-leader-client-auto-sync") {
+		c.EnableLeaderClientAutoSync = defaultEnableLeaderClientAutoSync
 	}
 
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))

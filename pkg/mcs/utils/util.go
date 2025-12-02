@@ -113,7 +113,7 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, "mcs-etcd-client")
+	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, etcdutil.McsEtcdClientUsager, true)
 	if err != nil {
 		return err
 	}

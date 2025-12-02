@@ -32,9 +32,9 @@ import (
 
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
-	LoadTimestamp(groupID uint32) (time.Time, error)
-	SaveTimestamp(groupID uint32, ts time.Time, leadership *election.Leadership) error
-	DeleteTimestamp(groupID uint32) error
+	LoadTimestamp(ctx context.Context, groupID uint32) (time.Time, error)
+	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error
+	DeleteTimestamp(ctx context.Context, groupID uint32) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -44,7 +44,7 @@ var _ TSOStorage = (*StorageEndpoint)(nil)
 // we must ensure that all keyspace groups are merged into the default
 // keyspace group. This guarantees the monotonicity of the TSO by loading
 // the timestamp from a single key.
-func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
+func (se *StorageEndpoint) LoadTimestamp(ctx context.Context, groupID uint32) (time.Time, error) {
 	key := keypath.TimestampPath(groupID)
 	value, err := se.Load(key)
 	if err != nil {
@@ -68,7 +68,7 @@ func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
 
 // SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
 // before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
-func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadership *election.Leadership) error {
+func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error {
 	logFilds := []zap.Field{
 		zap.Uint32("group-id", groupID),
 		zap.Time("ts", ts),
@@ -81,7 +81,7 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 	if len(leadership.GetLeaderValue()) == 0 {
 		return errors.Errorf("%s due to leadership has not been granted yet", errs.NotLeaderErr)
 	}
-	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+	return se.RunInTxn(ctx, func(txn kv.Txn) error {
 		// Ensure the current server is leader by reading and comparing the leader value.
 		leaderValue, err := txn.Load(leadership.GetLeaderKey())
 		if err != nil {
@@ -114,8 +114,8 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 }
 
 // DeleteTimestamp deletes the timestamp from the storage.
-func (se *StorageEndpoint) DeleteTimestamp(groupID uint32) error {
-	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+func (se *StorageEndpoint) DeleteTimestamp(ctx context.Context, groupID uint32) error {
+	return se.RunInTxn(ctx, func(txn kv.Txn) error {
 		return txn.Remove(keypath.TimestampPath(groupID))
 	})
 }

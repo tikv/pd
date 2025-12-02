@@ -2382,7 +2382,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 		}
 	}
 	res, err :=
-		kv.NewSlowLogTxn(s.client).Then(ops...).Commit()
+		kv.NewSlowLogTxn(s.client.Ctx(), s.client).Then(ops...).Commit()
 	if err != nil {
 		return &pdpb.StoreGlobalConfigResponse{}, err
 	}

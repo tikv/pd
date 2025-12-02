@@ -48,7 +48,7 @@ type healthyClient struct {
 // healthChecker is used to check the health of etcd endpoints. Inside the checker,
 // we will maintain a map from each available etcd endpoint to its healthyClient.
 type healthChecker struct {
-	source         string
+	source         EtcdClientUsager
 	tickerInterval time.Duration
 	tlsConfig      *tls.Config
 
@@ -70,14 +70,14 @@ func initHealthChecker(
 	tickerInterval time.Duration,
 	tlsConfig *tls.Config,
 	client *clientv3.Client,
-	source string,
+	source EtcdClientUsager,
 ) {
 	healthChecker := &healthChecker{
 		source:             source,
 		tickerInterval:     tickerInterval,
 		tlsConfig:          tlsConfig,
 		client:             client,
-		endpointCountState: etcdStateGauge.WithLabelValues(source, endpointLabel),
+		endpointCountState: etcdStateGauge.WithLabelValues(string(source), endpointLabel),
 	}
 	// A health checker has the same lifetime with the given etcd client.
 	ctx := client.Ctx()
@@ -96,7 +96,7 @@ func (checker *healthChecker) syncer(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			log.Info("etcd client is closed, exit the endpoint syncer goroutine",
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 			return
 		case <-ticker.C:
 			checker.update()
@@ -113,7 +113,7 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			log.Info("etcd client is closed, exit the health inspector goroutine",
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 			checker.close()
 			return
 		case <-ticker.C:
@@ -127,7 +127,7 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 				if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
 					log.Info("no available endpoint, try to reset endpoints",
 						zap.Strings("last-endpoints", lastEps),
-						zap.String("source", checker.source))
+						zap.String("source", string(checker.source)))
 					resetClientEndpoints(checker.client, lastEps...)
 				}
 				continue
@@ -140,7 +140,7 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 					zap.String("num-change", fmt.Sprintf("%d->%d", oldNum, newNum)),
 					zap.Strings("last-endpoints", lastEps),
 					zap.Strings("endpoints", checker.client.Endpoints()),
-					zap.String("source", checker.source))
+					zap.String("source", string(checker.source)))
 			}
 			lastAvailable = time.Now()
 		}
@@ -196,7 +196,7 @@ func (checker *healthChecker) patrol(ctx context.Context) (lastEps, pickedEps []
 				log.Warn("etcd endpoint is unhealthy",
 					zap.String("endpoint", ep),
 					zap.Duration("took", took),
-					zap.String("source", checker.source))
+					zap.String("source", string(checker.source)))
 				return
 			}
 			healthState.Set(1)
@@ -256,7 +256,7 @@ func (checker *healthChecker) pickEps(probeCh <-chan healthProbe) []string {
 					zap.Duration("max-latency", maxLatency),
 					zap.Duration("took", probe.took),
 					zap.String("endpoint", probe.ep),
-					zap.String("source", checker.source))
+					zap.String("source", string(checker.source)))
 				pickedEps = append(pickedEps, probe.ep)
 			}
 		}
@@ -282,7 +282,7 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 			log.Info("reset evicted etcd endpoint picked count",
 				zap.String("endpoint", ep),
 				zap.Int("previous-count", count),
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 		}
 		return true
 	})
@@ -298,7 +298,7 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 		checker.evictedEps.Store(ep, 0)
 		log.Info("evicted etcd endpoint found",
 			zap.String("endpoint", ep),
-			zap.String("source", checker.source))
+			zap.String("source", string(checker.source)))
 	}
 	// Find all endpoints which are in both `pickedEps` and `evictedEps` to
 	// increase their picked count.
@@ -310,7 +310,7 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 				zap.Int("picked-count-threshold", pickedCountThreshold),
 				zap.Int("picked-count", count.(int)+1),
 				zap.String("endpoint", ep),
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 		}
 	}
 }
@@ -330,7 +330,7 @@ func (checker *healthChecker) filterEps(eps []string) []string {
 				zap.Int("picked-count-threshold", pickedCountThreshold),
 				zap.Int("picked-count", count.(int)),
 				zap.String("endpoint", ep),
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 		}
 		pickedEps = append(pickedEps, ep)
 	}
@@ -339,7 +339,7 @@ func (checker *healthChecker) filterEps(eps []string) []string {
 	if len(pickedEps) == 0 {
 		log.Warn("all etcd endpoints are evicted, use the picked endpoints directly",
 			zap.Strings("endpoints", eps),
-			zap.String("source", checker.source))
+			zap.String("source", string(checker.source)))
 		return eps
 	}
 	return pickedEps
@@ -349,7 +349,7 @@ func (checker *healthChecker) update() {
 	eps := checker.syncURLs()
 	if len(eps) == 0 {
 		log.Warn("no available etcd endpoint returned by etcd cluster",
-			zap.String("source", checker.source))
+			zap.String("source", string(checker.source)))
 		return
 	}
 	epMap := make(map[string]struct{}, len(eps))
@@ -371,7 +371,7 @@ func (checker *healthChecker) update() {
 			log.Info("etcd server might be offline, try to remove it",
 				zap.Duration("since-last-health", since),
 				zap.String("endpoint", ep),
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 			checker.removeClient(ep)
 			continue
 		}
@@ -380,7 +380,7 @@ func (checker *healthChecker) update() {
 			log.Info("etcd server might be disconnected, try to reconnect",
 				zap.Duration("since-last-health", since),
 				zap.String("endpoint", ep),
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 			resetClientEndpoints(client.Client, ep)
 		}
 	}
@@ -390,7 +390,7 @@ func (checker *healthChecker) update() {
 		if _, ok := epMap[ep]; !ok {
 			log.Info("remove stale etcd client",
 				zap.String("endpoint", ep),
-				zap.String("source", checker.source))
+				zap.String("source", string(checker.source)))
 			checker.removeClient(ep)
 		}
 		return true
@@ -418,7 +418,7 @@ func (checker *healthChecker) initClient(ep string) {
 	if err != nil {
 		log.Error("failed to create etcd healthy client",
 			zap.String("endpoint", ep),
-			zap.String("source", checker.source),
+			zap.String("source", string(checker.source)),
 			zap.Error(err))
 		return
 	}
@@ -429,8 +429,8 @@ func (checker *healthChecker) storeClient(ep string, client *clientv3.Client, la
 	checker.healthyClients.Store(ep, &healthyClient{
 		Client:      client,
 		lastHealth:  lastHealth,
-		healthState: etcdStateGauge.WithLabelValues(checker.source, ep),
-		latency:     etcdEndpointLatency.WithLabelValues(checker.source, ep),
+		healthState: etcdStateGauge.WithLabelValues(string(checker.source), ep),
+		latency:     etcdEndpointLatency.WithLabelValues(string(checker.source), ep),
 	})
 }
 
@@ -441,7 +441,7 @@ func (checker *healthChecker) removeClient(ep string) {
 		if err := healthyCli.Close(); err != nil {
 			log.Error("failed to close etcd healthy client",
 				zap.String("endpoint", ep),
-				zap.String("source", checker.source),
+				zap.String("source", string(checker.source)),
 				zap.Error(err))
 		}
 	}
@@ -453,7 +453,7 @@ func (checker *healthChecker) syncURLs() (eps []string) {
 	resp, err := ListEtcdMembers(clientv3.WithRequireLeader(checker.client.Ctx()), checker.client)
 	if err != nil {
 		log.Warn("failed to list members",
-			zap.String("source", checker.source),
+			zap.String("source", string(checker.source)),
 			errs.ZapError(err))
 		return nil
 	}

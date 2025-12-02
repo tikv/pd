@@ -50,7 +50,7 @@ func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistr
 	switch serviceName {
 	case constant.TSOServiceName, constant.SchedulingServiceName, constant.ResourceManagerServiceName:
 		servicePath := keypath.ServicePath(serviceName)
-		resps, err := kv.NewSlowLogTxn(client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
+		resps, err := kv.NewSlowLogTxn(client.Ctx(), client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
 		if err != nil {
 			return nil, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
 		}
