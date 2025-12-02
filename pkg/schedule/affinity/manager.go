@@ -70,8 +70,8 @@ type Manager struct {
 	// The following members are protected by RWMutex.
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
-	regions             map[uint64]regionCache
-	unavailableStores   map[uint64]condition
+	regions             map[uint64]regionCache       // {region_id} -> regionCache
+	unavailableStores   map[uint64]condition         // {store_id} -> condition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges, cached in memory to reduce labeler lock contention

@@ -103,6 +103,18 @@ func (m *Manager) checkStoresAvailability() {
 	if isUnavailableStoresChanged {
 		m.setGroupStateChanges(unavailableStores, groupStateChanges)
 	}
+	m.collectMetrics()
+}
+
+// collectMetrics collects the global metrics of the affinity manager.
+func (m *Manager) collectMetrics() {
+	m.RLock()
+	defer m.RUnlock()
+
+	// Collect global metrics
+	affinityGroupCount.Set(float64(len(m.groups)))
+	affinityRegionCount.Set(float64(len(m.regions)))
+	affinityAffinityRegionCount.Set(float64(m.affinityRegionCount))
 }
 
 func (m *Manager) generateUnavailableStores() map[uint64]condition {
