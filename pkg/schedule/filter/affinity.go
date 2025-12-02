@@ -58,14 +58,14 @@ const (
 )
 
 // AllowAutoSplit returns true if the region can be auto split
-func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reason pdpb.AutoSplitReason) bool {
+func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reason pdpb.SplitReason) bool {
 	if region == nil {
 		// The default behavior is to allow it.
 		return true
 	}
 
 	switch reason {
-	case pdpb.AutoSplitReason_SIZE, pdpb.AutoSplitReason_LOAD:
+	case pdpb.SplitReason_SIZE, pdpb.SplitReason_LOAD:
 	default:
 		// For ADMIN type, splitting is always allowed.
 		return true

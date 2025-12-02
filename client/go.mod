@@ -5,7 +5,6 @@ go 1.23.12
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
-replace github.com/pingcap/kvproto => github.com/hundundm/kvproto v0.0.0-20251126155736-721eaf36c9e4
 
 require (
 	github.com/BurntSushi/toml v0.3.1
@@ -15,7 +14,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250616075548-d951fb623bb3
+	github.com/pingcap/kvproto v0.0.0-20251202064041-b6fd818387cd
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.9.0

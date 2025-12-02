@@ -46,7 +46,7 @@ type Operation struct {
 	ChangePeerV2    *pdpb.ChangePeerV2
 	SwitchWitnesses *pdpb.BatchSwitchWitness
 	// PD requires preventing the auto-splitting of this region.
-	ChangeAutoSplit *pdpb.ChangeAutoSplit
+	ChangeSplit *pdpb.ChangeSplit
 }
 
 // HeartbeatStream is an interface.
@@ -221,7 +221,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 			SplitRegion:     op.SplitRegion,
 			ChangePeerV2:    op.ChangePeerV2,
 			SwitchWitnesses: op.SwitchWitnesses,
-			ChangeAutoSplit: op.ChangeAutoSplit,
+			ChangeSplit:     op.ChangeSplit,
 		}
 	default:
 		resp = &pdpb.RegionHeartbeatResponse{
@@ -235,7 +235,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 			SplitRegion:     op.SplitRegion,
 			ChangePeerV2:    op.ChangePeerV2,
 			SwitchWitnesses: op.SwitchWitnesses,
-			ChangeAutoSplit: op.ChangeAutoSplit,
+			ChangeSplit:     op.ChangeSplit,
 		}
 	}
 
