@@ -231,6 +231,21 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
+	// Check if keyspace with that name already exists before allocating ID.
+	// This prevents unnecessary ID allocation when the name already exists.
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		nameExists, _, err := manager.store.LoadKeyspaceID(txn, request.Name)
+		if err != nil {
+			return err
+		}
+		if nameExists {
+			return errs.ErrKeyspaceExists
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	// Allocate new keyspaceID.
 	newID, err := manager.allocID()
 	if err != nil {
@@ -330,6 +345,28 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	}
 	// Validate purposed name's legality.
 	if err := validateName(name); err != nil {
+		return nil, err
+	}
+	// Check if keyspace with that name or ID already exists before processing.
+	// This provides early validation and better error handling.
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		nameExists, _, err := manager.store.LoadKeyspaceID(txn, name)
+		if err != nil {
+			return err
+		}
+		if nameExists {
+			return errs.ErrKeyspaceExists
+		}
+		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, id)
+		if err != nil {
+			return err
+		}
+		if loadedMeta != nil {
+			return errs.ErrKeyspaceExists
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])

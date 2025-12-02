@@ -47,6 +47,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	router "github.com/tikv/pd/pkg/mcs/router/server"
+	rc "github.com/tikv/pd/pkg/mcs/router/server/config"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -141,6 +143,23 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup
+}
+
+// StartSingleRouterServerWithoutCheck creates and starts a router server with default config for testing.
+func StartSingleRouterServerWithoutCheck(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*router.Server, func(), error) {
+	cfg := rc.NewConfig()
+	cfg.BackendEndpoints = backendEndpoints
+	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
+	cfg, err := router.GenerateConfig(cfg)
+	re.NoError(err)
+	s, cleanup, err := router.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return !s.IsClosed()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	return s, cleanup, nil
 }
 
 // StartSingleTSOTestServerWithoutCheck creates and starts a tso server with default config for testing.
@@ -876,4 +895,16 @@ func MustCallSchedulerConfigAPI(
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// NewResourceManagerTestServer creates a resource manager server with given config for testing.
+func NewResourceManagerTestServer(ctx context.Context, cfg *rm.Config) (*rm.Server, testutil.CleanupFunc, error) {
+	s := rm.CreateServer(ctx, cfg)
+	if err := s.Run(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		s.Close()
+	}
+	return s, cleanup, nil
 }

@@ -446,7 +446,7 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 			return false
 		}
 		r4.Adjust()
-		return suite.Equal(r.GetID(), r8.Regions[0].ID) && r8.Count == 1
+		return r8.Count == 1 && len(r8.Regions) > 0 && suite.Equal(r.GetID(), r8.Regions[0].ID)
 	})
 }
 

@@ -107,7 +107,7 @@ type Server struct {
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 
-	cluster   *Cluster
+	cluster   atomic.Value // *Cluster
 	hbStreams *hbstream.HeartbeatStreams
 	storage   *endpoint.StorageEndpoint
 
@@ -222,12 +222,15 @@ func (s *Server) updatePDMemberLoop() {
 					// double check
 					break
 				}
-				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
-					if status.Leader != curLeader {
-						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+				cluster := s.GetCluster()
+				if cluster != nil {
+					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+						if status.Leader != curLeader {
+							log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						}
+						curLeader = ep.ID
+						break
 					}
-					curLeader = ep.ID
-					break
 				}
 			}
 		}
@@ -408,7 +411,11 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 
 // GetCluster returns the cluster.
 func (s *Server) GetCluster() *Cluster {
-	return s.cluster
+	cluster := s.cluster.Load()
+	if cluster == nil {
+		return nil
+	}
+	return cluster.(*Cluster)
 }
 
 // GetBasicCluster returns the basic cluster.
@@ -501,14 +508,16 @@ func (s *Server) startCluster(context.Context) error {
 		return err
 	}
 	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), constant.SchedulingServiceName, s.basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	cluster, err := NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
 	if err != nil {
 		return err
 	}
+	s.cluster.Store(cluster)
 	// Inject the cluster components into the config watcher after the scheduler controller is created.
-	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
+	s.configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	// Start the rule watcher after the cluster is created.
-	err = s.startRuleWatcher()
+	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
 	if err != nil {
 		return err
 	}
@@ -517,12 +526,16 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.cluster.StartBackgroundJobs()
+	cluster.StartBackgroundJobs()
 	return nil
 }
 
 func (s *Server) stopCluster() {
-	s.cluster.StopBackgroundJobs()
+	cluster := s.GetCluster()
+	if cluster != nil {
+		s.cluster.Store((*Cluster)(nil))
+		cluster.StopBackgroundJobs()
+	}
 	s.stopWatcher()
 }
 
