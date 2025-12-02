@@ -30,7 +30,6 @@ type OpInfluence struct {
 // NewOpInfluence creates a OpInfluence.
 func NewOpInfluence() *OpInfluence {
 	return &OpInfluence{
-		mu:              syncutil.Mutex{},
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
 }
@@ -40,20 +39,24 @@ func (m *OpInfluence) Add(other *OpInfluence) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, v := range other.StoresInfluence {
-		m.GetStoreInfluence(id).add(v)
+		m.getOrCreateStoreInfluenceWithLock(id).add(v)
 	}
 }
 
-// GetStoreInfluence get storeInfluence of specific store.
-func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
-	m.mu.Lock()
-	defer m.mu.Lock()
+func (m *OpInfluence) getOrCreateStoreInfluenceWithLock(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
 		m.StoresInfluence[id] = storeInfluence
 	}
 	return storeInfluence
+}
+
+// GetStoreInfluence get storeInfluence of specific store.
+func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getOrCreateStoreInfluenceWithLock(id)
 }
 
 // StoreInfluence records influences that pending operators will make.
