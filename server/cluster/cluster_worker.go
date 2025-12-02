@@ -140,7 +140,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 
 	region := c.GetRegion(reqRegion.GetId())
 	if !filter.AllowAutoSplit(c, region, request.Reason) {
-		c.hbstreams.SendMsg(region, &hbstream.Operation{ChangeAutoSplit: &pdpb.ChangeAutoSplit{Disabled: true}})
+		c.hbstreams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
 		return nil, errors.New("cannot split affinity region")
 	}
 
