@@ -105,14 +105,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
 		}, []string{"type", "rw", "dim"})
 
-	evictedSlowStoreStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "evicted_slow_store_status",
-			Help:      "Store evicted status due to slow",
-		}, []string{"store", "slow_type"})
-
 	evictedStoppingStoreStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -120,14 +112,6 @@ var (
 			Name:      "evicted_stopping_store_status",
 			Help:      "Store evicted status due to stopping",
 		}, []string{"store"})
-
-	slowStoreTriggerLimitGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "slow_store_trigger_limit",
-			Help:      "slow store trigger limit",
-		}, []string{"store", "slow_type"})
 
 	storeSlowTrendEvictedStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -197,9 +181,7 @@ func init() {
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
-	prometheus.MustRegister(evictedSlowStoreStatusGauge)
 	prometheus.MustRegister(evictedStoppingStoreStatusGauge)
-	prometheus.MustRegister(slowStoreTriggerLimitGauge)
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
@@ -268,6 +250,14 @@ func balanceRangeCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.BalanceRangeScheduler.String(), event)
 }
 
+func evictSlowStoreCounterWithEvent(event string) prometheus.Counter {
+	return schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), event)
+}
+
+func evictStoppingStoreCounterWithEvent(event string) prometheus.Counter {
+	return schedulerCounter.WithLabelValues(types.EvictStoppingStoreScheduler.String(), event)
+}
+
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
 var (
 	balanceLeaderScheduleCounter         = balanceLeaderCounterWithEvent("schedule")
@@ -293,8 +283,8 @@ var (
 	evictLeaderNoTargetStoreCounter = evictLeaderCounterWithEvent("no-target-store")
 	evictLeaderNewOperatorCounter   = evictLeaderCounterWithEvent("new-operator")
 
-	evictSlowStoreCounter     = schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), "schedule")
-	evictStoppingStoreCounter = schedulerCounter.WithLabelValues(types.EvictStoppingStoreScheduler.String(), "schedule")
+	evictSlowStoreCounter     = evictSlowStoreCounterWithEvent("schedule")
+	evictStoppingStoreCounter = evictStoppingStoreCounterWithEvent("schedule")
 
 	grantHotRegionCounter     = grantHotRegionCounterWithEvent("schedule")
 	grantHotRegionSkipCounter = grantHotRegionCounterWithEvent("skip")
