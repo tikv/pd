@@ -1006,7 +1006,9 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyOverlappingRanges() {
 		var listResp *handlers.AffinityGroupsResponse
 		testutil.Eventually(re, func() bool {
 			listResp = mustGetAllAffinityGroups(re, serverAddr)
-			return len(listResp.AffinityGroups) == 2
+			g1, ok1 := listResp.AffinityGroups["group-1"]
+			g2, ok2 := listResp.AffinityGroups["group-2"]
+			return ok1 && ok2 && g1.RangeCount == 1 && g2.RangeCount == 1
 		})
 		re.Equal(1, listResp.AffinityGroups["group-1"].RangeCount)
 		re.Equal(1, listResp.AffinityGroups["group-2"].RangeCount)
