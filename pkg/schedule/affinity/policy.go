@@ -41,7 +41,7 @@ var (
 // ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
-	// TODO: Improve the strategy.
+	// In the future, we may want to use a more sophisticated strategy rather than first-win.
 	if group == nil || !group.RegularSchedulingEnabled {
 		return
 	}
@@ -50,7 +50,6 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	for i, voter := range region.GetVoters() {
 		voterStoreIDs[i] = voter.GetStoreId()
 	}
-	// TODO: Update asynchronously to avoid blocking the Checker.
 	_, _ = m.updateAffinityGroupPeersWithAffinityVer(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
 }
 

@@ -257,7 +257,6 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) {
 		return
 	}
 
-	// TODO: support batch updating all partitions in one call when needed.
 	if len(defs) != 1 {
 		cmd.Println("Specify --partition to target a single affinity group in partitioned tables")
 		return
