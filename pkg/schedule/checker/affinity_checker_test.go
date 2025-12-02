@@ -612,7 +612,7 @@ func TestAffinityCheckerMergePath(t *testing.T) {
 	defer cancel()
 
 	opt := mockconfig.NewTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(20)
+	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -659,7 +659,7 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 	defer cancel()
 
 	opt := mockconfig.NewTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(20)
+	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -696,7 +696,7 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 	defer cancel()
 
 	opt := mockconfig.NewTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(20)
+	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -757,7 +757,7 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	defer cancel()
 
 	opt := mockconfig.NewTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(20)
+	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -770,8 +770,8 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	region2 := tc.GetRegion(2)
 
 	region1 = region1.Clone(
-		core.SetApproximateSize(30), // Too large to merge
-		core.SetApproximateKeys(30000),
+		core.SetApproximateSize(70), // Too large to merge under 60 MB limit
+		core.SetApproximateKeys(700000),
 		core.WithStartKey([]byte("a")),
 		core.WithEndKey([]byte("b")),
 	)
@@ -1012,7 +1012,7 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	defer cancel()
 
 	opt := mockconfig.NewTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(20) // Max size 20, Max keys 200000
+	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -1022,13 +1022,63 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	tc.AddLeaderRegion(2, 1, 2, 3)
 	region1 := tc.GetRegion(1).Clone(
-		core.SetApproximateSize(15), // 15 size (Source)
+		core.SetApproximateSize(45), // Source fits under 60 MB limit
+		core.SetApproximateKeys(450000),
+		core.WithStartKey([]byte("a")),
+		core.WithEndKey([]byte("b")),
+	)
+	region2 := tc.GetRegion(2).Clone(
+		core.SetApproximateSize(25), // Total: 70 > 60
+		core.SetApproximateKeys(250000),
+		core.WithStartKey([]byte("b")),
+		core.WithEndKey([]byte("c")),
+	)
+
+	tc.PutRegion(region1)
+	tc.PutRegion(region2)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, opt)
+
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
+	re.NoError(err)
+
+	// MergeCheck should return nil because the combined size (70) exceeds the limit (60)
+	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
+	re.NotNil(groupState)
+	ops := checker.MergeCheck(region1, groupState)
+	re.Nil(ops, "Merged size exceeds MaxAffinityMergeRegionSize")
+}
+
+// TestAffinityMergeCheckTargetRespectsLargerGlobalLimit verifies that the merge
+// limit follows the larger value between MaxMergeRegionSize and MaxAffinityMergeRegionSize.
+func TestAffinityMergeCheckTargetRespectsLargerGlobalLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetMaxAffinityMergeRegionSize(20) // Smaller than the default MaxMergeRegionSize (54)
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	region1 := tc.GetRegion(1).Clone(
+		core.SetApproximateSize(15),
 		core.SetApproximateKeys(150000),
 		core.WithStartKey([]byte("a")),
 		core.WithEndKey([]byte("b")),
 	)
 	region2 := tc.GetRegion(2).Clone(
-		core.SetApproximateSize(6), // 6 size (Target). Total: 21 > 20
+		core.SetApproximateSize(6), // Total size: 21, allowed by global limit 54
 		core.SetApproximateKeys(60000),
 		core.WithStartKey([]byte("b")),
 		core.WithEndKey([]byte("c")),
@@ -1048,11 +1098,10 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
 	re.NoError(err)
 
-	// MergeCheck should return nil because the combined size (21) exceeds the limit (20)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
 	ops := checker.MergeCheck(region1, groupState)
-	re.Nil(ops, "Merged size exceeds MaxAffinityMergeRegionSize")
+	re.NotNil(ops, "Merge should be allowed because the effective limit follows the larger global max")
 }
 
 // TestAffinityMergeCheckAdjacentUnhealthy tests that merging is blocked if the adjacent region is unhealthy.

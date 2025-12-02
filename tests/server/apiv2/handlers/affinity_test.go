@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	pdpb "github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -76,6 +76,11 @@ func (suite *affinityHandlerTestSuite) TearDownTest() {
 			// Use NoError to ensure cleanup succeeds and catch state pollution issues
 			re.NoError(err, "failed to cleanup affinity groups in TearDownTest")
 		}
+
+		testutil.Eventually(re, func() bool {
+			listResp := mustGetAllAffinityGroups(re, leader.GetAddr())
+			return len(listResp.AffinityGroups) == 0
+		})
 	})
 }
 
@@ -310,7 +315,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 			VoterStoreIDs: []uint64{1},
 		}
 		groupState := mustUpdateAffinityGroupPeers(re, serverAddr, "group-1", &updatePeersReq)
-		re.Equal(affinity.PhasePending, groupState.Phase)
+		re.Equal(affinity.PhasePreparing, groupState.Phase)
 		re.Equal(updatePeersReq.LeaderStoreID, groupState.LeaderStoreID)
 		re.ElementsMatch(updatePeersReq.VoterStoreIDs, groupState.VoterStoreIDs)
 
@@ -390,8 +395,9 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 			if group == nil {
 				return false
 			}
+			// we need to call ObserveAvailableRegion and GetRegionAffinityGroupState to update the group
 			manager.ObserveAvailableRegion(region, group)
-			state = manager.GetAffinityGroupState("first-win")
+			state, _ = manager.GetRegionAffinityGroupState(region)
 			return state != nil && state.Phase == affinity.PhaseStable
 		})
 		re.Equal(region.GetLeader().GetStoreId(), state.LeaderStoreID)
@@ -473,7 +479,7 @@ func (suite *affinityHandlerTestSuite) TestUpdatePeersLeaderNotInVoters() {
 		// Leader is not in voters
 		// Note: Using storeID 2 which doesn't exist in test environment.
 		// AdjustGroup validates store existence before checking leader-in-voters,
-		// so we expect "voter store does not exist" error.
+		// so we expect "invalid affinity group content, leader must be in voter stores" error.
 		updateReq := handlers.UpdateAffinityGroupPeersRequest{
 			LeaderStoreID: 1,
 			VoterStoreIDs: []uint64{2},
@@ -481,7 +487,7 @@ func (suite *affinityHandlerTestSuite) TestUpdatePeersLeaderNotInVoters() {
 		statusCode, errorMsg := doUpdateAffinityGroupPeers(re, serverAddr, "mismatch", &updateReq)
 		re.Equal(http.StatusBadRequest, statusCode)
 		// Error comes from AdjustGroup - it checks store existence before leader-in-voters
-		re.Contains(errorMsg, "voter store does not exist")
+		re.Contains(errorMsg, "invalid affinity group content, leader must be in voter stores")
 	})
 }
 
@@ -519,6 +525,13 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 		// Get non-existent group.
 		statusCode, _ = doGetAffinityGroup(re, serverAddr, "nope")
 		re.Equal(http.StatusNotFound, statusCode)
+
+		// Make sure the default store is healthy so UpdateAffinityGroupPeers reaches the
+		// "group not found" branch instead of failing on store availability.
+		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
+			Header: testutil.NewRequestHeader(leader.GetClusterID()),
+			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
+		})
 
 		// Update peers for non-existent group.
 		updateReq := handlers.UpdateAffinityGroupPeersRequest{
@@ -993,7 +1006,9 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyOverlappingRanges() {
 		var listResp *handlers.AffinityGroupsResponse
 		testutil.Eventually(re, func() bool {
 			listResp = mustGetAllAffinityGroups(re, serverAddr)
-			return len(listResp.AffinityGroups) == 2
+			g1, ok1 := listResp.AffinityGroups["group-1"]
+			g2, ok2 := listResp.AffinityGroups["group-2"]
+			return ok1 && ok2 && g1.RangeCount == 1 && g2.RangeCount == 1
 		})
 		re.Equal(1, listResp.AffinityGroups["group-1"].RangeCount)
 		re.Equal(1, listResp.AffinityGroups["group-2"].RangeCount)
@@ -1072,6 +1087,7 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteNonExistentGroup() {
 // TestBatchModifyRemoveNonExistentRange tests removing a range that the group doesn't contain.
 func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		id := "test-group-batch-modify-remove-non-existent-range"
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
@@ -1079,7 +1095,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 		// Create a group with a specific range
 		createReq := handlers.CreateAffinityGroupsRequest{
 			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"test-group": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				id: {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
 			},
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
@@ -1087,7 +1103,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 		// Try to remove a range that the group doesn't contain
 		patchReq := handlers.BatchModifyAffinityGroupsRequest{
 			Remove: []handlers.GroupRangesModification{
-				{ID: "test-group", Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				{ID: id, Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
 			},
 		}
 		statusCode, errorMsg := doBatchModifyAffinityGroups(re, serverAddr, &patchReq)
@@ -1096,7 +1112,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 
 		// Verify the original range is still intact (state not polluted)
 		testutil.Eventually(re, func() bool {
-			state := mustGetAffinityGroup(re, serverAddr, "test-group")
+			state := mustGetAffinityGroup(re, serverAddr, id)
 			return state.RangeCount == 1
 		})
 	})

@@ -126,7 +126,7 @@ func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, stri
 }
 
 // MatchMicroserviceRedirect checks rules, rewrites path in-place, and returns (matched, targetAddr).
-// If matched but no primary is available, it returns matched=false to let caller handle locally.
+// If matched but no primary is available, it returns matched=true with empty addr so caller can handle the redirect error.
 func MatchMicroserviceRedirect(
 	r *http.Request,
 	rules []RedirectRule,
@@ -160,7 +160,7 @@ func MatchMicroserviceRedirect(
 		if !ok || addr == "" {
 			log.Warn("failed to get the service primary addr when trying to match redirect rules",
 				zap.String("path", r.URL.Path))
-			continue
+			return true, ""
 		}
 		// If the URL contains escaped characters, use RawPath instead of Path
 		origin := r.URL.Path
