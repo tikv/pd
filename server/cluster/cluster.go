@@ -327,7 +327,7 @@ func (c *RaftCluster) InitCluster(
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
 	c.keyRangeManager = keyrange.NewManager()
-	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager) // TODO: pass affinity manager
+	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
 }
 
