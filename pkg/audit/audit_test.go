@@ -65,14 +65,9 @@ func TestPrometheusBackend(t *testing.T) {
 	ts := httptest.NewServer(promhttp.Handler())
 	defer ts.Close()
 
-<<<<<<< HEAD
-	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
-=======
 	backend := NewPrometheusBackend(serviceAuditHistogramTest, serviceAuditCounterTest, true)
 	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
 	re.NoError(err)
->>>>>>> d0a0f38b7 (metrics: reduce audit metrics cardinality (#9552))
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
 	info.CallerID = "user1"
