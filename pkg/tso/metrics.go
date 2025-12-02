@@ -19,6 +19,7 @@ import "github.com/prometheus/client_golang/prometheus"
 const (
 	pdNamespace  = "pd"
 	tsoNamespace = "tso"
+	dcLabel      = "dc"
 	typeLabel    = "type"
 	groupLabel   = "group"
 )
@@ -31,7 +32,7 @@ var (
 			Subsystem: "tso",
 			Name:      "events",
 			Help:      "Counter of tso events",
-		}, []string{typeLabel, groupLabel})
+		}, []string{typeLabel, groupLabel, dcLabel})
 
 	tsoGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -39,7 +40,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "tso",
 			Help:      "Record of tso metadata.",
-		}, []string{typeLabel, groupLabel})
+		}, []string{typeLabel, groupLabel, dcLabel})
 
 	tsoGap = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -47,7 +48,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "tso_gap_millionseconds",
 			Help:      "The minimal (non-zero) TSO gap",
-		}, []string{groupLabel})
+		}, []string{groupLabel, dcLabel})
 
 	tsoOpDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -56,7 +57,7 @@ var (
 			Name:      "tso_operation_duration_seconds",
 			Help:      "Bucketed histogram of processing time(s) of the TSO operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{typeLabel, groupLabel})
+		}, []string{typeLabel, groupLabel, dcLabel})
 
 	tsoAllocatorRole = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -64,7 +65,7 @@ var (
 			Subsystem: "tso",
 			Name:      "role",
 			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
-		}, []string{groupLabel})
+		}, []string{groupLabel, dcLabel})
 
 	// Keyspace Group metrics
 	keyspaceGroupStateGauge = prometheus.NewGaugeVec(
@@ -127,41 +128,43 @@ type tsoMetrics struct {
 	precheckLogicalOverflowEvent prometheus.Counter
 	errGlobalTSOPersistEvent     prometheus.Counter
 	// others
-	tsoPhysicalGauge    prometheus.Gauge
-	tsoPhysicalGapGauge prometheus.Gauge
+	tsoPhysicalGauge      prometheus.Gauge
+	tsoPhysicalGapGauge   prometheus.Gauge
+	globalTSOSyncRTTGauge prometheus.Gauge
 }
 
-func newTSOMetrics(groupID string) *tsoMetrics {
+func newTSOMetrics(groupID string, dcLocation string) *tsoMetrics {
 	return &tsoMetrics{
-		syncEvent:                    tsoCounter.WithLabelValues("sync", groupID),
-		skipSyncEvent:                tsoCounter.WithLabelValues("skip_sync", groupID),
-		syncOKEvent:                  tsoCounter.WithLabelValues("sync_ok", groupID),
-		errSaveSyncTSEvent:           tsoCounter.WithLabelValues("err_save_sync_ts", groupID),
-		errLeaseResetTSEvent:         tsoCounter.WithLabelValues("err_lease_reset_ts", groupID),
-		errResetSmallPhysicalTSEvent: tsoCounter.WithLabelValues("err_reset_physical_small_ts", groupID),
-		errResetSmallLogicalTSEvent:  tsoCounter.WithLabelValues("err_reset_logical_small_ts", groupID),
-		errResetLargeTSEvent:         tsoCounter.WithLabelValues("err_reset_large_ts", groupID),
-		errSaveResetTSEvent:          tsoCounter.WithLabelValues("err_save_reset_ts", groupID),
-		resetTSOOKEvent:              tsoCounter.WithLabelValues("reset_tso_ok", groupID),
-		saveEvent:                    tsoCounter.WithLabelValues("save", groupID),
-		slowSaveEvent:                tsoCounter.WithLabelValues("slow_save", groupID),
-		systemTimeSlowEvent:          tsoCounter.WithLabelValues("system_time_slow", groupID),
-		skipSaveEvent:                tsoCounter.WithLabelValues("skip_save", groupID),
-		errSaveUpdateTSEvent:         tsoCounter.WithLabelValues("err_save_update_ts", groupID),
-		notLeaderAnymoreEvent:        tsoCounter.WithLabelValues("not_leader_anymore", groupID),
-		logicalOverflowEvent:         tsoCounter.WithLabelValues("logical_overflow", groupID),
-		exceededMaxRetryEvent:        tsoCounter.WithLabelValues("exceeded_max_retry", groupID),
-		syncSaveDuration:             tsoOpDuration.WithLabelValues("sync_save", groupID),
-		resetSaveDuration:            tsoOpDuration.WithLabelValues("reset_save", groupID),
-		updateSaveDuration:           tsoOpDuration.WithLabelValues("update_save", groupID),
-		notLeaderEvent:               tsoCounter.WithLabelValues("not_leader", groupID),
-		globalTSOSyncEvent:           tsoCounter.WithLabelValues("global_tso_sync", groupID),
-		globalTSOEstimateEvent:       tsoCounter.WithLabelValues("global_tso_estimate", groupID),
-		globalTSOPersistEvent:        tsoCounter.WithLabelValues("global_tso_persist", groupID),
-		errGlobalTSOPersistEvent:     tsoCounter.WithLabelValues("global_tso_persist_err", groupID),
-		precheckLogicalOverflowEvent: tsoCounter.WithLabelValues("precheck_logical_overflow", groupID),
-		tsoPhysicalGauge:             tsoGauge.WithLabelValues("tso", groupID),
-		tsoPhysicalGapGauge:          tsoGap.WithLabelValues(groupLabel),
+		syncEvent:                    tsoCounter.WithLabelValues("sync", groupID, dcLocation),
+		skipSyncEvent:                tsoCounter.WithLabelValues("skip_sync", groupID, dcLocation),
+		syncOKEvent:                  tsoCounter.WithLabelValues("sync_ok", groupID, dcLocation),
+		errSaveSyncTSEvent:           tsoCounter.WithLabelValues("err_save_sync_ts", groupID, dcLocation),
+		errLeaseResetTSEvent:         tsoCounter.WithLabelValues("err_lease_reset_ts", groupID, dcLocation),
+		errResetSmallPhysicalTSEvent: tsoCounter.WithLabelValues("err_reset_physical_small_ts", groupID, dcLocation),
+		errResetSmallLogicalTSEvent:  tsoCounter.WithLabelValues("err_reset_logical_small_ts", groupID, dcLocation),
+		errResetLargeTSEvent:         tsoCounter.WithLabelValues("err_reset_large_ts", groupID, dcLocation),
+		errSaveResetTSEvent:          tsoCounter.WithLabelValues("err_save_reset_ts", groupID, dcLocation),
+		resetTSOOKEvent:              tsoCounter.WithLabelValues("reset_tso_ok", groupID, dcLocation),
+		saveEvent:                    tsoCounter.WithLabelValues("save", groupID, dcLocation),
+		slowSaveEvent:                tsoCounter.WithLabelValues("slow_save", groupID, dcLocation),
+		systemTimeSlowEvent:          tsoCounter.WithLabelValues("system_time_slow", groupID, dcLocation),
+		skipSaveEvent:                tsoCounter.WithLabelValues("skip_save", groupID, dcLocation),
+		errSaveUpdateTSEvent:         tsoCounter.WithLabelValues("err_save_update_ts", groupID, dcLocation),
+		notLeaderAnymoreEvent:        tsoCounter.WithLabelValues("not_leader_anymore", groupID, dcLocation),
+		logicalOverflowEvent:         tsoCounter.WithLabelValues("logical_overflow", groupID, dcLocation),
+		exceededMaxRetryEvent:        tsoCounter.WithLabelValues("exceeded_max_retry", groupID, dcLocation),
+		syncSaveDuration:             tsoOpDuration.WithLabelValues("sync_save", groupID, dcLocation),
+		resetSaveDuration:            tsoOpDuration.WithLabelValues("reset_save", groupID, dcLocation),
+		updateSaveDuration:           tsoOpDuration.WithLabelValues("update_save", groupID, dcLocation),
+		notLeaderEvent:               tsoCounter.WithLabelValues("not_leader", groupID, dcLocation),
+		globalTSOSyncEvent:           tsoCounter.WithLabelValues("global_tso_sync", groupID, dcLocation),
+		globalTSOEstimateEvent:       tsoCounter.WithLabelValues("global_tso_estimate", groupID, dcLocation),
+		globalTSOPersistEvent:        tsoCounter.WithLabelValues("global_tso_persist", groupID, dcLocation),
+		errGlobalTSOPersistEvent:     tsoCounter.WithLabelValues("global_tso_persist_err", groupID, dcLocation),
+		precheckLogicalOverflowEvent: tsoCounter.WithLabelValues("precheck_logical_overflow", groupID, dcLocation),
+		tsoPhysicalGauge:             tsoGauge.WithLabelValues("tso", groupID, dcLocation),
+		tsoPhysicalGapGauge:          tsoGap.WithLabelValues(groupLabel, dcLocation),
+		globalTSOSyncRTTGauge:        tsoGauge.WithLabelValues("global_tso_sync_rtt", groupID, dcLocation),
 	}
 }
 
