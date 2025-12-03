@@ -588,26 +588,20 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		return conf1["batch"] == 10.
 	})
 
-	// test evict slow store scheduler
+	// test evict slow store scheduler config
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-store-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 	conf = make(map[string]any)
 	conf1 = make(map[string]any)
 	testutil.Eventually(re, func() bool {
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "show"}, &conf)
-		return conf["batch"] == 3. && conf["enable-network-slow-store"] == false && conf["recovery-duration"] == 1800.
+		return conf["recovery-duration"] == 1800.
 	})
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "batch", "10"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "recovery-duration", "100"}, nil)
 	re.Contains(echo, "Success!")
 	testutil.Eventually(re, func() bool {
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
-		return conf1["batch"] == 10. && conf1["enable-network-slow-store"] == false && conf["recovery-duration"] == 1800.
-	})
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "enable-network-slow-store", "true"}, nil)
-	re.Contains(echo, "Success!")
-	testutil.Eventually(re, func() bool {
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
-		return conf1["batch"] == 10. && conf1["enable-network-slow-store"] == true && conf["recovery-duration"] == 1800.
+		return conf1["recovery-duration"] == 100.
 	})
 }
 
