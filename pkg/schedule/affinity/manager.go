@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -141,10 +140,6 @@ func (m *Manager) IsAvailable() bool {
 	return len(m.groups) > 0
 }
 
-func (*Manager) getExpiredAt() uint64 {
-	return uint64(time.Now().Unix()) + defaultDegradedExpirationSeconds
-}
-
 func (m *Manager) initGroupLocked(group *Group) {
 	if _, ok := m.groups[group.ID]; ok {
 		log.Error("group already initialized", zap.String("group-id", group.ID))
@@ -157,8 +152,8 @@ func (m *Manager) initGroupLocked(group *Group) {
 			LeaderStoreID:   group.LeaderStoreID,
 			VoterStoreIDs:   slices.Clone(group.VoterStoreIDs),
 		},
-		State:               groupDegraded,
-		DegradedExpiredAt:   m.getExpiredAt(),
+		state:               groupDegraded,
+		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
 		Regions:             make(map[uint64]regionCache),
@@ -213,7 +208,7 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	groupInfo.State = groupAvailable
+	groupInfo.SetState(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	m.resetCountLocked(groupInfo)
@@ -226,25 +221,7 @@ func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
 	if !ok {
 		return
 	}
-
-	// If the expiration time has been reached, change groupDegraded to groupExpired.
-	if groupInfo.State == groupDegraded && groupInfo.IsExpired() {
-		groupInfo.State = groupExpired
-	}
-
-	// Update State
-	state = state.toGroupState()
-	if state == groupDegraded {
-		// Only set the expiration time when transitioning from groupAvailable to groupDegraded.
-		// Do nothing if the original state is already groupDegraded or groupExpired.
-		if groupInfo.State == groupAvailable {
-			groupInfo.State = groupDegraded
-			groupInfo.DegradedExpiredAt = m.getExpiredAt()
-		}
-	} else {
-		groupInfo.State = state
-	}
-
+	groupInfo.SetState(state)
 	m.resetCountLocked(groupInfo)
 }
 
