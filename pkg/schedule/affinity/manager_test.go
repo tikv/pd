@@ -99,7 +99,7 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 	// Test 7: Group not in effect should return false
 	manager.ExpireAffinityGroup("test_group")
 	groupInfo = manager.getGroupForTest(re, "test_group")
-	re.Equal(groupExpired, groupInfo.State)
+	re.Equal(groupExpired, groupInfo.GetState())
 	region6 := generateRegionForTest(6, []uint64{1, 2, 3}, ranges[5])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region6)
 	re.False(isAffinity, "Group not in effect should return false")
@@ -536,12 +536,12 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify group became degraded
 	groupInfo := manager.getGroupForTest(re, "expiration-test")
-	re.Equal(groupDegraded, groupInfo.State.toGroupState())
+	re.Equal(groupDegraded, groupInfo.GetState())
 	re.False(groupInfo.IsAffinitySchedulingEnabled())
 
 	// Record the expiration time
 	manager.RLock()
-	expirationTime := groupInfo.DegradedExpiredAt
+	expirationTime := groupInfo.degradedExpiredAt
 	manager.RUnlock()
 
 	// Verify the expiration time is approximately 10 minutes (600 seconds) from now
@@ -551,7 +551,7 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Simulate time passing beyond expiration
 	manager.Lock()
-	groupInfo.DegradedExpiredAt = uint64(time.Now().Add(-time.Hour).Unix())
+	groupInfo.degradedExpiredAt = uint64(time.Now().Add(-time.Hour).Unix())
 	manager.Unlock()
 
 	// Run availability check again
@@ -559,7 +559,7 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify group is now expired
 	re.True(groupInfo.IsExpired())
-	re.Equal(groupExpired, groupInfo.getState())
+	re.Equal(groupExpired, groupInfo.GetState())
 
 	// Verify scheduling is still disallowed
 	groupState2 := manager.GetAffinityGroupState("expiration-test")
