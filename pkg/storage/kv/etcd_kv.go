@@ -97,7 +97,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 		failpoint.Return(errors.New("save failed"))
 	})
 
-	txn := NewSlowLogTxn(kv.client.Ctx(), kv.client)
+	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
 		e := errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
@@ -112,7 +112,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 // Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
-	txn := NewSlowLogTxn(kv.client.Ctx(), kv.client)
+	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		err = errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
@@ -128,7 +128,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 // CreateRawTxn creates a transaction that provides interface in if-then-else pattern.
 func (kv *etcdKVBase) CreateRawTxn() RawTxn {
 	return &rawTxnWrapper{
-		inner: NewSlowLogTxn(kv.client.Ctx(), kv.client),
+		inner: NewSlowLogTxn(kv.client),
 	}
 }
 
@@ -139,7 +139,16 @@ type SlowLogTxn struct {
 }
 
 // NewSlowLogTxn create a SlowLogTxn.
-func NewSlowLogTxn(ctx context.Context, client *clientv3.Client) clientv3.Txn {
+func NewSlowLogTxn(client *clientv3.Client) clientv3.Txn {
+	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
+	return &SlowLogTxn{
+		Txn:    client.Txn(ctx),
+		cancel: cancel,
+	}
+}
+
+// NewSlowLogTxnWithContext creates a SlowLogTxn with a specific context.
+func NewSlowLogTxnWithContext(ctx context.Context, client *clientv3.Client) clientv3.Txn {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	return &SlowLogTxn{
 		Txn:    client.Txn(ctx),
@@ -277,7 +286,7 @@ func (txn *etcdTxn) commit() error {
 		time.Sleep(10 * time.Second)
 	})
 	// Using slowLogTxn to commit transaction.
-	slowLogTxn := NewSlowLogTxn(txn.ctx, txn.kv.client)
+	slowLogTxn := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client)
 	slowLogTxn.If(txn.conditions...)
 	slowLogTxn.Then(txn.operations...)
 	resp, err := slowLogTxn.Commit()

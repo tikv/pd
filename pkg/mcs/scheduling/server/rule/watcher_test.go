@@ -95,7 +95,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.DefaultEtcdClientUsager, true)
+	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientUsager, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 

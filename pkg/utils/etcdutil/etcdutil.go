@@ -267,8 +267,8 @@ const (
 type EtcdClientUsager string
 
 const (
-	// DefaultEtcdClientUsager is the default etcd client usager, used for testing.
-	DefaultEtcdClientUsager EtcdClientUsager = "default-etcd-client"
+	// TestEtcdClientUsager is the default etcd client usager, used for testing.
+	TestEtcdClientUsager EtcdClientUsager = "default-etcd-client"
 	// ServerEtcdClientUsager is the etcd client usager for server, most of the time.
 	ServerEtcdClientUsager EtcdClientUsager = "server-etcd-client"
 	// ElectionEtcdClientUsager is the etcd client usager for election and tso.

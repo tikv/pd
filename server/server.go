@@ -754,7 +754,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(keypath.ClusterPath()), "=", 0)
-	resp, err := kv.NewSlowLogTxn(s.client.Ctx(), s.client).If(bootstrapCmp).Then(ops...).Commit()
+	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
 		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
@@ -1955,7 +1955,7 @@ func (s *Server) MarkSnapshotRecovering() error {
 	log.Info("mark snapshot recovering")
 	markPath := keypath.RecoveringMarkPath()
 	// the value doesn't matter, set to a static string
-	_, err := kv.NewSlowLogTxn(s.ctx, s.client).
+	_, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
 		Then(clientv3.OpPut(markPath, "on")).
 		Commit()
@@ -1985,7 +1985,7 @@ func (s *Server) MarkPitrRestoreMode() error {
 	log.Info("mark pitr restore mode")
 	markPath := keypath.PitrRestoreModeMarkPath()
 	// the value doesn't matter, set to a static string
-	_, err := kv.NewSlowLogTxn(s.ctx, s.client).
+	_, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
 		Then(clientv3.OpPut(markPath, "on")).
 		Commit()

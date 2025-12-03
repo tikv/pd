@@ -200,7 +200,7 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	}
 
 	value := typeutil.Uint64ToBytes(end)
-	txn := kv.NewSlowLogTxn(alloc.client.Ctx(), alloc.client)
+	txn := kv.NewSlowLogTxn(alloc.client)
 	resp, err := txn.If(cmps...).Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()

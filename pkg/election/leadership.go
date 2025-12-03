@@ -204,7 +204,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	finalCmps = append(finalCmps, cmps...)
 	// The leader key must not exist, so the CreateRevision is 0.
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
-	resp, err := kv.NewSlowLogTxn(ls.client.Ctx(), ls.client).
+	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
 		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.ID.Load().(clientv3.LeaseID)))).
 		Commit()
@@ -240,7 +240,7 @@ func (ls *Leadership) Check() bool {
 // LeaderTxn returns txn() with a leader comparison to guarantee that
 // the transaction can be executed only if the server is leader.
 func (ls *Leadership) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
-	txn := kv.NewSlowLogTxn(ls.client.Ctx(), ls.client)
+	txn := kv.NewSlowLogTxn(ls.client)
 	return txn.If(append(cs, ls.leaderCmp())...)
 }
 
@@ -250,7 +250,7 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 
 // DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
 func (ls *Leadership) DeleteLeaderKey() error {
-	resp, err := kv.NewSlowLogTxn(ls.client.Ctx(), ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
+	resp, err := kv.NewSlowLogTxn(ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}

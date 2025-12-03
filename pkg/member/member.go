@@ -438,7 +438,7 @@ func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
 // SetMemberDeployPath saves a member's binary deploy path.
 func (m *Member) SetMemberDeployPath(id uint64) error {
 	key := keypath.MemberBinaryDeployPath(id)
-	txn := kv.NewSlowLogTxn(m.client.Ctx(), m.client)
+	txn := kv.NewSlowLogTxn(m.client)
 	execPath, err := os.Executable()
 	deployPath := filepath.Dir(execPath)
 	if err != nil {
@@ -483,7 +483,7 @@ func (m *Member) GetMemberGitHash(id uint64) (string, error) {
 // SetMemberBinaryVersion saves a member's binary version.
 func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
 	key := keypath.MemberBinaryVersionPath(id)
-	txn := kv.NewSlowLogTxn(m.client.Ctx(), m.client)
+	txn := kv.NewSlowLogTxn(m.client)
 	res, err := txn.Then(clientv3.OpPut(key, releaseVersion)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
@@ -497,7 +497,7 @@ func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error 
 // SetMemberGitHash saves a member's git hash.
 func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 	key := keypath.MemberGitHashPath(id)
-	txn := kv.NewSlowLogTxn(m.client.Ctx(), m.client)
+	txn := kv.NewSlowLogTxn(m.client)
 	res, err := txn.Then(clientv3.OpPut(key, gitHash)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
