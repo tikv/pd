@@ -419,6 +419,20 @@ func (grt *groupRUTracker) getRUPerSec() float64 {
 	return totalRUPerSec
 }
 
+func (grt *groupRUTracker) cleanupStaleRUTrackers() []uint64 {
+	grt.Lock()
+	defer grt.Unlock()
+	staleClientUniqueIDs := make([]uint64, 0, len(grt.ruTrackers))
+	for clientUniqueID, rt := range grt.ruTrackers {
+		if time.Since(rt.lastSampleTime) < slotExpireTimeout {
+			continue
+		}
+		delete(grt.ruTrackers, clientUniqueID)
+		staleClientUniqueIDs = append(staleClientUniqueIDs, clientUniqueID)
+	}
+	return staleClientUniqueIDs
+}
+
 // conciliateFillRates is used to conciliate the fill rate of each resource group.
 // Under the service limit, there might be multiple resource groups with different
 // priorities consuming the RU at the same time. In this case, we need to conciliate

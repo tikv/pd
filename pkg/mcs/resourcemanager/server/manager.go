@@ -532,6 +532,23 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				m.metrics.cleanupAllMetrics(r, keyspaceName)
 				m.ruCollector.remove(keyspaceName)
 			}
+			// Clean up the stale RU trackers.
+			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+				for _, group := range krgm.getResourceGroupList(false, true) {
+					grt := krgm.getGroupRUTracker(group.Name)
+					if grt == nil {
+						continue
+					}
+					if staleClientUniqueIDs := grt.cleanupStaleRUTrackers(); len(staleClientUniqueIDs) > 0 {
+						log.Info("cleaned up stale ru trackers",
+							zap.Uint32("keyspace-id", krgm.keyspaceID),
+							zap.String("group-name", group.Name),
+							zap.Int("stale-client-unique-ids-count", len(staleClientUniqueIDs)),
+							zap.Uint64s("stale-client-unique-ids", staleClientUniqueIDs),
+						)
+					}
+				}
+			}
 		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {

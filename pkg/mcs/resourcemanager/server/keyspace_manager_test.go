@@ -460,6 +460,17 @@ func TestGroupRUTracker(t *testing.T) {
 
 	re.Len(grt.ruTrackers, 10)
 	re.InDelta(totalRUPerSec, grt.getRUPerSec(), floatDelta)
+
+	staleClientUniqueIDs := grt.cleanupStaleRUTrackers()
+	re.Empty(staleClientUniqueIDs)
+	re.Len(grt.ruTrackers, 10)
+	// Manually set the last sample time to be stale.
+	for i := range 10 {
+		grt.getOrCreateRUTracker(uint64(i)).lastSampleTime = time.Now().Add(-slotExpireTimeout - time.Second)
+	}
+	staleClientUniqueIDs = grt.cleanupStaleRUTrackers()
+	re.Len(staleClientUniqueIDs, 10)
+	re.Empty(grt.ruTrackers)
 }
 
 func TestPersistAndReloadIntegrity(t *testing.T) {
