@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -551,8 +552,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
 					metrics.setGroup(group, keyspaceName)
 					// Record the tracked RU per second.
-					if rt := krgm.getGroupRUTracker(groupName); rt != nil {
-						metrics.setSampledRUPerSec(rt.getRUPerSec())
+					if grt := krgm.getGroupRUTracker(groupName); grt != nil {
+						for clientUniqueID, ruPerSec := range grt.getRUPerSecMap() {
+							sampledRequestUnitPerSec.WithLabelValues(groupName, keyspaceName, strconv.FormatUint(clientUniqueID, 10)).Set(ruPerSec)
+						}
 					}
 				}
 			}

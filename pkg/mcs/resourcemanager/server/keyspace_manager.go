@@ -388,35 +388,45 @@ func newGroupRUTracker() *groupRUTracker {
 	}
 }
 
-func (gtr *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracker {
-	gtr.RLock()
-	rt := gtr.ruTrackers[clientUniqueID]
-	gtr.RUnlock()
+func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracker {
+	grt.RLock()
+	rt := grt.ruTrackers[clientUniqueID]
+	grt.RUnlock()
 	if rt == nil {
-		gtr.Lock()
+		grt.Lock()
 		// Double check the RU tracker is not created by other goroutine.
-		rt = gtr.ruTrackers[clientUniqueID]
+		rt = grt.ruTrackers[clientUniqueID]
 		if rt == nil {
 			rt = newRUTracker(defaultRUTrackerTimeConstant)
-			gtr.ruTrackers[clientUniqueID] = rt
+			grt.ruTrackers[clientUniqueID] = rt
 		}
-		gtr.Unlock()
+		grt.Unlock()
 	}
 	return rt
 }
 
-func (gtr *groupRUTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
-	gtr.getOrCreateRUTracker(clientUniqueID).sample(now, totalRU)
+func (grt *groupRUTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
+	grt.getOrCreateRUTracker(clientUniqueID).sample(now, totalRU)
 }
 
-func (gtr *groupRUTracker) getRUPerSec() float64 {
-	gtr.RLock()
-	defer gtr.RUnlock()
+func (grt *groupRUTracker) getRUPerSec() float64 {
+	grt.RLock()
+	defer grt.RUnlock()
 	totalRUPerSec := 0.0
-	for _, rt := range gtr.ruTrackers {
+	for _, rt := range grt.ruTrackers {
 		totalRUPerSec += rt.getRUPerSec()
 	}
 	return totalRUPerSec
+}
+
+func (grt *groupRUTracker) getRUPerSecMap() map[uint64]float64 {
+	grt.RLock()
+	defer grt.RUnlock()
+	ruPerSecMap := make(map[uint64]float64)
+	for clientUniqueID, rt := range grt.ruTrackers {
+		ruPerSecMap[clientUniqueID] = rt.getRUPerSec()
+	}
+	return ruPerSecMap
 }
 
 // conciliateFillRates is used to conciliate the fill rate of each resource group.
