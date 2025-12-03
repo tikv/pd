@@ -496,7 +496,7 @@ func (suite *PDServiceForward) checkAvailableTSO(re *require.Assertions) {
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.NoError(err)
 	// try to update gc safe point
-	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1) //nolint:staticcheck
+	min, err := suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1) //nolint:staticcheck
 	re.NoError(err)
 	re.Equal(uint64(0), min)
 	// try to set external ts
