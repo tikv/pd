@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"fmt"
+	"maps"
 	"time"
 
 	"go.uber.org/zap"
@@ -146,26 +147,19 @@ func (m *Manager) generateUnavailableStores() map[uint64]condition {
 }
 
 func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (isUnavailableStoresChanged bool, groupStateChanges map[string]condition) {
-	m.RLock()
+	var logEntries []logEntry
+	groupStateChanges = make(map[string]condition)
+
 	// Validate whether unavailableStores has changed.
-	isUnavailableStoresChanged = len(m.unavailableStores) != len(unavailableStores)
+	m.RLock()
+	isUnavailableStoresChanged = !maps.Equal(unavailableStores, m.unavailableStores)
 	if !isUnavailableStoresChanged {
-		for storeID, state := range m.unavailableStores {
-			if state != unavailableStores[storeID] {
-				isUnavailableStoresChanged = true
-				break
-			}
-		}
-		if !isUnavailableStoresChanged {
-			m.RUnlock()
-			return false, nil
-		}
+		m.RUnlock()
+		return false, nil
 	}
+
 	// Analyze which Groups have changed state
 	// Collect log messages to print after releasing lock
-	var logEntries []logEntry
-
-	groupStateChanges = make(map[string]condition)
 	for _, groupInfo := range m.groups {
 		var unavailableStore uint64
 		var maxState condition
@@ -178,7 +172,7 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 			}
 		}
 		newState := maxState.toGroupState()
-		if newState != groupInfo.getState() {
+		if newState != groupInfo.GetState() {
 			groupStateChanges[groupInfo.ID] = newState
 			if unavailableStore != 0 {
 				logEntries = append(logEntries, logEntry{

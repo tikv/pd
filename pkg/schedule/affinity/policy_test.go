@@ -244,18 +244,18 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	re.NoError(err)
 	manager.checkStoresAvailability()
 	groupInfo := manager.getGroupForTest(re, "expire")
-	re.Equal(groupAvailable, groupInfo.State.toGroupState())
+	re.Equal(groupAvailable, groupInfo.GetState())
 
 	// Make store2 unhealthy so the group becomes degraded.
 	store2Disconnected := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Disconnected)
 	manager.checkStoresAvailability()
 	groupInfo = manager.getGroupForTest(re, "expire")
-	re.Equal(groupDegraded, groupInfo.State.toGroupState())
+	re.Equal(groupDegraded, groupInfo.GetState())
 
 	// Force the degraded state to be considered expired.
 	manager.Lock()
-	groupInfo.DegradedExpiredAt = uint64(time.Now().Add(-time.Hour).Unix())
+	groupInfo.degradedExpiredAt = uint64(time.Now().Add(-time.Hour).Unix())
 	manager.Unlock()
 
 	// Run availability check again without changing the unavailable store set.
