@@ -374,6 +374,16 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
 func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[string]string, error) {
+	failpoint.Inject("assignToSpecificKeyspaceGroup", func(val failpoint.Value) {
+		if groupID, ok := val.(int); ok {
+			config := map[string]string{
+				UserKindKey:           userKind.String(),
+				TSOKeyspaceGroupIDKey: strconv.Itoa(groupID),
+			}
+			failpoint.Return(config, nil)
+		}
+	})
+
 	if m == nil {
 		return map[string]string{}, nil
 	}
