@@ -93,15 +93,14 @@ func (suite *serverTestSuite) SetupSuite() {
 
 		tests.MustPutStore(re, suite.cluster, store)
 	}
-
 }
 
 func (suite *serverTestSuite) TearDownSuite() {
-	suite.cancel()
 	suite.routerCleanup()
 	suite.tsoCleanup()
 	suite.cluster.Destroy()
 	suite.routerServer.Close()
+	suite.cancel()
 }
 
 func (suite *serverTestSuite) SetupTest() {
@@ -119,6 +118,9 @@ func (suite *serverTestSuite) SetupTest() {
 func (suite *serverTestSuite) TearDownTest() {
 	suite.routerCleanup()
 	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop"))
+	testutil.Eventually(suite.Require(), func() bool {
+		return !suite.routerServer.IsReady()
+	})
 }
 
 func (suite *serverTestSuite) TestStoreAPI() {
@@ -130,18 +132,17 @@ func (suite *serverTestSuite) TestStoreAPI() {
 
 	store1 := uint64(1)
 	// make sure pd server can't support region grpc request
-	pdcli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
+	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
-	_, err = pdcli.GetStore(suite.ctx, store1)
-	re.Error(err, context.DeadlineExceeded)
-	pdcli.Close()
+	_, err = cli.GetStore(suite.ctx, store1)
+	re.Error(err)
+	defer cli.Close()
 
 	// test router store apis
-	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
-		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableRouterServiceHandler(true))
-	re.NoError(err)
-	defer cli.Close()
+	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
+	time.Sleep(1000 * time.Millisecond)
+
 	store, err := cli.GetStore(suite.ctx, store1)
 	re.NoError(err)
 	re.Equal(store1, store.GetId())
@@ -149,6 +150,10 @@ func (suite *serverTestSuite) TestStoreAPI() {
 	stores, err := cli.GetAllStores(suite.ctx)
 	re.NoError(err)
 	re.Len(stores, 2)
+
+	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, false))
+	_, err = cli.GetStore(suite.ctx, store1)
+	re.Error(err)
 }
 
 func (suite *serverTestSuite) TestRegionAPI() {
@@ -162,7 +167,7 @@ func (suite *serverTestSuite) TestRegionAPI() {
 		[]string{suite.backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	_, err = pdcli.GetRegionByID(suite.ctx, 1)
-	re.Error(err, context.DeadlineExceeded)
+	re.Error(err)
 	pdcli.Close()
 
 	// test region apis
@@ -207,21 +212,7 @@ func (suite *serverTestSuite) checkRegionAPI(cli pd.Client) {
 
 func (suite *serverTestSuite) TestBasicSync() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop"))
-	}()
-	regions := tests.InitRegions(10)
-	for _, region := range regions {
-		re.NoError(suite.cluster.HandleRegionHeartbeat(region))
-	}
-	tc, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-	re.NoError(err)
-	defer cleanup()
-	// check sync work well
-	testutil.Eventually(re, func() bool {
-		return tc.IsReady()
-	})
+	tc := suite.routerServer.GetCluster()
 	newRegion := tc.GetBasicCluster().GetRegion(1)
 	epoch := newRegion.GetRegionEpoch()
 	re.Equal(uint64(1), epoch.GetVersion())
@@ -255,11 +246,5 @@ func (suite *serverTestSuite) TestBasicSync() {
 	testutil.Eventually(re, func() bool {
 		newEpoch := tc.GetBasicCluster().GetRegion(1).GetRegionEpoch()
 		return newEpoch.GetVersion() == newRegion.GetRegionEpoch().GetVersion()
-	})
-
-	// stop router server and ensure it can not serve requests
-	tc.Close()
-	testutil.Eventually(re, func() bool {
-		return !tc.IsReady()
 	})
 }

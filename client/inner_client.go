@@ -72,6 +72,8 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		}
 		return err
 	}
+	c.routerSvcDiscovery = sd.NewRouterServiceDiscovery(c.ctx, c, c.serviceDiscovery,
+		c.keyspaceID, c.tlsCfg, c.option)
 
 	// Check if the router service client has been enabled.
 	if c.option.GetEnableRouterServiceHandler() {
@@ -118,13 +120,14 @@ func (c *innerClient) enableRouterClient() {
 		return
 	}
 	c.RUnlock()
-	c.group.Do("router-client", func() (interface{}, error) {
-		c.Lock()
-		defer c.Unlock()
+	_, err, _ := c.group.Do("router-client", func() (any, error) {
 		routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.routerSvcDiscovery, c.option)
 		c.routerClient = routerClient
 		return nil, nil
 	})
+	if err != nil {
+		log.Error("[pd] failed to enable router client", zap.Error(err))
+	}
 }
 
 func (c *innerClient) disableRouterClient() {
@@ -161,34 +164,17 @@ func (c *innerClient) routerServiceClientInitializer() {
 }
 
 func (c *innerClient) disableRouterServiceClient() {
-	c.Lock()
-	if c.routerSvcDiscovery == nil {
-		c.Unlock()
-		return
-	}
-	routerSvcDiscovery := c.routerSvcDiscovery
-	c.routerSvcDiscovery = nil
-	c.Unlock()
 	// Close the router client after the lock is released.
-	routerSvcDiscovery.Close()
+	c.routerSvcDiscovery.Close()
 }
 
 func (c *innerClient) enableRouterServiceClient() {
-	c.RLock()
-	if c.routerSvcDiscovery != nil {
-		c.RUnlock()
-		return
-	}
-	c.RUnlock()
-
-	c.group.Do("router-service", func() (interface{}, error) {
-		c.Lock()
-		defer c.Unlock()
-		routerSvcDiscovery := sd.NewRouterServiceDiscovery(c.ctx, c, c.serviceDiscovery,
-			c.keyspaceID, c.tlsCfg, c.option)
-		c.routerSvcDiscovery = routerSvcDiscovery
-		return nil, nil
+	_, err, _ := c.group.Do("router-service", func() (any, error) {
+		return nil, c.routerSvcDiscovery.Init()
 	})
+	if err != nil {
+		log.Error("[pd] failed to enable router service client", zap.Error(err))
+	}
 }
 
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
@@ -346,13 +332,12 @@ func (c *innerClient) getRegionAPIClient(ctx context.Context, options *opt.GetRe
 	}
 	if serviceClient != nil && serviceClient.GetClientConn() != nil && serviceClient.Available() {
 		return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
-	} else {
-		serviceClient = c.serviceDiscovery.GetServiceClient()
-		if serviceClient == nil || serviceClient.GetClientConn() == nil {
-			return nil, ctx, false
-		}
-		return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
 	}
+	serviceClient = c.serviceDiscovery.GetServiceClient()
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
+		return nil, ctx, false
+	}
+	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
 }
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.

@@ -257,6 +257,7 @@ func WithEnableRouterClient(enable bool) ClientOption {
 	}
 }
 
+// WithEnableRouterServiceHandler configures the client with router service handle option.
 func WithEnableRouterServiceHandler(enable bool) ClientOption {
 	return func(op *Option) {
 		op.SetEnableRouterServiceHandler(enable)

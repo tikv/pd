@@ -1,3 +1,4 @@
+// Copyright 2025 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,96 +76,114 @@ type routerServiceDiscovery struct {
 	option *opt.Option
 }
 
-func (c *routerServiceDiscovery) GetClusterID() uint64 {
-	return c.clusterID
+// GetClusterID returns the cluster ID of the router service.
+func (r *routerServiceDiscovery) GetClusterID() uint64 {
+	return r.clusterID
 }
 
-func (c *routerServiceDiscovery) GetKeyspaceID() uint32 {
-	return c.keyspaceID.Load()
+// GetKeyspaceID returns the keyspace ID of the router service.
+func (r *routerServiceDiscovery) GetKeyspaceID() uint32 {
+	return r.keyspaceID.Load()
 }
 
-func (c *routerServiceDiscovery) SetKeyspaceID(id uint32) {
-	c.keyspaceID.Store(id)
+// SetKeyspaceID sets the keyspace ID of the router service.
+func (r *routerServiceDiscovery) SetKeyspaceID(id uint32) {
+	r.keyspaceID.Store(id)
 }
 
-func (c *routerServiceDiscovery) GetKeyspaceGroupID() uint32 {
+// GetKeyspaceGroupID returns the keyspace group ID of the router service.
+func (*routerServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	return constants.DefaultKeyspaceGroupID
 }
 
-func (c *routerServiceDiscovery) GetServiceURLs() []string {
-	if c.urls.Load() == nil {
+// GetServiceURLs returns the URLs of the router service.
+func (r *routerServiceDiscovery) GetServiceURLs() []string {
+	if r.urls.Load() == nil {
 		return nil
 	}
-	return c.urls.Load().([]string)
+	return r.urls.Load().([]string)
 }
 
-func (c *routerServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
+// GetServingEndpointClientConn returns the gRPC client connection to the serving endpoint of the router service.
+func (*routerServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	log.Warn("[router-service] GetServingEndpointClientConn not supported")
 	return nil
 }
 
-func (c *routerServiceDiscovery) GetClientConns() *sync.Map {
-	return &c.clientConns
+// GetClientConns returns the gRPC client connections to the router service.
+func (r *routerServiceDiscovery) GetClientConns() *sync.Map {
+	return &r.clientConns
 }
 
-func (c *routerServiceDiscovery) GetServingURL() string {
+// GetServingURL returns the serving URL of the router service.
+func (*routerServiceDiscovery) GetServingURL() string {
 	log.Warn("[router-service]  GetServingURL not supported")
 	return ""
 }
 
-func (c *routerServiceDiscovery) GetBackupURLs() []string {
+// GetBackupURLs returns the backup URLs of the router service.
+func (*routerServiceDiscovery) GetBackupURLs() []string {
+	log.Warn("[router-service]  GetBackupURLs not supported")
 	return nil
 }
 
-func (c *routerServiceDiscovery) GetServiceClient() ServiceClient {
-	return c.GetServiceClientByKind(ForwardAPIKind)
+// GetServiceClient returns the ServiceClient of the router service.
+func (r *routerServiceDiscovery) GetServiceClient() ServiceClient {
+	return r.GetServiceClientByKind(ForwardAPIKind)
 }
 
-func (c *routerServiceDiscovery) GetServiceClientByKind(_ APIKind) ServiceClient {
-	client := c.balancer.get()
+// GetServiceClientByKind returns the ServiceClient of the router service.
+func (r *routerServiceDiscovery) GetServiceClientByKind(_ APIKind) ServiceClient {
+	client := r.balancer.get()
 	if client == nil {
 		return nil
 	}
 	return client
 }
 
-func (c *routerServiceDiscovery) GetAllServiceClients() []ServiceClient {
-	return c.serviceDiscovery.GetAllServiceClients()
+// GetAllServiceClients returns all the ServiceClient of the router service.
+func (r *routerServiceDiscovery) GetAllServiceClients() []ServiceClient {
+	return r.serviceDiscovery.GetAllServiceClients()
 }
 
-func (c *routerServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+// GetOrCreateGRPCConn creates a gRPC connection to the router service.
+func (r *routerServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	return grpcutil.GetOrCreateGRPCConn(r.ctx, &r.clientConns, url, r.tlsCfg, r.option.GRPCDialOptions...)
 }
 
 // ScheduleCheckMemberChanged schedules a check for member changes.
-func (c *routerServiceDiscovery) ScheduleCheckMemberChanged() {
+func (r *routerServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
-	case c.checkMembershipCh <- struct{}{}:
+	case r.checkMembershipCh <- struct{}{}:
 	default:
 	}
 }
 
-func (c *routerServiceDiscovery) CheckMemberChanged() error {
-	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
+// CheckMemberChanged checks if there is any membership change among the members of the router service.
+func (r *routerServiceDiscovery) CheckMemberChanged() error {
+	if err := r.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[router] failed to check member changed", errs.ZapError(err))
 	}
-	if err := innerRetry(c.ctx, queryRetryMaxTimes, c.updateMember); err != nil {
+	if err := innerRetry(r.ctx, queryRetryMaxTimes, r.updateMember); err != nil {
 		log.Error("[router] failed to update member", errs.ZapError(err))
 		return err
 	}
 	return nil
 }
 
-func (c *routerServiceDiscovery) ExecAndAddLeaderSwitchedCallback(_cb LeaderSwitchedCallbackFunc) {
+// ExecAndAddLeaderSwitchedCallback is a no-op for router service discovery.
+func (*routerServiceDiscovery) ExecAndAddLeaderSwitchedCallback(_cb LeaderSwitchedCallbackFunc) {
 	log.Warn("[router] leader switched callback function is disabled")
 }
 
-func (c *routerServiceDiscovery) AddLeaderSwitchedCallback(_cb LeaderSwitchedCallbackFunc) {
+// AddLeaderSwitchedCallback is a no-op for router service discovery.
+func (*routerServiceDiscovery) AddLeaderSwitchedCallback(_cb LeaderSwitchedCallbackFunc) {
 	log.Warn("[router] leader switched callback function is disabled")
 }
 
-func (c *routerServiceDiscovery) AddMembersChangedCallback(cb func()) {
-	c.callbacks.addMembersChangedCallback(cb)
+// AddMembersChangedCallback adds a callback to the router service discovery.
+func (r *routerServiceDiscovery) AddMembersChangedCallback(cb func()) {
+	r.callbacks.addMembersChangedCallback(cb)
 }
 
 // NewRouterServiceDiscovery returns a new client-side service discovery for the independent router service.
@@ -196,109 +215,105 @@ func NewRouterServiceDiscovery(
 		zap.Uint32("keyspace-id", keyspaceID),
 		zap.String("default-discovery-key", c.defaultDiscoveryKey))
 
-	if err := c.Init(); err != nil {
-		log.Warn("[router] failed to init router service discovery")
-	}
 	return c
 }
 
 // Init initialize the concrete client underlying
-func (c *routerServiceDiscovery) Init() error {
+func (r *routerServiceDiscovery) Init() error {
 	log.Info("initializing router service discovery",
-		zap.Int("max-retry-times", c.option.MaxRetryTimes),
+		zap.Int("max-retry-times", r.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
-	if err := innerRetry(c.ctx, c.option.MaxRetryTimes, c.updateMember); err != nil {
+	if err := innerRetry(r.ctx, r.option.MaxRetryTimes, r.updateMember); err != nil {
 		log.Error("failed to update member. initialization failed.", zap.Error(err))
-		c.cancel()
+		r.cancel()
 		return err
 	}
-	c.wg.Add(2)
-	go c.startCheckMemberLoop()
-	go c.nodeHealthCheckLoop()
+	r.wg.Add(2)
+	go r.startCheckMemberLoop()
+	go r.nodeHealthCheckLoop()
 	return nil
 }
 
-func (c *routerServiceDiscovery) updateMember() error {
-	urls, err := getMSMembers(c.ctx, c.defaultDiscoveryKey, c.metacli)
+func (r *routerServiceDiscovery) updateMember() error {
+	urls, err := getMSMembers(r.ctx, r.defaultDiscoveryKey, r.metacli)
 	if err != nil {
 		return err
 	}
 	if len(urls) == 0 {
 		return errs.ErrClientNoAvailableMember.GenWithStackByArgs()
 	}
-	changed := c.nodesChanged(urls)
+	changed := r.nodesChanged(urls)
 	if !changed {
 		return nil
 	}
-	c.updateURLs(urls)
-	c.updateNodes(urls)
+	r.updateURLs(urls)
+	r.updateNodes(urls)
 	return nil
 }
 
-func (c *routerServiceDiscovery) updateNodes(urls []string) {
+func (r *routerServiceDiscovery) updateNodes(urls []string) {
 	nodes := make(map[string]*serviceClient)
-	c.nodes.Range(func(key, value any) bool {
+	r.nodes.Range(func(key, value any) bool {
 		nodes[key.(string)] = value.(*serviceClient)
 		return true
 	})
 
 	for _, url := range urls {
 		if len(url) > 0 {
-			newUrl := tlsutil.PickMatchedURL([]string{url}, c.tlsCfg)
-			if client, ok := c.nodes.Load(newUrl); ok {
+			newURL := tlsutil.PickMatchedURL([]string{url}, r.tlsCfg)
+			if client, ok := r.nodes.Load(newURL); ok {
 				if client.(*serviceClient).GetClientConn() == nil {
-					conn, err := c.GetOrCreateGRPCConn(url)
+					conn, err := r.GetOrCreateGRPCConn(url)
 					if err != nil || conn == nil {
 						log.Warn("[pd] failed to connect follower", zap.String("follower", url), errs.ZapError(err))
 						continue
 					}
-					node := newPDServiceClient(url, c.GetServingURL(), conn, false)
-					c.nodes.Store(url, node)
+					node := newPDServiceClient(url, r.GetServingURL(), conn, false)
+					r.nodes.Store(url, node)
 				}
 			} else {
-				conn, err := c.GetOrCreateGRPCConn(url)
-				follower := newPDServiceClient(url, c.GetServingURL(), conn, false)
+				conn, err := r.GetOrCreateGRPCConn(url)
+				follower := newPDServiceClient(url, r.GetServingURL(), conn, false)
 				if err != nil || conn == nil {
 					log.Warn("[pd] failed to connect follower", zap.String("follower", url), errs.ZapError(err))
 				}
-				c.nodes.LoadOrStore(url, follower)
+				r.nodes.LoadOrStore(url, follower)
 			}
 		}
 	}
 	clients := make([]ServiceClient, 0, len(urls))
-	c.nodes.Range(func(_, value interface{}) bool {
+	r.nodes.Range(func(_, value any) bool {
 		clients = append(clients, value.(*serviceClient))
 		return true
 	})
-	c.balancer.set(clients)
-	return
+	r.balancer.set(clients)
 }
 
-func (c *routerServiceDiscovery) nodesChanged(urls []string) bool {
+func (r *routerServiceDiscovery) nodesChanged(urls []string) bool {
 	sort.Strings(urls)
-	oldURLs := c.GetServiceURLs()
+	oldURLs := r.GetServiceURLs()
 	return !reflect.DeepEqual(oldURLs, urls)
 }
 
-func (c *routerServiceDiscovery) updateURLs(urls []string) {
+func (r *routerServiceDiscovery) updateURLs(urls []string) {
 	sort.Strings(urls)
-	c.urls.Store(urls)
+	r.urls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
-	c.callbacks.onMembersChanged()
+	r.callbacks.onMembersChanged()
 	log.Info("[router] update member urls", zap.Strings("new-urls", urls))
 }
 
-func (c *routerServiceDiscovery) startCheckMemberLoop() {
-	defer c.wg.Done()
+func (r *routerServiceDiscovery) startCheckMemberLoop() {
+	defer r.wg.Done()
 
-	ctx, cancel := context.WithCancel(c.ctx)
+	ctx, cancel := context.WithCancel(r.ctx)
 	defer cancel()
 	ticker := time.NewTicker(MemberUpdateInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.checkMembershipCh:
+		case <-r.checkMembershipCh:
 		case <-ticker.C:
 		case <-ctx.Done():
 			log.Info("[router] exit check member loop")
@@ -307,7 +322,7 @@ func (c *routerServiceDiscovery) startCheckMemberLoop() {
 		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of router service discovery when failover happens on the
 		// router service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := innerRetry(c.ctx, queryRetryMaxTimes, c.updateMember); err != nil {
+		if err := innerRetry(r.ctx, queryRetryMaxTimes, r.updateMember); err != nil {
 			log.Error("[router] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -333,19 +348,16 @@ func innerRetry(
 }
 
 // Close releases all resources
-func (c *routerServiceDiscovery) Close() {
-	if c == nil {
-		return
-	}
+func (r *routerServiceDiscovery) Close() {
 	log.Info("closing router service discovery")
-	c.cancel()
-	c.wg.Wait()
+	r.cancel()
+	r.wg.Wait()
 
-	c.clientConns.Range(func(key, cc any) bool {
+	r.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[router service] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
-		c.clientConns.Delete(key)
+		r.clientConns.Delete(key)
 		return true
 	})
 
@@ -369,7 +381,6 @@ func getMSMembers(ctx context.Context, serviceKey string, client metastorage.Cli
 			continue
 		}
 		ret = append(ret, entry.ServiceAddr)
-
 	}
 	return ret, nil
 }
@@ -405,10 +416,10 @@ func (e *ServiceRegistryEntry) Deserialize(data []byte) error {
 	return nil
 }
 
-func (c *routerServiceDiscovery) nodeHealthCheckLoop() {
-	defer c.wg.Done()
+func (r *routerServiceDiscovery) nodeHealthCheckLoop() {
+	defer r.wg.Done()
 
-	nodeCheckLoopCtx, nodeCheckLoopCancel := context.WithCancel(c.ctx)
+	nodeCheckLoopCtx, nodeCheckLoopCancel := context.WithCancel(r.ctx)
 	defer nodeCheckLoopCancel()
 
 	ticker := time.NewTicker(MemberHealthCheckInterval)
@@ -416,16 +427,16 @@ func (c *routerServiceDiscovery) nodeHealthCheckLoop() {
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-r.ctx.Done():
 			return
 		case <-ticker.C:
-			c.checkNodeHealth(nodeCheckLoopCtx)
+			r.checkNodeHealth(nodeCheckLoopCtx)
 		}
 	}
 }
 
-func (c *routerServiceDiscovery) checkNodeHealth(ctx context.Context) {
-	c.nodes.Range(func(_, value any) bool {
+func (r *routerServiceDiscovery) checkNodeHealth(ctx context.Context) {
+	r.nodes.Range(func(_, value any) bool {
 		// To ensure that the leader's healthy check is not delayed, shorten the duration.
 		ctx, cancel := context.WithTimeout(ctx, MemberHealthCheckInterval/3)
 		defer cancel()
@@ -433,5 +444,5 @@ func (c *routerServiceDiscovery) checkNodeHealth(ctx context.Context) {
 		serviceClient.checkNetworkAvailable(ctx)
 		return true
 	})
-	c.balancer.check()
+	r.balancer.check()
 }
