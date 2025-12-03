@@ -306,6 +306,11 @@ func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// IsAffinitySchedulingEnabled returns if the affinity scheduling is enabled.
+func (o *PersistConfig) IsAffinitySchedulingEnabled() bool {
+	return o.GetScheduleConfig().EnableAffinityScheduling
+}
+
 // GetLowSpaceRatio returns the low space ratio.
 func (o *PersistConfig) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio
@@ -561,6 +566,24 @@ func (o *PersistConfig) GetMaxPendingPeerCount() uint64 {
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistConfig) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLUintOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// It returns 0 if the MaxMergeRegionSize is 0 or the MaxAffinityMergeRegionSize is 0.
+// It returns the greater one between the MaxMergeRegionSize and the MaxAffinityMergeRegionSize.
+func (o *PersistConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	size, exist, err := o.getTTLUint(sc.MaxMergeRegionSizeKey)
+	if exist && err == nil && size == 0 {
+		return 0
+	}
+	affinitySize := o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
+	if affinitySize == 0 {
+		return 0
+	}
+	if size > affinitySize {
+		return size
+	}
+	return affinitySize
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.

@@ -65,6 +65,7 @@ const (
 	defaultEnablePlacementRules            = true
 	defaultEnableWitness                   = false
 	defaultHaltScheduling                  = false
+	defaultEnableAffinityScheduling        = true
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
@@ -80,6 +81,13 @@ const (
 	defaultHotRegionsWriteInterval = 10 * time.Minute
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+
+	// defaultMaxAffinityMergeRegionSize is the default maximum size of affinity region when regions can be merged.
+	// It means 1024 MB, according https://docs.pingcap.com/tidb/stable/tune-region-performance/#use-region-split-size-to-adjust-region-size
+	defaultMaxAffinityMergeRegionSize = 1024
+
+	// RegionSizeToKeysRatio is the ratio between region size and region keys.
+	RegionSizeToKeysRatio = 10000
 )
 
 var (
@@ -314,6 +322,12 @@ type ScheduleConfig struct {
 
 	// PatrolRegionWorkerCount is the number of workers to patrol region.
 	PatrolRegionWorkerCount int `toml:"patrol-region-worker-count" json:"patrol-region-worker-count"`
+
+	// EnableAffinityScheduling is the option to enable affinity scheduling.
+	EnableAffinityScheduling bool `toml:"enable-affinity-scheduling" json:"enable-affinity-scheduling,string,omitempty"`
+	// If the size of region is smaller than MaxAffinityMergeRegionSize,
+	// and it is affinity, it will try to merge with adjacent regions.
+	MaxAffinityMergeRegionSize uint64 `toml:"max-affinity-merge-region-size" json:"max-affinity-merge-region-size"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -342,6 +356,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("max-merge-region-size") {
 		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	}
+	if !meta.IsDefined("max-affinity-merge-region-size") {
+		configutil.AdjustUint64(&c.MaxAffinityMergeRegionSize, defaultMaxAffinityMergeRegionSize)
 	}
 	configutil.AdjustDuration(&c.SplitMergeInterval, DefaultSplitMergeInterval)
 	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
@@ -422,6 +439,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("halt-scheduling") {
 		c.HaltScheduling = defaultHaltScheduling
 	}
+	if !meta.IsDefined("enable-affinity-scheduling") {
+		c.EnableAffinityScheduling = defaultEnableAffinityScheduling
+	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
@@ -472,7 +492,17 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	if keys := c.MaxMergeRegionKeys; keys != 0 {
 		return keys
 	}
-	return c.MaxMergeRegionSize * 10000
+	return c.MaxMergeRegionSize * RegionSizeToKeysRatio
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// It returns 0 if the MaxMergeRegionSize is 0 or the MaxAffinityMergeRegionSize is 0.
+// It returns the greater one between the MaxMergeRegionSize and the MaxAffinityMergeRegionSize.
+func (c *ScheduleConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	if c.MaxMergeRegionSize == 0 || c.MaxAffinityMergeRegionSize == 0 {
+		return 0
+	}
+	return max(c.MaxAffinityMergeRegionSize, c.MaxMergeRegionSize)
 }
 
 func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
