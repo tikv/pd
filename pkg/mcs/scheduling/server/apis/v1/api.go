@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
@@ -282,13 +283,9 @@ func changeLogLevel(c *gin.Context) {
 // @Router   /config [get]
 func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-<<<<<<< HEAD
-	cfg := svr.GetConfig()
-	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, cfg)
-=======
 	localCfg := svr.GetConfig()
 	if svr.IsServing() {
+		localCfg.Schedule.MaxMergeRegionKeys = localCfg.Schedule.GetMaxMergeRegionKeys()
 		c.IndentedJSON(http.StatusOK, localCfg)
 		return
 	}
@@ -297,7 +294,7 @@ func getConfig(c *gin.Context) {
 	// We need to get the dynamic config from the primary server.
 	// If no primary server is found, return an error.
 	// Or if the primary server is itself but not serving, return an error.
-	primaryAddrs := svr.GetParticipant().GetServingUrls()
+	primaryAddrs := svr.GetLeaderListenUrls()
 	if len(primaryAddrs) == 0 || primaryAddrs[0] == svr.GetAddr() {
 		c.String(http.StatusServiceUnavailable, "no available primary server found, cannot get dynamic config")
 		return
@@ -329,9 +326,9 @@ func getConfig(c *gin.Context) {
 	// Schedule and Replication are dynamic configs managed by primary, so we need to merge them.
 	mergedCfg := localCfg
 	mergedCfg.Schedule = primaryCfg.Schedule
+	mergedCfg.Schedule.MaxMergeRegionKeys = mergedCfg.Schedule.GetMaxMergeRegionKeys()
 	mergedCfg.Replication = primaryCfg.Replication
 	c.IndentedJSON(http.StatusOK, &mergedCfg)
->>>>>>> 5de7eaebe (mcs: fix /config and /admin scheduling forward logic (#9827))
 }
 
 // @Tags     admin

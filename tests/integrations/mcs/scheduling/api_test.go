@@ -15,12 +15,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-<<<<<<< HEAD
-	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
-=======
 	"github.com/tikv/pd/pkg/mcs/scheduling/server"
-	"github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
->>>>>>> 5de7eaebe (mcs: fix /config and /admin scheduling forward logic (#9827))
+	apis "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/handler"
@@ -737,12 +733,13 @@ func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
 // schedulingForwardingTestSuite is a test suite for testing the forwarding behavior of Scheduling APIs.
 type schedulingForwardingTestSuite struct {
 	suite.Suite
-	ctx         context.Context
-	cancel      context.CancelFunc
-	cluster     *tests.TestCluster
-	scheCluster *tests.TestSchedulingCluster
-	primary     *server.Server
-	follower    *server.Server
+	ctx              context.Context
+	cancel           context.CancelFunc
+	cluster          *tests.TestCluster
+	scheCluster      *tests.TestSchedulingCluster
+	primary          *server.Server
+	follower         *server.Server
+	backendEndpoints string
 }
 
 func TestSchedulingForwarding(t *testing.T) {
@@ -756,7 +753,7 @@ func (suite *schedulingForwardingTestSuite) SetupTest() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -764,8 +761,9 @@ func (suite *schedulingForwardingTestSuite) SetupTest() {
 	re.NotEmpty(leaderName)
 	leader := suite.cluster.GetLeaderServer()
 	re.NoError(leader.BootstrapCluster())
+	suite.backendEndpoints = leader.GetAddr()
 
-	suite.scheCluster, err = tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
+	suite.scheCluster, err = tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
 
 	suite.primary = suite.scheCluster.WaitForPrimaryServing(re)
