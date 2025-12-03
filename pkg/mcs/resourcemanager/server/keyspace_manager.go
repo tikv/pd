@@ -419,16 +419,6 @@ func (grt *groupRUTracker) getRUPerSec() float64 {
 	return totalRUPerSec
 }
 
-func (grt *groupRUTracker) getRUPerSecMap() map[uint64]float64 {
-	grt.RLock()
-	defer grt.RUnlock()
-	ruPerSecMap := make(map[uint64]float64)
-	for clientUniqueID, rt := range grt.ruTrackers {
-		ruPerSecMap[clientUniqueID] = rt.getRUPerSec()
-	}
-	return ruPerSecMap
-}
-
 // conciliateFillRates is used to conciliate the fill rate of each resource group.
 // Under the service limit, there might be multiple resource groups with different
 // priorities consuming the RU at the same time. In this case, we need to conciliate
