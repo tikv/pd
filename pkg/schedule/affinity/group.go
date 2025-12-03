@@ -274,7 +274,7 @@ func (g *runtimeGroupInfo) IsExpired() bool {
 	}
 }
 
-// GetState returns a condition whose value is always one of the group-prefixed variants and handles degradedExpiredAt internally.
+// GetState returns a condition whose value is always group-prefixed. It handles degradedExpiredAt internally.
 func (g *runtimeGroupInfo) GetState() condition {
 	state := g.state.toGroupState()
 	if state == groupAvailable {
