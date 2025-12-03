@@ -57,6 +57,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
+	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -65,6 +66,7 @@ import (
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
@@ -109,6 +111,8 @@ const (
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
+
+	gcTunerCheckCfgInterval = 10 * time.Second
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -652,14 +656,86 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(5)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
+	go s.startGCTuner()
 	if s.IsKeyspaceGroupEnabled() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
+	}
+}
+
+func (s *Server) startGCTuner() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+
+	tick := time.NewTicker(gcTunerCheckCfgInterval)
+	defer tick.Stop()
+	totalMem, err := memory.MemTotal()
+	if err != nil {
+		log.Fatal("fail to get total memory", zap.Error(err))
+	}
+	log.Info("memory info", zap.Uint64("total-mem", totalMem))
+	cfg := s.GetPDServerConfig()
+	enableGCTuner := cfg.EnableGOGCTuner
+	memoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
+	gcThresholdBytes := uint64(float64(memoryLimitBytes) * cfg.GCTunerThreshold)
+	if memoryLimitBytes == 0 {
+		gcThresholdBytes = uint64(float64(totalMem) * cfg.GCTunerThreshold)
+	}
+	memoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
+	memoryLimitGCTriggerBytes := uint64(float64(memoryLimitBytes) * memoryLimitGCTriggerRatio)
+	updateGCTuner := func() {
+		gctuner.Tuning(gcThresholdBytes)
+		gctuner.EnableGOGCTuner.Store(enableGCTuner)
+		log.Info("update gc tuner", zap.Bool("enable-gc-tuner", enableGCTuner),
+			zap.Uint64("gc-threshold-bytes", gcThresholdBytes))
+	}
+	updateGCMemLimit := func() {
+		memory.ServerMemoryLimit.Store(memoryLimitBytes)
+		gctuner.GlobalMemoryLimitTuner.SetPercentage(memoryLimitGCTriggerRatio)
+		gctuner.GlobalMemoryLimitTuner.UpdateMemoryLimit()
+		log.Info("update gc memory limit", zap.Uint64("memory-limit-bytes", memoryLimitBytes),
+			zap.Float64("memory-limit-gc-trigger-ratio", memoryLimitGCTriggerRatio))
+	}
+	updateGCTuner()
+	updateGCMemLimit()
+	checkAndUpdateIfCfgChange := func() {
+		cfg := s.GetPDServerConfig()
+		newEnableGCTuner := cfg.EnableGOGCTuner
+		newMemoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
+		newGCThresholdBytes := uint64(float64(newMemoryLimitBytes) * cfg.GCTunerThreshold)
+		if newMemoryLimitBytes == 0 {
+			newGCThresholdBytes = uint64(float64(totalMem) * cfg.GCTunerThreshold)
+		}
+		newMemoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
+		newMemoryLimitGCTriggerBytes := uint64(float64(newMemoryLimitBytes) * newMemoryLimitGCTriggerRatio)
+		if newEnableGCTuner != enableGCTuner || newGCThresholdBytes != gcThresholdBytes {
+			enableGCTuner = newEnableGCTuner
+			gcThresholdBytes = newGCThresholdBytes
+			updateGCTuner()
+		}
+		if newMemoryLimitBytes != memoryLimitBytes || newMemoryLimitGCTriggerBytes != memoryLimitGCTriggerBytes {
+			memoryLimitBytes = newMemoryLimitBytes
+			memoryLimitGCTriggerBytes = newMemoryLimitGCTriggerBytes
+			memoryLimitGCTriggerRatio = newMemoryLimitGCTriggerRatio
+			updateGCMemLimit()
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("gc tuner is stopped")
+			return
+		case <-tick.C:
+			checkAndUpdateIfCfgChange()
+		}
 	}
 }
 

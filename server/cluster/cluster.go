@@ -42,13 +42,11 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
-	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -104,9 +102,8 @@ const (
 	tsoServiceCheckInterval        = 100 * time.Millisecond
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
-	persistLimitRetryTimes  = 5
-	persistLimitWaitTime    = 100 * time.Millisecond
-	gcTunerCheckCfgInterval = 10 * time.Second
+	persistLimitRetryTimes = 5
+	persistLimitWaitTime   = 100 * time.Millisecond
 	// regionLabelGCInterval is the interval to run region-label's GC work.
 	regionLabelGCInterval = time.Hour
 	// storageSizeCollectorInterval is the interval to run storage size collector.
@@ -404,7 +401,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 	}
 	c.checkSchedulingService()
-	c.wg.Add(12)
+	c.wg.Add(11)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -413,7 +410,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runMinResolvedTSJob()
 	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
-	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 	go c.runDFSStatsCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
@@ -550,75 +546,6 @@ func (c *RaftCluster) stopTSOJobsIfNeeded() {
 			log.Panic("the tso allocator should be uninitialized after reset")
 		}
 	})
-}
-
-// startGCTuner
-func (c *RaftCluster) startGCTuner() {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
-
-	tick := time.NewTicker(gcTunerCheckCfgInterval)
-	defer tick.Stop()
-	totalMem, err := memory.MemTotal()
-	if err != nil {
-		log.Fatal("fail to get total memory", zap.Error(err))
-	}
-	log.Info("memory info", zap.Uint64("total-mem", totalMem))
-	cfg := c.opt.GetPDServerConfig()
-	enableGCTuner := cfg.EnableGOGCTuner
-	memoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
-	gcThresholdBytes := uint64(float64(memoryLimitBytes) * cfg.GCTunerThreshold)
-	if memoryLimitBytes == 0 {
-		gcThresholdBytes = uint64(float64(totalMem) * cfg.GCTunerThreshold)
-	}
-	memoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
-	memoryLimitGCTriggerBytes := uint64(float64(memoryLimitBytes) * memoryLimitGCTriggerRatio)
-	updateGCTuner := func() {
-		gctuner.Tuning(gcThresholdBytes)
-		gctuner.EnableGOGCTuner.Store(enableGCTuner)
-		log.Info("update gc tuner", zap.Bool("enable-gc-tuner", enableGCTuner),
-			zap.Uint64("gc-threshold-bytes", gcThresholdBytes))
-	}
-	updateGCMemLimit := func() {
-		memory.ServerMemoryLimit.Store(memoryLimitBytes)
-		gctuner.GlobalMemoryLimitTuner.SetPercentage(memoryLimitGCTriggerRatio)
-		gctuner.GlobalMemoryLimitTuner.UpdateMemoryLimit()
-		log.Info("update gc memory limit", zap.Uint64("memory-limit-bytes", memoryLimitBytes),
-			zap.Float64("memory-limit-gc-trigger-ratio", memoryLimitGCTriggerRatio))
-	}
-	updateGCTuner()
-	updateGCMemLimit()
-	checkAndUpdateIfCfgChange := func() {
-		cfg := c.opt.GetPDServerConfig()
-		newEnableGCTuner := cfg.EnableGOGCTuner
-		newMemoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
-		newGCThresholdBytes := uint64(float64(newMemoryLimitBytes) * cfg.GCTunerThreshold)
-		if newMemoryLimitBytes == 0 {
-			newGCThresholdBytes = uint64(float64(totalMem) * cfg.GCTunerThreshold)
-		}
-		newMemoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
-		newMemoryLimitGCTriggerBytes := uint64(float64(newMemoryLimitBytes) * newMemoryLimitGCTriggerRatio)
-		if newEnableGCTuner != enableGCTuner || newGCThresholdBytes != gcThresholdBytes {
-			enableGCTuner = newEnableGCTuner
-			gcThresholdBytes = newGCThresholdBytes
-			updateGCTuner()
-		}
-		if newMemoryLimitBytes != memoryLimitBytes || newMemoryLimitGCTriggerBytes != memoryLimitGCTriggerBytes {
-			memoryLimitBytes = newMemoryLimitBytes
-			memoryLimitGCTriggerBytes = newMemoryLimitGCTriggerBytes
-			memoryLimitGCTriggerRatio = newMemoryLimitGCTriggerRatio
-			updateGCMemLimit()
-		}
-	}
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("gc tuner is stopped")
-			return
-		case <-tick.C:
-			checkAndUpdateIfCfgChange()
-		}
-	}
 }
 
 func (c *RaftCluster) startProgressGC() {
