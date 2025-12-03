@@ -150,10 +150,10 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 	var logEntries []logEntry
 	groupStateChanges = make(map[string]condition)
 
-	m.RLock()
-
 	// Validate whether unavailableStores has changed.
-	if maps.Equal(unavailableStores, m.unavailableStores) {
+	m.RLock()
+	isUnavailableStoresChanged = !maps.Equal(unavailableStores, m.unavailableStores)
+	if !isUnavailableStoresChanged {
 		m.RUnlock()
 		return false, nil
 	}
