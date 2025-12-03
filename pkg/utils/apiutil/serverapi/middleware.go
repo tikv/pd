@@ -182,9 +182,6 @@ var localOnlyPaths = []string{
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-<<<<<<< HEAD
-	redirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
-=======
 	// Special case: GET /config should always be handled locally on followers
 	// to return a merged view of local and cluster configurations.
 	// POST /config should still be forwarded to the leader to update cluster-wide config.
@@ -199,8 +196,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		}
 	}
 
-	redirectToMicroservice, targetAddr := h.matchMicroserviceRedirectRules(r)
->>>>>>> 303c6c3b4 (server, api: fix forward logic (#9836))
+	redirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 
 	if h.s.IsClosed() {

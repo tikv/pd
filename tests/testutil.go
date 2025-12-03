@@ -307,6 +307,7 @@ type SchedulingTestEnvironment struct {
 	clusters map[SchedulerMode]*TestCluster
 	cancels  []context.CancelFunc
 	RunMode  SchedulerMode
+	PDCount  int
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -386,9 +387,12 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancels = append(s.cancels, cancel)
+	if s.PDCount == 0 {
+		s.PDCount = 1
+	}
 	switch m {
 	case PDMode:
-		cluster, err := NewTestCluster(ctx, 1, s.opts...)
+		cluster, err := NewTestCluster(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
@@ -397,7 +401,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		re.NoError(leaderServer.BootstrapCluster())
 		s.clusters[PDMode] = cluster
 	case APIMode:
-		cluster, err := NewTestAPICluster(ctx, 1, s.opts...)
+		cluster, err := NewTestAPICluster(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)

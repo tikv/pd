@@ -61,7 +61,7 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Success  200  {object}  config.Config
 // @Router   /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	if !h.svr.GetMember().IsServing() {
+	if !h.svr.IsServing() {
 		localCfg := h.svr.GetConfig()
 		leaderCfg, err := h.getLeaderConfig()
 		if err != nil {
@@ -575,7 +575,11 @@ func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, _ *http.Request) 
 }
 
 func (h *confHandler) getLeaderConfig() (*config.Config, error) {
-	addrs := h.svr.GetMember().GetServingUrls()
+	leader := h.svr.GetLeader()
+	if leader == nil {
+		return nil, errs.ErrLeaderNil.FastGenByArgs()
+	}
+	addrs := leader.GetClientUrls()
 	if len(addrs) == 0 {
 		return nil, errs.ErrLeaderNil.FastGenByArgs()
 	}

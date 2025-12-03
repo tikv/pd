@@ -661,8 +661,6 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	re.NoError(err)
 }
 
-<<<<<<< HEAD
-=======
 func (suite *redirectorTestSuite) TestPing() {
 	re := suite.Require()
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower()).GetServer()
@@ -693,7 +691,6 @@ func (suite *redirectorTestSuite) TestPing() {
 	re.NotEmpty(suite.cluster.WaitLeader())
 }
 
->>>>>>> 303c6c3b4 (server, api: fix forward logic (#9836))
 func (suite *redirectorTestSuite) TestNotLeader() {
 	re := suite.Require()
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
@@ -924,7 +921,7 @@ func (suite *forwardTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/enableAddServerNameHeader", `return`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 	suite.env.PDCount = 3
-	suite.env.RunFunc(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		suite.leader = cluster.GetLeaderServer().GetServer()
 		for _, svr := range cluster.GetServers() {
 			if svr.GetAddr() != suite.leader.GetAddr() {
@@ -944,9 +941,9 @@ func (suite *forwardTestSuite) TearDownSuite() {
 }
 
 func (suite *forwardTestSuite) TestFollowerLocalAPIs() {
-	suite.env.RunTest(suite.checkAdminLog)
-	suite.env.RunTest(suite.checkGetRequest)
-	suite.env.RunTest(suite.checkConfig)
+	suite.env.RunTestBasedOnMode(suite.checkAdminLog)
+	suite.env.RunTestBasedOnMode(suite.checkGetRequest)
+	suite.env.RunTestBasedOnMode(suite.checkConfig)
 }
 
 func (suite *forwardTestSuite) checkAdminLog(_ *tests.TestCluster) {
