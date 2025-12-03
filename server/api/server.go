@@ -20,8 +20,9 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/failpoint"
 	"github.com/urfave/negroni/v3"
+
+	"github.com/pingcap/failpoint"
 
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
@@ -33,8 +34,6 @@ import (
 
 const (
 	apiPrefix = "/pd"
-	// APIPrefix is the prefix of the API.
-	APIPrefix = apiPrefix
 )
 
 // NewHandler creates a HTTP handler for API.
@@ -43,8 +42,8 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 		Name:   "core",
 		IsCore: true,
 	}
-	prefix := APIPrefix + "/api/v1"
-	r := createRouter(APIPrefix, svr)
+	prefix := apiPrefix + "/api/v1"
+	r := createRouter(apiPrefix, svr)
 	router := mux.NewRouter()
 
 	serviceValidator := serverapi.NewRuntimeServiceValidator(svr, group)
@@ -183,7 +182,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	failpoint.Inject("enableAddServerNameHeader", func() {
 		middlewares = append(middlewares, addServerNameHeader(svr))
 	})
-	router.PathPrefix(APIPrefix).Handler(negroni.New(
+	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		append(middlewares, negroni.Wrap(r))...))
 	return router, group, nil
 }

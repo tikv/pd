@@ -68,10 +68,6 @@ const (
 	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
 	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
 	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
-	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
-	XForbiddenForwardToMicroserviceHeader = XForbiddenForwardToMicroServiceHeader
-	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
-	XForwardedToMicroserviceHeader = XForwardedToMicroServiceHeader
 
 	chunkSize = 4096
 )
