@@ -64,6 +64,10 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 		return true
 	}
 
+	if !cluster.GetCheckerConfig().IsAffinitySchedulingEnabled() {
+		return true
+	}
+
 	switch reason {
 	case pdpb.SplitReason_SIZE, pdpb.SplitReason_LOAD:
 	default:

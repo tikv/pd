@@ -1055,9 +1055,9 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	re.Nil(ops, "Merged size exceeds MaxAffinityMergeRegionSize")
 }
 
-// TestAffinityMergeCheckTargetRespectsLargerGlobalLimit verifies that the merge
-// limit follows the larger value between MaxMergeRegionSize and MaxAffinityMergeRegionSize.
-func TestAffinityMergeCheckTargetRespectsLargerGlobalLimit(t *testing.T) {
+// TestAffinityMergeCheckRespectsAffinityLimit verifies that affinity merge uses its own limit
+// even if the global max merge size is larger.
+func TestAffinityMergeCheckRespectsAffinityLimit(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1101,7 +1101,67 @@ func TestAffinityMergeCheckTargetRespectsLargerGlobalLimit(t *testing.T) {
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
 	ops := checker.MergeCheck(region1, groupState)
-	re.NotNil(ops, "Merge should be allowed because the effective limit follows the larger global max")
+	re.Nil(ops, "Merge should be blocked by the stricter affinity merge limit")
+}
+
+func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cases := []struct {
+		name              string
+		affinityMergeSize uint64
+		globalMergeSize   uint64
+	}{
+		{name: "affinity-size-zero", affinityMergeSize: 0, globalMergeSize: 54},
+		{name: "global-size-zero", affinityMergeSize: 20, globalMergeSize: 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+
+			opt := mockconfig.NewTestOptions()
+			opt.SetMaxAffinityMergeRegionSize(tc.affinityMergeSize)
+			opt.SetMaxMergeRegionSize(tc.globalMergeSize)
+			cluster := mockcluster.NewCluster(ctx, opt)
+			cluster.AddRegionStore(1, 100)
+			cluster.AddRegionStore(2, 100)
+			cluster.AddRegionStore(3, 100)
+
+			cluster.AddLeaderRegion(1, 1, 2, 3)
+			cluster.AddLeaderRegion(2, 1, 2, 3)
+			region1 := cluster.GetRegion(1).Clone(
+				core.SetApproximateSize(10),
+				core.SetApproximateKeys(10),
+				core.WithStartKey([]byte("a")),
+				core.WithEndKey([]byte("b")),
+			)
+			region2 := cluster.GetRegion(2).Clone(
+				core.SetApproximateSize(5),
+				core.SetApproximateKeys(5),
+				core.WithStartKey([]byte("b")),
+				core.WithEndKey([]byte("c")),
+			)
+			cluster.PutRegion(region1)
+			cluster.PutRegion(region2)
+
+			affinityManager := cluster.GetAffinityManager()
+			checker := NewAffinityChecker(cluster, opt)
+			group := &affinity.Group{
+				ID:            "test_group",
+				LeaderStoreID: 1,
+				VoterStoreIDs: []uint64{1, 2, 3},
+			}
+			err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
+			re.NoError(err)
+
+			groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
+			re.NotNil(groupState)
+			ops := checker.MergeCheck(region1, groupState)
+			re.Nil(ops)
+		})
+	}
 }
 
 // TestAffinityMergeCheckAdjacentUnhealthy tests that merging is blocked if the adjacent region is unhealthy.

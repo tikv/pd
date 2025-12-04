@@ -64,7 +64,7 @@ func (*AffinityChecker) Name() string {
 
 // Check verifies a region's replicas according to affinity group constraints, creating an Operator if needed.
 func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
-	if c.affinityManager == nil {
+	if c.affinityManager == nil || !c.conf.IsAffinitySchedulingEnabled() {
 		return nil
 	}
 	affinityCheckerCounter.Inc()
@@ -282,18 +282,20 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 // - Does NOT skip recently split or recently started regions (as requested)
 // - Only merges regions within the same affinity group
 func (c *AffinityChecker) MergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
-	maxSize := int64(c.conf.GetMaxAffinityMergeRegionSize())
-	if maxSize == 0 {
-		if c.conf.GetMaxMergeRegionSize() == 0 {
-			affinityMergeCheckerGlobalDisabledCounter.Inc()
-		} else {
-			affinityMergeCheckerDisabledCounter.Inc()
-		}
+	maxAffinityMergeRegionSize := c.conf.GetMaxAffinityMergeRegionSize()
+
+	if maxAffinityMergeRegionSize == 0 {
+		affinityMergeCheckerDisabledCounter.Inc()
+		return nil
+	}
+	if c.conf.GetMaxMergeRegionSize() == 0 {
+		affinityMergeCheckerGlobalDisabledCounter.Inc()
 		return nil
 	}
 	affinityMergeCheckerCounter.Inc()
 
 	// Region is not small enough
+	maxSize := int64(maxAffinityMergeRegionSize)
 	maxKeys := maxSize * config.RegionSizeToKeysRatio
 	if !region.NeedMerge(maxSize, maxKeys) {
 		affinityMergeCheckerNoNeedCounter.Inc()
