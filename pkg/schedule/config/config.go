@@ -65,7 +65,7 @@ const (
 	defaultEnablePlacementRules            = true
 	defaultEnableWitness                   = false
 	defaultHaltScheduling                  = false
-	defaultEnableAffinityScheduling        = true
+	defaultEnableAffinityScheduling        = false
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"

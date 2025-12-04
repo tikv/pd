@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -46,7 +47,9 @@ func TestAffinityHandlerTestSuite(t *testing.T) {
 }
 
 func (suite *affinityHandlerTestSuite) SetupSuite() {
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
+		conf.Schedule.EnableAffinityScheduling = true
+	})
 }
 
 func (suite *affinityHandlerTestSuite) TearDownSuite() {

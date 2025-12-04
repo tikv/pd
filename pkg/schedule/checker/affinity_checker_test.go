@@ -32,7 +32,16 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/server/config"
 )
+
+func newAffinityTestOptions() *config.PersistOptions {
+	opt := mockconfig.NewTestOptions()
+	cfg := opt.GetScheduleConfig().Clone()
+	cfg.EnableAffinityScheduling = true
+	opt.SetScheduleConfig(cfg)
+	return opt
+}
 
 // createAffinityGroupForTest is a test helper that creates an affinity group with the specified peers.
 // If startKey and endKey are provided (both non-nil), creates the group with that key range.
@@ -71,7 +80,7 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -103,7 +112,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -136,7 +145,7 @@ func TestAffinityCheckerPaused(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -185,7 +194,7 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 		affinity.SetAvailabilityCheckIntervalForTest(0) // Reset to default
 	}()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 
 	tc.AddRegionStore(1, 10)
@@ -246,7 +255,7 @@ func TestAffinityAvailabilityCheckWithOfflineStore(t *testing.T) {
 		affinity.SetAvailabilityCheckIntervalForTest(0)
 	}()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 
 	tc.AddRegionStore(1, 10)
@@ -296,7 +305,7 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 		affinity.SetAvailabilityCheckIntervalForTest(0)
 	}()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 
 	tc.AddRegionStore(1, 10)
@@ -366,7 +375,7 @@ func TestAffinityCheckerNoOperatorWhenAligned(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -396,7 +405,7 @@ func TestAffinityCheckerTransferLeaderWithoutPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -431,7 +440,7 @@ func TestAffinityCheckerMultipleGroups(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -491,7 +500,7 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -522,7 +531,7 @@ func TestAffinityCheckerConcurrentGroupDeletion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -560,7 +569,7 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20) // Small size to trigger merge
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -611,7 +620,7 @@ func TestAffinityCheckerMergePath(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -658,7 +667,7 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -695,7 +704,7 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -756,7 +765,7 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -809,7 +818,7 @@ func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -862,7 +871,7 @@ func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -899,7 +908,7 @@ func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -950,7 +959,7 @@ func TestAffinityMergeCheckBothDirections(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	// One-way merge is disabled by default
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1011,7 +1020,7 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -1062,7 +1071,7 @@ func TestAffinityMergeCheckRespectsAffinityLimit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20) // Smaller than the default MaxMergeRegionSize (54)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -1121,7 +1130,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
 
-			opt := mockconfig.NewTestOptions()
+			opt := newAffinityTestOptions()
 			opt.SetMaxAffinityMergeRegionSize(tc.affinityMergeSize)
 			opt.SetMaxMergeRegionSize(tc.globalMergeSize)
 			cluster := mockcluster.NewCluster(ctx, opt)
@@ -1170,7 +1179,7 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -1233,7 +1242,7 @@ func TestAffinityCheckerComplexMove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1274,7 +1283,7 @@ func TestAffinityCheckerPartialOverlap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1310,7 +1319,7 @@ func TestAffinityCheckerOperatorSteps(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1350,7 +1359,7 @@ func TestAffinityCheckerOnlyLeaderTransfer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1386,7 +1395,7 @@ func TestAffinityCheckerOnlyPeerChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1427,7 +1436,7 @@ func TestAffinityCheckerLeaderNotInVoters(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1456,7 +1465,7 @@ func TestAffinityCheckerSameStoreOrder(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1490,7 +1499,7 @@ func TestAffinityCheckerReplicaCountMatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 
 	// Add 10 stores
@@ -1575,7 +1584,7 @@ func TestAffinityCheckerStoreNotExist(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1604,7 +1613,7 @@ func TestAffinityCheckerOfflineStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1642,7 +1651,7 @@ func TestAffinityCheckerDownStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1679,7 +1688,7 @@ func TestAffinityCheckerMultipleRegionsSameGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1725,7 +1734,7 @@ func TestAffinityCheckerRegionNoLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1760,7 +1769,7 @@ func TestAffinityCheckerUnhealthyRegion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1800,7 +1809,7 @@ func TestAffinityCheckerDuplicateStores(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1829,7 +1838,7 @@ func TestAffinityCheckerEmptyVoterList(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1857,7 +1866,7 @@ func TestAffinityCheckerAbnormalReplicaCount(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1887,7 +1896,7 @@ func TestAffinityCheckerPreserveLearners(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicasWithLabel(true, 3) // Enable placement rules with 3 replicas
 	tc.AddRegionStore(1, 10)
@@ -1950,7 +1959,7 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicasWithLabel(true, 3) // Enable placement rules with 3 replicas
 	tc.AddRegionStore(1, 10)
@@ -2012,7 +2021,7 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicasWithLabel(true, 3) // Enable placement rules with 3 replicas
 	tc.AddRegionStore(1, 10)
@@ -2078,7 +2087,7 @@ func TestAffinityCheckerManagerNil(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -2103,7 +2112,7 @@ func TestAffinityCheckerWithWitnessPeers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -2150,7 +2159,7 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
 	defer affinity.SetAvailabilityCheckIntervalForTest(0)
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -2188,7 +2197,7 @@ func TestAffinityCheckerTargetStoreEvictLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -2221,7 +2230,7 @@ func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -2255,7 +2264,7 @@ func TestAffinityMergeCheckPeerStoreMismatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
@@ -2306,7 +2315,7 @@ func TestAffinityMergeCheckAdjacentAbnormalReplica(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicasWithLabel(true, 3) // Require 3 replicas
@@ -2357,7 +2366,7 @@ func TestAffinityMergeCheckPlacementSplitKeys(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicasWithLabel(true, 3)
@@ -2419,7 +2428,7 @@ func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetMaxAffinityMergeRegionSize(20)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
