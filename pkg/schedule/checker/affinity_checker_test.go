@@ -621,7 +621,6 @@ func TestAffinityCheckerMergePath(t *testing.T) {
 	defer cancel()
 
 	opt := newAffinityTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -668,7 +667,6 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 	defer cancel()
 
 	opt := newAffinityTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -705,7 +703,6 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 	defer cancel()
 
 	opt := newAffinityTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -766,7 +763,7 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	defer cancel()
 
 	opt := newAffinityTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
+	opt.SetMaxAffinityMergeRegionSize(60)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -1021,7 +1018,7 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	defer cancel()
 
 	opt := newAffinityTestOptions()
-	opt.SetMaxAffinityMergeRegionSize(60) // Larger than default MaxMergeRegionSize
+	opt.SetMaxAffinityMergeRegionSize(60)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
