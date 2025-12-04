@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
@@ -259,7 +260,7 @@ func (c *serviceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	if c.IsConnectedToLeader() {
 		return false
 	}
-	return !(err == nil && pdErr == nil)
+	return err != nil || pdErr != nil
 }
 
 type errFn func(*pdpb.Error) bool
@@ -547,7 +548,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 		}
 		err := bo.Exec(ctx, c.updateMember)
 		if err != nil {
-			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			log.Warn("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
 }
@@ -577,7 +578,7 @@ func (c *serviceDiscovery) updateServiceModeLoop() {
 		case <-ticker.C:
 		}
 		if err := c.checkServiceModeChanged(); err != nil {
-			log.Error("[pd] failed to update service mode",
+			log.Warn("[pd] failed to update service mode",
 				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 			c.ScheduleCheckMemberChanged() // check if the leader changed
 		}
@@ -848,7 +849,7 @@ func (c *serviceDiscovery) initClusterID() error {
 func (c *serviceDiscovery) checkServiceModeChanged() error {
 	leaderURL := c.getLeaderURL()
 	if len(leaderURL) == 0 {
-		return errors.New("no leader found")
+		return errors.New(errs.NoLeaderErr)
 	}
 
 	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)
@@ -909,12 +910,16 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
+	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
 	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
 	if err != nil {
+		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
 	if clusterInfo.GetHeader().GetError() != nil {
+		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
@@ -928,12 +933,16 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
+	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
+		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 	if members.GetHeader().GetError() != nil {
+		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}

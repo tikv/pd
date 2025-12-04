@@ -99,7 +99,7 @@ func (m *Manager) serviceLoop() {
 
 // updateInfo updates information from the server.
 func (m *Manager) updateInfo() {
-	if !m.srv.GetMember().IsLeader() {
+	if !m.srv.GetMember().IsServing() {
 		m.isLeader = false
 		m.members = nil
 		if err := m.srv.GetPersistOptions().Reload(m.srv.GetStorage()); err != nil {

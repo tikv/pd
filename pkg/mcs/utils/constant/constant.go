@@ -14,7 +14,9 @@
 
 package constant
 
-import "time"
+import (
+	"time"
+)
 
 const (
 	// RetryInterval is the interval to retry.
@@ -24,8 +26,6 @@ const (
 	// TCPNetworkStr is the string of tcp network
 	TCPNetworkStr = "tcp"
 
-	// DefaultEnableGRPCGateway is the default value of EnableGRPCGateway
-	DefaultEnableGRPCGateway = true
 	// DefaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
 	DefaultGRPCGracefulStopTimeout = 5 * time.Second
 	// DefaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
@@ -36,24 +36,12 @@ const (
 	DefaultLogLevel = "info"
 	// DefaultDisableErrorVerbose is the default value of DisableErrorVerbose
 	DefaultDisableErrorVerbose = true
-	// DefaultLeaderLease is the default value of LeaderLease
-	DefaultLeaderLease = int64(3)
+	// DefaultLease is the default value of lease
+	DefaultLease = int64(5)
+	// PrimaryTickInterval is the interval to check primary
+	PrimaryTickInterval = 50 * time.Millisecond
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
-
-	// DefaultKeyspaceName is the name reserved for default keyspace.
-	DefaultKeyspaceName = "DEFAULT"
-
-	// DefaultKeyspaceID is the default key space id.
-	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
-	// and reserved for users who haven't been assigned keyspace.
-	DefaultKeyspaceID = uint32(0)
-	// NullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
-	NullKeyspaceID = uint32(0xFFFFFFFF)
-	// DefaultKeyspaceGroupID is the default key space group id.
-	// We also reserved 0 for the keyspace group for the same purpose.
-	DefaultKeyspaceGroupID = uint32(0)
 
 	// MicroserviceRootPath is the root path of microservice in etcd.
 	MicroserviceRootPath = "/ms"
@@ -61,12 +49,12 @@ const (
 	PDServiceName = "pd"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
+	// ResourceManagerServiceName is the name of resource manager server.
+	ResourceManagerServiceName = "resource_manager"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
-	// KeyspaceGroupsKey is the path component of keyspace groups.
-	KeyspaceGroupsKey = "keyspace_groups"
-	// PrimaryKey is the path component of primary.
-	PrimaryKey = "primary"
+	// RouterServiceName is the name of router server.
+	RouterServiceName = "router"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards

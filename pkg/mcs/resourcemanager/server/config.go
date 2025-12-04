@@ -17,17 +17,15 @@ package server
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -71,8 +69,6 @@ type Config struct {
 	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
 	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
 	Name                string `toml:"name" json:"name"`
-	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -93,6 +89,8 @@ type Config struct {
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	Controller ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
@@ -233,20 +231,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		}
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
-	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	configutil.AdjustPath(&c.DataDir)
-
-	if err := c.Validate(); err != nil {
-		return err
-	}
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
-
-	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
-	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	if err := c.Security.Encryption.Adjust(); err != nil {
@@ -254,7 +242,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
-	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLease)
 
 	return nil
 }
@@ -272,8 +260,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -290,25 +278,4 @@ func (c *Config) GetAdvertiseListenAddr() string {
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
-}
-
-// Validate is used to validate if some configurations are right.
-func (c *Config) Validate() error {
-	dataDir, err := filepath.Abs(c.DataDir)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	logFile, err := filepath.Abs(c.Log.File.Filename)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !strings.HasPrefix(rel, "..") {
-		return errors.New("log directory shouldn't be the subdirectory of data directory")
-	}
-
-	return nil
 }

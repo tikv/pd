@@ -38,13 +38,16 @@ import (
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
@@ -101,6 +104,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	for _, region := range []*core.RegionInfo{
 		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
 		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+		core.NewTestRegionInfo(12, 1, []byte("a3"), []byte("a4")),
 	} {
 		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -157,20 +161,20 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Equal(core.HexRegionKeyStr([]byte("a3")), region.EndKey)
 	regions, err := client.GetRegions(ctx)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	regions, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
 	regions, err = client.GetRegionsByStoreID(ctx, 1)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	regions, err = client.GetEmptyRegions(ctx)
 	re.NoError(err)
-	re.Equal(int64(2), regions.Count)
-	re.Len(regions.Regions, 2)
+	re.Equal(int64(3), regions.Count)
+	re.Len(regions.Regions, 3)
 	state, err := client.GetRegionsReplicatedStateByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
 	re.NoError(err)
 	re.Equal("INPROGRESS", state)
@@ -190,6 +194,15 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.NoError(err)
 	re.Len(hotWriteRegions.AsPeer, 4)
 	re.Len(hotWriteRegions.AsLeader, 4)
+
+	distribution, err := client.GetRegionDistributionByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), "tikv")
+	re.NoError(err)
+	re.Len(distribution.RegionDistributions, 4)
+	sort.Slice(distribution.RegionDistributions, func(i, j int) bool {
+		return distribution.RegionDistributions[i].StoreID < distribution.RegionDistributions[j].StoreID
+	})
+	re.Equal(2, distribution.RegionDistributions[0].RegionLeaderCount)
+	re.Equal(2, distribution.RegionDistributions[0].RegionPeerCount)
 	historyHorRegions, err := client.GetHistoryHotRegions(ctx, &pd.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
@@ -207,14 +220,18 @@ func (suite *httpClientTestSuite) TestMeta() {
 	version, err := client.GetClusterVersion(ctx)
 	re.NoError(err)
 	re.Equal("1.0.0", version)
-	rgs, _ := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	rgs, err := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	re.NoError(err)
 	re.Equal(int64(0), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
-	re.Equal(int64(1), rgs.Count)
-	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	re.NoError(err)
 	re.Equal(int64(2), rgs.Count)
+	rgs, err = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	re.NoError(err)
+	re.Equal(int64(3), rgs.Count)
 	// store 2 origin status:offline
 	err = client.DeleteStore(ctx, 2)
 	re.NoError(err)
@@ -350,6 +367,49 @@ func (suite *httpClientTestSuite) TestRule() {
 	err = client.SetPlacementRule(ctx, testRule)
 	re.NoError(err)
 	suite.checkRuleResult(ctx, re, testRule, 1, true)
+
+	// ***** Test placement rule failed passing check after transfer leader
+	// Transfer the leader to another store to ensure the PD follower
+	// exists stale store labels.
+	suite.transferLeader(ctx, re)
+	tranferLeaderRule := []*pd.GroupBundle{
+		{
+			ID: "test-transfer-leader",
+			Rules: []*pd.Rule{
+				{
+					GroupID:  "test-transfer-leader",
+					ID:       "readonly",
+					Role:     pd.Voter,
+					Count:    3,
+					StartKey: []byte{},
+					EndKey:   []byte{},
+					LabelConstraints: []pd.LabelConstraint{
+						{
+							Key:    "$mode",
+							Op:     pd.In,
+							Values: []string{"readonly"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.Error(err)
+	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"$mode": "readonly",
+	})
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.NoError(err)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+
+	suite.transferLeader(ctx, re)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "$mode"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -408,7 +468,13 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	labelRules, err := client.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
 	re.Len(labelRules, 1)
-	re.Equal("keyspaces/0", labelRules[0].ID)
+
+	// In NextGen, the bootstrap keyspace is SYSTEM with ID 16777214, not DEFAULT with ID 0
+	expectedKeyspaceID := "keyspaces/0"
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceID = "keyspaces/16777214"
+	}
+	re.Equal(expectedKeyspaceID, labelRules[0].ID)
 	// Set a new region label rule.
 	labelRule := &pd.LabelRule{
 		ID:       "rule1",
@@ -453,7 +519,7 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.NoError(err)
 	re.Len(labelRules, 1)
 	re.Equal(labelRule, labelRules[0])
-	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"keyspaces/0", "rule2"})
+	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{expectedKeyspaceID, "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
@@ -538,6 +604,66 @@ func (suite *httpClientTestSuite) TestConfig() {
 	re.Empty(resp.Kvs)
 }
 
+func (suite *httpClientTestSuite) TestTTLConfigPersist() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	configKey := "schedule.max-pending-peer-count"
+
+	testCases := []struct {
+		inputValue        any
+		expectedEtcdValue string
+	}{
+		{
+			inputValue:        uint64(10000000),
+			expectedEtcdValue: "10000000",
+		},
+		{
+			inputValue:        int(20000000),
+			expectedEtcdValue: "20000000",
+		},
+		{
+			inputValue:        float64(2147483647),
+			expectedEtcdValue: "2147483647",
+		},
+		{
+			inputValue:        float64(1234567890.0),
+			expectedEtcdValue: "1234567890",
+		},
+		{
+			inputValue:        float64(0.0),
+			expectedEtcdValue: "0",
+		},
+		{
+			inputValue:        float64(987.65),
+			expectedEtcdValue: "987.65",
+		},
+		{
+			inputValue:        int(-1),
+			expectedEtcdValue: "-1",
+		},
+		{
+			inputValue:        int32(-2147483647),
+			expectedEtcdValue: "-2147483647",
+		},
+	}
+
+	for _, tc := range testCases {
+		newConfig := map[string]any{
+			configKey: tc.inputValue,
+		}
+		err := client.SetConfig(ctx, newConfig, 10000)
+		re.NoError(err)
+		resp, err := suite.cluster.GetEtcdClient().Get(ctx, sc.TTLConfigPrefix+"/"+configKey)
+		re.NoError(err)
+		re.Len(resp.Kvs, 1)
+		re.Equal([]byte(tc.expectedEtcdValue), resp.Kvs[0].Value)
+		err = client.SetConfig(ctx, newConfig, 0)
+		re.NoError(err)
+	}
+}
+
 func (suite *httpClientTestSuite) TestScheduleConfig() {
 	re := suite.Require()
 	client := suite.client
@@ -568,9 +694,16 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 
 	err = client.CreateScheduler(ctx, schedulerName, 1)
 	re.NoError(err)
-	schedulers, err = client.GetSchedulers(ctx)
-	re.NoError(err)
-	re.Contains(schedulers, schedulerName)
+	checkScheduler := func() {
+		schedulers, err = client.GetSchedulers(ctx)
+		re.NoError(err)
+		re.Contains(schedulers, schedulerName)
+		config, err := client.GetSchedulerConfig(ctx, schedulerName)
+		re.NoError(err)
+		re.Contains(config, "store-id-ranges")
+		re.Contains(config, "batch")
+	}
+	checkScheduler()
 	err = client.SetSchedulerDelay(ctx, schedulerName, 100)
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
@@ -580,21 +713,57 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	schedulers, err = client.GetSchedulers(ctx)
 	re.NoError(err)
 	re.NotContains(schedulers, schedulerName)
+
+	input := map[string]any{
+		"store_id": 1,
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
+	checkScheduler()
+	re.NoError(client.DeleteScheduler(ctx, schedulerName))
+	const schedulerName2 = "balance-range-scheduler"
+	input = map[string]any{
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"alias":     "test",
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName2, input))
+	checkFn := func() map[string]any {
+		config, err := client.GetSchedulerConfig(ctx, schedulerName2)
+		re.NoError(err)
+		jobs, ok := config.([]any)
+		re.True(ok, config)
+		res := make([]map[string]any, 0, len(jobs))
+		for _, job := range jobs {
+			jobMap, ok := job.(map[string]any)
+			re.True(ok, config)
+			res = append(res, jobMap)
+		}
+		return res[0]
+	}
+	job := checkFn()
+	jobID := uint64(job["job-id"].(float64))
+	re.Equal(uint64(0), jobID)
+	_, ok := job["start"].(*time.Time)
+	re.False(ok, job)
+
+	// cancel one job
+	re.NoError(client.CancelSchedulerJob(ctx, schedulerName2, jobID))
+	job = checkFn()
+	status, ok := job["status"]
+	re.True(ok)
+	re.Equal("cancelled", status)
 }
 
-func (suite *httpClientTestSuite) TestStoreLabels() {
-	re := suite.Require()
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, re *require.Assertions, storeLabels map[string]string) int64 {
 	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
 	resp, err := client.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
 	re.Empty(firstStore.Store.Labels, nil)
-	storeLabels := map[string]string{
-		"zone": "zone1",
-	}
+
 	err = client.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels)
 	re.NoError(err)
 
@@ -611,17 +780,27 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 		re.Equal(value, labelsMap[key])
 	}
 
-	re.NoError(client.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
-	store, err := client.GetStore(ctx, uint64(firstStore.Store.ID))
-	re.NoError(err)
-	re.Empty(store.Store.Labels)
+	return firstStore.Store.ID
 }
 
-func (suite *httpClientTestSuite) TestTransferLeader() {
+func (suite *httpClientTestSuite) TestStoreLabels() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"zone": "zone1",
+	})
+
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "zone"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
+}
+
+func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
+	client := suite.client
 	members, err := client.GetMembers(ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
@@ -653,6 +832,13 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
 }
+func (suite *httpClientTestSuite) TestTransferLeader() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	suite.transferLeader(ctx, re)
+}
 
 func (suite *httpClientTestSuite) TestVersion() {
 	re := suite.Require()
@@ -669,6 +855,7 @@ func (suite *httpClientTestSuite) TestStatus() {
 	re.Equal(versioninfo.PDGitHash, status.GitHash)
 	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
 	re.GreaterOrEqual(time.Now().Unix(), status.StartTimestamp)
+	re.Equal(versioninfo.PDKernelType, status.KernelType)
 }
 
 func (suite *httpClientTestSuite) TestAdmin() {
@@ -683,6 +870,12 @@ func (suite *httpClientTestSuite) TestAdmin() {
 	err = client.ResetBaseAllocID(ctx, 456)
 	re.NoError(err)
 	err = client.DeleteSnapshotRecoveringMark(ctx)
+	re.NoError(err)
+
+	// Test PiTR restore mode mark APIs
+	err = client.SetPitrRestoreModeMark(ctx)
+	re.NoError(err)
+	err = client.DeletePitrRestoreModeMark(ctx)
 	re.NoError(err)
 }
 
@@ -722,11 +915,13 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err := c.CreateScheduler(context.Background(), "test", 0)
+	re.ErrorContains(err, "mock error")
 	var out dto.Metric
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	c.Close()
 
@@ -739,10 +934,12 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(1), out.GetCounter().GetValue())
 	c.Close()
 
@@ -754,14 +951,17 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	err = c.CreateScheduler(context.Background(), "test", 0)
+	re.NoError(err)
 	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
-	successCnt.Write(&out)
+	err = successCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(2), out.GetCounter().GetValue())
 	failureCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
-	failureCnt.Write(&out)
+	err = failureCnt.Write(&out)
+	re.NoError(err)
 	re.Equal(float64(3), out.GetCounter().GetValue())
 	c.Close()
 }
@@ -772,7 +972,13 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	keyspaceName := "DEFAULT"
+	// Use the correct bootstrap keyspace name based on build type
+	var keyspaceName string
+	if kerneltype.IsNextGen() {
+		keyspaceName = constant.SystemKeyspaceName
+	} else {
+		keyspaceName = constant.DefaultKeyspaceName
+	}
 	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
@@ -798,6 +1004,36 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 		},
 	}
 	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	re.Error(err)
+}
+
+func (suite *httpClientTestSuite) TestGetKeyspaceMetaByID() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Fetch the bootstrap keyspace by name first to get its ID.
+	// In NextGen, it's SYSTEM keyspace; in Classic, it's DEFAULT keyspace.
+	var bootstrapKeyspaceName string
+	if kerneltype.IsNextGen() {
+		bootstrapKeyspaceName = constant.SystemKeyspaceName
+	} else {
+		bootstrapKeyspaceName = constant.DefaultKeyspaceName
+	}
+
+	metaByName, err := client.GetKeyspaceMetaByName(ctx, bootstrapKeyspaceName)
+	re.NoError(err)
+	re.NotNil(metaByName)
+
+	// Fetch the same keyspace by ID and compare.
+	metaByID, err := client.GetKeyspaceMetaByID(ctx, metaByName.GetId())
+	re.NoError(err)
+	re.NotNil(metaByID)
+	re.Equal(metaByName, metaByID)
+
+	// Query a non-existing ID should return error.
+	_, err = client.GetKeyspaceMetaByID(ctx, math.MaxUint32)
 	re.Error(err)
 }
 
@@ -843,7 +1079,8 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
 	for range 3 {
-		leader.ResignLeader()
+		err := leader.ResignLeader()
+		re.NoError(err)
 		re.NotEmpty(suite.cluster.WaitLeader())
 		leader = suite.cluster.GetLeaderServer()
 		re.NotNil(leader)
@@ -861,34 +1098,48 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	defer cancel()
 
 	// adding some safepoints to the server
+	now := time.Now().Truncate(time.Second)
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
-				ServiceID: "AAA",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 1,
+				ServiceID:  "AAA",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  10,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "BBB",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 2,
+				ServiceID:  "BBB",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  20,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "CCC",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 3,
+				ServiceID:  "CCC",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  30,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  1,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 		},
 		GCSafePoint:           1,
 		MinServiceGcSafepoint: 1,
 	}
 
-	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
-	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
+	// Skip writing "gc_worker".
+	for _, ssp := range list.ServiceGCSafepoints[:3] {
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	re.NoError(err)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	re.NoError(err)
 
 	// get the safepoints and start testing
 	l, err := client.GetGCSafePoint(ctx)
@@ -896,7 +1147,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
-	re.Len(l.ServiceGCSafepoints, 3)
+	re.Len(l.ServiceGCSafepoints, 4)
 
 	// sort the gc safepoints based on order of ServiceID
 	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
@@ -915,21 +1166,80 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal("Delete service GC safepoint successfully.", msg)
 	}
 
-	// check that the safepoitns are indeed deleted
+	// check that the safepoints are indeed deleted.
+	// "gc_worker" will still exist in the result set as it's pseudo.
 	l, err = client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
 	re.Equal(uint64(1), l.GCSafePoint)
-	re.Equal(uint64(0), l.MinServiceGcSafepoint)
-	re.Empty(l.ServiceGCSafepoints)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
-	// try delete gc_worker, should get an error
+	// Deleting "gc_worker" should result in an error in earlier version. As the service safe point becomes a
+	// compatibility layer over GC barriers, it won't take any effect except that possibly deleting the residual
+	// service safe point of "gc_worker" that was written by previous version.
 	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
-	re.Error(err)
+	re.NoError(err)
+
+	// However, after the deletion, it doesn't affect the behavior that generates the pseudo service safe point for
+	// "gc_worker".
+	l, err = client.GetGCSafePoint(ctx)
+	re.NoError(err)
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 1)
+	re.Equal("gc_worker", l.ServiceGCSafepoints[0].ServiceID)
 
 	// try delete some non-exist safepoints, should return normally
 	var msg string
 	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
 	re.NoError(err)
 	re.Equal("Delete service GC safepoint successfully.", msg)
+}
+
+func (suite *httpClientTestSuite) TestGetSiblingsRegions() {
+	re := suite.Require()
+
+	rg, err := suite.client.GetRegionByID(suite.ctx, 11)
+	re.NoError(err)
+	re.NotNil(rg)
+	rgs, err := suite.client.GetRegionSiblingsByID(suite.ctx, 11)
+	re.NoError(err)
+	re.Equal(int64(2), rgs.Count)
+	re.Equal(int64(10), rgs.Regions[0].ID)
+	re.Equal(int64(12), rgs.Regions[1].ID)
+
+	rightStartKey := rgs.Regions[rgs.Count-1].GetStartKey()
+	re.Zero(strings.Compare(rightStartKey, rg.EndKey))
+
+	// Create a merge operator to test the siblings regions.
+	leaderServer := suite.cluster.GetLeaderServer()
+	oc := leaderServer.GetRaftCluster().GetOperatorController()
+	err = suite.client.SetConfig(suite.ctx, map[string]any{
+		"max-replicas": 1,
+	})
+	re.NoError(err)
+	defer func() {
+		// clean operators
+		oc.RemoveOperators()
+		oc.CleanAllOpRecords()
+		re.Empty(oc.GetOperators())
+		// reset to default value to avoid affecting other tests.
+		err = suite.client.SetConfig(suite.ctx, map[string]any{
+			"max-replicas": 3,
+		})
+		re.NoError(err)
+	}()
+	input := map[string]any{
+		"name":             "merge-region",
+		"source_region_id": 10,
+		"target_region_id": 11,
+	}
+	err = suite.client.CreateOperators(suite.ctx, input)
+	re.NoError(err)
+	ops := oc.GetOperators()
+	re.Len(ops, 2)
+	re.NotZero(ops[0].Kind() & operator.OpMerge)
+	re.NotZero(ops[1].Kind() & operator.OpMerge)
 }

@@ -24,7 +24,8 @@ import (
 	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -62,7 +63,7 @@ func CreateKeyspaceGroups(c *gin.Context) {
 	createParams := &CreateKeyspaceGroupParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	for _, keyspaceGroup := range createParams.KeyspaceGroups {
@@ -228,7 +229,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 	splitParams := &SplitKeyspaceGroupByIDParams{}
 	err = c.BindJSON(splitParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	if !isValid(splitParams.NewID) {
@@ -319,7 +320,7 @@ func MergeKeyspaceGroups(c *gin.Context) {
 	mergeParams := &MergeKeyspaceGroupsParams{}
 	err = c.BindJSON(mergeParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	if len(mergeParams.MergeList) == 0 && !mergeParams.MergeAllIntoDefault {
@@ -399,10 +400,10 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 	allocParams := &AllocNodesForKeyspaceGroupParams{}
 	err = c.BindJSON(allocParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < constant.DefaultKeyspaceGroupReplicaCount {
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < mcs.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [2, nodes_num]")
 		return
 	}
@@ -454,7 +455,7 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 	setParams := &SetNodesForKeyspaceGroupParams{}
 	err = c.BindJSON(setParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	// check if keyspace group exists
@@ -505,7 +506,7 @@ func SetPriorityForKeyspaceGroup(c *gin.Context) {
 	setParams := &SetPriorityForKeyspaceGroupParams{}
 	err = c.BindJSON(setParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	// check if keyspace group exists
@@ -555,5 +556,5 @@ func parseNodeAddress(c *gin.Context) (string, error) {
 }
 
 func isValid(id uint32) bool {
-	return id >= constant.DefaultKeyspaceGroupID && id <= constant.MaxKeyspaceGroupCountInUse
+	return id >= constant.DefaultKeyspaceGroupID && id <= mcs.MaxKeyspaceGroupCountInUse
 }

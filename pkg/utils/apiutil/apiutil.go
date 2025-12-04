@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,6 +65,8 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
+	// XPDHandleHeader is used to mark whether this request is handled by the PD.
+	XPDHandleHeader = "X-PD-Handle-By"
 	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
 	XForbiddenForwardToMicroserviceHeader = "X-Forbidden-Forward-To-Microservice"
 	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
@@ -464,7 +467,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
+			log.Warn("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
 		var reader io.ReadCloser
@@ -502,7 +505,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		resp.Body.Close()
 		reader.Close()
 		if err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
+			log.Warn("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.
 			continue
 		}
@@ -539,4 +542,19 @@ func ParseTime(t string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.Unix(i, 0), nil
+}
+
+// IsPathInDirectory checks if the given path is in the specified directory.
+func IsPathInDirectory(path, directory string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	absDir, err := filepath.Abs(directory)
+	if err != nil {
+		return false
+	}
+
+	return strings.HasPrefix(absPath, absDir)
 }

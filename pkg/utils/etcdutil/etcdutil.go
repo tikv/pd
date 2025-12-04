@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -93,7 +94,7 @@ func CheckClusterID(localClusterID etcdtypes.ID, um etcdtypes.URLsMap, tlsConfig
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
+			log.Warn("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
 			continue
 		}
 
@@ -165,6 +166,27 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		return resp, e
 	}
 	return resp, nil
+}
+
+// WriteKeyToFile writes the key to the file. It is only used for testing.
+func writeKeyToFile(file, key, op string) error {
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// remove all number in the key to avoid the random number affect.
+	key = strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return -1
+		}
+		return r
+	}, key)
+
+	if _, err = f.WriteString(key + " " + op + "\n"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // IsHealthy checks if the etcd is healthy.

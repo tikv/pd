@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
@@ -58,7 +59,7 @@ func TestSendAndGetComponent(t *testing.T) {
 		}
 		return mux, info, nil
 	}
-	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := server.CreateServer(ctx, cfg, nil, handler)
 	re.NoError(err)

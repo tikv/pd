@@ -50,13 +50,14 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 // Service is the gRPC service for resource manager.
 type Service struct {
-	ctx     context.Context
+	ctx context.Context
+	*Server
 	manager *Manager
 	// settings
 }
 
 // NewService creates a new resource manager service.
-func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService[T factoryProvider](svr bs.Server) registry.RegistrableService {
 	manager := NewManager[T](svr)
 
 	return &Service{
@@ -93,12 +94,17 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(req.ResourceGroupName, req.WithRuStats)
-	if rg == nil {
-		return nil, errors.New("resource group not found")
+	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
+	rg, err := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
+	if err != nil {
+		return nil, err
 	}
+	if rg == nil {
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
+	}
+	resp := rg.IntoProtoResourceGroup(keyspaceID)
 	return &rmpb.GetResourceGroupResponse{
-		Group: rg.IntoProtoResourceGroup(),
+		Group: resp,
 	}, nil
 }
 
@@ -107,14 +113,19 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(req.WithRuStats)
-	resp := &rmpb.ListResourceGroupsResponse{
+	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
+	groups, err := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
+	if err != nil {
+		return nil, err
+	}
+	resps := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
 	for _, group := range groups {
-		resp.Groups = append(resp.Groups, group.IntoProtoResourceGroup())
+		resp := group.IntoProtoResourceGroup(keyspaceID)
+		resps.Groups = append(resps.Groups, resp)
 	}
-	return resp, nil
+	return resps, nil
 }
 
 // AddResourceGroup implements ResourceManagerServer.AddResourceGroup.
@@ -134,7 +145,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	err := s.manager.DeleteResourceGroup(req.ResourceGroupName)
+	err := s.manager.DeleteResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
 		return nil, err
 	}
@@ -174,53 +185,64 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err := s.checkServing(); err != nil {
 			return err
 		}
-		targetPeriodMs := request.GetTargetRequestPeriodMs()
-		clientUniqueID := request.GetClientUniqueId()
-		resps := &rmpb.TokenBucketsResponse{}
+		var (
+			targetPeriodMs = request.GetTargetRequestPeriodMs()
+			clientUniqueID = request.GetClientUniqueId()
+			resps          = &rmpb.TokenBucketsResponse{}
+			logFields      = make([]zap.Field, 2)
+		)
 		for _, req := range request.Requests {
+			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
+			logFields[0] = zap.Uint32("keyspace-id", keyspaceID)
+			logFields[1] = zap.String("resource-group", resourceGroupName)
+			// Get keyspace resource group manager to apply service limit later.
+			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
+			if krgm == nil {
+				log.Warn("keyspace resource group manager not found", append(logFields, zap.Error(err))...)
+				continue
+			}
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
+			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
 			if rg == nil {
-				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
+				log.Warn("resource group not found", append(logFields, zap.Error(err))...)
 				continue
 			}
 			// Send the consumption to update the metrics.
-			isBackground := req.GetIsBackground()
-			isTiFlash := req.GetIsTiflash()
-			if isBackground && isTiFlash {
-				return errors.New("background and tiflash cannot be true at the same time")
+			err = s.manager.dispatchConsumption(req)
+			if err != nil {
+				return err
 			}
-			s.manager.consumptionDispatcher <- struct {
-				resourceGroupName string
-				*rmpb.Consumption
-				isBackground bool
-				isTiFlash    bool
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
-			if isBackground {
+			if req.GetIsBackground() {
 				continue
 			}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
+				KeyspaceId:        &rmpb.KeyspaceIDValue{Value: keyspaceID},
 			}
+			requiredToken := 0.0
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID)
+						requiredToken = re.GetValue()
+						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
 					}
+					// Sample the latest RU demand.
+					krgm.getOrCreateGroupRUTracker(rg.Name).sample(clientUniqueID, now, requiredToken)
 					if tokens == nil {
 						continue
 					}
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
 			case rmpb.GroupMode_RawMode:
-				log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
+				log.Warn("not supports the resource type",
+					append(logFields, zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))...)
 				continue
 			}
-			log.Debug("finish token request from", zap.String("resource-group", resourceGroupName))
+			log.Debug("finish token request from", logFields...)
 			resps.Responses = append(resps.Responses, resp)
 		}
 		if err := stream.Send(resps); err != nil {

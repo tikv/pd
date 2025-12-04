@@ -14,6 +14,8 @@
 
 package types
 
+import "github.com/tikv/pd/pkg/versioninfo/kerneltype"
+
 // CheckerSchedulerType is the type of checker/scheduler.
 type CheckerSchedulerType string
 
@@ -48,6 +50,8 @@ const (
 	EvictSlowStoreScheduler CheckerSchedulerType = "evict-slow-store-scheduler"
 	// EvictSlowTrendScheduler is evict leader by slow trend scheduler name.
 	EvictSlowTrendScheduler CheckerSchedulerType = "evict-slow-trend-scheduler"
+	// EvictStoppingStoreScheduler is evict stopping store scheduler name.
+	EvictStoppingStoreScheduler CheckerSchedulerType = "evict-stopping-store-scheduler"
 	// GrantLeaderScheduler is grant leader scheduler name.
 	GrantLeaderScheduler CheckerSchedulerType = "grant-leader-scheduler"
 	// GrantHotRegionScheduler is grant hot region scheduler name.
@@ -64,12 +68,12 @@ const (
 	ShuffleLeaderScheduler CheckerSchedulerType = "shuffle-leader-scheduler"
 	// ShuffleRegionScheduler is shuffle region scheduler name.
 	ShuffleRegionScheduler CheckerSchedulerType = "shuffle-region-scheduler"
-	// SplitBucketScheduler is the split bucket name.
-	SplitBucketScheduler CheckerSchedulerType = "split-bucket-scheduler"
 	// TransferWitnessLeaderScheduler is transfer witness leader scheduler name.
 	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
+	// BalanceRangeScheduler is balance key range scheduler name.
+	BalanceRangeScheduler CheckerSchedulerType = "balance-range-scheduler"
 )
 
 // TODO: SchedulerTypeCompatibleMap and ConvertOldStrToType should be removed after
@@ -86,6 +90,7 @@ var (
 		EvictLeaderScheduler:           "evict-leader",
 		EvictSlowStoreScheduler:        "evict-slow-store",
 		EvictSlowTrendScheduler:        "evict-slow-trend",
+		EvictStoppingStoreScheduler:    "evict-stopping-store",
 		GrantLeaderScheduler:           "grant-leader",
 		GrantHotRegionScheduler:        "grant-hot-region",
 		BalanceHotRegionScheduler:      "hot-region",
@@ -94,9 +99,9 @@ var (
 		ShuffleHotRegionScheduler:      "shuffle-hot-region",
 		ShuffleLeaderScheduler:         "shuffle-leader",
 		ShuffleRegionScheduler:         "shuffle-region",
-		SplitBucketScheduler:           "split-bucket",
 		TransferWitnessLeaderScheduler: "transfer-witness-leader",
 		LabelScheduler:                 "label",
+		BalanceRangeScheduler:          "balance-range",
 	}
 
 	// ConvertOldStrToType exists for compatibility.
@@ -109,6 +114,7 @@ var (
 		"evict-leader":            EvictLeaderScheduler,
 		"evict-slow-store":        EvictSlowStoreScheduler,
 		"evict-slow-trend":        EvictSlowTrendScheduler,
+		"evict-stopping-store":    EvictStoppingStoreScheduler,
 		"grant-leader":            GrantLeaderScheduler,
 		"grant-hot-region":        GrantHotRegionScheduler,
 		"hot-region":              BalanceHotRegionScheduler,
@@ -117,32 +123,33 @@ var (
 		"shuffle-hot-region":      ShuffleHotRegionScheduler,
 		"shuffle-leader":          ShuffleLeaderScheduler,
 		"shuffle-region":          ShuffleRegionScheduler,
-		"split-bucket":            SplitBucketScheduler,
 		"transfer-witness-leader": TransferWitnessLeaderScheduler,
 		"label":                   LabelScheduler,
+		"balance-range":           BalanceRangeScheduler,
 	}
 
 	// StringToSchedulerType is a map to convert the scheduler string to the CheckerSchedulerType.
 	StringToSchedulerType = map[string]CheckerSchedulerType{
-		"balance-leader-scheduler":     BalanceLeaderScheduler,
-		"balance-region-scheduler":     BalanceRegionScheduler,
-		"balance-witness-scheduler":    BalanceWitnessScheduler,
-		"evict-leader-scheduler":       EvictLeaderScheduler,
-		"evict-slow-store-scheduler":   EvictSlowStoreScheduler,
-		"evict-slow-trend-scheduler":   EvictSlowTrendScheduler,
-		"grant-leader-scheduler":       GrantLeaderScheduler,
-		"grant-hot-region-scheduler":   GrantHotRegionScheduler,
-		"balance-hot-region-scheduler": BalanceHotRegionScheduler,
-		"random-merge-scheduler":       RandomMergeScheduler,
-		"scatter-range-scheduler":      ScatterRangeScheduler,
+		"balance-leader-scheduler":       BalanceLeaderScheduler,
+		"balance-region-scheduler":       BalanceRegionScheduler,
+		"balance-witness-scheduler":      BalanceWitnessScheduler,
+		"evict-leader-scheduler":         EvictLeaderScheduler,
+		"evict-slow-store-scheduler":     EvictSlowStoreScheduler,
+		"evict-slow-trend-scheduler":     EvictSlowTrendScheduler,
+		"evict-stopping-store-scheduler": EvictStoppingStoreScheduler,
+		"grant-leader-scheduler":         GrantLeaderScheduler,
+		"grant-hot-region-scheduler":     GrantHotRegionScheduler,
+		"balance-hot-region-scheduler":   BalanceHotRegionScheduler,
+		"random-merge-scheduler":         RandomMergeScheduler,
+		"scatter-range-scheduler":        ScatterRangeScheduler,
 		// TODO: remove `scatter-range` after remove `NewScatterRangeSchedulerCommand` from pd-ctl
 		"scatter-range":                     ScatterRangeScheduler,
 		"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
 		"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
 		"shuffle-region-scheduler":          ShuffleRegionScheduler,
-		"split-bucket-scheduler":            SplitBucketScheduler,
 		"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
 		"label-scheduler":                   LabelScheduler,
+		"balance-range-scheduler":           BalanceRangeScheduler,
 	}
 
 	// DefaultSchedulers is the default scheduler types.
@@ -151,10 +158,17 @@ var (
 	//   2. change the `schedulerConfig` interface to the `baseDefaultSchedulerConfig`
 	// 		structure in related `xxxxSchedulerConfig`
 	//   3. remove `syncutil.RWMutex` from related `xxxxSchedulerConfig`
-	DefaultSchedulers = []CheckerSchedulerType{
-		BalanceLeaderScheduler,
-		BalanceRegionScheduler,
-		BalanceHotRegionScheduler,
-		EvictSlowStoreScheduler,
+	DefaultSchedulers     = defaultSchedulersInit()
+	defaultSchedulersInit = func() []CheckerSchedulerType {
+		defaultSchedulers := []CheckerSchedulerType{
+			BalanceLeaderScheduler,
+			BalanceRegionScheduler,
+			BalanceHotRegionScheduler,
+			EvictSlowStoreScheduler,
+		}
+		if !kerneltype.IsNextGen() {
+			defaultSchedulers = append(defaultSchedulers, EvictStoppingStoreScheduler)
+		}
+		return defaultSchedulers
 	}
 )

@@ -72,6 +72,7 @@ func StatusHandler(c *gin.Context) {
 		GitHash:        versioninfo.PDGitHash,
 		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: svr.StartTimestamp(),
+		KernelType:     versioninfo.PDKernelType,
 	}
 
 	c.IndentedJSON(http.StatusOK, version)
@@ -104,7 +105,7 @@ type server interface {
 
 // InitClient initializes the etcd and http clients.
 func InitClient(s server) error {
-	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	tlsConfig, err := s.GetTLSConfig().ToClientTLSConfig()
 	if err != nil {
 		return err
 	}

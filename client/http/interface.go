@@ -44,10 +44,12 @@ type Client interface {
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetEmptyRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
+	GetRegionSiblingsByID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
+	GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	DeleteStore(context.Context, uint64) error
@@ -67,8 +69,11 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
+	CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
+	GetSchedulerConfig(ctx context.Context, name string) (any, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -98,6 +103,8 @@ type Client interface {
 	ResetBaseAllocID(context.Context, uint64) error
 	SetSnapshotRecoveringMark(context.Context) error
 	DeleteSnapshotRecoveringMark(context.Context) error
+	SetPitrRestoreModeMark(context.Context) error
+	DeletePitrRestoreModeMark(context.Context) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
@@ -106,6 +113,7 @@ type Client interface {
 	/* Microservice interfaces */
 	GetMicroserviceMembers(context.Context, string) ([]MicroserviceMember, error)
 	GetMicroservicePrimary(context.Context, string) (string, error)
+	CreateOperators(context.Context, map[string]any) error
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
@@ -116,6 +124,7 @@ type Client interface {
 	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
 	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
+	GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -271,6 +280,20 @@ func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRan
 	return state, nil
 }
 
+// GetRegionSiblingsByID gets the regions sibling info by ID.
+func (c *client) GetRegionSiblingsByID(ctx context.Context, regionID uint64) (*RegionsInfo, error) {
+	var regions RegionsInfo
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionSiblingsByID).
+		WithURI(RegionSiblingsByID(regionID)).
+		WithMethod(http.MethodGet).
+		WithResp(&regions))
+	if err != nil {
+		return nil, err
+	}
+	return &regions, nil
+}
+
 // GetHotReadRegions gets the hot read region statistics info.
 func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotReadRegions StoreHotPeersInfos
@@ -317,6 +340,44 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 		return nil, err
 	}
 	return &historyHotRegions, nil
+}
+
+// GetRegionDistributionByKeyRange gets the region distribution by key range.
+func (c *client) GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
+	var regionStats RegionStats
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionDistributionsByKeyRangeName).
+		WithURI(RegionDistributionsByKeyRange(keyRange, engine)).
+		WithMethod(http.MethodGet).
+		WithResp(&regionStats))
+	if err != nil {
+		return nil, err
+	}
+	distributions := make([]*RegionDistribution, 0, len(regionStats.StorePeerCount))
+	for storeID, region := range regionStats.StorePeerCount {
+		distribution := &RegionDistribution{
+			StoreID:               storeID,
+			EngineType:            regionStats.StoreEngine[storeID],
+			RegionLeaderCount:     regionStats.StoreLeaderCount[storeID],
+			RegionPeerCount:       region,
+			ApproximateSize:       regionStats.StorePeerSize[storeID],
+			ApproximateKeys:       regionStats.StorePeerKeys[storeID],
+			RegionWriteBytes:      regionStats.StoreWriteBytes[storeID],
+			RegionWriteKeys:       regionStats.StoreWriteKeys[storeID],
+			RegionWriteQuery:      regionStats.StoreWriteQuery[storeID],
+			RegionLeaderReadBytes: regionStats.StoreLeaderReadBytes[storeID],
+			RegionLeaderReadKeys:  regionStats.StoreLeaderReadKeys[storeID],
+			RegionLeaderReadQuery: regionStats.StoreLeaderReadQuery[storeID],
+			RegionPeerReadBytes:   regionStats.StorePeerReadBytes[storeID],
+			RegionPeerReadKeys:    regionStats.StorePeerReadKeys[storeID],
+			RegionPeerReadQuery:   regionStats.StorePeerReadQuery[storeID],
+		}
+		distributions = append(distributions, distribution)
+	}
+	regionDistributions := &RegionDistributions{
+		RegionDistributions: distributions,
+	}
+	return regionDistributions, nil
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
@@ -768,6 +829,42 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 	return schedulers, nil
 }
 
+// GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
+func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, error) {
+	var config any
+	err := c.request(ctx, newRequestInfo().
+		WithName(getSchedulerConfig).
+		WithURI(GetSchedulerConfigURIByName(name)).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// CancelSchedulerJob cancels the specified scheduler job.
+func (c *client) CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(cancelSchedulerJobName).
+		WithURI(GetCancelSchedulerJobURIByNameAndJobID(name, jobID)).
+		WithMethod(http.MethodDelete))
+}
+
+// CreateSchedulerWithInput creates a scheduler with the specified input.
+func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error {
+	input["name"] = name
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createSchedulerNameWithInput).
+		WithURI(Schedulers).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
 // CreateScheduler creates a scheduler to PD cluster.
 func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
 	inputJSON, err := json.Marshal(map[string]any{
@@ -884,6 +981,22 @@ func (c *client) DeleteSnapshotRecoveringMark(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
+// SetPitrRestoreModeMark sets the pitr restore mode mark.
+func (c *client) SetPitrRestoreModeMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(setPitrRestoreModeMarkName).
+		WithURI(PitrRestoreModeMark).
+		WithMethod(http.MethodPost))
+}
+
+// DeletePitrRestoreModeMark deletes the pitr restore mode mark.
+func (c *client) DeletePitrRestoreModeMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deletePitrRestoreModeMarkName).
+		WithURI(PitrRestoreModeMark).
+		WithMethod(http.MethodDelete))
+}
+
 // SetSchedulerDelay sets the delay of given scheduler.
 func (c *client) SetSchedulerDelay(ctx context.Context, scheduler string, delaySec int64) error {
 	m := map[string]int64{
@@ -914,7 +1027,7 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 	if len(storeIDs) != 0 {
 		storeIDStrs := make([]string, len(storeIDs))
 		for idx, id := range storeIDs {
-			storeIDStrs[idx] = fmt.Sprintf("%d", id)
+			storeIDStrs[idx] = strconv.FormatUint(id, 10)
 		}
 		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDStrs, ","))
 	}
@@ -975,6 +1088,19 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 	return ver.Version, err
 }
 
+// CreateOperators creates the operators.
+func (c *client) CreateOperators(ctx context.Context, input map[string]any) error {
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createOperators).
+		WithURI(operators).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
 // DeleteOperators deletes the running operators.
 func (c *client) DeleteOperators(ctx context.Context) error {
 	return c.request(ctx, newRequestInfo().
@@ -1005,6 +1131,38 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByNameName).
 		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
+		WithMethod(http.MethodGet).
+		WithResp(&tempKeyspaceMeta))
+
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
+		Name:           tempKeyspaceMeta.Name,
+		Id:             tempKeyspaceMeta.ID,
+		Config:         tempKeyspaceMeta.Config,
+		CreatedAt:      tempKeyspaceMeta.CreatedAt,
+		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
+		State:          keyspaceState,
+	}
+	return &keyspaceMetaPB, nil
+}
+
+// GetKeyspaceMetaByID get the given keyspace meta.
+func (c *client) GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+	var (
+		tempKeyspaceMeta tempKeyspaceMeta
+		keyspaceMetaPB   keyspacepb.KeyspaceMeta
+	)
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetKeyspaceMetaByIDName).
+		WithURI(GetKeyspaceMetaByIDURL(keyspaceID)).
 		WithMethod(http.MethodGet).
 		WithResp(&tempKeyspaceMeta))
 

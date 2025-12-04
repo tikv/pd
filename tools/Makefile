@@ -37,7 +37,7 @@ test: failpoint-enable
 
 ci-test-job:
 	if [ -f covprofile ]; then rm covprofile; fi
-	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
+	CGO_ENABLED=1 go test ./... -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
 
 failpoint-enable:
 	cd $(ROOT_PATH) && $(MAKE) failpoint-enable

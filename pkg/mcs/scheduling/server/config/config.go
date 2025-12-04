@@ -17,10 +17,8 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -30,7 +28,6 @@ import (
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
@@ -60,8 +57,6 @@ type Config struct {
 	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
 	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
 	Name                string `toml:"name" json:"name"`
-	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -134,27 +129,17 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 		}
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
-	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	configutil.AdjustPath(&c.DataDir)
-
-	if err := c.validate(); err != nil {
-		return err
-	}
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
-
-	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = mcsconstant.DefaultEnableGRPCGateway
-	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	if err := c.Security.Encryption.Adjust(); err != nil {
 		return err
 	}
 
-	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLease)
 
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
@@ -175,8 +160,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -193,27 +178,6 @@ func (c *Config) GetAdvertiseListenAddr() string {
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
-}
-
-// validate is used to validate if some configurations are right.
-func (c *Config) validate() error {
-	dataDir, err := filepath.Abs(c.DataDir)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	logFile, err := filepath.Abs(c.Log.File.Filename)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !strings.HasPrefix(rel, "..") {
-		return errors.New("log directory shouldn't be the subdirectory of data directory")
-	}
-
-	return nil
 }
 
 // Clone creates a copy of current config.
@@ -340,6 +304,11 @@ func (o *PersistConfig) GetMaxReplicas() int {
 // IsPlacementRulesEnabled returns if the placement rules is enabled.
 func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
+}
+
+// IsAffinitySchedulingEnabled returns if the affinity scheduling is enabled.
+func (o *PersistConfig) IsAffinitySchedulingEnabled() bool {
+	return o.GetScheduleConfig().EnableAffinityScheduling
 }
 
 // GetLowSpaceRatio returns the low space ratio.
@@ -562,10 +531,12 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	defer func() {
-		if typ == storelimit.RemovePeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		} else if typ == storelimit.AddPeer {
+		switch typ {
+		case storelimit.AddPeer:
 			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
+		case storelimit.RemovePeer:
+			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
+		default:
 		}
 	}()
 	limit := o.GetStoreLimit(storeID)
@@ -595,6 +566,12 @@ func (o *PersistConfig) GetMaxPendingPeerCount() uint64 {
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistConfig) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLUintOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// A zero value means the affinity merge is disabled.
+func (o *PersistConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.

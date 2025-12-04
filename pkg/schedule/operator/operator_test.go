@@ -542,6 +542,7 @@ func (suite *operatorTestSuite) TestRecord() {
 }
 
 func (suite *operatorTestSuite) TestToJSONObject() {
+	re := suite.Require()
 	steps := []OpStep{
 		AddPeer{ToStore: 1, PeerID: 1},
 		TransferLeader{FromStore: 3, ToStore: 1},
@@ -550,28 +551,28 @@ func (suite *operatorTestSuite) TestToJSONObject() {
 	op := NewTestOperator(101, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 	op.Start()
 	obj := op.ToJSONObject()
-	suite.Equal("test", obj.Desc)
-	suite.Equal("test", obj.Brief)
-	suite.Equal(uint64(101), obj.RegionID)
-	suite.Equal(OpLeader|OpRegion, obj.Kind)
-	suite.Equal("12m0s", obj.Timeout)
-	suite.Equal(STARTED, obj.Status)
+	re.Equal("test", obj.Desc)
+	re.Equal("test", obj.Brief)
+	re.Equal(uint64(101), obj.RegionID)
+	re.Equal(OpLeader|OpRegion, obj.Kind)
+	re.Equal("12m0s", obj.Timeout)
+	re.Equal(STARTED, obj.Status)
 
 	// Test SUCCESS status.
 	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
-	suite.Nil(op.Check(region))
-	suite.Equal(SUCCESS, op.Status())
+	re.Nil(op.Check(region))
+	re.Equal(SUCCESS, op.Status())
 	obj = op.ToJSONObject()
-	suite.Equal(SUCCESS, obj.Status)
+	re.Equal(SUCCESS, obj.Status)
 
 	// Test TIMEOUT status.
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, steps...)
 	op.Start()
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
-	suite.True(op.CheckTimeout())
+	re.True(op.CheckTimeout())
 	obj = op.ToJSONObject()
-	suite.Equal(TIMEOUT, obj.Status)
+	re.Equal(TIMEOUT, obj.Status)
 }
 
 func TestOperatorCheckConcurrently(t *testing.T) {

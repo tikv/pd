@@ -17,6 +17,7 @@ package http
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"time"
 )
 
@@ -32,6 +33,7 @@ const (
 	regionsByKey              = "/pd/api/v1/regions/key"
 	RegionsByStoreIDPrefix    = "/pd/api/v1/regions/store"
 	regionsReplicated         = "/pd/api/v1/regions/replicated"
+	regionsSiblings           = "/pd/api/v1/regions/sibling"
 	EmptyRegions              = "/pd/api/v1/regions/check/empty-region"
 	AccelerateSchedule        = "/pd/api/v1/regions/accelerate-schedule"
 	AccelerateScheduleInBatch = "/pd/api/v1/regions/accelerate-schedule/batch"
@@ -60,11 +62,13 @@ const (
 	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
 	// Scheduler
 	Schedulers            = "/pd/api/v1/schedulers"
+	SchedulerConfig       = "/pd/api/v1/scheduler-config"
 	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-scheduler-"
 	// Admin
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
 	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
 	SnapshotRecoveringMark = "/pd/api/v1/admin/cluster/markers/snapshot-recovering"
+	PitrRestoreModeMark    = "/pd/api/v1/admin/cluster/markers/pitr-restore-mode"
 	// Debug
 	PProfProfile   = "/pd/api/v1/debug/pprof/profile"
 	PProfHeap      = "/pd/api/v1/debug/pprof/heap"
@@ -85,6 +89,7 @@ const (
 	// Keyspace
 	KeyspaceConfig        = "/pd/api/v2/keyspaces/%s/config"
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
+	GetKeyspaceMetaByID   = "/pd/api/v2/keyspaces/id/%d"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -116,6 +121,11 @@ func RegionsReplicatedByKeyRange(keyRange *KeyRange) string {
 		regionsReplicated, startKeyStr, endKeyStr)
 }
 
+// RegionSiblingsByID returns the path of PD HTTP API to get sibling regions by ID.
+func RegionSiblingsByID(regionID uint64) string {
+	return fmt.Sprintf("%s/%d", regionsSiblings, regionID)
+}
+
 // RegionStatsByKeyRange returns the path of PD HTTP API to get region stats by start key and end key.
 func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
@@ -125,6 +135,13 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 	}
 	return fmt.Sprintf("%s?start_key=%s&end_key=%s",
 		StatsRegion, startKeyStr, endKeyStr)
+}
+
+// RegionDistributionsByKeyRange returns the path of PD HTTP API to get region distribution by start key and end key.
+func RegionDistributionsByKeyRange(keyRange *KeyRange, engine string) string {
+	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
+	return fmt.Sprintf("%s?use_hot&start_key=%s&end_key=%s&engine=%s",
+		StatsRegion, startKeyStr, endKeyStr, engine)
 }
 
 // StoreByID returns the store API with store ID parameter.
@@ -177,6 +194,16 @@ func PlacementRuleGroupByID(id string) string {
 	return fmt.Sprintf("%s/%s", placementRuleGroup, id)
 }
 
+// GetSchedulerConfigURIByName returns the path of PD HTTP API to get configuration of the given scheduler
+func GetSchedulerConfigURIByName(name string) string {
+	return path.Join(SchedulerConfig, name, "list")
+}
+
+// GetCancelSchedulerJobURIByNameAndJobID returns the path of PD HTTP API to cancel the job of the given scheduler
+func GetCancelSchedulerJobURIByNameAndJobID(name string, jobID uint64) string {
+	return fmt.Sprintf("%s/%s/job?job-id=%d", SchedulerConfig, name, jobID)
+}
+
 // SchedulerByName returns the scheduler API with the given scheduler name.
 func SchedulerByName(name string) string {
 	return fmt.Sprintf("%s/%s", Schedulers, name)
@@ -216,6 +243,11 @@ func GetUpdateKeyspaceConfigURL(keyspaceName string) string {
 // GetKeyspaceMetaByNameURL returns the path of PD HTTP API to get keyspace meta by keyspace name.
 func GetKeyspaceMetaByNameURL(keyspaceName string) string {
 	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
+}
+
+// GetKeyspaceMetaByIDURL returns the path of PD HTTP API to get keyspace meta by keyspace id.
+func GetKeyspaceMetaByIDURL(id uint32) string {
+	return fmt.Sprintf(GetKeyspaceMetaByID, id)
 }
 
 // GetDeleteSafePointURI returns the URI for delete safepoint service

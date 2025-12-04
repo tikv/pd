@@ -17,15 +17,12 @@ package server
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -43,7 +40,7 @@ const (
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 
-	defaultTSOSaveInterval           = time.Duration(constant.DefaultLeaderLease) * time.Second
+	defaultTSOSaveInterval           = time.Duration(constant.DefaultLease) * time.Second
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
@@ -57,9 +54,7 @@ type Config struct {
 	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
 	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
 
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
+	Name string `toml:"name" json:"name"`
 
 	// LeaderLease defines the time within which a TSO primary/leader must update its TTL
 	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
@@ -106,8 +101,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -121,8 +116,8 @@ func (c *Config) GetAdvertiseListenAddr() string {
 	return c.AdvertiseListenAddr
 }
 
-// GetLeaderLease returns the leader lease.
-func (c *Config) GetLeaderLease() int64 {
+// GetLease returns the primary lease.
+func (c *Config) GetLease() int64 {
 	return c.LeaderLease
 }
 
@@ -188,19 +183,13 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		}
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
-	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default-datadir.%s", c.Name))
-	configutil.AdjustPath(&c.DataDir)
-
-	if err := c.Validate(); err != nil {
-		return err
-	}
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
-	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLease)
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
@@ -214,10 +203,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
 	}
 
-	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
-	}
-
 	c.adjustLog(configMetaData.Child("log"))
 	return c.Security.Encryption.Adjust()
 }
@@ -228,25 +213,4 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	}
 	configutil.AdjustString(&c.Log.Format, constant.DefaultLogFormat)
 	configutil.AdjustString(&c.Log.Level, constant.DefaultLogLevel)
-}
-
-// Validate is used to validate if some configurations are right.
-func (c *Config) Validate() error {
-	dataDir, err := filepath.Abs(c.DataDir)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	logFile, err := filepath.Abs(c.Log.File.Filename)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !strings.HasPrefix(rel, "..") {
-		return errors.New("log directory shouldn't be the subdirectory of data directory")
-	}
-
-	return nil
 }

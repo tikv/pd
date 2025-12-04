@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -52,10 +51,13 @@ func TestHotTestSuite(t *testing.T) {
 }
 
 func (suite *hotTestSuite) SetupSuite() {
+	statistics.DisableDenoising()
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, _ string) {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
 			conf.Schedule.HotRegionCacheHitsThreshold = 0
+			conf.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
+			conf.Schedule.HotRegionsReservedDays = 1
 		},
 	)
 }
@@ -65,15 +67,8 @@ func (suite *hotTestSuite) TearDownSuite() {
 }
 
 func (suite *hotTestSuite) TearDownTest() {
-	cleanFunc := func(cluster *pdTests.TestCluster) {
-		leader := cluster.GetLeaderServer()
-		hotStat := leader.GetRaftCluster().GetHotStat()
-		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			hotStat = sche.GetCluster().GetHotStat()
-		}
-		hotStat.HotCache.CleanCache()
-	}
-	suite.env.RunTest(cleanFunc)
+	re := suite.Require()
+	suite.env.Reset(re)
 }
 
 func (suite *hotTestSuite) TestHot() {
@@ -82,20 +77,17 @@ func (suite *hotTestSuite) TestHot() {
 
 func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
 	store1 := &metapb.Store{
-		Id:            1,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
+		Id:    1,
+		State: metapb.StoreState_Up,
 	}
 	store2 := &metapb.Store{
-		Id:            2,
-		State:         metapb.StoreState_Up,
-		LastHeartbeat: time.Now().UnixNano(),
-		Labels:        []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
+		Id:     2,
+		State:  metapb.StoreState_Up,
+		Labels: []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
 	}
 
 	pdTests.MustPutStore(re, cluster, store1)
@@ -252,21 +244,18 @@ func (suite *hotTestSuite) TestHotWithStoreID() {
 
 func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 	leaderServer := cluster.GetLeaderServer()
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 
@@ -319,21 +308,18 @@ func (suite *hotTestSuite) TestHotWithoutHotPeer() {
 
 func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) {
 	re := suite.Require()
-	statistics.Denoising = false
 
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
 
@@ -397,52 +383,35 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) 
 	}
 }
 
-func TestHistoryHotRegions(t *testing.T) {
+func (suite *hotTestSuite) TestHistoryHotRegions() {
 	// TODO: support history hotspot in scheduling server with stateless in the future.
 	// Ref: https://github.com/tikv/pd/pull/7183
-	re := require.New(t)
-	statistics.Denoising = false
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1,
-		func(cfg *config.Config, _ string) {
-			cfg.Schedule.HotRegionCacheHitsThreshold = 0
-			cfg.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
-			cfg.Schedule.HotRegionsReservedDays = 1
-		},
-	)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkHistoryHotRegions)
+}
+
+func (suite *hotTestSuite) checkHistoryHotRegions(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    3,
+			State: metapb.StoreState_Up,
 		},
 	}
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store)
 	}
-	defer cluster.Destroy()
+	leaderServer := cluster.GetLeaderServer()
 	startTime := time.Now().Unix()
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
@@ -521,40 +490,29 @@ func TestHistoryHotRegions(t *testing.T) {
 	re.Error(json.Unmarshal(output, &hotRegions))
 }
 
-func TestBuckets(t *testing.T) {
+func (suite *hotTestSuite) TestBuckets() {
 	// TODO: support forward bucket request in scheduling server in the future.
-	re := require.New(t)
-	statistics.Denoising = false
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkBuckets)
+}
+
+func (suite *hotTestSuite) checkBuckets(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
 	stores := []*metapb.Store{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    1,
+			State: metapb.StoreState_Up,
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:    2,
+			State: metapb.StoreState_Up,
 		},
 	}
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store)
 	}
-	defer cluster.Destroy()
 
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	pdTests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))

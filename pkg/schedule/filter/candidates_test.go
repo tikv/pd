@@ -20,13 +20,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // A dummy comparer for testing.
 func idComparer(a, b *core.StoreInfo) int {
@@ -99,7 +105,7 @@ func TestCandidates(t *testing.T) {
 	cs.Sort(idComparer)
 	check(re, cs, 1, 2, 3, 4, 5, 6, 7)
 	store = cs.RandomPick()
-	re.Positive(store.GetID())
+	re.NotEmpty(store.GetID())
 	re.Less(store.GetID(), uint64(8))
 
 	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)

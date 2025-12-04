@@ -30,12 +30,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type balanceRegionSchedulerConfig struct {
 	baseDefaultSchedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 
@@ -136,9 +137,16 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	solver.Step++
 	var sourceIndex int
 
+	rs := s.conf.Ranges
+	if s.GetName() == types.BalanceRegionScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {
-		retryLimit := s.retryQuota.getLimit(solver.Source)
+		retryLimit := s.getLimit(solver.Source)
 		solver.sourceScore = solver.sourceStoreScore(s.GetName())
 		if sourceIndex == len(sourceStores)-1 {
 			break
@@ -146,21 +154,21 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		for range retryLimit {
 			// Priority pick the region that has a pending peer.
 			// Pending region may mean the disk is overload, remove the pending region firstly.
-			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), rs), collector,
 				append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))...)
 			if solver.Region == nil {
 				// Then pick the region that has a follower in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), rs), collector,
 					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Then pick the region has the leader in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), rs), collector,
 					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Finally, pick learner.
-				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), rs), collector,
 					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
@@ -191,15 +199,15 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			// satisfy all the filters, so the region fit must belong the scheduled region.
 			solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
 			if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
-				s.retryQuota.resetLimit(solver.Source)
+				s.resetLimit(solver.Source)
 				op.Counters = append(op.Counters, balanceRegionNewOpCounter)
 				return []*operator.Operator{op}, collector.GetPlans()
 			}
 			solver.Step--
 		}
-		s.retryQuota.attenuate(solver.Source)
+		s.attenuate(solver.Source)
 	}
-	s.retryQuota.gc(stores)
+	s.gc(stores)
 	return nil, collector.GetPlans()
 }
 
@@ -254,10 +262,9 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			collector.Collect()
 		}
 		solver.Step--
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))

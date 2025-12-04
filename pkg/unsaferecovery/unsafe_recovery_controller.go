@@ -110,7 +110,7 @@ type cluster interface {
 	core.StoreSetInformer
 
 	ResetRegionCache()
-	AllocID() (uint64, error)
+	AllocID(uint32) (uint64, uint32, error)
 	BuryStore(storeID uint64, forceBury bool) error
 	GetSchedulerConfig() sc.SchedulerConfigProvider
 }
@@ -133,6 +133,12 @@ type Controller struct {
 
 	storePlanExpires   map[uint64]time.Time
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
+
+	// Orphaned peers are the peers that exist in the forced leader but not in the target stores' reports
+	// they are expected to exist when some of the peers were destroyed by TombstoneTiFlashLearner phase.
+	// we need to explicitly remove them in DemoteFailedVoter phase, in case there is only one candidate store
+	// for this peer, and PD is not able to remove it through the down peer removal mechanism.
+	orphanedPeers map[uint64][]*metapb.Peer
 
 	// accumulated output for the whole recovery process
 	output []StageOutput
@@ -172,6 +178,7 @@ func (u *Controller) reset() {
 	u.AffectedTableIDs = make(map[int64]struct{}, 0)
 	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
 	u.newlyCreatedRegions = make(map[uint64]struct{}, 0)
+	u.orphanedPeers = make(map[uint64][]*metapb.Peer)
 	u.err = nil
 }
 
@@ -515,7 +522,7 @@ func (u *Controller) changeStage(stage stage) {
 			count := 0
 			for store := range u.failedStores {
 				count += 1
-				stores += fmt.Sprintf("%d", store)
+				stores += strconv.FormatUint(store, 10)
 				if count != len(u.failedStores) {
 					stores += ", "
 				}
@@ -576,6 +583,7 @@ func (u *Controller) changeStage(stage stage) {
 	for k := range u.storeReports {
 		u.storeReports[k] = nil
 	}
+	u.orphanedPeers = map[uint64][]*metapb.Peer{}
 	u.numStoresReported = 0
 	u.step += 1
 }
@@ -587,7 +595,7 @@ func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
 		if forceLeaders != nil {
 			regions := ""
 			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
-				regions += fmt.Sprintf("%d", regionID)
+				regions += strconv.FormatUint(regionID, 10)
 				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
 					regions += ", "
 				}
@@ -737,12 +745,22 @@ func (u *Controller) getFailedPeers(region *metapb.Region) []*metapb.Peer {
 		return nil
 	}
 
+	exists := func(peers []*metapb.Peer, peer *metapb.Peer) bool {
+		for _, p := range peers {
+			if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
+				return true
+			}
+		}
+		return false
+	}
+
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
-		if u.isFailed(peer) {
+		if u.isFailed(peer) || exists(u.orphanedPeers[region.GetId()], peer) {
 			failedPeers = append(failedPeers, peer)
 		}
 	}
+
 	return failedPeers
 }
 
@@ -795,10 +813,10 @@ func (r *regionItem) isRaftStale(origin *regionItem, u *Controller) bool {
 			return int(a.report.GetRaftState().GetHardState().GetCommit()) - int(b.report.GetRaftState().GetHardState().GetCommit())
 		},
 		func(a, b *regionItem) int {
-			if u.cluster.GetStore(a.storeID).IsTiFlash() {
+			if !u.cluster.GetStore(a.storeID).IsTiKV() {
 				return -1
 			}
-			if u.cluster.GetStore(b.storeID).IsTiFlash() {
+			if !u.cluster.GetStore(b.storeID).IsTiKV() {
 				return 1
 			}
 			// better use voter rather than learner
@@ -945,6 +963,27 @@ func (u *Controller) buildUpFromReports() (*regionTree, map[uint64][]*regionItem
 			continue
 		}
 		newestPeerReports = append(newestPeerReports, latest)
+
+		// find the orphaned peers, i.e. the peers exist in the forced leader but not in the target stores' reports
+		// this is expected when some of the peers were destroyed by TombstoneTiFlashLearner phase.
+		orphaned := func(peers []*regionItem, peer *metapb.Peer) bool {
+			// If the peer is in the failed stores, it is considered failed instead of orphaned.
+			if u.isFailed(peer) {
+				return false
+			}
+			for _, p := range peers {
+				if p.storeID == peer.StoreId {
+					return false
+				}
+			}
+			return true
+		}
+
+		for _, peer := range latest.report.RegionState.GetRegion().Peers {
+			if orphaned(peers, peer) {
+				u.orphanedPeers[latest.region().GetId()] = append(u.orphanedPeers[latest.region().GetId()], peer)
+			}
+		}
 	}
 
 	// sort in descending order of epoch
@@ -988,7 +1027,7 @@ func (u *Controller) generateTombstoneTiFlashLearnerPlan(newestRegionTree *regio
 				return false
 			}
 			storeID := leader.storeID
-			if u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
 				// tombstone the tiflash learner, as it can't be leader
 				storeRecoveryPlan := u.getRecoveryPlan(storeID)
 				storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, region.GetId())
@@ -1151,11 +1190,11 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
-		regionID, err := u.cluster.AllocID()
+		regionID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}
-		peerID, err := u.cluster.AllocID()
+		peerID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}
@@ -1170,7 +1209,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 
 	getRandomStoreID := func() uint64 {
 		for storeID := range u.storeReports {
-			if !u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiKV() {
 				return storeID
 			}
 		}
@@ -1186,7 +1225,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 		region := item.region()
 		storeID := item.storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
-			if u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
 				storeID = getRandomStoreID()
 				// can't create new region on tiflash store, choose a random one
 				if storeID == 0 {

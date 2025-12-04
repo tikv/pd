@@ -34,6 +34,7 @@ const (
 	SpaceIDBase = 10
 	// spaceIDBitSizeMax is the max bitSize of spaceID.
 	// It's currently set to 24 (3bytes).
+	// In kv encode, the first byte is represented by r/x, which means txn kv/raw kv, so there are 24 bits left.
 	spaceIDBitSizeMax = 24
 )
 

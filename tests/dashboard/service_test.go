@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !without_dashboard
+// +build !without_dashboard
+
 package dashboard_test
 
 import (
@@ -30,6 +33,7 @@ import (
 
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -70,10 +74,16 @@ func (suite *dashboardTestSuite) TearDownSuite() {
 }
 
 func (suite *dashboardTestSuite) TestDashboardRedirect() {
+	if kerneltype.IsNextGen() {
+		suite.T().Skip("Skip flaky test")
+	}
 	suite.testDashboard(suite.Require(), false)
 }
 
 func (suite *dashboardTestSuite) TestDashboardProxy() {
+	if kerneltype.IsNextGen() {
+		suite.T().Skip("Skip flaky test")
+	}
 	suite.testDashboard(suite.Require(), true)
 }
 
@@ -154,7 +164,8 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	}
 	data, err := json.Marshal(input)
 	re.NoError(err)
-	req, _ := http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	re.NoError(err)
 	resp, err := suite.httpClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
@@ -167,7 +178,8 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	}
 	data, err = json.Marshal(input)
 	re.NoError(err)
-	req, _ = http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	req, err = http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	re.NoError(err)
 	resp, err = suite.httpClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()

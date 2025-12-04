@@ -162,7 +162,6 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetEnablePlacementRules(true)
 	ruleManager := testCluster.RuleManager
-	ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	err := ruleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "test",
@@ -198,6 +197,8 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 			LocationLabels: []string{"dc", "zone", "host"},
 		},
 	})
+	re.NoError(err)
+	err = ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	re.NoError(err)
 	stores := []struct {
 		storeID     uint64
@@ -286,6 +287,16 @@ func TestStoreStateFilter(t *testing.T) {
 		{1, plan.StatusStoreBusy, plan.StatusStoreBusy},
 		{2, plan.StatusStoreBusy, plan.StatusStoreBusy},
 		{3, plan.StatusOK, plan.StatusOK},
+	}
+	check(store, testCases)
+
+	// Removed
+	store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	testCases = []testCase{
+		{0, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{1, plan.StatusStoreBusy, plan.StatusStoreRemoved},
+		{2, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{3, plan.StatusOK, plan.StatusStoreRemoved},
 	}
 	check(store, testCases)
 }
@@ -474,6 +485,16 @@ func TestSpecialUseFilter(t *testing.T) {
 	}
 }
 
+func TestSpecialEngine(t *testing.T) {
+	re := require.New(t)
+	tiflash := core.NewStoreInfoWithLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+	tikv := core.NewStoreInfoWithLabel(2, map[string]string{core.EngineKey: core.EngineTiKV})
+	re.True(SpecialEngines.MatchStore(tiflash))
+	re.False(SpecialEngines.MatchStore(tikv))
+	re.True(NotSpecialEngines.MatchStore(tikv))
+	re.False(NotSpecialEngines.MatchStore(tiflash))
+}
+
 func BenchmarkCloneRegionTest(b *testing.B) {
 	epoch := &metapb.RegionEpoch{
 		ConfVer: 1,
@@ -494,7 +515,7 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		core.SetApproximateKeys(20),
 	)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }

@@ -34,6 +34,7 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -63,7 +64,7 @@ type backupTestSuite struct {
 }
 
 func TestBackupTestSuite(t *testing.T) {
-	servers, etcdClient, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, etcdClient, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	server, serverConfig := setupServer()
@@ -103,7 +104,7 @@ func setupServer() (*httptest.Server, *config.Config) {
 		b, err := json.Marshal(serverConfig)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
-			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			fmt.Fprintf(res, "failed setting up test server: %s", err)
 			return
 		}
 
@@ -129,7 +130,7 @@ func (s *backupTestSuite) BeforeTest(string, string) {
 		rootPath               = path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
 		allocTimestampMaxBytes = typeutil.Uint64ToBytes(allocTimestampMax)
 	)
-	_, err = s.etcdClient.Put(ctx, keypath.TimestampPath(rootPath), string(allocTimestampMaxBytes))
+	_, err = s.etcdClient.Put(ctx, keypath.TimestampPath(constant.DefaultKeyspaceGroupID), string(allocTimestampMaxBytes))
 	re.NoError(err)
 
 	var (

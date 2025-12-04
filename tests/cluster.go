@@ -18,28 +18,30 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	ks "github.com/tikv/pd/pkg/keyspace/constant"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -66,6 +68,11 @@ var (
 	WaitLeaderCheckInterval = 500 * time.Millisecond
 	// WaitLeaderRetryTimes represents the maximum number of loops of WaitLeader.
 	WaitLeaderRetryTimes = 100
+
+	// WaitPreAllocKeyspacesInterval represents the time interval of WaitPreAllocKeyspaces running check.
+	WaitPreAllocKeyspacesInterval = 500 * time.Millisecond
+	// WaitPreAllocKeyspacesRetryTimes represents the maximum number of loops of WaitPreAllocKeyspaces.
+	WaitPreAllocKeyspacesRetryTimes = 100
 )
 
 // TestServer is only for test.
@@ -80,7 +87,15 @@ var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
-	//  disable the heartbeat async runner in test
+	// use temp dir to ensure test isolation.
+	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
+		tempDir, err := os.MkdirTemp("", "pd_tests")
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create safeguard temp data dir for test server")
+		}
+		cfg.DataDir = tempDir
+	}
+	// disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
@@ -93,7 +108,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 	if swaggerserver.Enabled() {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
@@ -153,15 +168,37 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResetPDLeader() {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 }
 
 // ResignLeader resigns the leader of the server.
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
+}
+
+// ResignLeaderWithRetry resigns the leader of the server with retry.
+func (s *TestServer) ResignLeaderWithRetry() (err error) {
+	if !s.IsLeader() {
+		return
+	}
+	// The default timeout of moving an etcd leader is 5 seconds,
+	// set the retry times to 3 will get a maximum of ~15 seconds of trying.
+	const retryCount = 3
+	for retry := range retryCount {
+		err = s.ResignLeader()
+		if err == nil {
+			return
+		}
+		// Do not retry if the last attempt fails.
+		if retry == retryCount-1 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return
 }
 
 // State returns the current TestServer's state.
@@ -257,7 +294,7 @@ func (s *TestServer) GetServerID() uint64 {
 func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
-	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
+	return !s.server.IsClosed() && s.server.GetMember().IsServing()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -370,7 +407,7 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
@@ -380,6 +417,12 @@ func (s *TestServer) BootstrapCluster() error {
 	if resp.GetHeader().GetError() != nil {
 		return errors.New(resp.GetHeader().GetError().String())
 	}
+
+	err = s.waitPreAllocKeyspaces()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -388,7 +431,7 @@ func (s *TestServer) BootstrapCluster() error {
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
 	for range WaitLeaderRetryTimes {
-		if s.server.GetMember().IsLeader() {
+		if s.server.GetMember().IsServing() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
@@ -396,9 +439,47 @@ func (s *TestServer) WaitLeader() bool {
 	return false
 }
 
-// GetTSOAllocatorManager returns the server's TSO Allocator Manager.
-func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.server.GetTSOAllocatorManager()
+func (s *TestServer) waitPreAllocKeyspaces() error {
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
+	if len(keyspaces) == 0 {
+		return nil
+	}
+
+	manager := s.GetKeyspaceManager()
+	idx := 0
+Outer:
+	for range WaitPreAllocKeyspacesRetryTimes {
+		for idx < len(keyspaces) {
+			_, err := manager.LoadKeyspace(keyspaces[idx])
+			if err != nil {
+				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+				if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) || errors.ErrorEqual(err, errs.ErrEtcdTxnConflict) {
+					time.Sleep(WaitPreAllocKeyspacesInterval)
+					continue Outer
+				}
+				return errors.Trace(err)
+			}
+
+			idx += 1
+		}
+		return nil
+	}
+	return errors.New("wait pre-alloc keyspaces retry limit exceeded")
+}
+
+// GetPreAllocKeyspaceIDs returns the pre-allocated keyspace IDs.
+func (s *TestServer) GetPreAllocKeyspaceIDs() ([]uint32, error) {
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
+	ids := make([]uint32, 0, len(keyspaces))
+	manager := s.GetKeyspaceManager()
+	for _, keyspace := range keyspaces {
+		meta, err := manager.LoadKeyspace(keyspace)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		ids = append(ids, meta.GetId())
+	}
+	return ids, nil
 }
 
 // GetServicePrimaryAddr returns the primary address of the service.
@@ -416,6 +497,7 @@ type TestCluster struct {
 		pool map[uint64]struct{}
 	}
 	schedulingCluster *TestSchedulingCluster
+	tsoCluster        *TestTSOCluster
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -489,7 +571,10 @@ func restartTestCluster(
 		wg.Add(1)
 		go func(serverName string, server *TestServer) {
 			defer wg.Done()
-			server.Destroy()
+			err := server.Destroy()
+			if err != nil {
+				return
+			}
 			var (
 				newServer *TestServer
 				serverErr error
@@ -550,7 +635,35 @@ func (c *TestCluster) RunInitialServers() error {
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
-	return RunServers(servers)
+	return RunServersWithRetry(servers, 3)
+}
+
+// RunServersWithRetry starts to run multiple TestServer with retry logic.
+func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
+	var lastErr error
+	for range maxRetries {
+		lastErr = RunServers(servers)
+		if lastErr == nil {
+			return nil
+		}
+
+		// If the error is related to etcd start cancellation, we should retry
+		if strings.Contains(lastErr.Error(), "ErrCancelStartEtcd") ||
+			strings.Contains(lastErr.Error(), "ErrStartEtcd") {
+			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
+			// Stop any partially started servers before retrying
+			for _, s := range servers {
+				if s.State() == Running {
+					_ = s.Stop()
+				}
+			}
+			continue
+		}
+
+		// For other errors, don't retry
+		return lastErr
+	}
+	return errors.Wrapf(lastErr, "failed to start servers after %d retries", maxRetries)
 }
 
 // StopAll is used to stop all servers.
@@ -591,7 +704,7 @@ func (c *TestCluster) GetLeader() string {
 // GetFollower returns an follower of all servers
 func (c *TestCluster) GetFollower() string {
 	for name, s := range c.servers {
-		if !s.server.IsClosed() && !s.server.GetMember().IsLeader() {
+		if !s.server.IsClosed() && !s.server.GetMember().IsServing() {
 			return name
 		}
 	}
@@ -708,11 +821,11 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	return cluster.HandleRegionHeartbeat(region)
 }
 
-// HandleReportBuckets processes BucketInfo reports from the client.
-func (c *TestCluster) HandleReportBuckets(b *metapb.Buckets) error {
+// HandleRegionBuckets processes BucketInfo reports from the client.
+func (c *TestCluster) HandleRegionBuckets(b *metapb.Buckets) error {
 	leader := c.GetLeader()
 	cluster := c.servers[leader].GetRaftCluster()
-	return cluster.HandleReportBuckets(b)
+	return cluster.HandleRegionBuckets(b)
 }
 
 // Join is used to add a new TestServer into the cluster.
@@ -754,6 +867,9 @@ func (c *TestCluster) Destroy() {
 	if c.schedulingCluster != nil {
 		c.schedulingCluster.Destroy()
 	}
+	if c.tsoCluster != nil {
+		c.tsoCluster.Destroy()
+	}
 }
 
 // CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.
@@ -775,9 +891,22 @@ func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
 	return c.schedulingCluster.GetPrimaryServer()
 }
 
+// GetDefaultTSOPrimaryServer returns the primary TSO server for the default keyspace.
+func (c *TestCluster) GetDefaultTSOPrimaryServer() *tso.Server {
+	if c.tsoCluster == nil {
+		return nil
+	}
+	return c.tsoCluster.GetPrimaryServer(ks.DefaultKeyspaceID, ks.DefaultKeyspaceGroupID)
+}
+
 // SetSchedulingCluster sets the scheduling cluster.
 func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
 	c.schedulingCluster = cluster
+}
+
+// SetTSOCluster sets the TSO cluster.
+func (c *TestCluster) SetTSOCluster(cluster *TestTSOCluster) {
+	c.tsoCluster = cluster
 }
 
 // WaitOp represent the wait configuration

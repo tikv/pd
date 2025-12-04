@@ -40,6 +40,7 @@ func newRegionLabelHandler(s *server.Server, rd *render.Render) *regionLabelHand
 	}
 }
 
+// GetAllRegionLabelRules returns all label rules of cluster.
 // @Tags     region_label
 // @Summary  List all label rules of cluster.
 // @Produce  json
@@ -51,6 +52,7 @@ func (h *regionLabelHandler) GetAllRegionLabelRules(w http.ResponseWriter, r *ht
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// PatchRegionLabelRules updates region label rules in batch.
 // @Tags     region_label
 // @Summary  Update region label rules in batch.
 // @Accept   json
@@ -77,6 +79,7 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 	h.rd.JSON(w, http.StatusOK, "Update region label rules successfully.")
 }
 
+// GetRegionLabelRulesByIDs returns label rules of cluster by ids.
 // @Tags     region_label
 // @Summary  Get label rules of cluster by ids.
 // @Param    body  body  []string  true  "IDs of query rules"
@@ -99,6 +102,7 @@ func (h *regionLabelHandler) GetRegionLabelRulesByIDs(w http.ResponseWriter, r *
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// GetRegionLabelRuleByID returns label rule of cluster by id.
 // @Tags     region_label
 // @Summary  Get label rule of cluster by id.
 // @Param    id  path  string  true  "Rule Id"
@@ -121,6 +125,7 @@ func (h *regionLabelHandler) GetRegionLabelRuleByID(w http.ResponseWriter, r *ht
 	h.rd.JSON(w, http.StatusOK, rule)
 }
 
+// DeleteRegionLabelRule deletes label rule of cluster by id.
 // @Tags     region_label
 // @Summary  Delete label rule of cluster by id.
 // @Param    id  path  string  true  "Rule Id"
@@ -148,6 +153,7 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 	h.rd.Text(w, http.StatusOK, "Delete rule successfully.")
 }
 
+// SetRegionLabelRule updates region label rule of cluster.
 // @Tags     region_label
 // @Summary  Update region label rule of cluster.
 // @Accept   json
@@ -174,6 +180,7 @@ func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, "Update region label rule successfully.")
 }
 
+// GetRegionLabelByKey returns label of a region by key.
 // @Tags     region_label
 // @Summary  Get label of a region.
 // @Param    id   path  integer  true  "Region Id"
@@ -200,6 +207,7 @@ func (h *regionLabelHandler) GetRegionLabelByKey(w http.ResponseWriter, r *http.
 	h.rd.JSON(w, http.StatusOK, labelValue)
 }
 
+// GetRegionLabels returns labels of a region.
 // @Tags     region_label
 // @Summary  Get labels of a region.
 // @Param    id  path  integer  true  "Region Id"

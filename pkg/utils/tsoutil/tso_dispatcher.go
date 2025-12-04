@@ -16,7 +16,7 @@ package tsoutil
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"sync"
 	"time"
 
@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -37,10 +38,18 @@ const (
 	maxMergeRequests = 10000
 	// DefaultTSOProxyTimeout defines the default timeout value of TSP Proxying
 	DefaultTSOProxyTimeout = 3 * time.Second
+	// tsoProxyStreamIdleTimeout defines how long Proxy stream will live if no request is received
+	tsoProxyStreamIdleTimeout = 5 * time.Minute
 )
 
 type tsoResp interface {
 	GetTimestamp() *pdpb.Timestamp
+}
+
+type tsoRequestProxyQueue struct {
+	requestCh chan Request
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
 }
 
 // TSODispatcher dispatches the TSO requests to the corresponding forwarding TSO channels.
@@ -62,71 +71,80 @@ func NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize prometheus.Histo
 }
 
 // DispatchRequest is the entry point for dispatching/forwarding a tso request to the destination host
-func (s *TSODispatcher) DispatchRequest(
-	ctx context.Context,
-	req Request,
-	tsoProtoFactory ProtoFactory,
-	doneCh <-chan struct{},
-	errCh chan<- error,
-	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
+func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, tsoProtoFactory ProtoFactory, tsoPrimaryWatchers ...*etcdutil.LoopWatcher) context.Context {
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
-		val = make(chan Request, maxMergeRequests)
-		val, loaded = s.dispatchChs.LoadOrStore(key, val)
+		dispatcherCtx, ctxCancel := context.WithCancelCause(serverCtx)
+		tsoQueue := &tsoRequestProxyQueue{
+			ctx:       dispatcherCtx,
+			cancel:    ctxCancel,
+			requestCh: make(chan Request, maxMergeRequests+1),
+		}
+		val, loaded = s.dispatchChs.LoadOrStore(key, tsoQueue)
+		if !loaded {
+			log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
+			tsDeadlineCh := make(chan *TSDeadline, 1)
+			go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
+			go WatchTSDeadline(tsoQueue.ctx, tsDeadlineCh)
+		}
 	}
-	reqCh := val.(chan Request)
-	if !loaded {
-		tsDeadlineCh := make(chan *TSDeadline, 1)
-		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, tsoPrimaryWatchers...)
-		go WatchTSDeadline(ctx, tsDeadlineCh)
-	}
-	reqCh <- req
+	tsoQueue := val.(*tsoRequestProxyQueue)
+	tsoQueue.requestCh <- req
+	return tsoQueue.ctx
 }
 
 func (s *TSODispatcher) dispatch(
-	ctx context.Context,
+	tsoQueue *tsoRequestProxyQueue,
 	tsoProtoFactory ProtoFactory,
 	forwardedHost string,
 	clientConn *grpc.ClientConn,
-	tsoRequestCh <-chan Request,
 	tsDeadlineCh chan<- *TSDeadline,
-	doneCh <-chan struct{},
-	errCh chan<- error,
 	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
 	defer logutil.LogPanic()
-	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
-	defer ctxCancel()
-	defer s.dispatchChs.Delete(forwardedHost)
+	dispatcherCtx := tsoQueue.ctx
+	// Note: We use clearPendingRequests in a defer statement to ensure proper cleanup when an error occurs.
+	// This function not only deletes the queue from the dispatcher but also clears all pending requests
+	// to prevent goroutine leakage and ensure that all waiting goroutines are notified and can exit gracefully.
+	var err error
+	defer func() {
+		s.clearPendingRequests(tsoQueue, forwardedHost, err)
+	}()
 
-	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(ctx, clientConn)
+	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(tsoQueue.ctx, clientConn)
+	failpoint.Inject("canNotCreateForwardStream", func() {
+		cancel()
+		err = errors.New("canNotCreateForwardStream")
+	})
 	if err != nil || forwardStream == nil {
 		log.Error("create tso forwarding stream error",
 			zap.String("forwarded-host", forwardedHost),
 			errs.ZapError(errs.ErrGRPCCreateStream, err))
-		select {
-		case <-dispatcherCtx.Done():
-			return
-		case _, ok := <-doneCh:
-			if !ok {
-				return
-			}
-		case errCh <- err:
-			close(errCh)
-			return
+		if err != nil {
+			tsoQueue.cancel(err)
+		} else {
+			tsoQueue.cancel(errors.New("create tso forwarding stream error: empty stream"))
 		}
+		return
 	}
 	defer cancel()
 
-	requests := make([]Request, maxMergeRequests+1)
+	// make(chan Request, maxMergeRequests+1) + 1
+	requests := make([]Request, maxMergeRequests+2)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
+	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
 	for {
+		noProxyRequestsTimer.Reset(tsoProxyStreamIdleTimeout)
+		failpoint.Inject("tsoProxyStreamIdleTimeout", func() {
+			noProxyRequestsTimer.Reset(0)
+			<-tsoQueue.requestCh // consume the request so that the select below results in the idle case
+		})
 		select {
-		case first := <-tsoRequestCh:
-			pendingTSOReqCount := len(tsoRequestCh) + 1
+		case first := <-tsoQueue.requestCh:
+			pendingTSOReqCount := len(tsoQueue.requestCh) + 1
 			requests[0] = first
 			for i := 1; i < pendingTSOReqCount; i++ {
-				requests[i] = <-tsoRequestCh
+				requests[i] = <-tsoQueue.requestCh
 			}
 			done := make(chan struct{})
 			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
@@ -141,21 +159,16 @@ func (s *TSODispatcher) dispatch(
 				log.Error("proxy forward tso error",
 					zap.String("forwarded-host", forwardedHost),
 					errs.ZapError(errs.ErrGRPCSend, err))
-				if needUpdateServicePrimaryAddr && strings.Contains(err.Error(), errs.NotLeaderErr) {
+				if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
 					tsoPrimaryWatchers[0].ForceLoad()
 				}
-				select {
-				case <-dispatcherCtx.Done():
-					return
-				case _, ok := <-doneCh:
-					if !ok {
-						return
-					}
-				case errCh <- err:
-					close(errCh)
-					return
-				}
+				tsoQueue.cancel(err)
+				return
 			}
+		case <-noProxyRequestsTimer.C:
+			log.Info("close tso proxy as it is idle for a while")
+			tsoQueue.cancel(errors.New("TSOProxyStreamIdleTimeout"))
+			return
 		case <-dispatcherCtx.Done():
 			return
 		}
@@ -175,20 +188,17 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 		return err
 	}
 	s.tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
-	s.tsoProxyBatchSize.Observe(float64(count))
+	if s.tsoProxyBatchSize != nil {
+		s.tsoProxyBatchSize.Observe(float64(count))
+	}
 	// Split the response
 	ts := resp.GetTimestamp()
 	physical, logical := ts.GetPhysical(), ts.GetLogical()
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
-	firstLogical := addLogical(logical, -int64(count))
+	firstLogical := logical - int64(count)
 	return s.finishRequest(requests, physical, firstLogical)
-}
-
-// Because of the suffix, we need to shift the count before we add it to the logical part.
-func addLogical(logical, count int64) int64 {
-	return logical + count
 }
 
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) error {
@@ -201,6 +211,40 @@ func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical i
 		countSum = newCountSum
 	}
 	return nil
+}
+
+// clearPendingRequests clears all pending requests in the queue to prevent goroutine leakage.
+// This method should be called when an error occurs to ensure that all waiting goroutines
+// are notified and can exit gracefully.
+func (s *TSODispatcher) clearPendingRequests(tsoQueue *tsoRequestProxyQueue, forwardedHost string, err error) {
+	// Delete the queue from the dispatcher to prevent new requests from being accepted
+	s.dispatchChs.Delete(forwardedHost)
+	defer tsoQueue.cancel(err)
+
+	// Clear all pending requests in the queue
+	// We don't close the channel here to avoid panic in other goroutines that might try to send to it
+	// Instead, we drain the channel
+	for {
+		select {
+		case <-tsoQueue.requestCh:
+			// We can't directly notify the request of the error since the Request interface
+			// doesn't have an onError method. The goroutines waiting for these requests
+			// will eventually be notified through the context cancellation.
+		default:
+			// No more requests in the channel
+			return
+		}
+	}
+}
+
+// Stop the TSODispatcher and clears all pending requests
+// Used for test only.
+func (s *TSODispatcher) Stop() {
+	s.dispatchChs.Range(func(_, value any) bool {
+		tsoQueue := value.(*tsoRequestProxyQueue)
+		tsoQueue.cancel(errors.New("TSODispatcher stopped"))
+		return true
+	})
 }
 
 // TSDeadline is used to watch the deadline of each tso request.
@@ -227,14 +271,12 @@ func NewTSDeadline(
 // WatchTSDeadline watches the deadline of each tso request.
 func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 	defer logutil.LogPanic()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	for {
 		select {
 		case d := <-tsDeadlineCh:
 			select {
 			case <-d.timer.C:
-				log.Error("tso proxy request processing is canceled due to timeout",
+				log.Warn("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
 				timerutil.GlobalTimerPool.Put(d.timer)

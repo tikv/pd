@@ -17,6 +17,7 @@ package core
 import (
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
@@ -61,8 +62,10 @@ type SharedCluster interface {
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
 	GetRuleManager() *placement.RuleManager
-	AllocID() (uint64, error)
+	GetKeyRangeManager() *keyrange.Manager
+	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
+	GetPrepareRegionCount() (int, error)
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces

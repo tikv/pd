@@ -14,6 +14,7 @@ dev-basic: build check basic-test
 
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
+TEST_TAGS ?=
 BUILD_CGO_ENABLED := 0
 BUILD_TOOL_CGO_ENABLED := 0
 BUILD_GOEXPERIMENT ?=
@@ -49,10 +50,16 @@ ifeq ($(PLUGIN), 1)
 endif
 
 ifeq ($(ENABLE_FIPS), 1)
-	BUILD_TAGS+=boringcrypto
-	BUILD_GOEXPERIMENT=boringcrypto
+	BUILD_TAGS += boringcrypto
+	BUILD_GOEXPERIMENT = boringcrypto
 	BUILD_CGO_ENABLED := 1
 	BUILD_TOOL_CGO_ENABLED := 1
+endif
+
+ifeq ($(NEXT_GEN), 1)
+	BUILD_TAGS += nextgen
+	BUILD_TAGS += without_dashboard
+	TEST_TAGS = nextgen
 endif
 
 RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
@@ -80,7 +87,7 @@ BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench pd-ut
+tools: pd-tso-bench pd-heartbeat-bench pd-region-bench regions-dump stores-dump pd-api-bench pd-ut
 
 PD_SERVER_DEP :=
 ifeq ($(SWAGGER), 1)
@@ -91,6 +98,7 @@ ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
 	PD_SERVER_DEP += dashboard-replace-distro-info
 endif
 PD_SERVER_DEP += dashboard-ui
+PD_SERVER_DEP += generate-easyjson
 
 pre-build: ${PD_SERVER_DEP}
 
@@ -114,6 +122,8 @@ pd-tso-bench:
 	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench pd-tso-bench/main.go
 pd-api-bench:
 	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench pd-api-bench/main.go
+pd-region-bench:
+	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-region-bench pd-region-bench/main.go
 pd-recover:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover pd-recover/main.go
 pd-analysis:
@@ -127,7 +137,7 @@ regions-dump:
 stores-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
 pd-ut: pd-xprog
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '$(TEST_TAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
 pd-xprog:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
 
@@ -170,7 +180,7 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.61.0
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.1.2
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
@@ -185,6 +195,9 @@ static: install-tools pre-build
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+	@ echo "leakcheck ..."
+	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
+
 
 # Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
 fmt:
@@ -205,6 +218,10 @@ generate-errdoc: install-tools
 check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
+
+generate-easyjson: install-tools
+	@echo "generating easyjson..."
+	easyjson -all ./pkg/response/region.go
 
 .PHONY: check static tidy generate-errdoc check-plugin
 

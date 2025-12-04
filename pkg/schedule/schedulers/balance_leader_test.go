@@ -24,6 +24,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
@@ -35,13 +36,20 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
-	keyRanges1, _ := getKeyRanges([]string{"a", "b", "c", "d"})
+	keyRanges1, err := getKeyRanges([]string{"a", "b", "c", "d"})
+	re.NoError(err)
 	conf := &balanceLeaderSchedulerConfig{
 		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
 			Ranges: keyRanges1,
@@ -52,7 +60,8 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re.Equal(conf.Batch, conf2.Batch)
 	re.Equal(conf.Ranges, conf2.Ranges)
 
-	keyRanges2, _ := getKeyRanges([]string{"e", "f", "g", "h"})
+	keyRanges2, err := getKeyRanges([]string{"e", "f", "g", "h"})
+	re.NoError(err)
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)
@@ -424,7 +433,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NotEmpty(ops)
 	re.Len(ops, 1)
 	re.Len(ops[0].Counters, 1)
-	re.Len(ops[0].FinishedCounters, 1)
+	re.Len(ops[0].FinishedCounters, 2)
 	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"h", "n"}))
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
@@ -449,6 +458,14 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
+
+	kye := keyutil.NewKeyRange("a", "g")
+	suite.tc.Append([]keyutil.KeyRange{kye})
+	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	ops, _ = lb.Schedule(suite.tc, false)
+	re.Empty(ops)
+	suite.tc.Delete([]keyutil.KeyRange{kye})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
@@ -675,7 +692,7 @@ func BenchmarkCandidateStores(b *testing.B) {
 		tc.AddLeaderStore(id, leaderCount)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		updateAndResortStoresInCandidateStores(tc)
 	}
 }

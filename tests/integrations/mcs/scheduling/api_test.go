@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package scheduling_test
+package scheduling
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +31,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/handler"
@@ -42,8 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
-
-	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 )
 
 type apiTestSuite struct {
@@ -58,7 +59,6 @@ func TestAPI(t *testing.T) {
 func (suite *apiTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
@@ -66,7 +66,6 @@ func (suite *apiTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 }
 
 func (suite *apiTestSuite) TestGetCheckerByName() {
@@ -405,13 +404,13 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
 
 	var cfg config.Config
-	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	re.NoError(err)
 	re.Equal(cfg.GetListenAddr(), s.GetConfig().GetListenAddr())
 	re.Equal(cfg.Schedule.LeaderScheduleLimit, s.GetConfig().Schedule.LeaderScheduleLimit)
 	re.Equal(cfg.Schedule.EnableCrossTableMerge, s.GetConfig().Schedule.EnableCrossTableMerge)
 	re.Equal(cfg.Replication.MaxReplicas, s.GetConfig().Replication.MaxReplicas)
 	re.Equal(cfg.Replication.LocationLabels, s.GetConfig().Replication.LocationLabels)
-	re.Equal(cfg.DataDir, s.GetConfig().DataDir)
 }
 
 func (suite *apiTestSuite) TestConfigForward() {
@@ -429,7 +428,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	// Test config forward
 	// Expect to get same config in scheduling server and PD
 	testutil.Eventually(re, func() bool {
-		testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		re.NoError(err)
 		re.Equal(cfg["schedule"].(map[string]any)["leader-schedule-limit"],
 			float64(opts.GetLeaderScheduleLimit()))
 		return cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
@@ -444,7 +444,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, reqData, testutil.StatusOK(re))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+		re.NoError(err)
 		return cfg["replication"].(map[string]any)["max-replicas"] == 4. &&
 			opts.GetReplicationConfig().MaxReplicas == 4.
 	})
@@ -455,13 +456,15 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	scheCfg.LeaderScheduleLimit = 100
 	opts.SetScheduleConfig(scheCfg)
 	re.Equal(100, int(opts.GetLeaderScheduleLimit()))
-	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	re.NoError(err)
 	re.Equal(100., cfg["schedule"].(map[string]any)["leader-schedule-limit"])
 	repCfg := opts.GetReplicationConfig().Clone()
 	repCfg.MaxReplicas = 5
 	opts.SetReplicationConfig(repCfg)
 	re.Equal(5, int(opts.GetReplicationConfig().MaxReplicas))
-	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
+	re.NoError(err)
 	re.Equal(5., cfg["replication"].(map[string]any)["max-replicas"])
 }
 
@@ -611,6 +614,7 @@ func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
 	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
 	re.Equal(versioninfo.PDGitHash, status.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, status.Version)
+	re.Equal(versioninfo.PDKernelType, status.KernelType)
 }
 
 func (suite *apiTestSuite) TestStores() {
@@ -619,18 +623,20 @@ func (suite *apiTestSuite) TestStores() {
 
 func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	re := suite.Require()
+	// prevent the offline store from changing to tombstone
+	tests.MustPutRegion(re, cluster, 3, 6, []byte("a"), []byte("b"))
 	stores := []*metapb.Store{
 		{
 			// metapb.StoreState_Up == 0
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
 		},
 		{
 			Id:        4,
-			Address:   "tikv4",
+			Address:   "mock://tikv-4:4",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
@@ -638,7 +644,7 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		{
 			// metapb.StoreState_Offline == 1
 			Id:        6,
-			Address:   "tikv6",
+			Address:   "mock://tikv-6:6",
 			State:     metapb.StoreState_Offline,
 			NodeState: metapb.NodeState_Removing,
 			Version:   "2.0.0",
@@ -646,7 +652,7 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:        7,
-			Address:   "tikv7",
+			Address:   "mock://tikv-7:7",
 			State:     metapb.StoreState_Tombstone,
 			NodeState: metapb.NodeState_Removed,
 			Version:   "2.0.0",
@@ -678,21 +684,22 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/1", scheServerAddr)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
-	re.Equal("tikv1", resp["store"].(map[string]any)["address"])
+	re.Equal("mock://tikv-1:1", resp["store"].(map[string]any)["address"])
 	re.Equal("Up", resp["store"].(map[string]any)["state_name"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/6", scheServerAddr)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
-	re.Equal("tikv6", resp["store"].(map[string]any)["address"])
+	re.Equal("mock://tikv-6:6", resp["store"].(map[string]any)["address"])
 	re.Equal("Offline", resp["store"].(map[string]any)["state_name"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/7", scheServerAddr)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
-	re.Equal("tikv7", resp["store"].(map[string]any)["address"])
+	re.Equal("mock://tikv-7:7", resp["store"].(map[string]any)["address"])
 	re.Equal("Tombstone", resp["store"].(map[string]any)["state_name"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/233", scheServerAddr)
-	testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
 		testutil.Status(re, http.StatusNotFound), testutil.StringContain(re, "not found"))
+	re.NoError(err)
 }
 
 func (suite *apiTestSuite) TestRegions() {
@@ -729,9 +736,141 @@ func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
 	re.NoError(err)
 	re.Equal(3., resp["count"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions/0", scheServerAddr)
-	testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
 		testutil.Status(re, http.StatusBadRequest))
+	re.NoError(err)
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions/233", scheServerAddr)
-	testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
+	err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,
 		testutil.Status(re, http.StatusNotFound), testutil.StringContain(re, "not found"))
+	re.NoError(err)
+}
+
+func (suite *apiTestSuite) TestHealth() {
+	suite.env.RunTestInMicroserviceEnv(suite.checkHealth)
+}
+
+func (suite *apiTestSuite) checkHealth(cluster *tests.TestCluster) {
+	re := suite.Require()
+
+	s := cluster.GetSchedulingPrimaryServer()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	})
+	resp, err := tests.TestDialClient.Get(s.GetConfig().GetAdvertiseListenAddr() + "/health")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+}
+
+// schedulingForwardingTestSuite is a test suite for testing the forwarding behavior of Scheduling APIs.
+type schedulingForwardingTestSuite struct {
+	suite.Suite
+	ctx         context.Context
+	cancel      context.CancelFunc
+	cluster     *tests.TestCluster
+	scheCluster *tests.TestSchedulingCluster
+	primary     *server.Server
+	follower    *server.Server
+}
+
+func TestSchedulingForwarding(t *testing.T) {
+	suite.Run(t, new(schedulingForwardingTestSuite))
+}
+
+func (suite *schedulingForwardingTestSuite) SetupTest() {
+	var err error
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := suite.cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+
+	suite.scheCluster, err = tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
+	re.NoError(err)
+
+	suite.primary = suite.scheCluster.WaitForPrimaryServing(re)
+	re.NotNil(suite.primary)
+	for _, srv := range suite.scheCluster.GetServers() {
+		if srv.GetAddr() != suite.primary.GetAddr() {
+			suite.follower = srv
+			break
+		}
+	}
+	re.NotNil(suite.follower, "follower should not be nil")
+	re.False(suite.follower.IsServing(), "follower should not be serving")
+}
+
+func (suite *schedulingForwardingTestSuite) TearDownTest() {
+	suite.cancel()
+	suite.scheCluster.Destroy()
+	suite.cluster.Destroy()
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+}
+
+// TestForwardingAndLocalBehavior tests the API behaviors.
+func (suite *schedulingForwardingTestSuite) TestForwardingAndLocalBehavior() {
+	re := suite.Require()
+	followerAddr := suite.follower.GetAdvertiseListenAddr()
+	followerURL := func(path string) string {
+		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
+	}
+	leader := suite.cluster.GetLeaderServer()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leader.GetAddr())
+
+	// Case 1: PUT /admin/log will be handled locally
+	logURL := followerURL("/admin/log")
+	level := "debug"
+	logPayload, err := json.Marshal(level)
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
+	re.NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	// Case 2: GET /config will be handled locally
+	var followerCfg config.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL("/config"), &followerCfg,
+		testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(suite.follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(suite.follower.GetConfig().Name, followerCfg.Name)
+	re.Equal(suite.follower.GetConfig().LeaderLease, followerCfg.LeaderLease)
+	re.NotEqual(suite.primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(level, followerCfg.Log.Level)
+
+	// Case 3: Test sync config from pd server.
+	configURL := urlPrefix + "/config"
+	reqData, err := json.Marshal(map[string]any{
+		"max-replicas": 4,
+	})
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, configURL, reqData, testutil.StatusOK(re))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		var followerCfg config.Config
+		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL("/config"), &followerCfg)
+		re.NoError(err)
+		fmt.Println(followerCfg.Replication.MaxReplicas)
+		return followerCfg.Replication.MaxReplicas == 4.
+	})
+
+	// Case 4: GET /schedulers will be handled by primary
+	schedulersURL := followerURL("/schedulers")
+	var schedulers []string
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, schedulersURL, &schedulers,
+		testutil.StatusOK(re))
+	re.NoError(err)
 }

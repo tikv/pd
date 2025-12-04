@@ -85,9 +85,9 @@ func runReserveMax(t *testing.T, lim *Limiter, req request) *Reservation {
 func runReserve(t *testing.T, lim *Limiter, req request, maxReserve time.Duration) *Reservation {
 	t.Helper()
 	r := lim.reserveN(req.t, req.n, maxReserve)
-	if r.ok && (dSince(r.timeToAct) != dSince(req.act)) || r.ok != req.ok {
+	if r.reserved && (dSince(r.timeToAct) != dSince(req.act)) || r.reserved != req.ok {
 		t.Errorf("lim.reserveN(t%d, %v, %v) = (t%d, %v) want (t%d, %v)",
-			dSince(req.t), req.n, maxReserve, dSince(r.timeToAct), r.ok, dSince(req.act), req.ok)
+			dSince(req.t), req.n, maxReserve, dSince(r.timeToAct), r.reserved, dSince(req.act), req.ok)
 	}
 	return &r
 }
@@ -109,7 +109,7 @@ func TestSimpleReserve(t *testing.T) {
 	runReserve(t, lim, request{t3, 2, t8, true}, time.Second*8)
 	// unlimited
 	args := tokenBucketReconfigureArgs{
-		NewBurst: -1,
+		newBurst: -1,
 	}
 	lim.Reconfigure(t1, args)
 	runReserveMax(t, lim, request{t5, 2000, t5, true})
@@ -121,17 +121,17 @@ func TestReconfig(t *testing.T) {
 
 	runReserveMax(t, lim, request{t0, 4, t2, true})
 	args := tokenBucketReconfigureArgs{
-		NewTokens: 6.,
-		NewRate:   2,
+		newTokens:   6.,
+		newFillRate: 2,
 	}
 	lim.Reconfigure(t1, args)
 	checkTokens(re, lim, t1, 5)
 	checkTokens(re, lim, t2, 7)
 
 	args = tokenBucketReconfigureArgs{
-		NewTokens: 6.,
-		NewRate:   2,
-		NewBurst:  -1,
+		newTokens:   6.,
+		newFillRate: 2,
+		newBurst:    -1,
 	}
 	lim.Reconfigure(t1, args)
 	checkTokens(re, lim, t1, 6)
@@ -144,9 +144,9 @@ func TestNotify(t *testing.T) {
 	lim := NewLimiter(t0, 1, 0, 0, nc)
 
 	args := tokenBucketReconfigureArgs{
-		NewTokens:       1000.,
-		NewRate:         2,
-		NotifyThreshold: 400,
+		newTokens:          1000.,
+		newFillRate:        2,
+		newNotifyThreshold: 400,
 	}
 	lim.Reconfigure(t1, args)
 	runReserveMax(t, lim, request{t2, 1000, t2, true})
@@ -239,7 +239,7 @@ const testCaseRunTime = 4 * time.Second
 
 func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru float64, needWait time.Duration) {
 	nc := make(chan notifyMsg, 1)
-	lim := NewLimiter(time.Now(), Limit(limit), limit, float64(limit), nc)
+	lim := NewLimiter(time.Now(), fillRate(limit), limit, float64(limit), nc)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var wg sync.WaitGroup
@@ -257,7 +257,7 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 				default:
 				}
 				r := lim.Reserve(context.Background(), 30*time.Second, time.Now(), float64(reserveN))
-				if r.OK() {
+				if r.Reserved() {
 					delay := r.DelayFrom(time.Now())
 					<-time.After(delay)
 				} else {

@@ -23,8 +23,8 @@ import (
 )
 
 func TestMaxPerSecCostTracker(t *testing.T) {
-	tracker := newMaxPerSecCostTracker("test", defaultCollectIntervalSec)
 	re := require.New(t)
+	tracker := newMaxPerSecCostTracker("test", "test", defaultCollectIntervalSec)
 
 	// Define the expected max values for each flushPeriod
 	expectedMaxRU := []float64{19, 39, 59}
@@ -36,8 +36,8 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 			RRU: float64(i),
 			WRU: float64(i),
 		}
-		tracker.CollectConsumption(consumption)
-		tracker.FlushMetrics()
+		tracker.collect(consumption)
+		tracker.flushMetrics()
 
 		// Check the max values at the end of each flushPeriod
 		if (i+1)%20 == 0 {

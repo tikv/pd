@@ -61,7 +61,7 @@ func TestMSTS(t *testing.T) {
 	suite.Run(t, &tsSuite{
 		clusterSuite: clusterSuite{
 			suiteName: "ts",
-			ms:        true,
+			mode:      "ms",
 		},
 	})
 }

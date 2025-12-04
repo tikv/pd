@@ -15,12 +15,16 @@
 package metricutil
 
 import (
+	"context"
 	"os"
+	"runtime"
 	"time"
 	"unicode"
 
+	"github.com/grafana/pyroscope-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
@@ -65,7 +69,7 @@ func camelCaseToSnakeCase(str string) string {
 }
 
 // prometheusPushClient pushes metrics to Prometheus Pushgateway.
-func prometheusPushClient(job, addr string, interval time.Duration) {
+func prometheusPushClient(ctx context.Context, job, addr string, interval time.Duration) {
 	defer logutil.LogPanic()
 
 	pusher := push.New(addr, job).
@@ -78,12 +82,18 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 			log.Error("could not push metrics to Prometheus Pushgateway", errs.ZapError(errs.ErrPrometheusPushMetrics, err))
 		}
 
-		time.Sleep(interval)
+		select {
+		case <-ctx.Done():
+			log.Info("stop Prometheus push client")
+			return
+		case <-time.After(interval):
+			// continue to push metrics
+		}
 	}
 }
 
 // Push metrics in background.
-func Push(cfg *MetricConfig) {
+func Push(ctx context.Context, cfg *MetricConfig) {
 	if cfg.PushInterval.Duration == zeroDuration || len(cfg.PushAddress) == 0 {
 		log.Info("disable Prometheus push client")
 		return
@@ -92,7 +102,7 @@ func Push(cfg *MetricConfig) {
 	log.Info("start Prometheus push client")
 
 	interval := cfg.PushInterval.Duration
-	go prometheusPushClient(cfg.PushJob, cfg.PushAddress, interval)
+	go prometheusPushClient(ctx, cfg.PushJob, cfg.PushAddress, interval)
 }
 
 func instanceName() string {
@@ -101,4 +111,29 @@ func instanceName() string {
 		return "unknown"
 	}
 	return hostname
+}
+
+// EnablePyroscope enables pyroscope if pyroscope is enabled.
+func EnablePyroscope() {
+	if os.Getenv("PYROSCOPE_SERVER_ADDRESS") != "" {
+		runtime.SetMutexProfileFraction(5)
+		runtime.SetBlockProfileRate(5)
+		_, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName:   "pd",
+			ServerAddress:     os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
+			Logger:            pyroscope.StandardLogger,
+			AuthToken:         os.Getenv("PYROSCOPE_AUTH_TOKEN"),
+			TenantID:          os.Getenv("PYROSCOPE_TENANT_ID"),
+			BasicAuthUser:     os.Getenv("PYROSCOPE_BASIC_AUTH_USER"),
+			BasicAuthPassword: os.Getenv("PYROSCOPE_BASIC_AUTH_PASSWORD"),
+			ProfileTypes: []pyroscope.ProfileType{
+				pyroscope.ProfileCPU,
+				pyroscope.ProfileAllocSpace,
+			},
+			UploadRate: 30 * time.Second,
+		})
+		if err != nil {
+			log.Fatal("fail to start pyroscope", zap.Error(err))
+		}
+	}
 }

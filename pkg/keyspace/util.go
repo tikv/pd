@@ -20,21 +20,25 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
-	spaceIDMax = ^uint32(0) >> 8 // 16777215 (Uint24Max) is the maximum value of spaceID.
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
-	// Name must be non-empty and contains only alphanumerical, `_` and `-`.
-	namePattern = "^[-A-Za-z0-9_]+$"
+	// Valid name must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
+	// numbers (0-9), hyphens (-), and underscores (_).
+	// currently, we enforce this rule to keyspace_name.
+	namePattern = "^[-A-Za-z0-9_]{1,20}$"
 )
 
 var (
@@ -54,11 +58,11 @@ var (
 // It throws errIllegalID when input id is our of range,
 // or if it collides with reserved id.
 func validateID(id uint32) error {
-	if id > spaceIDMax {
-		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, spaceIDMax)
+	if id > constant.MaxValidKeyspaceID {
+		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, constant.MaxValidKeyspaceID)
 	}
-	if id == constant.DefaultKeyspaceID {
-		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", id)
+	if isProtectedKeyspaceID(id) {
+		return errors.Errorf("illegal keyspace id %d, collides with a protected keyspace id", id)
 	}
 	return nil
 }
@@ -74,8 +78,8 @@ func validateName(name string) error {
 	if !isValid {
 		return errors.Errorf("illegal keyspace name %s, should contain only alphanumerical and underline", name)
 	}
-	if name == constant.DefaultKeyspaceName {
-		return errors.Errorf("illegal keyspace name %s, collides with default keyspace name", name)
+	if isProtectedKeyspaceName(name) {
+		return errors.Errorf("illegal keyspace name %s, collides with a protected keyspace name", name)
 	}
 	return nil
 }
@@ -158,6 +162,39 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 	}
 }
 
+// ParseKeyspaceIDFromLabelRule parses the keyspace ID from the label rule.
+// It will return the keyspace ID and a boolean indicating whether the label
+// rule is a keyspace label rule.
+func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
+	// Validate the ID matches the expected format "keyspaces/<id>".
+	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
+		return 0, false
+	}
+	// Retrieve the keyspace ID.
+	keyspaceID, err := strconv.ParseUint(
+		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
+		endpoint.SpaceIDBase, 32,
+	)
+	if err != nil {
+		return 0, false
+	}
+	// Double check the keyspace ID from the label rule.
+	var idFromLabel uint64
+	for _, label := range rule.Labels {
+		if label.Key == regionLabelKey {
+			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
+			if err != nil {
+				return 0, false
+			}
+			break
+		}
+	}
+	if keyspaceID != idFromLabel {
+		return 0, false
+	}
+	return uint32(keyspaceID), true
+}
+
 // indexedHeap is a heap with index.
 type indexedHeap struct {
 	items []*endpoint.KeyspaceGroup
@@ -183,6 +220,7 @@ func (hp *indexedHeap) Less(i, j int) bool {
 	return len(hp.items[j].Keyspaces) > len(hp.items[i].Keyspaces)
 }
 
+// Swap swaps the items at the given indices.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Swap(i, j int) {
 	lid := hp.items[i].ID
@@ -192,6 +230,7 @@ func (hp *indexedHeap) Swap(i, j int) {
 	hp.index[rid] = i
 }
 
+// Push adds an item to the heap.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Push(x any) {
 	item := x.(*endpoint.KeyspaceGroup)
@@ -199,6 +238,7 @@ func (hp *indexedHeap) Push(x any) {
 	hp.items = append(hp.items, item)
 }
 
+// Pop removes the top item and returns it.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Pop() any {
 	l := hp.Len()
@@ -251,4 +291,45 @@ func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
 		return item.(*endpoint.KeyspaceGroup)
 	}
 	return nil
+}
+
+// GetBootstrapKeyspaceID returns the Keyspace ID used for bootstrapping.
+// Classic: constant.DefaultKeyspaceID
+// NextGen: constant.SystemKeyspaceID
+func GetBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
+
+// GetBootstrapKeyspaceName returns the Keyspace Name used for bootstrapping.
+// Classic: constant.DefaultKeyspaceName
+// NextGen: constant.SystemKeyspaceName
+func GetBootstrapKeyspaceName() string {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceName
+	}
+	return constant.DefaultKeyspaceName
+}
+
+func newModifyProtectedKeyspaceError() error {
+	if kerneltype.IsNextGen() {
+		return errs.ErrModifyReservedKeyspace
+	}
+	return errs.ErrModifyDefaultKeyspace
+}
+
+func isProtectedKeyspaceID(id uint32) bool {
+	if kerneltype.IsNextGen() {
+		return id == constant.SystemKeyspaceID
+	}
+	return id == constant.DefaultKeyspaceID
+}
+
+func isProtectedKeyspaceName(name string) bool {
+	if kerneltype.IsNextGen() {
+		return name == constant.SystemKeyspaceName
+	}
+	return name == constant.DefaultKeyspaceName
 }

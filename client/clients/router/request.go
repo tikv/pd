@@ -18,9 +18,11 @@ import (
 	"context"
 	"runtime/trace"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 )
 
@@ -36,15 +38,15 @@ type Request struct {
 	// ID field represents this is a `GetRegionByID` request.
 	id uint64
 
-	// NeedBuckets field represents whether the request needs to get the region buckets.
-	needBuckets bool
+	options *opt.GetRegionOp
 
 	done chan error
 	// region will be set after the request is done.
 	region *Region
 
 	// Runtime fields.
-	pool *sync.Pool
+	start time.Time
+	pool  *sync.Pool
 }
 
 func (req *Request) tryDone(err error) {
@@ -55,14 +57,20 @@ func (req *Request) tryDone(err error) {
 }
 
 func (req *Request) wait() (*Region, error) {
-	// TODO: introduce the metrics.
+	start := time.Now()
+	metrics.CmdDurationQueryRegionAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err := <-req.done:
 		defer req.pool.Put(req)
 		defer trace.StartRegion(req.requestCtx, "pdclient.regionReqDone").End()
+		now := time.Now()
 		if err != nil {
+			metrics.CmdFailedDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
+			metrics.CmdFailedDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
 			return nil, errors.WithStack(err)
 		}
+		metrics.CmdDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
+		metrics.CmdDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
 		return req.region, nil
 	case <-req.requestCtx.Done():
 		return nil, errors.WithStack(req.requestCtx.Err())
@@ -73,13 +81,8 @@ func (req *Request) wait() (*Region, error) {
 
 // GetRegion implements the Client interface.
 func (c *Cli) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error) {
-	req := c.newRequest(ctx)
+	req := c.newRequest(ctx, opts...)
 	req.key = key
-	options := &opt.GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req.needBuckets = options.NeedBuckets
 
 	c.requestCh <- req
 	return req.wait()
@@ -87,13 +90,8 @@ func (c *Cli) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOp
 
 // GetPrevRegion implements the Client interface.
 func (c *Cli) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error) {
-	req := c.newRequest(ctx)
+	req := c.newRequest(ctx, opts...)
 	req.prevKey = key
-	options := &opt.GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req.needBuckets = options.NeedBuckets
 
 	c.requestCh <- req
 	return req.wait()
@@ -101,13 +99,8 @@ func (c *Cli) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegi
 
 // GetRegionByID implements the Client interface.
 func (c *Cli) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt.GetRegionOption) (*Region, error) {
-	req := c.newRequest(ctx)
+	req := c.newRequest(ctx, opts...)
 	req.id = regionID
-	options := &opt.GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req.needBuckets = options.NeedBuckets
 
 	c.requestCh <- req
 	return req.wait()

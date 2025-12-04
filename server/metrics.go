@@ -14,7 +14,9 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 var (
 	timeJumpBackCounter = prometheus.NewCounter(
@@ -99,11 +101,11 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
-	regionQueryDuration = prometheus.NewHistogram(
+	queryRegionDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "server",
-			Name:      "region_query_duration_seconds",
+			Name:      "query_region_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of region query requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
@@ -150,9 +152,17 @@ var (
 			Namespace: "pd",
 			Subsystem: "service",
 			Name:      "audit_handling_seconds",
-			Help:      "PD server service handling audit",
+			Help:      "PD server service handling performance metrics",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "caller_id", "ip"})
+		}, []string{"service", "method"})
+
+	serviceAuditCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_requests_total",
+			Help:      "Total number of service requests for audit",
+		}, []string{"service", "method", "caller_component"})
 
 	apiConcurrencyGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -169,6 +179,22 @@ var (
 			Name:      "forward_fail_total",
 			Help:      "Counter of forward fail.",
 		}, []string{"request", "type"})
+	forwardTsoDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
+	regionRequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "region_request_cnt",
+			Help:      "Counter of region request.",
+		}, []string{"request", "caller_id", "caller_component", "event"})
 )
 
 func init() {
@@ -181,13 +207,16 @@ func init() {
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
 	prometheus.MustRegister(tsoHandleDuration)
-	prometheus.MustRegister(regionQueryDuration)
+	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(bucketReportCounter)
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
+	prometheus.MustRegister(serviceAuditCounter)
 	prometheus.MustRegister(bucketReportInterval)
 	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
+	prometheus.MustRegister(forwardTsoDuration)
+	prometheus.MustRegister(regionRequestCounter)
 }

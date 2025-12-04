@@ -16,10 +16,8 @@ package realcluster
 
 import (
 	"context"
-	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	pd "github.com/tikv/pd/client"
@@ -40,46 +38,26 @@ func TestClusterID(t *testing.T) {
 }
 
 func (s *clusterIDSuite) TestClientClusterID() {
-	re := require.New(s.T())
+	// create clusters manually
+	s.TearDownSuite()
+	re := s.Require()
 	ctx := context.Background()
+	// deploy first cluster
+	cluster1 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
+	cluster1.start()
+	defer cluster1.stop()
 	// deploy second cluster
-	s.startCluster(s.T())
-	defer s.stopCluster(s.T())
+	cluster2 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
+	cluster2.start()
+	defer cluster2.stop()
 
-	pdEndpoints := getPDEndpoints(s.T())
+	pdEndpoints := getPDEndpoints(re)
 	// Try to create a client with the mixed endpoints.
-	_, err := pd.NewClientWithContext(
+	cli, err := pd.NewClientWithContext(
 		ctx, caller.TestComponent, pdEndpoints,
 		pd.SecurityOption{}, opt.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
+	defer cli.Close()
 	re.Contains(err.Error(), "unmatched cluster id")
-}
-
-func getPDEndpoints(t *testing.T) []string {
-	pdAddrsForEachTikv, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
-	require.NoError(t, err)
-	var pdAddrs []string
-	for _, addr := range pdAddrsForEachTikv {
-		// length of addr is less than 5 means it must not be a valid address
-		if len(addr) < 5 {
-			continue
-		}
-		pdAddrs = append(pdAddrs, strings.Split(addr, ",")...)
-	}
-	return removeDuplicates(pdAddrs)
-}
-
-func removeDuplicates(arr []string) []string {
-	uniqueMap := make(map[string]bool)
-	var result []string
-
-	for _, item := range arr {
-		if _, exists := uniqueMap[item]; !exists {
-			uniqueMap[item] = true
-			result = append(result, item)
-		}
-	}
-
-	return result
 }

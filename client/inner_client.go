@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -42,6 +43,7 @@ const (
 
 type innerClient struct {
 	keyspaceID       uint32
+	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 	svrUrls          []string
 	serviceDiscovery sd.ServiceDiscovery
 	tokenDispatcher  *tokenDispatcher
@@ -71,16 +73,69 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		return err
 	}
 
+	// Check if the router client has been enabled.
+	if c.option.GetEnableRouterClient() {
+		c.enableRouterClient()
+	}
+	c.wg.Add(1)
+	go c.routerClientInitializer()
+
 	return nil
 }
 
-func (c *innerClient) initRouterClient() {
-	c.Lock()
-	defer c.Unlock()
+func (c *innerClient) routerClientInitializer() {
+	log.Info("[pd] start router client initializer")
+	defer c.wg.Done()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("[pd] exit router client initializer")
+			return
+		case <-c.option.EnableRouterClientCh:
+			if c.option.GetEnableRouterClient() {
+				log.Info("[pd] notified to enable the router client")
+				c.enableRouterClient()
+			} else {
+				log.Info("[pd] notified to disable the router client")
+				c.disableRouterClient()
+			}
+		}
+	}
+}
+
+func (c *innerClient) enableRouterClient() {
+	// Check if the router client has been enabled.
+	c.RLock()
 	if c.routerClient != nil {
+		c.RUnlock()
 		return
 	}
-	c.routerClient = router.NewClient(c.ctx, c.serviceDiscovery, c.option)
+	c.RUnlock()
+	// Create a new router client first before acquiring the lock.
+	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.option)
+	c.Lock()
+	// Double check if the router client has been enabled.
+	if c.routerClient != nil {
+		// Release the lock and close the router client.
+		c.Unlock()
+		routerClient.Close()
+		return
+	}
+	c.routerClient = routerClient
+	c.Unlock()
+}
+
+func (c *innerClient) disableRouterClient() {
+	c.Lock()
+	if c.routerClient == nil {
+		c.Unlock()
+		return
+	}
+	routerClient := c.routerClient
+	c.routerClient = nil
+	c.Unlock()
+	// Close the router client after the lock is released.
+	routerClient.Close()
 }
 
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
@@ -132,7 +187,7 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.serviceDiscovery,
-			c.keyspaceID, c.tlsCfg, c.option)
+			c.keyspaceID, c.keyspaceMeta, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
 		newTSOCli = tso.NewClient(c.ctx, c.option,
@@ -214,6 +269,7 @@ func (c *innerClient) setup() error {
 
 	// Create dispatchers
 	c.createTokenDispatcher()
+
 	return nil
 }
 

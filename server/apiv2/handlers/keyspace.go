@@ -39,6 +39,7 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspace)
+	router.POST("/id", CreateKeyspaceByID)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
 	router.PATCH("/:name/config", UpdateKeyspaceConfig)
@@ -73,16 +74,59 @@ func CreateKeyspace(c *gin.Context) {
 	createParams := &CreateKeyspaceParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	req := &keyspace.CreateKeyspaceRequest{
 		Name:       createParams.Name,
 		Config:     createParams.Config,
 		CreateTime: time.Now().Unix(),
-		IsPreAlloc: false,
 	}
 	meta, err := manager.CreateKeyspace(req)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
+}
+
+// CreateKeyspaceByIDParams represents parameters needed when creating a new keyspace by ID.
+type CreateKeyspaceByIDParams struct {
+	ID     *uint32           `json:"id"`
+	Name   string            `json:"name"`
+	Config map[string]string `json:"config"`
+}
+
+// CreateKeyspaceByID creates keyspace according to given input.
+//
+// @Tags     keyspaces
+// @Summary  Create new keyspace by ID.
+// @Param    body  body  CreateKeyspaceByIDParams  true  "Create keyspace parameters"
+// @Produce  json
+// @Success  200  {object}  KeyspaceMeta
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /keyspaces [post]
+func CreateKeyspaceByID(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
+	createParams := &CreateKeyspaceByIDParams{}
+	err := c.BindJSON(createParams)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	req := &keyspace.CreateKeyspaceByIDRequest{
+		ID:         createParams.ID,
+		Name:       createParams.Name,
+		Config:     createParams.Config,
+		CreateTime: time.Now().Unix(),
+	}
+	meta, err := manager.CreateKeyspaceByID(req)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -292,7 +336,7 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 	configParams := &UpdateConfigParams{}
 	err := c.BindJSON(configParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	mutations := getMutations(configParams.Config)
@@ -363,7 +407,7 @@ func UpdateKeyspaceState(c *gin.Context) {
 	param := &UpdateStateParam{}
 	err := c.BindJSON(param)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	targetState, ok := keyspacepb.KeyspaceState_value[strings.ToUpper(param.State)]

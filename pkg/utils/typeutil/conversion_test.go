@@ -46,9 +46,10 @@ func TestJSONToUint64Slice(t *testing.T) {
 	a := testArray{
 		Array: []uint64{1, 2, 3},
 	}
-	bytes, _ := json.Marshal(a)
+	bytes, err := json.Marshal(a)
+	re.NoError(err)
 	var jsonStr map[string]any
-	err := json.Unmarshal(bytes, &jsonStr)
+	err = json.Unmarshal(bytes, &jsonStr)
 	re.NoError(err)
 	// valid case
 	res, ok := JSONToUint64Slice(jsonStr["array"])
@@ -65,7 +66,8 @@ func TestJSONToUint64Slice(t *testing.T) {
 	a1 := testArray1{
 		Array: []string{"1", "2", "3"},
 	}
-	bytes, _ = json.Marshal(a1)
+	bytes, err = json.Marshal(a1)
+	re.NoError(err)
 	var jsonStr1 map[string]any
 	err = json.Unmarshal(bytes, &jsonStr1)
 	re.NoError(err)

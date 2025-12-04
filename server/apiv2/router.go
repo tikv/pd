@@ -51,11 +51,13 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 		c.Set(middlewares.ServerContextKey, svr)
 		c.Next()
 	})
-	router.Use(middlewares.Redirector())
 	root := router.Group(apiV2Prefix)
-	root.GET("ready", handlers.Ready)
+	// add ready check handler before Redirector to avoid redirecting it to the leader
+	handlers.RegisterReadyCheck(root)
+	root.Use(middlewares.Redirector())
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
 	handlers.RegisterMicroservice(root)
+	handlers.RegisterMaintenance(root)
 	return router, group, nil
 }

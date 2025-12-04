@@ -88,7 +88,8 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
 	returnedEntry := &discovery.ServiceRegistryEntry{}
-	returnedEntry.Deserialize([]byte(endpoints[0]))
+	err = returnedEntry.Deserialize([]byte(endpoints[0]))
+	re.NoError(err)
 	re.Equal(addr, returnedEntry.ServiceAddr)
 
 	// test primary when only one server
@@ -156,6 +157,8 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	switch serviceName {
 	case constant.TSOServiceName:
 		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	case constant.ResourceManagerServiceName:
+		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	default:
 		return nil, nil
 	}

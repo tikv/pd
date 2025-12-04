@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -29,7 +30,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
@@ -39,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -55,13 +57,17 @@ const (
 	// Note: Config[TSOKeyspaceGroupIDKey] is only used to judge whether there is keyspace group id.
 	// It will not update the keyspace group id when merging or splitting.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
-
-	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
-	// configured to run a global gc worker to calculate a global gc safe point.
-	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	// GCManagementType is the key for gc_management_type in keyspace config.
+	// If `gc_management_type` is `unified`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a unified GC worker to calculate a unified GC state.
+	// If `gc_management_type` is `keyspace_level` it means the current keyspace can calculate GC states by its own.
 	GCManagementType = "gc_management_type"
-	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently advances its own gc safe point.
-	KeyspaceLevelGC = "keyspace_level_gc"
+	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently manages its own
+	// GC states
+	KeyspaceLevelGC = "keyspace_level"
+	// UnifiedGC is a type of gc_management_type used to indicate that the GC states of this keyspace is managed
+	// in a unified way (managed by the NullKeyspace).
+	UnifiedGC = "unified"
 )
 
 // Config is the interface for keyspace config.
@@ -91,6 +97,9 @@ type Manager struct {
 	kgm *GroupManager
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
+	// cached keyspace meta info for each keyspace ID.
+	keyspaceNameLookup  sync.Map // store as ID(uint32) -> name(string)
+	keyspaceStateLookup sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -101,8 +110,19 @@ type CreateKeyspaceRequest struct {
 	Config map[string]string
 	// CreateTime is the timestamp used to record creation time.
 	CreateTime int64
-	// IsPreAlloc indicates whether the keyspace is pre-allocated when the cluster starts.
-	IsPreAlloc bool
+}
+
+// CreateKeyspaceByIDRequest represents necessary arguments to create a keyspace.
+type CreateKeyspaceByIDRequest struct {
+	// ID of the keyspace to be created.
+	// Using an existing ID will result in error.
+	ID *uint32
+	// Name of the keyspace to be created.
+	// Using an existing name will result in error.
+	Name   string
+	Config map[string]string
+	// CreateTime is the timestamp used to record creation time.
+	CreateTime int64
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
@@ -127,20 +147,56 @@ func NewKeyspaceManager(
 		cluster:           cluster,
 		config:            config,
 		kgm:               kgm,
-		nextPatrolStartID: constant.DefaultKeyspaceID,
+		nextPatrolStartID: constant.StartKeyspaceID,
 	}
 }
 
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
-	// Split Keyspace Region for default keyspace.
-	if err := manager.splitKeyspaceRegion(constant.DefaultKeyspaceID, false); err != nil {
+	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
+	bootstrapKeyspaceName := GetBootstrapKeyspaceName()
+	err := manager.initReserveKeyspace(bootstrapKeyspaceID, bootstrapKeyspaceName)
+	if err != nil {
+		return err
+	}
+	// Initialize pre-alloc keyspace.
+	preAlloc := manager.config.GetPreAlloc()
+	for _, keyspaceName := range preAlloc {
+		go func() {
+			config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+			if err != nil {
+				log.Error("[keyspace] failed to get keyspace config for pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+			req := &CreateKeyspaceRequest{
+				Name:       keyspaceName,
+				CreateTime: time.Now().Unix(),
+				Config:     config,
+			}
+			keyspace, err := manager.CreateKeyspace(req)
+			// Ignore the keyspaceExists error for the same reason as saving default keyspace.
+			if err != nil && err != errs.ErrKeyspaceExists {
+				log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+			if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+				log.Error("[keyspace] failed to update pre-alloc keyspace for group", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+		}()
+	}
+	return nil
+}
+
+func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
+	// Split Keyspace Region for default/system keyspace.
+	if err := manager.splitKeyspaceRegion(id, false); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
-	defaultKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:             constant.DefaultKeyspaceID,
-		Name:           constant.DefaultKeyspaceName,
+	meta := &keyspacepb.KeyspaceMeta{
+		Id:             id,
+		Name:           name,
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
@@ -150,39 +206,18 @@ func (manager *Manager) Bootstrap() error {
 	if err != nil {
 		return err
 	}
-	defaultKeyspaceMeta.Config = config
-	err = manager.saveNewKeyspace(defaultKeyspaceMeta)
-	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
+	// It is needed to set for system keyspace in next-gen.
+	if id == constant.SystemKeyspaceID {
+		config[GCManagementType] = KeyspaceLevelGC
+	}
+	meta.Config = config
+	err = manager.saveNewKeyspace(meta)
+	// It's possible that default/system keyspace already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the keyspaceExists error.
 	if err != nil && err != errs.ErrKeyspaceExists {
 		return err
 	}
-	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], defaultKeyspaceMeta.GetId(), opAdd); err != nil {
-		return err
-	}
-	// Initialize pre-alloc keyspace.
-	preAlloc := manager.config.GetPreAlloc()
-	for _, keyspaceName := range preAlloc {
-		config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
-		if err != nil {
-			return err
-		}
-		req := &CreateKeyspaceRequest{
-			Name:       keyspaceName,
-			CreateTime: now,
-			IsPreAlloc: true,
-			Config:     config,
-		}
-		keyspace, err := manager.CreateKeyspace(req)
-		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
-		if err != nil && err != errs.ErrKeyspaceExists {
-			return err
-		}
-		if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
-			return err
-		}
-	}
-	return nil
+	return manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], meta.GetId(), opAdd)
 }
 
 // UpdateConfig update keyspace manager's config.
@@ -194,6 +229,21 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	// Validate purposed name's legality.
 	if err := validateName(request.Name); err != nil {
+		return nil, err
+	}
+	// Check if keyspace with that name already exists before allocating ID.
+	// This prevents unnecessary ID allocation when the name already exists.
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		nameExists, _, err := manager.store.LoadKeyspaceID(txn, request.Name)
+		if err != nil {
+			return err
+		}
+		if nameExists {
+			return errs.ErrKeyspaceExists
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	// Allocate new keyspaceID.
@@ -214,6 +264,15 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
 	}
+	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
+	if kerneltype.IsNextGen() {
+		if request.Config == nil {
+			request.Config = make(map[string]string)
+		}
+		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
+			request.Config[GCManagementType] = KeyspaceLevelGC
+		}
+	}
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
@@ -232,11 +291,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		)
 		return nil, err
 	}
-	// If the request to create a keyspace is pre-allocated when the PD starts,
-	// there is no need to wait for the region split, because TiKV has not started.
-	waitRegionSplit := !request.IsPreAlloc && manager.config.ToWaitRegionSplit()
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
+	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			idPath := keypath.KeyspaceIDPath(request.Name)
@@ -277,6 +333,120 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	return keyspace, nil
 }
 
+// CreateKeyspaceByID create a keyspace meta with given config and save it to storage.
+func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (*keyspacepb.KeyspaceMeta, error) {
+	if request.ID == nil {
+		return nil, errors.New("keyspace id is empty")
+	}
+	id := *request.ID
+	name := request.Name
+	if len(name) == 0 {
+		return nil, errors.New("keyspace name is empty")
+	}
+	// Validate purposed name's legality.
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
+	// Check if keyspace with that name or ID already exists before processing.
+	// This provides early validation and better error handling.
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		nameExists, _, err := manager.store.LoadKeyspaceID(txn, name)
+		if err != nil {
+			return err
+		}
+		if nameExists {
+			return errs.ErrKeyspaceExists
+		}
+		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, id)
+		if err != nil {
+			return err
+		}
+		if loadedMeta != nil {
+			return errs.ErrKeyspaceExists
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
+	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
+	if err != nil {
+		return nil, err
+	}
+	if len(config) != 0 {
+		if request.Config == nil {
+			request.Config = config
+		} else {
+			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
+			request.Config[UserKindKey] = config[UserKindKey]
+		}
+	}
+	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
+	if kerneltype.IsNextGen() {
+		if request.Config == nil {
+			request.Config = make(map[string]string)
+		}
+		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
+			request.Config[GCManagementType] = KeyspaceLevelGC
+		}
+	}
+	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
+	keyspace := &keyspacepb.KeyspaceMeta{
+		Id:             id,
+		Name:           name,
+		State:          keyspacepb.KeyspaceState_DISABLED,
+		CreatedAt:      request.CreateTime,
+		StateChangedAt: request.CreateTime,
+		Config:         request.Config,
+	}
+	err = manager.saveNewKeyspace(keyspace)
+	if err != nil {
+		log.Warn("[keyspace] failed to save keyspace before split",
+			zap.Uint32("keyspace-id", keyspace.GetId()),
+			zap.String("keyspace-name", keyspace.GetName()),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	// Split keyspace region.
+	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
+	if err != nil {
+		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			metaPath := keypath.KeyspaceMetaPath(id)
+			return txn.Remove(metaPath)
+		})
+		if err2 != nil {
+			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
+				zap.Uint32("keyspace-id", keyspace.GetId()),
+				zap.String("keyspace-name", keyspace.GetName()),
+				zap.Error(err2),
+			)
+		}
+		return nil, err
+	}
+	// enable the keyspace metadata after split.
+	keyspace.State = keyspacepb.KeyspaceState_ENABLED
+	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
+	if err != nil {
+		log.Warn("[keyspace] failed to create keyspace",
+			zap.Uint32("keyspace-id", keyspace.GetId()),
+			zap.String("keyspace-name", keyspace.GetName()),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+		return nil, err
+	}
+	log.Info("[keyspace] keyspace created",
+		zap.Uint32("keyspace-id", keyspace.GetId()),
+		zap.String("keyspace-name", keyspace.GetName()),
+		zap.Any("keyspace", keyspace),
+	)
+	return keyspace, nil
+}
+
 func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
 	manager.metaLock.Lock(keyspace.Id)
 	defer manager.metaLock.Unlock(keyspace.Id)
@@ -295,6 +465,8 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		if err != nil {
 			return err
 		}
+		// Update the keyspace name cache.
+		manager.keyspaceNameLookup.Store(keyspace.Id, keyspace.Name)
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
 		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.Id)
@@ -341,53 +513,14 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	}()
 
 	if waitRegionSplit {
-		ranges := keyspaceRule.Data.([]*labeler.KeyRangeRule)
-		if len(ranges) < 2 {
-			log.Warn("[keyspace] failed to split keyspace region with insufficient range", logutil.ZapRedactString("label-rule", keyspaceRule.String()))
-			return errs.ErrRegionSplitFailed
+		err = manager.waitKeyspaceRegionSplit(id)
+		if err != nil {
+			log.Warn("[keyspace] wait region split meets error",
+				zap.Uint32("keyspace-id", id),
+				zap.Error(err),
+			)
 		}
-		rawLeftBound, rawRightBound := ranges[0].StartKey, ranges[0].EndKey
-		txnLeftBound, txnRightBound := ranges[1].StartKey, ranges[1].EndKey
-
-		ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
-		timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
-		defer func() {
-			ticker.Stop()
-			timer.Stop()
-		}()
-		for {
-			select {
-			case <-ticker.C:
-				c := manager.cluster.GetBasicCluster()
-				region := c.GetRegionByKey(rawLeftBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), rawLeftBound) {
-					continue
-				}
-				region = c.GetRegionByKey(rawRightBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), rawRightBound) {
-					continue
-				}
-				region = c.GetRegionByKey(txnLeftBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), txnLeftBound) {
-					continue
-				}
-				region = c.GetRegionByKey(txnRightBound)
-				if region == nil || !bytes.Equal(region.GetStartKey(), txnRightBound) {
-					continue
-				}
-				// Note: we reset the ticker here to support updating configuration dynamically.
-				ticker.Reset(manager.config.GetCheckRegionSplitInterval())
-			case <-timer.C:
-				log.Warn("[keyspace] wait region split timeout",
-					zap.Uint32("keyspace-id", id),
-					zap.Error(err),
-				)
-				err = errs.ErrRegionSplitTimeout
-				return
-			}
-			log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
-			break
-		}
+		return err
 	}
 
 	log.Info("[keyspace] added region label for keyspace",
@@ -396,6 +529,52 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		zap.Duration("takes", time.Since(start)),
 	)
 	return
+}
+
+func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
+	ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
+	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
+	defer func() {
+		ticker.Stop()
+		timer.Stop()
+	}()
+	for {
+		select {
+		case <-manager.ctx.Done():
+			return errors.New("[keyspace] wait region split canceled")
+		case <-ticker.C:
+			if manager.CheckKeyspaceRegionBound(id) {
+				log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
+				return nil
+			}
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(manager.config.GetCheckRegionSplitInterval())
+		case <-timer.C:
+			err := errs.ErrRegionSplitTimeout
+			return err
+		}
+	}
+}
+
+// CheckKeyspaceRegionBound checks whether the keyspace region has been split.
+func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
+	regionBound := MakeRegionBound(id)
+	return manager.checkBound(regionBound.RawLeftBound) &&
+		manager.checkBound(regionBound.RawRightBound) &&
+		manager.checkBound(regionBound.TxnLeftBound) &&
+		manager.checkBound(regionBound.TxnRightBound)
+}
+
+func (manager *Manager) checkBound(key []byte) bool {
+	if manager.cluster == nil {
+		return false
+	}
+	c := manager.cluster.GetBasicCluster()
+	region := c.GetRegionByKey(key)
+	if region == nil || !bytes.Equal(region.GetStartKey(), key) {
+		return false
+	}
+	return true
 }
 
 // LoadKeyspace returns the keyspace specified by name.
@@ -531,7 +710,6 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		}
 		return nil
 	})
-
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Uint32("keyspace-id", meta.GetId()),
@@ -551,12 +729,10 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // UpdateKeyspaceState updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
-	// Changing the state of default keyspace is not allowed.
-	if name == constant.DefaultKeyspaceName {
-		log.Warn("[keyspace] failed to update keyspace config",
-			errs.ZapError(errs.ErrModifyDefaultKeyspace),
-		)
-		return nil, errs.ErrModifyDefaultKeyspace
+	if isProtectedKeyspaceName(name) {
+		err := newModifyProtectedKeyspaceError()
+		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
+		return nil, err
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -579,7 +755,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = updateKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -603,12 +779,10 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
-	// Changing the state of default keyspace is not allowed.
-	if id == constant.DefaultKeyspaceID {
-		log.Warn("[keyspace] failed to update keyspace config",
-			errs.ZapError(errs.ErrModifyDefaultKeyspace),
-		)
-		return nil, errs.ErrModifyDefaultKeyspace
+	if isProtectedKeyspaceID(id) {
+		err := newModifyProtectedKeyspaceError()
+		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
+		return nil, err
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
@@ -624,7 +798,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = updateKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -645,8 +819,8 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	return meta, nil
 }
 
-// updateKeyspaceState updates keyspace meta and record the update time.
-func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+// transformKeyspaceState transforms the keyspace state to the target state and record the update time.
+func (manager *Manager) transformKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
 	// If already in the target state, do nothing and return.
 	if meta.GetState() == newState {
 		return nil
@@ -658,14 +832,17 @@ func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.Keys
 	// If the operation is legal, update keyspace state and change time.
 	meta.State = newState
 	meta.StateChangedAt = now
+	// Update the keyspace state to the cache.
+	manager.keyspaceStateLookup.Store(meta.GetId(), newState)
 	return nil
 }
 
 // LoadRangeKeyspace load up to limit keyspaces starting from keyspace with startID.
+// It will not load the NullKeyspace meta data.
 func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
 	// Load Start should fall within acceptable ID range.
-	if startID > spaceIDMax {
-		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, spaceIDMax)
+	if startID > constant.MaxValidKeyspaceID {
+		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, constant.MaxValidKeyspaceID)
 	}
 	var (
 		keyspaces []*keyspacepb.KeyspaceMeta
@@ -681,9 +858,78 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 	return keyspaces, nil
 }
 
+// GetKeyspaceNameByID gets the keyspace name by ID, which will try to get it from the cache first.
+// If not found, it will try to get it from the storage.
+func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
+	if id == constant.NullKeyspaceID {
+		return "", nil
+	}
+	// Try to get the keyspace name from the cache first.
+	name, ok := manager.keyspaceNameLookup.Load(id)
+	if ok {
+		return name.(string), nil
+	}
+	var loadedName string
+	// If the keyspace name is not in the cache, try to get it from the storage.
+	meta, err := manager.LoadKeyspaceByID(id)
+	if err != nil {
+		return "", err
+	}
+	loadedName = meta.GetName()
+	if len(loadedName) == 0 {
+		return "", errors.Errorf("got an empty keyspace name by id %d", id)
+	}
+	// Load or store the keyspace name to the cache.
+	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
+	return actual.(string), nil
+}
+
+// GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.
+// If not found, it will try to get it from the storage.
+func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceState, error) {
+	if id == constant.NullKeyspaceID {
+		return keyspacepb.KeyspaceState_DISABLED, nil
+	}
+	state, ok := manager.keyspaceStateLookup.Load(id)
+	if ok {
+		return state.(keyspacepb.KeyspaceState), nil
+	}
+	var loadedState keyspacepb.KeyspaceState
+	// If the keyspace state is not in the cache, try to get it from the storage.
+	meta, err := manager.LoadKeyspaceByID(id)
+	// Only check wether the keyspace meta is nil, ensure the returned state is as latest as possible.
+	if meta == nil {
+		return keyspacepb.KeyspaceState_DISABLED, err
+	}
+	loadedState = meta.GetState()
+	// Load or store the keyspace state to the cache.
+	actual, _ := manager.keyspaceStateLookup.LoadOrStore(id, loadedState)
+	return actual.(keyspacepb.KeyspaceState), nil
+}
+
+// GetEnabledKeyspaceNameByID gets the enabled keyspace name by ID. If the state is not enabled, it will return an error.
+// This method is useful for getting the keyspace name while checking whether the keyspace is enabled.
+func (manager *Manager) GetEnabledKeyspaceNameByID(id uint32) (string, error) {
+	state, err := manager.GetKeyspaceStateByID(id)
+	if err != nil {
+		return "", err
+	}
+	if state != keyspacepb.KeyspaceState_ENABLED {
+		return "", errors.Errorf("keyspace %d is not enabled, current state is %s", id, state.String())
+	}
+	return manager.GetKeyspaceNameByID(id)
+}
+
+// IterateKeyspaces returns an iterator that yields all keyspaces starting from startID.
+// In case the keyspaces are being modified while iteration is in progress, it's not guaranteed that the results are
+// in a consistent snapshot.
+func (manager *Manager) IterateKeyspaces() *Iterator {
+	return newKeyspaceIterator(manager)
+}
+
 // allocID allocate a new keyspace id.
 func (manager *Manager) allocID() (uint32, error) {
-	id64, err := manager.idAllocator.Alloc()
+	id64, _, err := manager.idAllocator.Alloc(1)
 	if err != nil {
 		return 0, err
 	}
@@ -830,5 +1076,79 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 		// If all keyspaces in the current batch are assigned, update the next start ID.
 		manager.nextPatrolStartID = nextStartID
 	}
+	return nil
+}
+
+// IteratorLoadingBatchSize is the batch size that the keyspace.Iterator internally loads keyspaces.
+// This constant is public for test purposes.
+const IteratorLoadingBatchSize int = 100
+
+// Iterator iterates over all keyspaces.
+// Create this using keyspace.Manager.IterateKeyspaces, and use Next method for iteration.
+type Iterator struct {
+	manager      *Manager
+	currentBatch []*keyspacepb.KeyspaceMeta
+	currentIndex int
+	isDrained    bool
+	err          error
+}
+
+func newKeyspaceIterator(manager *Manager) *Iterator {
+	return &Iterator{
+		manager: manager,
+	}
+}
+
+// Next advances the iterator to the next item. On a new iterator, Next returns the first item.
+// Returns the next keyspace (if any), and a bool value that indicates whether the next item exists (if false, it means
+// the iteration is ended).
+// Once the iteration is ended, all subsequent calls to Next will result in a false indicates there's no more items.
+// Once an error occurs during the iteration, all subsequent calls to Next will get the same error.
+func (it *Iterator) Next() (*keyspacepb.KeyspaceMeta, bool, error) {
+	if it.err != nil {
+		return nil, false, it.err
+	}
+	if it.isDrained {
+		return nil, false, nil
+	}
+
+	if it.currentBatch == nil || it.currentIndex >= len(it.currentBatch) {
+		if err := it.loadBatch(); err != nil {
+			return nil, false, err
+		}
+		if it.isDrained {
+			return nil, false, nil
+		}
+	}
+
+	result := it.currentBatch[it.currentIndex]
+	it.currentIndex++
+	return result, true, nil
+}
+
+func (it *Iterator) loadBatch() error {
+	nextID := uint32(0)
+	if it.currentBatch != nil {
+		nextID = it.currentBatch[len(it.currentBatch)-1].GetId() + 1
+	}
+
+	var err error
+	it.currentIndex = 0
+	batchSize := IteratorLoadingBatchSize
+	failpoint.Inject("keyspaceIteratorLoadingBatchSize", func(val failpoint.Value) {
+		batchSize = val.(int)
+	})
+	failpoint.InjectCall("keyspaceIteratorOnLoadRange")
+	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextID, batchSize)
+	if err != nil {
+		err = errors.AddStack(err)
+		it.err = err
+		return err
+	}
+
+	if len(it.currentBatch) == 0 {
+		it.isDrained = true
+	}
+
 	return nil
 }

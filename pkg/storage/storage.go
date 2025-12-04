@@ -20,13 +20,13 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -40,14 +40,15 @@ type Storage interface {
 	endpoint.MetaStorage
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
-	endpoint.GCSafePointStorage
+	endpoint.GCStateStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.SafePointV2Storage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
+	endpoint.MaintenanceStorage
+	endpoint.AffinityStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
@@ -56,8 +57,8 @@ func NewStorageWithMemoryBackend() Storage {
 }
 
 // NewStorageWithEtcdBackend creates a new storage with etcd backend.
-func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage {
-	return newEtcdBackend(client, rootPath)
+func NewStorageWithEtcdBackend(client *clientv3.Client) Storage {
+	return newEtcdBackend(client)
 }
 
 // NewRegionStorageWithLevelDBBackend will create a specialized storage to
@@ -73,8 +74,6 @@ func NewRegionStorageWithLevelDBBackend(
 	}
 	return newRegionStorage(levelDBBackend), nil
 }
-
-// TODO: support other KV storage backends like BadgerDB in the future.
 
 type regionSource int
 
@@ -220,11 +219,17 @@ func AreRegionsLoaded(s Storage) bool {
 	ps := s.(*coreStorage)
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	failpoint.Inject("loadRegionSlow", func() {
-		failpoint.Return(false)
-	})
 	if ps.useRegionStorage.Load() {
 		return ps.regionLoaded == fromLeveldb
 	}
 	return ps.regionLoaded == fromEtcd
+}
+
+// IsBootstrapped returns whether the cluster is bootstrapped.
+func IsBootstrapped(s Storage) bool {
+	data, err := s.Load(keypath.ClusterBootstrapTimePath())
+	if err != nil {
+		return false
+	}
+	return data != ""
 }

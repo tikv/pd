@@ -57,7 +57,7 @@ func ServiceRedirector() gin.HandlerFunc {
 
 		c.Request.Header.Set(ServiceRedirectorHeader, svr.Name())
 
-		listenUrls := svr.GetLeaderListenUrls()
+		listenUrls := svr.GetServingUrls()
 		if listenUrls == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 			return

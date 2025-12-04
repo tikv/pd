@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 )
 
 const globalConfigPath = "/global/config/"
@@ -77,7 +78,7 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 	)
 	checker := assertutil.NewChecker()
 	checker.FailNow = func() {}
-	gsi, suite.cleanup, err = server.NewTestServer(re, checker)
+	gsi, suite.cleanup, err = tests.NewServer(re, checker)
 	suite.server = &server.GrpcServer{Server: gsi}
 	re.NoError(err)
 	addr := suite.server.GetAddr()
@@ -213,10 +214,13 @@ func (suite *globalConfigTestSuite) TestWatch() {
 	ctx, cancel := context.WithCancel(suite.server.Context())
 	defer cancel()
 	server := testReceiver{re: suite.Require(), ctx: ctx}
-	go suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
-		ConfigPath: globalConfigPath,
-		Revision:   0,
-	}, server)
+	go func() {
+		err := suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
+			ConfigPath: globalConfigPath,
+			Revision:   0,
+		}, server)
+		re.NoError(err)
+	}()
 	for i := range 6 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)

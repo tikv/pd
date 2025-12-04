@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type operatorControllerTestSuite struct {
@@ -419,10 +420,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source := suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(source)
-	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target := suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(target)
 
@@ -493,6 +494,54 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	re.Equal(0, controller.opNotifierQueue.len())
 }
 
+func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
+	re := suite.Require()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	for i := range 10 {
+		left := suite.newRegionInfo(uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		left.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+		cluster.PutRegion(left)
+		middle := suite.newRegionInfo(uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		middle.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+		cluster.PutRegion(middle)
+		right := suite.newRegionInfo(uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		right.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+		cluster.PutRegion(right)
+		wg := &sync.WaitGroup{}
+		for range 5 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
+				re.NoError(err)
+				re.Len(ops1, 2)
+				controller.AddWaitingOperator(ops1...)
+				ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
+				re.NoError(err)
+				re.Len(ops2, 2)
+				controller.AddWaitingOperator(ops2...)
+			}()
+		}
+		wg.Wait()
+		var count int
+		controller.operators.Range(func(_ any, op any) bool {
+			if op.(*Operator).Kind() == OpMerge {
+				count++
+			}
+			return true
+		})
+		re.Equal(count, int(controller.counts.getCountByKind(OpMerge)))
+	}
+}
+
 func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
@@ -503,10 +552,10 @@ func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source := suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(source)
-	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target := suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(target)
 
@@ -651,6 +700,30 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	re.Equal(uint64(0), op.ConfVerChanged(region))
 	// no new step
 	re.Equal(3, stream.MsgLength())
+}
+
+func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
+	re := suite.Require()
+	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderRegionWithRange(1, "200", "300", 1, 2, 3)
+	op := &Operator{
+		regionID: 1,
+		kind:     OpRegion,
+		steps: []OpStep{
+			AddLearner{ToStore: 2, PeerID: 2},
+		},
+		timeout: time.Minute,
+	}
+	re.True(controller.addOperatorInner(op))
+	op.Start()
+	inf := controller.GetOpInfluence(cluster.GetBasicCluster())
+	re.Len(inf.StoresInfluence, 1)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("200")}}))
+	re.Empty(inf.StoresInfluence)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
+	re.Len(inf.StoresInfluence, 1)
 }
 
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
@@ -842,13 +915,16 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	}
 }
 
-func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
+func (suite *operatorControllerTestSuite) newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
+	re := suite.Require()
 	prs := make([]*metapb.Peer, 0, len(peers))
 	for _, peer := range peers {
 		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
 	}
-	start, _ := hex.DecodeString(startKey)
-	end, _ := hex.DecodeString(endKey)
+	start, err := hex.DecodeString(startKey)
+	re.NoError(err)
+	end, err := hex.DecodeString(endKey)
+	re.NoError(err)
 	return core.NewRegionInfo(
 		&metapb.Region{
 			Id:       id,
@@ -880,7 +956,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	addPeerOp := func(i uint64) *Operator {
 		start := fmt.Sprintf("%da", i)
 		end := fmt.Sprintf("%db", i)
-		region := newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
+		region := suite.newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
 		cluster.PutRegion(region)
 		peer := &metapb.Peer{
 			StoreId: 2,
@@ -914,9 +990,9 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re.Equal(1, added)
 	re.NotNil(controller.GetOperator(uint64(100)))
 
-	source := newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	source := suite.newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(source)
-	target := newRegionInfo(102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := suite.newRegionInfo(102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(target)
 
 	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
@@ -925,12 +1001,13 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 
 	// test with label schedule=deny
 	labelerManager := cluster.GetRegionLabeler()
-	labelerManager.SetLabelRule(&labeler.LabelRule{
+	err = labelerManager.SetLabelRule(&labeler.LabelRule{
 		ID:       "schedulelabel",
 		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: labeler.KeyRange,
 		Data:     []any{map[string]any{"start_key": "1a", "end_key": "1b"}},
 	})
+	re.NoError(err)
 
 	re.True(labelerManager.ScheduleDisabled(source))
 	// add operator should be success since it is not check in addWaitingOperator
@@ -947,8 +1024,12 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(3, 1)
 	tc.AddRegionStore(4, 1)
 	tc.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	// Remove store 3 to simulate the scenario where store 3 is gone
+	store3 := tc.GetStore(3)
+	tc.GetBasicCluster().DeleteStore(store3)
 	steps := []OpStep{
 		RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
 	}

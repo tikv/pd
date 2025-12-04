@@ -26,7 +26,7 @@ import (
 
 func TestPatchResourceGroup(t *testing.T) {
 	re := require.New(t)
-	rg := &ResourceGroup{Name: "test", Mode: rmpb.GroupMode_RUMode, RUSettings: NewRequestUnitSettings(nil)}
+	rg := &ResourceGroup{Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: NewRequestUnitSettings(testResourceGroupName, nil)}
 	testCaseRU := []struct {
 		patchJSONString  string
 		expectJSONString string
@@ -52,10 +52,11 @@ func TestPatchResourceGroup(t *testing.T) {
 }
 
 func TestClone(t *testing.T) {
-	for i := 0; i <= 10; i++ {
+	re := require.New(t)
+	for range 11 {
 		var rg ResourceGroup
-		gofakeit.Struct(&rg)
+		re.NoError(gofakeit.Struct(&rg))
 		rgClone := rg.Clone(true)
-		require.EqualValues(t, &rg, rgClone)
+		require.Equal(t, &rg, rgClone)
 	}
 }

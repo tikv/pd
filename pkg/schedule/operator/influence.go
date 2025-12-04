@@ -40,7 +40,7 @@ func (m *OpInfluence) Add(other *OpInfluence) {
 }
 
 // GetStoreInfluence get storeInfluence of specific store.
-func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
@@ -83,7 +83,13 @@ func (s *StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 			return 0
 		}
 	case constant.RegionKind:
-		return s.RegionSize
+		switch kind.Policy {
+		case constant.ByCount:
+			return s.RegionCount
+		default:
+			return s.RegionSize
+		}
+
 	case constant.WitnessKind:
 		return s.WitnessCount
 	default:

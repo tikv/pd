@@ -30,3 +30,7 @@ embedded_assets_handler.go
 *.log
 *.bin
 third_bin
+tmp*
+.specstory/
+.cursorindexingignore
+.gocache/

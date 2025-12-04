@@ -16,6 +16,7 @@ package syncer
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/docker/go-units"
@@ -155,7 +156,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
+				log.Warn("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				select {
 				case <-ctx.Done():
 					log.Info("stop synchronizing with leader due to context canceled")
@@ -167,15 +168,26 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.getNextIndex()))
 			for {
 				resp, err := stream.Recv()
+				if err == io.EOF {
+					log.Info("server region sync with leader meets EOF, stop syncing", zap.String("server", s.server.Name()))
+					return
+				}
 				if err != nil {
 					s.streamingRunning.Store(false)
-					log.Error("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
+					log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 					if err = stream.CloseSend(); err != nil {
-						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+					}
+					// Check if the leader is still there to avoid waiting for a `retryInterval`.
+					if s.server.GetLeader() == nil {
+						log.Warn("stop synchronizing with leader due to leader stepped down",
+							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
+						return
 					}
 					select {
 					case <-ctx.Done():
-						log.Info("stop synchronizing with leader due to context canceled")
+						log.Info("stop synchronizing with leader due to context canceled",
+							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
 						return
 					case <-time.After(retryInterval):
 					}
@@ -200,21 +212,22 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					var (
 						region       *core.RegionInfo
 						regionLeader *metapb.Peer
+						opts         = []core.RegionCreateOption{core.SetSource(core.Sync)}
 					)
 					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
 						regionLeader = regionLeaders[i]
 					}
 					if hasStats {
-						region = core.NewRegionInfo(r, regionLeader,
+						opts = append(opts,
 							core.SetWrittenBytes(stats[i].BytesWritten),
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
-							core.SetReadKeys(stats[i].KeysRead),
-							core.SetSource(core.Sync),
-						)
-					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.Sync))
+							core.SetReadKeys(stats[i].KeysRead))
 					}
+					if hasBuckets {
+						opts = append(opts, core.SetBuckets(buckets[i]))
+					}
+					region = core.NewRegionInfo(r, regionLeader, opts...)
 
 					origin, _, err := bc.PreCheckPutRegion(region)
 					if err != nil {

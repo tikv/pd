@@ -15,8 +15,10 @@
 package core
 
 import (
+	"maps"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/go-units"
@@ -42,8 +44,15 @@ const (
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
+	// EngineRoleKey is the label key used to indicate engine role.
+	// Only TiFlash write node has this label.
+	EngineRoleKey = "engine_role"
 	// EngineTiFlash is the tiflash value of the engine label.
+	// Classic TiFlash and TiFlash write node will use this value.
 	EngineTiFlash = "tiflash"
+	// EngineTiFlashCompute is the tiflash value of the engine label.
+	// TiFlash compute node will use this value.
+	EngineTiFlashCompute = "tiflash_compute"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"
 )
@@ -53,10 +62,11 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransferIn  bool // not allow to be used as target of transfer leader
-	pauseLeaderTransferOut bool // not allow to be used as source of transfer leader
-	slowStoreEvicted       bool // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted       bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	pauseLeaderTransferIn  atomic.Int64 // not allow to be used as target of transfer leader
+	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
+	slowStoreEvicted       atomic.Int64 // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted       atomic.Int64 // this store has been evicted as a slow store by trend, should not transfer leader to it
+	stoppingStoreEvicted   atomic.Int64 // this store has been evicted as a stopping store, should not transfer leader to it
 	leaderCount            int
 	regionCount            int
 	learnerCount           int
@@ -70,6 +80,7 @@ type StoreInfo struct {
 	limiter                storelimit.StoreLimit
 	minResolvedTS          uint64
 	lastAwakenTime         time.Time
+	networkSlowTriggers    uint64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -108,14 +119,35 @@ func NewStoreInfoWithLabel(id uint64, labels map[string]string) *StoreInfo {
 
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	store := *s
-	store.meta = typeutil.DeepClone(s.meta, StoreFactory)
+	store := &StoreInfo{
+		meta:                typeutil.DeepClone(s.meta, StoreFactory),
+		storeStats:          s.storeStats,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		learnerCount:        s.learnerCount,
+		witnessCount:        s.witnessCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
+		lastAwakenTime:      s.lastAwakenTime,
+		networkSlowTriggers: s.networkSlowTriggers,
+	}
+	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
+	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
+	store.slowStoreEvicted.Store(s.slowStoreEvicted.Load())
+	store.slowTrendEvicted.Store(s.slowTrendEvicted.Load())
+	store.stoppingStoreEvicted.Store(s.stoppingStoreEvicted.Load())
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&store)
+			opt(store)
 		}
 	}
-	return &store
+	return store
 }
 
 // LimitVersion returns the limit version of the store.
@@ -134,33 +166,60 @@ func (s *StoreInfo) Feedback(e float64) {
 
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
-	store := *s
-	for _, opt := range opts {
-		opt(&store)
+	store := &StoreInfo{
+		meta:                s.meta,
+		storeStats:          s.storeStats,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		learnerCount:        s.learnerCount,
+		witnessCount:        s.witnessCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
+		lastAwakenTime:      s.lastAwakenTime,
+		networkSlowTriggers: s.networkSlowTriggers,
 	}
-	return &store
+	store.pauseLeaderTransferIn.Store(s.pauseLeaderTransferIn.Load())
+	store.pauseLeaderTransferOut.Store(s.pauseLeaderTransferOut.Load())
+	store.slowStoreEvicted.Store(s.slowStoreEvicted.Load())
+	store.slowTrendEvicted.Store(s.slowTrendEvicted.Load())
+	store.stoppingStoreEvicted.Store(s.stoppingStoreEvicted.Load())
+	for _, opt := range opts {
+		opt(store)
+	}
+	return store
 }
 
 // AllowLeaderTransferIn returns if the store is allowed to be selected
 // as target of transfer leader.
 func (s *StoreInfo) AllowLeaderTransferIn() bool {
-	return !s.pauseLeaderTransferIn
+	return s.pauseLeaderTransferIn.Load() == 0
 }
 
 // AllowLeaderTransferOut returns if the store is allowed to be selected
 // as source of transfer leader.
 func (s *StoreInfo) AllowLeaderTransferOut() bool {
-	return !s.pauseLeaderTransferOut
+	return s.pauseLeaderTransferOut.Load() == 0
 }
 
 // EvictedAsSlowStore returns if the store should be evicted as a slow store.
 func (s *StoreInfo) EvictedAsSlowStore() bool {
-	return s.slowStoreEvicted
+	return s.slowStoreEvicted.Load() > 0
+}
+
+// EvictedAsStoppingStore returns if the store should be evicted as a stopping store.
+func (s *StoreInfo) EvictedAsStoppingStore() bool {
+	return s.stoppingStoreEvicted.Load() > 0
 }
 
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
 func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
-	return s.slowTrendEvicted
+	return s.slowTrendEvicted.Load() > 0
 }
 
 // IsAvailable returns if the store bucket of limitation is available
@@ -170,9 +229,27 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type, level constant.Priori
 	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, level)
 }
 
-// IsTiFlash returns true if the store is tiflash.
-func (s *StoreInfo) IsTiFlash() bool {
+// IsTiKV returns true if the store is TiKV store.
+func (s *StoreInfo) IsTiKV() bool {
+	return !s.IsTiFlashWrite() && !s.IsTiFlashCompute()
+}
+
+// IsTiFlashWrite returns true if the store is TiFlash write node or TiFlash classic node.
+func (s *StoreInfo) IsTiFlashWrite() bool {
 	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
+}
+
+// IsTiFlashCompute returns true if the store is TiFlash compute node.
+func (s *StoreInfo) IsTiFlashCompute() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlashCompute)
+}
+
+// Engine returns the engine type of the store.
+func (s *StoreInfo) Engine() string {
+	if s.IsTiKV() {
+		return EngineTiKV
+	}
+	return EngineTiFlash
 }
 
 // IsUp returns true if store is serving or preparing.
@@ -207,6 +284,24 @@ func (s *StoreInfo) GetSlowScore() uint64 {
 	return s.rawStats.GetSlowScore()
 }
 
+// GetNetworkSlowScores returns the network slow score of the store.
+func (s *StoreInfo) GetNetworkSlowScores() map[uint64]uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[uint64]uint64)
+	maps.Copy(result, s.rawStats.GetNetworkSlowScores())
+	return result
+}
+
+// GetNetworkSlowTriggers returns the triggered network slow eviction count of the store.
+func (s *StoreInfo) GetNetworkSlowTriggers() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.networkSlowTriggers
+}
+
 // WitnessScore returns the store's witness score.
 func (s *StoreInfo) WitnessScore(delta int64) float64 {
 	return float64(int64(s.GetWitnessCount()) + delta)
@@ -216,7 +311,14 @@ func (s *StoreInfo) WitnessScore(delta int64) float64 {
 func (s *StoreInfo) IsSlow() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.slowTrendEvicted || s.rawStats.GetSlowScore() >= slowStoreThreshold
+	return s.IsEvictedAsSlowTrend() || s.rawStats.GetSlowScore() >= slowStoreThreshold
+}
+
+// IsStopping checks if the store is in stopping state.
+func (s *StoreInfo) IsStopping() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetIsStopping()
 }
 
 // GetSlowTrend returns the slow trend information of the store.
@@ -426,7 +528,12 @@ func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	}
 
 	if s.GetRegionSize() != 0 {
-		U += U * (float64(delta)) / float64(s.GetRegionSize())
+		U1 := U + U*(float64(delta))/float64(s.GetRegionSize())
+		// The used size of the store can't be increase/decrease too much
+		if U1 < 2*U && U1 > U*0.5 {
+			U = U1
+		}
+		// The available size of the store can't reach out the capacity
 		if A1 := C - U - diff; A1 > 0 && A1 < C {
 			A = A1
 		}
@@ -763,17 +870,51 @@ func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
 	return stores
 }
 
+// GetAvgNetworkSlowScore returns the average network slow score of a store.
+func (s *StoresInfo) GetAvgNetworkSlowScore(storeID uint64) uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		return 0
+	}
+	var (
+		total             uint64
+		count             uint64
+		networkSlowScores = store.GetNetworkSlowScores()
+	)
+	for id := range s.stores {
+		if id == storeID {
+			continue
+		}
+		if score, ok := networkSlowScores[id]; ok {
+			total += score
+		} else {
+			// If the score is 1, its score will not report to PD.
+			total += 1
+		}
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return total / count
+}
+
 /* Stores write operations */
 
 // PutStore sets a StoreInfo with storeID.
-func (s *StoresInfo) PutStore(store *StoreInfo) {
+func (s *StoresInfo) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
 	s.Lock()
 	defer s.Unlock()
-	s.putStoreLocked(store)
+	s.putStoreLocked(store, opts...)
 }
 
 // putStoreLocked sets a StoreInfo with storeID.
-func (s *StoresInfo) putStoreLocked(store *StoreInfo) {
+func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption) {
+	if len(opts) > 0 {
+		store = s.stores[store.GetID()].Clone(opts...)
+	}
 	s.stores[store.GetID()] = store
 }
 
@@ -789,21 +930,16 @@ func (s *StoresInfo) ResetStores() {
 func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Direction) error {
 	s.Lock()
 	defer s.Unlock()
-	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
+
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	switch direction {
-	case constant.In:
-		if !store.AllowLeaderTransferIn() {
-			return errs.ErrPauseLeaderTransferIn.FastGenByArgs(storeID)
-		}
-	case constant.Out:
-		if !store.AllowLeaderTransferOut() {
-			return errs.ErrPauseLeaderTransferOut.FastGenByArgs(storeID)
-		}
-	}
+	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID),
+		zap.String("direction", direction.String()),
+		zap.Int64("pause-in-time", store.pauseLeaderTransferIn.Load()),
+		zap.Int64("pause-out-time", store.pauseLeaderTransferOut.Load()),
+	)
 	s.stores[storeID] = store.Clone(PauseLeaderTransfer(direction))
 	return nil
 }
@@ -832,10 +968,20 @@ func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if store.EvictedAsSlowStore() {
-		return errs.ErrSlowStoreEvicted.FastGenByArgs(storeID)
-	}
 	s.stores[storeID] = store.Clone(SlowStoreEvicted())
+	return nil
+}
+
+// StoppingStoreEvicted marks a store as a stopping store and prevents transferring
+// leader to the store
+func (s *StoresInfo) StoppingStoreEvicted(storeID uint64) error {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(StoppingStoreEvicted())
 	return nil
 }
 
@@ -850,6 +996,19 @@ func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
 		return
 	}
 	s.stores[storeID] = store.Clone(SlowStoreRecovered())
+}
+
+// StoppingStoreRecovered cleans the evicted state of a store.
+func (s *StoresInfo) StoppingStoreRecovered(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's evicted as a stopping store state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(StoppingStoreRecovered())
 }
 
 // SlowTrendEvicted marks a store as a slow trend and prevents transferring
@@ -913,6 +1072,30 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount,
 	}
 }
 
+// TriggerNetworkSlowEvict triggers a network slow eviction threshold for the store.
+func (s *StoresInfo) TriggerNetworkSlowEvict(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	if store, ok := s.stores[storeID]; ok {
+		newStore := store.ShallowClone(
+			SetNetworkSlowTriggers(store.networkSlowTriggers + 1),
+		)
+		s.putStoreLocked(newStore)
+	}
+}
+
+// ResetTriggerNetworkSlowEvict resets the trigger network slow eviction count for the store.
+func (s *StoresInfo) ResetTriggerNetworkSlowEvict(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	if store, ok := s.stores[storeID]; ok {
+		newStore := store.ShallowClone(
+			SetNetworkSlowTriggers(0),
+		)
+		s.putStoreLocked(newStore)
+	}
+}
+
 // IsStoreContainLabel returns if the store contains the given label.
 func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 	for _, l := range store.GetLabels() {
@@ -927,5 +1110,5 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && s.IsTiKV() && s.GetLeaderCount() != 0
 }

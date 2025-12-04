@@ -16,11 +16,14 @@ package pd
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -48,17 +51,69 @@ func TestClientCtx(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
-	_, err := NewClientWithContext(ctx, caller.TestComponent,
+	cli, err := NewClientWithContext(ctx, caller.TestComponent,
 		[]string{testClientURL}, SecurityOption{})
 	re.Error(err)
+	defer cli.Close()
 	re.Less(time.Since(start), time.Second*5)
 }
 
 func TestClientWithRetry(t *testing.T) {
 	re := require.New(t)
 	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), caller.TestComponent,
+	cli, err := NewClientWithContext(context.TODO(), caller.TestComponent,
 		[]string{testClientURL}, SecurityOption{}, opt.WithMaxErrorRetry(5))
 	re.Error(err)
+	defer cli.Close()
 	re.Less(time.Since(start), time.Second*10)
+}
+
+func TestRoundUpDurationToSeconds(t *testing.T) {
+	re := require.New(t)
+	re.Equal(int64(0), roundUpDurationToSeconds(0))
+	re.Equal(int64(1), roundUpDurationToSeconds(time.Millisecond))
+	re.Equal(int64(1), roundUpDurationToSeconds(time.Second))
+	re.Equal(int64(3600), roundUpDurationToSeconds(time.Hour))
+	re.Equal(int64(3601), roundUpDurationToSeconds(time.Hour+1))
+	// time.Duration(9223372036854775807) -> 9223372036.854... secs -(round up)-> 9223372037
+	re.Equal(int64(9223372037), roundUpDurationToSeconds(math.MaxInt64-1))
+	re.Equal(int64(math.MaxInt64), roundUpDurationToSeconds(math.MaxInt64))
+}
+
+func TestSaturatingStdDurationFromSeconds(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(time.Second*2, saturatingStdDurationFromSeconds(2))
+	re.Equal(time.Duration(0), saturatingStdDurationFromSeconds(-2))
+	re.Equal(time.Hour, saturatingStdDurationFromSeconds(3600))
+	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(1<<34))
+	re.Equal((1<<33)*time.Second, saturatingStdDurationFromSeconds(1<<33))
+	re.Equal(9223372036*time.Second, saturatingStdDurationFromSeconds(9223372036))
+	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(9223372037))
+	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(math.MaxInt64))
+}
+
+func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
+	re := require.New(t)
+
+	// Default to false when the meta or the config map is nil.
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(nil))
+	meta := &keyspacepb.KeyspaceMeta{}
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta = &keyspacepb.KeyspaceMeta{
+		Config: map[string]string{"gc_management_type": "keyspace_level"},
+	}
+	re.True(IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta = &keyspacepb.KeyspaceMeta{
+		Config: map[string]string{"gc_management_type": "unified"},
+	}
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	// Invalid values interpreted as false.
+	meta = &keyspacepb.KeyspaceMeta{
+		Config: map[string]string{"gc_management_type": "111111"},
+	}
+	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
 }

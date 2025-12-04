@@ -253,10 +253,13 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	re.True(ok)
 	re.Zero(es2.conf.evictedStore())
 	// prepare with no evict store.
-	suite.es.PrepareConfig(suite.tc)
+	err := suite.es.PrepareConfig(suite.tc)
+	re.NoError(err)
 
-	es2.conf.setStoreAndPersist(1)
+	err = es2.conf.setStoreAndPersist(1)
+	re.NoError(err)
 	re.Equal(uint64(1), es2.conf.evictedStore())
 	// prepare with evict store.
-	suite.es.PrepareConfig(suite.tc)
+	err = suite.es.PrepareConfig(suite.tc)
+	re.NoError(err)
 }

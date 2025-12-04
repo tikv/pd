@@ -8,6 +8,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
+      - release-nextgen-20250815
   pull_request:
     branches:
       - master
@@ -16,6 +17,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
+      - release-nextgen-20250815
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
@@ -23,7 +25,7 @@ jobs:
   chunks:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - worker_id: 1
@@ -70,6 +72,7 @@ jobs:
           path: covprofile_${{ matrix.worker_id }}
   report-coverage:
     needs: chunks
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

@@ -16,6 +16,7 @@ package command
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -23,13 +24,22 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/client/clients/router"
+	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/tools/pd-ctl/helper/mok"
+	"github.com/tikv/pd/tools/pd-ctl/helper/tidb/codec"
 )
 
 var (
@@ -67,6 +77,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithKeyspaceCommand())
 	r.AddCommand(NewRegionsByKeysCommand())
 	r.AddCommand(NewRangesWithRangeHolesCommand())
+	r.AddCommand(NewInvalidTiFlashKeyCommand())
 
 	topRead := &cobra.Command{
 		Use:   `topread [byte|query] <limit> [--jq="<query string>"]`,
@@ -376,8 +387,9 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("Error: ", err)
 		return
 	}
+	query := make(url.Values)
 	startKey = url.QueryEscape(startKey)
-	prefix := regionsKeyPrefix + "?key=" + startKey
+	query.Set("key", startKey)
 	if len(args) >= 2 {
 		endKey, err := parseKey(cmd.Flags(), args[1])
 		if err != nil {
@@ -385,14 +397,18 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		endKey = url.QueryEscape(endKey)
-		prefix += "&end_key=" + endKey
+		query.Set("end_key", endKey)
 	}
 	if len(args) == 3 {
 		if _, err = strconv.Atoi(args[2]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
-		prefix += "&limit=" + args[2]
+		query.Set("limit", args[2])
+	}
+	prefix := regionsKeyPrefix
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
@@ -421,15 +437,16 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	state := args[0]
 	prefix := regionsCheckPrefix + "/" + state
+	query := make(url.Values)
 	if strings.EqualFold(state, "hist-size") {
 		if len(args) == 2 {
 			if _, err := strconv.Atoi(args[1]); err != nil {
 				cmd.Println("region size histogram bound should be a number")
 				return
 			}
-			prefix += "?bound=" + args[1]
+			query.Set("bound", args[1])
 		} else {
-			prefix += "?bound=10"
+			query.Set("bound", "10")
 		}
 	} else if strings.EqualFold(state, "hist-keys") {
 		if len(args) == 2 {
@@ -437,10 +454,13 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Println("region keys histogram bound should be a number")
 				return
 			}
-			prefix += "?bound=" + args[1]
+			query.Set("bound", args[1])
 		} else {
-			prefix += "?bound=10000"
+			query.Set("bound", "10000")
 		}
+	}
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
@@ -608,4 +628,332 @@ func printWithJQFilter(data, filter string) {
 	}
 
 	fmt.Printf("%s\n", out)
+}
+
+const (
+	defaultScanLimit       = 8192
+	statusMergeFailed      = "merge_failed"
+	statusMergeSkipped     = "merge_skipped"
+	statusMergeRequestSent = "merge_request_sent"
+	maxMergeRetries        = 10
+	mergeRetryDelay        = 6 * time.Second
+)
+
+// PatrolResult defines the structure for JSON output of each processed region.
+type PatrolResult struct {
+	RegionID    uint64 `json:"region_id"`
+	Key         string `json:"key"`
+	TableID     int64  `json:"table_id"`
+	Status      string `json:"status"`
+	Description string `json:"description,omitempty"`
+}
+
+// PatrolResults defines the structure for the final JSON output of the command.
+type PatrolResults struct {
+	ScanCount    int               `json:"scan_count"`
+	ScanDuration typeutil.Duration `json:"scan_duration"`
+	Count        int               `json:"count"`
+	Results      []PatrolResult    `json:"results"`
+}
+
+// NewInvalidTiFlashKeyCommand creates the command to scan for invalid keys.
+func NewInvalidTiFlashKeyCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:               "invalid-tiflash-key",
+		Short:             "Scan for regions with invalid TiFlash keys and optionally merge them.",
+		Long:              "Scans all regions to find specific invalid key patterns related to TiFlash and provides an option to automatically merge them with their neighbors. Note that this command is temporary for tiflash#10147.",
+		Run:               invalidTiFlashKeyCommandFunc,
+		PersistentPreRunE: requirePDClient,
+	}
+	cmd.Flags().Int("limit", defaultScanLimit, "Limit of regions to scan per batch from PD.")
+	cmd.Flags().Bool("auto-fix", false, "Enable automatic region merge for regions with invalid keys.")
+	return cmd
+}
+
+func invalidTiFlashKeyCommandFunc(cmd *cobra.Command, _ []string) {
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
+
+	// Scan for special regions
+	startTime := time.Now()
+	specialRegions, scanCount, err := scanForSpecialKeys(ctx, cmd)
+	if err != nil {
+		cmd.Printf("Error during region scan: %v\n", err)
+		return
+	}
+
+	// Process special regions
+	// If auto-fix is true, we will try to merge regions with special keys.
+	// If it is false, we will skip the merge operation and just report the regions.
+	results := processSpecialRegions(ctx, cmd, specialRegions)
+
+	// Print final JSON output
+	patrolResults := &PatrolResults{
+		ScanCount:    scanCount,
+		ScanDuration: typeutil.NewDuration(time.Since(startTime)),
+		Count:        len(results),
+		Results:      results,
+	}
+	finalOutput, err := json.MarshalIndent(patrolResults, "", "  ")
+	if err != nil {
+		cmd.Printf("Failed to marshal patrol results to JSON: %v\n", err)
+		return
+	}
+	cmd.Println(string(finalOutput))
+}
+
+func scanForSpecialKeys(ctx context.Context, cmd *cobra.Command) (map[uint64]pd.RegionInfo, int, error) {
+	startKey := []byte{}
+	count := 0
+	specialRegions := make(map[uint64]pd.RegionInfo)
+	limit, _ := cmd.Flags().GetInt("limit")
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		default:
+		}
+		res, err := PDCli.GetRegionsByKeyRange(ctx, &router.KeyRange{StartKey: startKey}, limit)
+		if err != nil {
+			return nil, 0, err
+		}
+		if res.Count == 0 {
+			break
+		}
+		for _, region := range res.Regions {
+			found := checkRegion(cmd, region)
+			if found {
+				regionID := uint64(region.ID)
+				specialRegions[regionID] = region
+			}
+		}
+		count += int(res.Count)
+		lastRegion := res.Regions[res.Count-1]
+		endKeyHex := lastRegion.GetEndKey()
+		if len(endKeyHex) == 0 {
+			break
+		}
+		endKey, err := hex.DecodeString(endKeyHex)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(endKey) == 0 || bytes.Compare(startKey, endKey) >= 0 {
+			break
+		}
+		startKey = endKey
+	}
+	return specialRegions, count, nil
+}
+
+func checkRegion(cmd *cobra.Command, region pd.RegionInfo) bool {
+	endKeyHex := region.GetEndKey()
+	if len(endKeyHex) == 0 {
+		return false
+	}
+	key, err := hex.DecodeString(endKeyHex)
+	if err != nil {
+		return false
+	}
+	// Add a panic recovery to ensure we don't crash the entire program
+	defer func() {
+		if r := recover(); r != nil {
+			cmd.Printf("Recovered from panic while processing region %d with key %s: %v\n", region.ID, endKeyHex, r)
+		}
+	}()
+	rootNode := mok.N("key", key)
+	rootNode.Expand()
+	return hasSpecialPatternRecursive(rootNode)
+}
+
+func processSpecialRegions(ctx context.Context, cmd *cobra.Command, specialRegions map[uint64]pd.RegionInfo) []PatrolResult {
+	autoMerge, _ := cmd.Flags().GetBool("auto-fix")
+	results := make([]PatrolResult, 0)
+	for regionID, region := range specialRegions {
+		// Prepare the result structure
+		endKeyHex := region.GetEndKey()
+		tableID, err := extractTableID(region)
+		result := PatrolResult{
+			RegionID: regionID,
+			Key:      endKeyHex,
+			TableID:  tableID,
+		}
+		if err != nil {
+			result.Status = statusMergeSkipped
+			result.Description = fmt.Sprintf("failed to extract table ID from region %d: %v", regionID, err)
+			results = append(results, result)
+			continue
+		}
+		if !autoMerge {
+			result.Status = statusMergeSkipped
+			results = append(results, result)
+			continue
+		}
+		// Find the next region that matches the end key of the current region
+		nextRegion, err := findMatchingSiblingWithRetry(ctx, cmd, region)
+		if err != nil {
+			result.Status = statusMergeFailed
+			result.Description = err.Error()
+			results = append(results, result)
+			continue
+		}
+		// Create merge operator
+		input := map[string]any{
+			"name":             "merge-region",
+			"source_region_id": regionID,
+			"target_region_id": nextRegion.ID,
+		}
+		err = PDCli.CreateOperators(ctx, input)
+		if err != nil {
+			result.Status = statusMergeFailed
+			result.Description = fmt.Sprintf("failed to create merge operator for region %d: %v", regionID, err)
+		} else {
+			result.Status = statusMergeRequestSent
+			result.Description = fmt.Sprintf("merge request sent for region %d and region %d", regionID, nextRegion.ID)
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+// findMatchingSiblingWithRetry contains the complex retry logic for finding a stable sibling.
+func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, region pd.RegionInfo) (*pd.RegionInfo, error) {
+	regionID := uint64(region.ID)
+	delay := mergeRetryDelay
+	failpoint.Inject("fastCheckRegion", func() {
+		delay = time.Millisecond * 100
+	})
+	ticker := time.NewTicker(delay)
+	defer ticker.Stop()
+	for i := range maxMergeRetries {
+		siblingRegions, err := PDCli.GetRegionSiblingsByID(ctx, regionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get sibling regions for region %d: %v", regionID, err)
+		}
+		if siblingRegions.Count == 0 {
+			return nil, fmt.Errorf("no sibling regions found for region %d", regionID)
+		}
+
+		nextRegion := siblingRegions.Regions[siblingRegions.Count-1]
+		if strings.Compare(nextRegion.GetStartKey(), region.GetEndKey()) == 0 {
+			return &nextRegion, nil // Success
+		}
+
+		if i == maxMergeRetries-1 {
+			break // Last attempt failed, break to return the final error
+		}
+
+		cmd.Printf("Region %d's endKey does not match sibling %d's startKey. Retrying... (Attempt %d/%d)\n",
+			region.ID, nextRegion.ID, i+1, maxMergeRetries)
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("merge cancelled during retry-wait: %w", ctx.Err())
+		}
+	}
+
+	return nil, fmt.Errorf("merge failed: no matching sibling found for region %d", regionID)
+}
+
+func extractTableID(region pd.RegionInfo) (int64, error) {
+	endKeyHex := region.GetEndKey()
+	key, err := hex.DecodeString(endKeyHex)
+	if err != nil {
+		return 0, err
+	}
+	rootNode := mok.N("key", key)
+	rootNode.Expand()
+	tableID, _, err := extractTableIDRecursive(rootNode)
+	return tableID, err
+}
+
+// hasSpecialPatternRecursive recursively searches the Node tree for the specific key pattern.
+func hasSpecialPatternRecursive(node *mok.Node) bool {
+	for _, variant := range node.GetVariants() {
+		// Target pattern path:
+		// Node (rootNode or child of DecodeHex)
+		//  -> Variant (method: "decode hex key") [It has been finished in Expand()]
+		//    -> Node (val: hex_decoded_bytes)
+		//       -> Variant (method: "decode mvcc key")
+		//          -> Node (val: mvcc_key_body, call as mvccBodyNode)
+		//             -> Variant (method: "table row key", call as tableRowVariant)
+		//                -> Node (typ: "table_id", ...)
+		//                -> Node (typ: "index_values" or "row_id", val: row_data, call as rowDataNode)
+		//                   -> Variant (method: "decode index values")
+
+		if variant.GetMethod() == "decode mvcc key" {
+			for _, mvccBodyNode := range variant.GetChildren() {
+				for _, tableRowVariant := range mvccBodyNode.GetVariants() {
+					if tableRowVariant.GetMethod() != "table row key" {
+						continue
+					}
+					// According to DecodeTableRow, it should have 2 children:
+					// children[0] is N("table_id", ...)
+					// children[1] is N(handleTyp, row_data_bytes) -> this is rowDataNode (Node_B)
+					if len(tableRowVariant.GetChildren()) != 2 {
+						continue
+					}
+					rowDataNode := tableRowVariant.GetChildren()[1]
+					// Confirm if rowDataNode's type is as expected, which is determined by DecodeTableRow's handleTyp.
+					if rowDataNode.GetType() != "index_values" && rowDataNode.GetType() != "row_id" {
+						continue
+					}
+					// Condition 1: Does row data end with non \x00?
+					// And we only care about the 9 bytes of the row data.
+					if len(rowDataNode.GetValue()) != 9 || rowDataNode.GetValue()[len(rowDataNode.GetValue())-1] == '\x00' {
+						continue
+					}
+					// Condition 2: Does rowDataNode have extra output?
+					for _, rdnVariant := range rowDataNode.GetVariants() {
+						if rdnVariant.GetMethod() == "decode index values" {
+							return true
+						}
+					}
+				}
+			}
+		}
+
+		// We need to recursively check all children of the current variant.
+		if slices.ContainsFunc(variant.GetChildren(), hasSpecialPatternRecursive) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractTableIDRecursive recursively searches the expanded Node tree to try and extract and decode the table ID.
+func extractTableIDRecursive(node *mok.Node) (tableID int64, found bool, err error) {
+	for _, variant := range node.GetVariants() {
+		if variant.GetMethod() == "decode mvcc key" {
+			for _, mvccChildNode := range variant.GetChildren() {
+				for _, detailVariant := range mvccChildNode.GetVariants() {
+					if detailVariant.GetMethod() == "table prefix" || detailVariant.GetMethod() == "table row key" {
+						// Both of these variant types should have a child Node with typ "table_id".
+						// its `.val` contains bytes decodable by `codec.DecodeInt()`.
+						for _, childOfDetail := range detailVariant.GetChildren() {
+							if childOfDetail.GetType() == "table_id" {
+								_, id, decodeErr := codec.DecodeInt(childOfDetail.GetValue())
+								if decodeErr == nil {
+									return id, true, nil
+								}
+								return 0, false, fmt.Errorf("failed to decode table_id node (type: %s, value_hex: %x): %w",
+									childOfDetail.GetType(), childOfDetail.GetValue(), decodeErr)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for _, childNode := range variant.GetChildren() {
+			id, found, err := extractTableIDRecursive(childNode)
+			if err != nil {
+				return 0, false, err
+			}
+			if found {
+				return id, true, nil
+			}
+		}
+	}
+	return 0, false, nil
 }

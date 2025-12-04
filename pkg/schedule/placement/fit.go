@@ -120,6 +120,11 @@ func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
 	return f.regionStores
 }
 
+// GetRules returns the rules that are used to fit the region.
+func (f *RegionFit) GetRules() []*Rule {
+	return f.rules
+}
+
 // RuleFit is the result of fitting status of a Rule.
 type RuleFit struct {
 	Rule *Rule `json:"rule"`
@@ -257,7 +262,7 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Don't select leader as witness.
 		// 4. Not selected by other rules.
 		for _, p := range w.peers {
-			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && !(p.isLeader && w.supportWitness && w.rules[index].IsWitness) {
+			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && (!p.isLeader || !w.supportWitness || !w.rules[index].IsWitness) {
 				candidates = append(candidates, p)
 			}
 		}

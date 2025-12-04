@@ -39,12 +39,6 @@ func RegisterScheduler(typ types.CheckerSchedulerType) {
 	schedulerMap.Store(typ, struct{}{})
 }
 
-// IsSchedulerRegistered checks if the named scheduler type is registered.
-func IsSchedulerRegistered(typ types.CheckerSchedulerType) bool {
-	_, ok := schedulerMap.Load(typ)
-	return ok
-}
-
 // SchedulerConfigProvider is the interface for scheduler configurations.
 type SchedulerConfigProvider interface {
 	SharedConfigProvider
@@ -94,13 +88,16 @@ type CheckerConfigProvider interface {
 	GetPatrolRegionWorkerCount() int
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
+	GetMaxAffinityMergeRegionSize() uint64
 	GetReplicaScheduleLimit() uint64
+	GetRegionScheduleLimit() uint64
 }
 
 // SharedConfigProvider is the interface for shared configurations.
 type SharedConfigProvider interface {
 	GetMaxReplicas() int
 	IsPlacementRulesEnabled() bool
+	IsAffinitySchedulingEnabled() bool
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetLowSpaceRatio() float64

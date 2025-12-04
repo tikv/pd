@@ -21,10 +21,20 @@ import (
 	"github.com/opentracing/opentracing-go"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
+)
+
+const (
+	// KeyspaceConfigGCManagementType is the key for GC management type in keyspace config.
+	KeyspaceConfigGCManagementType = "gc_management_type"
+	// KeyspaceConfigGCManagementTypeKeyspaceLevel is the value representing keyspace level GC in keyspace config.
+	KeyspaceConfigGCManagementTypeKeyspaceLevel = "keyspace_level"
+	// KeyspaceConfigGCManagementTypeUnified is the value representing unified GC in keyspace config.
+	KeyspaceConfigGCManagementTypeUnified = "unified"
 )
 
 // KeyspaceClient manages keyspace metadata.
@@ -49,6 +59,27 @@ func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
 
 // LoadKeyspace loads and returns target keyspace's metadata.
 func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error) {
+	// Failpoint: return a hardcoded keyspace meta for testing
+	// When enabled, this bypasses the gRPC LoadKeyspace call
+	failpoint.Inject("mockLoadKeyspace", func(val failpoint.Value) {
+		if enabled, ok := val.(bool); ok && enabled {
+			// Create a hardcoded keyspace meta for keyspace_1
+			now := time.Now().Unix()
+			mockKeyspaceMeta := &keyspacepb.KeyspaceMeta{
+				Id:             1,
+				Name:           name,
+				CreatedAt:      now,
+				StateChangedAt: now,
+				State:          keyspacepb.KeyspaceState_ENABLED,
+				Config: map[string]string{
+					"user_kind":             "standard",
+					"tso_keyspace_group_id": "1",
+				},
+			}
+			failpoint.Return(mockKeyspaceMeta, nil)
+		}
+	})
+
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("keyspaceClient.LoadKeyspace", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -169,4 +200,12 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	}
 
 	return resp.Keyspaces, nil
+}
+
+// IsKeyspaceUsingKeyspaceLevelGC checks on a specific keyspace meta and returns whether keyspace level GC is enabled
+// for this keyspace.
+// Nil value, which may occur for the null keyspace, are considered unified GC and this function returns false for this
+// case.
+func IsKeyspaceUsingKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
+	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[KeyspaceConfigGCManagementType] == KeyspaceConfigGCManagementTypeKeyspaceLevel
 }

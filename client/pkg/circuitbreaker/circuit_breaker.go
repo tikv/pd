@@ -68,7 +68,7 @@ type CircuitBreaker struct {
 	config *Settings
 	name   string
 
-	mutex sync.Mutex
+	sync.RWMutex
 	state *State
 
 	successCounter  prometheus.Counter
@@ -124,14 +124,21 @@ func registerMetrics(cb *CircuitBreaker) {
 	cb.fastFailCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "fast_fail")
 }
 
+// IsEnabled returns true if the circuit breaker is enabled.
+func (cb *CircuitBreaker) IsEnabled() bool {
+	cb.RLock()
+	defer cb.RUnlock()
+	return cb.config.ErrorRateThresholdPct > 0
+}
+
 // ChangeSettings changes the CircuitBreaker settings.
 // The changes will be reflected only in the next evaluation window.
 func (cb *CircuitBreaker) ChangeSettings(apply func(config *Settings)) {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.Lock()
+	defer cb.Unlock()
 
 	apply(cb.config)
-	log.Info("circuit breaker settings changed", zap.Any("config", cb.config))
+	log.Debug("circuit breaker settings changed", zap.Any("config", cb.config))
 }
 
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.
@@ -160,8 +167,8 @@ func (cb *CircuitBreaker) Execute(call func() (Overloading, error)) error {
 }
 
 func (cb *CircuitBreaker) onRequest() (*State, error) {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.Lock()
+	defer cb.Unlock()
 
 	state, err := cb.state.onRequest(cb)
 	cb.state = state
@@ -169,8 +176,8 @@ func (cb *CircuitBreaker) onRequest() (*State, error) {
 }
 
 func (cb *CircuitBreaker) onResult(state *State, overloaded Overloading) {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.Lock()
+	defer cb.Unlock()
 
 	// even if the circuit breaker already moved to a new state while the request was in progress,
 	// it is still ok to update the old state, but it is not relevant anymore
@@ -271,10 +278,9 @@ func (s *State) onRequest(cb *CircuitBreaker) (*State, error) {
 				zap.String("name", cb.name),
 				zap.Any("config", cb.config))
 			return cb.newState(now, StateHalfOpen), nil
-		} else {
-			// continue in the open state till CoolDownInterval is over
-			return s, errs.ErrCircuitBreakerOpen
 		}
+		// continue in the open state till CoolDownInterval is over
+		return s, errs.ErrCircuitBreakerOpen
 	case StateHalfOpen:
 		if s.cb.config.ErrorRateThresholdPct == 0 {
 			return cb.newState(now, StateClosed), nil
@@ -297,10 +303,9 @@ func (s *State) onRequest(cb *CircuitBreaker) (*State, error) {
 			// allow more probe requests and continue in half-open state
 			s.pendingCount++
 			return s, nil
-		} else {
-			// continue in half-open state till all probe requests are done and fail all other requests for now
-			return s, errs.ErrCircuitBreakerOpen
 		}
+		// continue in half-open state till all probe requests are done and fail all other requests for now
+		return s, errs.ErrCircuitBreakerOpen
 	default:
 		panic("unknown state")
 	}
@@ -320,7 +325,7 @@ func (s *State) onResult(overloaded Overloading) {
 // Define context key type
 type cbCtxKey struct{}
 
-// Key used to store circuit breaker
+// CircuitBreakerKey is used to store circuit breaker
 var CircuitBreakerKey = cbCtxKey{}
 
 // FromContext retrieves the circuit breaker from the context

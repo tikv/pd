@@ -22,6 +22,8 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
+	@ echo "leakcheck ..."
+	@ leakcheck -exclude-packages="tests/integrations/realcluster" ./...
 
 tidy:
 	@ go mod tidy
@@ -34,7 +36,7 @@ test: failpoint-enable
 
 ci-test-job:
 	if [ -f ./$(value test_name)/covprofile ]; then rm ./$(value test_name)/covprofile; fi
-	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=../../...
+	CGO_ENABLED=1 go test ./$(value test_name)/... -tags deadlock -race -cover -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=../../...
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

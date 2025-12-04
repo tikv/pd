@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
@@ -55,7 +56,7 @@ type GlobalConfigItem struct {
 // RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
 type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
-	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
+	GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -67,11 +68,17 @@ type RPCClient interface {
 	// UpdateGCSafePoint TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
+	//
+	// Deprecated: This API is deprecated and replaced by AdvanceGCSafePoint, which expected only for use of the
+	// GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
+	// read the current GC safe point, consider using GetGCStates instead.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
+	//
+	// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
@@ -102,10 +109,9 @@ type RPCClient interface {
 	router.Client
 	tso.Client
 	metastorage.Client
+	gc.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
-	// GCClient manages gcSafePointV2 and serviceSafePointV2
-	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
 }
@@ -236,7 +242,6 @@ func createClientWithKeyspace(
 	if err != nil {
 		return nil, err
 	}
-
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		callerComponent: adjustCallerComponent(callerComponent),
@@ -382,6 +387,7 @@ func newClientWithKeyspaceName(
 			return err
 		}
 		c.inner.keyspaceID = keyspaceMeta.GetId()
+		c.inner.keyspaceMeta = keyspaceMeta
 		// c.keyspaceID is the source of truth for keyspace id.
 		c.inner.serviceDiscovery.SetKeyspaceID(c.inner.keyspaceID)
 		return nil
@@ -424,6 +430,11 @@ func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
 	return c.inner.serviceDiscovery
 }
 
+// GetTSOServiceDiscovery returns the TSO service discovery object. Only used for testing.
+func (c *client) GetTSOServiceDiscovery() sd.ServiceDiscovery {
+	return c.inner.tsoSvcDiscovery
+}
+
 // UpdateOption updates the client option.
 func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 	switch option {
@@ -436,12 +447,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return err
 		}
 	case opt.EnableTSOFollowerProxy:
-		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
-		}
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
+		}
+		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE && enable {
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		c.inner.option.SetEnableTSOFollowerProxy(enable)
 	case opt.EnableFollowerHandle:
@@ -456,6 +467,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
+	case opt.EnableRouterClient:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
+		}
+		c.inner.option.SetEnableRouterClient(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -463,7 +480,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 }
 
 // GetAllMembers gets the members Info from PD.
-func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
+func (c *client) GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
@@ -478,7 +495,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	if err = c.respForErr(metrics.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return resp.GetMembers(), nil
+	return resp, nil
 }
 
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
@@ -501,6 +518,7 @@ func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
 	return c.inner.dispatchTSORequestWithRetry(ctx)
 }
 
+// GetLocalTSAsync implements the TSOClient interface.
 // Deprecated: the Local TSO feature has been deprecated. Regardless of the
 // parameters passed, the behavior of this interface will be equivalent to
 // `GetTSAsync`. If you want to use a separately deployed TSO service,
@@ -509,12 +527,66 @@ func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
 }
 
+const (
+	// maxTSORetryTimes is the max retry times for TSO request.
+	maxTSORetryTimes = 20
+	// retryInterval is the interval between two TSO requests.
+	retryInterval = 100 * time.Millisecond
+)
+
 // GetTS implements the TSOClient interface.
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
-	resp := c.GetTSAsync(ctx)
-	return resp.Wait()
+	var retryCount int
+	maxRetries := maxTSORetryTimes
+	failpoint.Inject("mockMaxTSORetryTimes", func(val failpoint.Value) {
+		if newMax, ok := val.(int); ok {
+			maxRetries = newMax
+		}
+	})
+
+	for retryCount = range maxRetries {
+		resp := c.GetTSAsync(ctx)
+		physical, logical, err = resp.Wait()
+		// directly return if no error to avoid metrics recording
+		if err == nil {
+			return physical, logical, err
+		}
+
+		if !errs.IsLeaderChange(err) {
+			break
+		}
+
+		log.Debug("[pd] get tso failed, retrying",
+			zap.Int("retry-count", retryCount),
+			zap.Error(err))
+		failpoint.Inject("skipRetry", func() {
+			failpoint.Return(physical, logical, err)
+		})
+
+		// If the leader changes, we need to retry.
+		// For the first time, we retry immediately to avoid impacting the latency.
+		var interval time.Duration
+		if retryCount != 0 {
+			interval = retryInterval
+		}
+		select {
+		case <-ctx.Done():
+			return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
+		case <-time.After(interval):
+		}
+	}
+	failpoint.Inject("checkRetry", func(val failpoint.Value) {
+		if maxRetry, ok := val.(int); ok {
+			if retryCount >= maxRetry {
+				failpoint.Return(0, 0, errors.Errorf("retry count %d exceeds max retry times %d", retryCount, maxRetry))
+			}
+		}
+	})
+	metrics.TSORetryCount.Observe(float64(retryCount))
+	return physical, logical, err
 }
 
+// GetLocalTS implements the TSOClient interface.
 // Deprecated: the Local TSO feature has been deprecated. Regardless of the
 // parameters passed, the behavior of this interface will be equivalent to
 // `GetTS`. If you want to use a separately deployed TSO service,
@@ -567,12 +639,6 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 
 	minTS := resp.GetTimestamp()
 	return minTS.Physical, minTS.Logical, nil
-}
-
-// EnableRouterClient enables the router client.
-// This is only for test currently.
-func (c *client) EnableRouterClient() {
-	c.inner.initRouterClient()
 }
 
 func (c *client) getRouterClient() *router.Cli {
@@ -976,7 +1042,15 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 }
 
 // UpdateGCSafePoint implements the RPCClient interface.
+//
+// Deprecated: This API is deprecated and replaced by AdvanceGCSafePoint, which expected only for use of the
+// GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
+// read the current GC safe point, consider using GetGCStates instead.
 func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
+	if c.inner.keyspaceID != constants.NullKeyspaceID {
+		return c.updateGCSafePointV2(ctx, c.inner.keyspaceID, safePoint)
+	}
+
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1006,7 +1080,13 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // returns the minimum safepoint across all services, this value is used to
 // determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
+//
+// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+	if c.inner.keyspaceID != constants.NullKeyspaceID {
+		return c.updateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)
+	}
+
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateServiceGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1371,4 +1451,14 @@ func adjustCallerComponent(callerComponent caller.Component) caller.Component {
 	log.Warn("Unknown callerComponent", zap.String("callerComponent", string(callerComponent)))
 	// If the callerComponent is still in pd/client, we set it to empty.
 	return ""
+}
+
+// GetGCInternalController returns the gc.InternalController, which is used for internally controlling the GC states.
+func (c *client) GetGCInternalController(keyspaceID uint32) gc.InternalController {
+	return newGCInternalController(c, keyspaceID)
+}
+
+// GetGCStatesClient returns the gc.GCStatesClient, which is used for accessing the GC states for general purposes.
+func (c *client) GetGCStatesClient(keyspaceID uint32) gc.GCStatesClient {
+	return newGCStatesClient(c, keyspaceID)
 }

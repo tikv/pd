@@ -97,7 +97,9 @@ func (s *tsoProxyTestSuite) TearDownSuite() {
 // It also verifies the correctness of the TSO Proxy's TSO response, such as the count of timestamps
 // to retrieve in one TSO request and the monotonicity of the returned timestamps.
 func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
-	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
+	re := s.Require()
+	err := s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
+	re.NoError(err)
 }
 
 // TestTSOProxyWithLargeCount tests while some grpc streams being cancelled and the others are still
@@ -113,13 +115,15 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 			for range 3 {
 				streams, cleanupFuncs := createTSOStreams(s.ctx, re, s.backendEndpoints, 10)
 				for range 10 {
-					s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, true)
+					err := s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, true)
+					re.NoError(err)
 				}
 				cleanupGRPCStreams(cleanupFuncs)
 			}
 		}()
 		for range 10 {
-			s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 10, true)
+			err := s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 10, true)
+			re.NoError(err)
 		}
 	}()
 	wg.Wait()
@@ -155,7 +159,8 @@ func TestTSOProxyStress(_ *testing.T) {
 			createTSOStreams(s.ctx, re, s.backendEndpoints, clientsIncr)
 		streams = append(streams, streamsTemp...)
 		cleanupFuncs = append(cleanupFuncs, cleanupFuncsTemp...)
-		s.verifyTSOProxy(ctxTimeout, streams, cleanupFuncs, 50, false)
+		err := s.verifyTSOProxy(ctxTimeout, streams, cleanupFuncs, 50, false)
+		re.NoError(err)
 	}
 	cleanupGRPCStreams(cleanupFuncs)
 	log.Info("the stress test completed.")
@@ -188,13 +193,15 @@ func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
 		re.NoError(err)
 		streams[i] = stream
 		cleanupFunc := func() {
-			stream.CloseSend()
+			err = stream.CloseSend()
+			re.NoError(err)
 			conn.Close()
 		}
 		cleanupFuncs[i] = cleanupFunc
 	}
 
-	s.verifyTSOProxy(ctx, streams, cleanupFuncs, 100, true)
+	err := s.verifyTSOProxy(ctx, streams, cleanupFuncs, 100, true)
+	re.NoError(err)
 	cleanupGRPCStreams(cleanupFuncs)
 }
 
@@ -214,7 +221,8 @@ func (s *tsoProxyTestSuite) TestTSOProxyRecvFromClientTimeout() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxyRecvFromClientTimeout"))
 
 	// Verify the streams with no fault injection can work correctly.
-	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	err = s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	re.NoError(err)
 }
 
 // TestTSOProxyFailToSendToClient tests the TSO Proxy can properly close the grpc stream on the server side
@@ -232,7 +240,8 @@ func (s *tsoProxyTestSuite) TestTSOProxyFailToSendToClient() {
 	cleanupGRPCStreams(cleanupFuncs)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxyFailToSendToClient"))
 
-	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	err = s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	re.NoError(err)
 }
 
 // TestTSOProxySendToTSOTimeout tests the TSO Proxy can properly close the grpc stream on the server side
@@ -250,7 +259,8 @@ func (s *tsoProxyTestSuite) TestTSOProxySendToTSOTimeout() {
 	cleanupGRPCStreams(cleanupFuncs)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxySendToTSOTimeout"))
 
-	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	err = s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	re.NoError(err)
 }
 
 // TestTSOProxyRecvFromTSOTimeout tests the TSO Proxy can properly close the grpc stream on the server side
@@ -268,7 +278,8 @@ func (s *tsoProxyTestSuite) TestTSOProxyRecvFromTSOTimeout() {
 	cleanupGRPCStreams(cleanupFuncs)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxyRecvFromTSOTimeout"))
 
-	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	err = s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+	re.NoError(err)
 }
 
 func cleanupGRPCStreams(cleanupFuncs []testutil.CleanupFunc) {
@@ -387,7 +398,8 @@ func createTSOStreams(
 		re.NoError(err)
 		streams[i] = stream
 		cleanupFunc := func() {
-			stream.CloseSend()
+			err = stream.CloseSend()
+			re.NoError(err)
 			cancel()
 			conn.Close()
 		}
@@ -490,7 +502,7 @@ func benchmarkTSOProxyNClients(clientCount int, b *testing.B) {
 			builder.WriteString("SequentialClients_")
 		}
 		b.Run(fmt.Sprintf("%s_%dReqsPerClient", builder.String(), t.requestsPerClient), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				err := tsoProxy(suite.defaultReq, streams, t.concurrentClient, t.requestsPerClient)
 				re.NoError(err)
 			}

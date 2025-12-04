@@ -16,6 +16,7 @@ package cache
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,18 +40,19 @@ type ttlCache struct {
 	items      map[any]ttlCacheItem
 	ttl        time.Duration
 	gcInterval time.Duration
+	// isGCRunning is used to avoid running GC multiple times.
+	isGCRunning atomic.Bool
 }
 
 // NewTTL returns a new TTL cache.
 func newTTL(ctx context.Context, gcInterval time.Duration, duration time.Duration) *ttlCache {
 	c := &ttlCache{
-		ctx:        ctx,
-		items:      make(map[any]ttlCacheItem),
-		ttl:        duration,
-		gcInterval: gcInterval,
+		ctx:         ctx,
+		items:       make(map[any]ttlCacheItem),
+		ttl:         duration,
+		gcInterval:  gcInterval,
+		isGCRunning: atomic.Bool{},
 	}
-
-	go c.doGC()
 	return c
 }
 
@@ -63,7 +65,9 @@ func (c *ttlCache) put(key any, value any) {
 func (c *ttlCache) putWithTTL(key any, value any, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
-
+	if len(c.items) == 0 && c.isGCRunning.CompareAndSwap(false, true) {
+		go c.doGC()
+	}
 	c.items[key] = ttlCacheItem{
 		value:  value,
 		expire: time.Now().Add(ttl),
@@ -163,6 +167,11 @@ func (c *ttlCache) doGC() {
 					}
 				}
 			}
+			if len(c.items) == 0 && c.isGCRunning.CompareAndSwap(true, false) {
+				c.Unlock()
+				log.Debug("TTL GC items is empty exit")
+				return
+			}
 			c.Unlock()
 			log.Debug("TTL GC items", zap.Int("count", count))
 		case <-c.ctx.Done():
@@ -202,17 +211,17 @@ func NewIDTTL(ctx context.Context, gcInterval, ttl time.Duration) *TTLUint64 {
 
 // Get return the value by key id
 func (c *TTLUint64) Get(id uint64) (any, bool) {
-	return c.ttlCache.get(id)
+	return c.get(id)
 }
 
 // Put saves an ID in cache.
 func (c *TTLUint64) Put(id uint64, value any) {
-	c.ttlCache.put(id, value)
+	c.put(id, value)
 }
 
 // GetAllID returns all ids.
 func (c *TTLUint64) GetAllID() []uint64 {
-	keys := c.ttlCache.getKeys()
+	keys := c.getKeys()
 	var ids []uint64
 	for _, key := range keys {
 		id, ok := key.(uint64)
@@ -225,18 +234,18 @@ func (c *TTLUint64) GetAllID() []uint64 {
 
 // Exists checks if an ID exists in cache.
 func (c *TTLUint64) Exists(id uint64) bool {
-	_, ok := c.ttlCache.get(id)
+	_, ok := c.get(id)
 	return ok
 }
 
 // Remove remove key
 func (c *TTLUint64) Remove(key uint64) {
-	c.ttlCache.remove(key)
+	c.remove(key)
 }
 
 // PutWithTTL puts an item into cache with specified TTL.
 func (c *TTLUint64) PutWithTTL(key uint64, value any, ttl time.Duration) {
-	c.ttlCache.putWithTTL(key, value, ttl)
+	c.putWithTTL(key, value, ttl)
 }
 
 // TTLString is simple TTL saves key string and value.
@@ -253,17 +262,17 @@ func NewStringTTL(ctx context.Context, gcInterval, ttl time.Duration) *TTLString
 
 // Put put the string key with the value
 func (c *TTLString) Put(key string, value any) {
-	c.ttlCache.put(key, value)
+	c.put(key, value)
 }
 
 // PutWithTTL puts an item into cache with specified TTL.
 func (c *TTLString) PutWithTTL(key string, value any, ttl time.Duration) {
-	c.ttlCache.putWithTTL(key, value, ttl)
+	c.putWithTTL(key, value, ttl)
 }
 
 // Pop one key/value that is not expired
 func (c *TTLString) Pop() (string, any, bool) {
-	k, v, success := c.ttlCache.pop()
+	k, v, success := c.pop()
 	if !success {
 		return "", nil, false
 	}
@@ -276,12 +285,12 @@ func (c *TTLString) Pop() (string, any, bool) {
 
 // Get return the value by key id
 func (c *TTLString) Get(id string) (any, bool) {
-	return c.ttlCache.get(id)
+	return c.get(id)
 }
 
 // GetAllID returns all key ids
 func (c *TTLString) GetAllID() []string {
-	keys := c.ttlCache.getKeys()
+	keys := c.getKeys()
 	var ids []string
 	for _, key := range keys {
 		id, ok := key.(string)

@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/unrolled/render"
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 
 	"github.com/pingcap/failpoint"
 

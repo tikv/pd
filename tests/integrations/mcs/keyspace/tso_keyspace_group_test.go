@@ -21,22 +21,38 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/integrations/mcs/utils"
+	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 const (
 	keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
@@ -58,6 +74,7 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
@@ -78,6 +95,55 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cleanupFunc()
 	suite.cluster.Destroy()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+}
+
+// getTSOServerURLs gets the TSO server URLs from PD, mimicking the client's getTSOServer logic
+func (suite *keyspaceGroupTestSuite) getTSOServerURLs() ([]string, error) {
+	// Connect to PD via gRPC
+	// Remove "http://" or "https://" prefix if present, as gRPC Dial expects address without scheme
+	addr := suite.backendEndpoints
+	addr = strings.TrimPrefix(addr, "http://")
+
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	// Call GetClusterInfo to get TsoUrls (same as client's discoverMicroservice does)
+	pdClient := pdpb.NewPDClient(conn)
+	resp, err := pdClient.GetClusterInfo(suite.ctx, &pdpb.GetClusterInfoRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.TsoUrls, nil
+}
+
+// closeAllTSONodesAndWait closes all TSO nodes and waits for them to deregister from etcd
+func (suite *keyspaceGroupTestSuite) closeAllTSONodesAndWait(re *require.Assertions, nodes map[string]bs.Server) {
+	// Close all TSO nodes
+	nodeCount := 0
+	for _, node := range nodes {
+		node.Close()
+		nodeCount++
+	}
+
+	// Wait for nodes to deregister from etcd (TTL is 3 seconds)
+	// Use the same logic as client's getTSOServer: check if TsoUrls is empty
+	testutil.Eventually(re, func() bool {
+		// Get TSO server URLs using the same method as client's getTSOServer
+		tsoURLs, err := suite.getTSOServerURLs()
+		if err != nil {
+			return false
+		}
+
+		// Check if TsoUrls is empty (same condition as in client's getTSOServer)
+		// When len(tsoURLs) == 0, client will enter the fallback logic
+		noTSOServers := len(tsoURLs) == 0
+		return noTSOServers
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(500*time.Millisecond))
 }
 
 func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
@@ -90,7 +156,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 			cleanup()
 		}
 	}()
-	for range constant.DefaultKeyspaceGroupReplicaCount + 1 {
+	for range mcs.DefaultKeyspaceGroupReplicaCount + 1 {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -110,11 +176,11 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	// alloc nodes for the keyspace group.
 	id := 1
 	params := &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
 	}
 	got, code := suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
-	re.Len(got, constant.DefaultKeyspaceGroupReplicaCount)
+	re.Len(got, mcs.DefaultKeyspaceGroupReplicaCount)
 	oldMembers := make(map[string]struct{})
 	for _, member := range got {
 		re.Contains(nodes, member.Address)
@@ -122,7 +188,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	}
 
 	// alloc node update to 3.
-	params.Replica = constant.DefaultKeyspaceGroupReplicaCount + 1
+	params.Replica = mcs.DefaultKeyspaceGroupReplicaCount + 1
 	got, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
 	re.Len(got, params.Replica)
@@ -146,7 +212,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 			cleanup()
 		}
 	}()
-	for range constant.DefaultKeyspaceGroupReplicaCount {
+	for range mcs.DefaultKeyspaceGroupReplicaCount {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -162,14 +228,14 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 
 	// replica is less than default replica.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount - 1,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount - 1,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
 
 	// there is no any keyspace group.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -184,7 +250,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	code = suite.tryCreateKeyspaceGroup(re, kgs)
 	re.Equal(http.StatusOK, code)
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
 	}
 	got, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
@@ -194,7 +260,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 
 	// the keyspace group is exist, but the replica is more than the num of nodes.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount + 1,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount + 1,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -205,7 +271,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	nodes[s2.GetAddr()] = s2
 	tests.WaitForPrimaryServing(re, nodes)
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount + 1,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount + 1,
 	}
 	got, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
@@ -215,14 +281,14 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 
 	// the keyspace group is exist, the new replica is equal to the old replica.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount + 1,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount + 1,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
 
 	// the keyspace group is exist, the new replica is less than the old replica.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -230,7 +296,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	// the keyspace group is not exist.
 	id = 2
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: constant.DefaultKeyspaceGroupReplicaCount,
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -246,7 +312,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 			cleanup()
 		}
 	}()
-	for range constant.DefaultKeyspaceGroupReplicaCount {
+	for range mcs.DefaultKeyspaceGroupReplicaCount {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -313,7 +379,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 			cleanup()
 		}
 	}()
-	for range constant.DefaultKeyspaceGroupReplicaCount {
+	for range mcs.DefaultKeyspaceGroupReplicaCount {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -330,7 +396,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 	// the allocNodesToAllKeyspaceGroups loop will run every 100ms.
 	testutil.Eventually(re, func() bool {
-		return len(kg.Members) == constant.DefaultKeyspaceGroupReplicaCount
+		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 	for _, member := range kg.Members {
 		re.Contains(nodes, member.Address)
@@ -347,7 +413,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 			cleanup()
 		}
 	}()
-	for range constant.DefaultKeyspaceGroupReplicaCount + 1 {
+	for range mcs.DefaultKeyspaceGroupReplicaCount + 1 {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -368,7 +434,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
 		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
-		return code == http.StatusOK && kg != nil && len(kg.Members) == constant.DefaultKeyspaceGroupReplicaCount
+		return code == http.StatusOK && kg != nil && len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 	stopNode := kg.Members[0].Address
 	// close one of members
@@ -382,7 +448,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 				return false
 			}
 		}
-		return code == http.StatusOK && kg != nil && len(kg.Members) == constant.DefaultKeyspaceGroupReplicaCount
+		return code == http.StatusOK && kg != nil && len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 }
 
@@ -488,4 +554,188 @@ func (suite *keyspaceGroupTestSuite) trySetNodesForKeyspaceGroup(re *require.Ass
 		return nil, resp.StatusCode
 	}
 	return suite.tryGetKeyspaceGroup(re, uint32(id))
+}
+
+// tsoTestSetup holds the setup information for TSO tests
+type tsoTestSetup struct {
+	nodes         map[string]bs.Server
+	cleanups      []func()
+	client        pd.Client
+	initialTS     uint64
+	firstNodeAddr string
+	keyspaceID    uint32
+}
+
+// setupTSONodesAndClient creates TSO nodes, keyspace group, and returns initialized client
+func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertions, nodeCount int, keyspaceGroupID uint32, opts ...opt.ClientOption) *tsoTestSetup {
+	// Create TSO nodes
+	nodes := make(map[string]bs.Server)
+	var cleanups []func()
+
+	// Start TSO servers
+	for range nodeCount {
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		cleanups = append(cleanups, cleanup)
+		nodes[s.GetAddr()] = s
+	}
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// Enable failpoint to assign keyspace to the specified keyspace group instead of default group 0
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/assignToSpecificKeyspaceGroup", fmt.Sprintf("return(%d)", keyspaceGroupID)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/assignToSpecificKeyspaceGroup"))
+	}()
+
+	// Create keyspace group and assign the keyspace to it
+	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       keyspaceGroupID,
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	code := suite.tryCreateKeyspaceGroup(re, kgs)
+	re.Equal(http.StatusOK, code)
+
+	// Alloc nodes for keyspace group
+	params := &handlers.AllocNodesForKeyspaceGroupParams{
+		Replica: nodeCount,
+	}
+	got, code := suite.tryAllocNodesForKeyspaceGroup(re, int(keyspaceGroupID), params)
+	re.Equal(http.StatusOK, code)
+	re.Len(got, nodeCount)
+
+	// Wait for keyspace group to be ready
+	testutil.Eventually(re, func() bool {
+		kg, code := suite.tryGetKeyspaceGroup(re, keyspaceGroupID)
+		return code == http.StatusOK && kg != nil && len(kg.Members) == nodeCount
+	})
+
+	// Create keyspace (will be assigned to keyspaceGroupID via failpoint)
+	keyspaceID := keyspaceGroupID // Use same ID for simplicity
+	keyspaceName := fmt.Sprintf("keyspace_%d", keyspaceID)
+	handlersutil.MustCreateKeyspaceByID(re, suite.server, &handlers.CreateKeyspaceByIDParams{
+		ID:   &keyspaceID,
+		Name: keyspaceName,
+		Config: map[string]string{
+			keyspace.UserKindKey: endpoint.Standard.String(), // Keep UserKind consistent with keyspace group
+		},
+	})
+
+	// Wait for keyspace to be created (HTTP verification)
+	// Note: Since LoadKeyspace is mocked, we don't need to wait for gRPC availability
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Get(suite.server.GetAddr() + "/pd/api/v2/keyspaces/" + keyspaceName)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	// Create client using keyspace name (not ID) to ensure keyspace meta is loaded and passed to tsoServiceDiscovery
+	apiCtx := pd.NewAPIContextV2(keyspaceName)
+	client := utils.SetupClientWithAPIContext(suite.ctx, re, apiCtx, []string{suite.backendEndpoints}, opts...)
+	utils.WaitForTSOServiceAvailable(suite.ctx, re, client)
+
+	physical, logical, err := client.GetTS(suite.ctx)
+	re.NoError(err)
+	initialTS := tsoutil.ComposeTS(physical, logical)
+	re.NotZero(initialTS)
+
+	// Save the first node's address for later restart
+	var firstNodeAddr string
+	for addr := range nodes {
+		firstNodeAddr = addr
+		break
+	}
+	return &tsoTestSetup{
+		nodes:         nodes,
+		cleanups:      cleanups,
+		client:        client,
+		initialTS:     initialTS,
+		firstNodeAddr: firstNodeAddr,
+		keyspaceID:    keyspaceID,
+	}
+}
+
+// TestUpdateMemberWhenRecovery verifies that in TSO microservice mode (API_SVC_MODE), when all TSO nodes
+// become temporarily unavailable and then recover, the client should NOT fallback to
+// the legacy path (group 0), but should wait and successfully get TSO after nodes restart.
+//
+// Test scenario:
+// 1. Setup: Start 2 TSO nodes and create keyspace group 1, client gets initial TSO
+// 2. Close all TSO nodes to simulate total TSO microservice failure
+// 3. Wait until all TSO nodes are deregistered (getTSOServerURLs returns empty)
+// 4. Enable failpoints: assertNotReachLegacyPath (panic if fallback) and extend timeout
+// 5. Start async GetTS call (will wait for TSO service to recover)
+// 6. Restart one TSO node while GetTS is waiting
+// 7. Verify GetTS succeeds after node restart (assertNotReachLegacyPath ensures no fallback)
+func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
+	re := suite.Require()
+
+	// Test configuration constants
+	const (
+		// Time to wait for GetTS to start
+		waitForGetTSStart = 3 * time.Second
+	)
+
+	// Enable mockLoadKeyspace failpoint to return hardcoded keyspace meta for testing
+	// This bypasses the gRPC LoadKeyspace call which may fail due to timing issues
+	// Must enable before setupTSONodesAndClient because that's when the client is created
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/mockLoadKeyspace", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/mockLoadKeyspace"))
+	}()
+
+	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
+	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(30*time.Second))
+	defer func() {
+		for _, cleanup := range setup.cleanups {
+			cleanup()
+		}
+	}()
+	defer setup.client.Close()
+
+	nodes := setup.nodes
+	client := setup.client
+	firstNodeAddr := setup.firstNodeAddr
+
+	// Step 2: Close all TSO nodes to simulate total TSO microservice failure
+	// Step 3: Wait until all TSO nodes are deregistered
+	suite.closeAllTSONodesAndWait(re, nodes)
+
+	// Step 4: Enable failpoints for verification and timeout extension
+	// assertNotReachLegacyPath: ensures we don't fallback to legacy path (will panic if we do)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath"))
+	}()
+
+	// Step 5: Start async GetTS call - it will wait for TSO service to recover
+	type getTSResult struct {
+		physicalTS int64
+		logicalTS  int64
+		err        error
+	}
+	resultCh := make(chan getTSResult, 1)
+
+	go func() {
+		physicalTS, logicalTS, getErr := client.GetTS(suite.ctx)
+		resultCh <- getTSResult{physicalTS: physicalTS, logicalTS: logicalTS, err: getErr}
+	}()
+
+	time.Sleep(waitForGetTSStart) // Give it time to begin execution
+
+	// Step 6: Restart one TSO node while GetTS is waiting
+	newNode, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, firstNodeAddr)
+	setup.cleanups = append(setup.cleanups, cleanup)
+	nodes[newNode.GetAddr()] = newNode
+	tests.WaitForPrimaryServing(re, map[string]bs.Server{newNode.GetAddr(): newNode})
+
+	// Step 7: Verify GetTS succeeds after node restart
+	result := <-resultCh
+	re.NoError(result.err, "GetTS should succeed after TSO node restart")
+
+	// KEY VERIFICATION: If code incorrectly tried to fallback to legacy path,
+	// assertNotReachLegacyPath failpoint would have panicked already
 }

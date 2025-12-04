@@ -68,7 +68,7 @@ func (bs *BaseServer) Context() context.Context {
 func (bs *BaseServer) GetDelegateClient(ctx context.Context, tlsCfg *grpcutil.TLSConfig, forwardedHost string) (*grpc.ClientConn, error) {
 	client, ok := bs.clientConns.Load(forwardedHost)
 	if !ok {
-		tlsConfig, err := tlsCfg.ToTLSConfig()
+		tlsConfig, err := tlsCfg.ToClientTLSConfig()
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +148,7 @@ func (bs *BaseServer) InitListener(tlsCfg *grpcutil.TLSConfig, listenAddr string
 	if err != nil {
 		return err
 	}
-	tlsConfig, err := tlsCfg.ToTLSConfig()
+	tlsConfig, err := tlsCfg.ToServerTLSConfig()
 	if err != nil {
 		return err
 	}

@@ -273,18 +273,20 @@ func TestShuffleRegionRole(t *testing.T) {
 
 	// update rule to 1leader+1follower+1learner
 	tc.SetEnablePlacementRules(true)
-	tc.RuleManager.SetRule(&placement.Rule{
+	err := tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	tc.RuleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,
 		Count:   1,
 	})
+	re.NoError(err)
 
 	// Add stores 1, 2, 3, 4
 	tc.AddRegionStore(1, 6)
@@ -523,15 +525,15 @@ func TestIsDefault(t *testing.T) {
 	defer cancel()
 
 	for schedulerType := range types.SchedulerTypeCompatibleMap {
-		bs, err := CreateScheduler(schedulerType, oc,
+		s, err := CreateScheduler(schedulerType, oc,
 			storage.NewStorageWithMemoryBackend(),
 			testDecoder,
 			func(string) error { return nil })
 		re.NoError(err)
 		if slices.Contains(types.DefaultSchedulers, schedulerType) {
-			re.True(bs.IsDefault())
+			re.True(s.IsDefault())
 		} else {
-			re.False(bs.IsDefault())
+			re.False(s.IsDefault())
 		}
 	}
 }

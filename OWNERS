@@ -1,27 +1,29 @@
-# See the OWNERS docs at https://go.k8s.io/owners
+# See the OWNERS docs at https://www.kubernetes.dev/docs/guide/owners/#owners
+# The members of 'sig-community-*' are synced from memberships defined in repository: https://github.com/tikv/community.
 approvers:
   - AndreMouche
-  - binshi-bing
-  - bufferflies
   - CabinfeverB
   - Connor1996
+  - HuSharp
+  - HunDunDM
+  - JmPotato
+  - Yisaer
+  - binshi-bing
+  - bufferflies
   - disksing
   - huachaohuang
-  - HunDunDM
-  - HuSharp
-  - JmPotato
   - lhy1024
   - nolouch
   - overvenus
   - qiuyesuifeng
   - rleungx
   - siddontang
-  - Yisaer
   - zhouqiang-cl
 reviewers:
   - BusyJay
-  - howardlau1999
   - Luffbee
+  - Tema
+  - howardlau1999
   - okJiang
   - shafreeck
   - xhebox

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -40,26 +41,45 @@ import (
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
-func TestStoreLimitV2(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+type storeTestSuite struct {
+	suite.Suite
+	env *pdTests.SchedulingTestEnvironment
+}
+
+func TestStoreTestSuite(t *testing.T) {
+	suite.Run(t, new(storeTestSuite))
+}
+
+func (s *storeTestSuite) SetupSuite() {
+	s.env = pdTests.NewSchedulingTestEnvironment(s.T())
+}
+
+func (s *storeTestSuite) TearDownSuite() {
+	s.env.Cleanup()
+}
+
+func (s *storeTestSuite) TearDownTest() {
+	re := s.Require()
+	s.env.Reset(re)
+}
+
+func (s *storeTestSuite) TestStoreLimitV2() {
+	s.env.RunTest(s.checkStoreLimitV2)
+}
+func (s *storeTestSuite) checkStoreLimitV2(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
 	// store command
 	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	_, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	defer func() {
+		// reset to v1 to avoid affecting other tests
+		args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v1"}
+		_, err = tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+	}()
 
 	args = []string{"-u", pdAddr, "store", "limit"}
 	output, err := tests.ExecuteCommand(cmd, args...)
@@ -72,16 +92,13 @@ func TestStoreLimitV2(t *testing.T) {
 	re.Contains(string(output), "not support set limit")
 }
 
-func TestStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (s *storeTestSuite) TestStore() {
+	// TODO: enable this test in microservice mode
+	s.env.RunTestInNonMicroserviceEnv(s.checkStore)
+}
+
+func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -89,10 +106,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            1,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        1,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -100,10 +116,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            3,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        3,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -111,10 +126,9 @@ func TestStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -122,12 +136,10 @@ func TestStore(t *testing.T) {
 	}
 
 	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store.Store.Store)
 	}
-	defer cluster.Destroy()
 
 	// store command
 	args := []string{"-u", pdAddr, "store"}
@@ -195,12 +207,12 @@ func TestStore(t *testing.T) {
 			expectValues:      []string{""},
 		},
 	}
-	for i := 0; i <= 1; i++ {
+	for i := range 2 {
 		for _, testcase := range labelTestCases {
-			switch {
-			case i == 0: // old way
+			switch i {
+			case 0: // old way
 				args = testcase.args
-			case i == 1: // new way
+			case 1: // new way
 				args = testcase.newArgs
 			}
 			cmd := ctl.GetRootCmd()
@@ -330,10 +342,9 @@ func TestStore(t *testing.T) {
 	// put enough stores for replica.
 	for id := 1000; id <= 1005; id++ {
 		store2 := &metapb.Store{
-			Id:            uint64(id),
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
+			Id:        uint64(id),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 		}
 		pdTests.MustPutStore(re, cluster, store2)
 	}
@@ -414,7 +425,7 @@ func TestStore(t *testing.T) {
 	re.Equal(20.0, limit)
 
 	// store delete addr <address>
-	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
+	args = []string{"-u", pdAddr, "store", "delete", "addr", "mock://tikv-3:3"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.Equal("Success!\n", string(output))
 	re.NoError(err)
@@ -431,7 +442,7 @@ func TestStore(t *testing.T) {
 	// store cancel-delete addr <address>
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
 	re.Equal(storelimit.Unlimited, limit)
-	args = []string{"-u", pdAddr, "store", "cancel-delete", "addr", "tikv3"}
+	args = []string{"-u", pdAddr, "store", "cancel-delete", "addr", "mock://tikv-3:3"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.Equal("Success!\n", string(output))
 	re.NoError(err)
@@ -491,19 +502,27 @@ func TestStore(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "rate should be less than")
+
+	// store limit all engine tikv 21 remove peer for tikv stores
+	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "tikv", "21", "remove-peer"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+
+	args = []string{"-u", pdAddr, "store", "limit", "remove-peer"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	allRemovePeerLimit = make(map[string]map[string]any)
+	json.Unmarshal(output, &allRemovePeerLimit)
+	re.Equal(float64(21), allRemovePeerLimit["1"]["remove-peer"].(float64))
+	re.Equal(float64(21), allRemovePeerLimit["3"]["remove-peer"].(float64))
 }
 
 // https://github.com/tikv/pd/issues/5024
-func TestTombstoneStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+func (s *storeTestSuite) TestTombstoneStore() {
+	s.env.RunTest(s.checkTombstoneStore)
+}
+func (s *storeTestSuite) checkTombstoneStore(cluster *pdTests.TestCluster) {
+	re := s.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -511,10 +530,9 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -522,10 +540,9 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            3,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        3,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
@@ -533,23 +550,18 @@ func TestTombstoneStore(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            4,
-					State:         metapb.StoreState_Tombstone,
-					NodeState:     metapb.NodeState_Removed,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        4,
+					State:     metapb.StoreState_Tombstone,
+					NodeState: metapb.NodeState_Removed,
 				},
 				StateName: metapb.StoreState_Tombstone.String(),
 			},
 		},
 	}
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store.Store.Store)
 	}
-	defer cluster.Destroy()
 	pdTests.MustPutRegion(re, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	pdTests.MustPutRegion(re, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	// store remove-tombstone
@@ -561,6 +573,8 @@ func TestTombstoneStore(t *testing.T) {
 	re.Contains(message, "3")
 }
 
+// TestStoreTLS tests the store command with TLS enabled.
+// So we need another cluster to run this test.
 func TestStoreTLS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -611,10 +625,9 @@ func TestStoreTLS(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            1,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        1,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -622,10 +635,9 @@ func TestStoreTLS(t *testing.T) {
 		{
 			Store: &response.MetaStore{
 				Store: &metapb.Store{
-					Id:            2,
-					State:         metapb.StoreState_Up,
-					NodeState:     metapb.NodeState_Serving,
-					LastHeartbeat: time.Now().UnixNano(),
+					Id:        2,
+					State:     metapb.StoreState_Up,
+					NodeState: metapb.NodeState_Serving,
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},

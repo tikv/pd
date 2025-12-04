@@ -195,6 +195,11 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// IsAffinitySchedulingEnabled returns if the affinity scheduling is enabled.
+func (o *PersistOptions) IsAffinitySchedulingEnabled() bool {
+	return o.GetScheduleConfig().EnableAffinityScheduling
+}
+
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
@@ -273,6 +278,11 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLNumberOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
 }
 
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+func (o *PersistOptions) GetMaxAffinityMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
+}
+
 // GetMaxMergeRegionKeys returns the max number of keys.
 // It returns size * 10000 if the key of max-merge-region-Keys doesn't exist.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
@@ -339,6 +349,13 @@ func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()
 	v.MaxMergeRegionSize = maxMergeRegionSize
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxAffinityMergeRegionSize sets the max affinity merge region size.
+func (o *PersistOptions) SetMaxAffinityMergeRegionSize(maxAffinityMergeRegionSize uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxAffinityMergeRegionSize = maxAffinityMergeRegionSize
 	o.SetScheduleConfig(v)
 }
 
@@ -493,10 +510,12 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	defer func() {
-		if typ == storelimit.RemovePeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		} else if typ == storelimit.AddPeer {
+		switch typ {
+		case storelimit.AddPeer:
 			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
+		case storelimit.RemovePeer:
+			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
+		default:
 		}
 	}()
 	limit := o.GetStoreLimit(storeID)

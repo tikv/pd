@@ -46,6 +46,7 @@ func newServiceMiddlewareHandler(svr *server.Server, rd *render.Render) *service
 	}
 }
 
+// GetServiceMiddlewareConfig gets the service middleware config.
 // @Tags     service_middleware
 // @Summary  Get Service Middleware config.
 // @Produce  json
@@ -55,6 +56,7 @@ func (h *serviceMiddlewareHandler) GetServiceMiddlewareConfig(w http.ResponseWri
 	h.rd.JSON(w, http.StatusOK, h.svr.GetServiceMiddlewareConfig())
 }
 
+// SetServiceMiddlewareConfig sets the service middleware config.
 // @Tags     service_middleware
 // @Summary  Update some service-middleware's config items.
 // @Accept   json
@@ -134,6 +136,7 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 	return err
 }
 
+// SetRateLimitConfig updates the rate limit config.
 // @Tags     service_middleware
 // @Summary  update ratelimit config
 // @Param    body  body  object  string  "json params"
@@ -228,6 +231,7 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 	}
 }
 
+// SetGRPCRateLimitConfig updates the gRPC rate limit config.
 // @Tags     service_middleware
 // @Summary  update gRPC ratelimit config
 // @Param    body  body  object  string  "json params"

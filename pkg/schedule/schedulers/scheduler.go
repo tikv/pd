@@ -49,7 +49,7 @@ type Scheduler interface {
 	CleanConfig(cluster sche.SchedulerCluster)
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
-	// IsDiable returns if the scheduler is disabled, it only works for default schedulers.
+	// IsDisable returns if the scheduler is disabled, it only works for default schedulers.
 	// - BalanceRegionScheduler
 	// - BalanceLeaderScheduler
 	// - BalanceHotRegionScheduler
@@ -158,7 +158,7 @@ func CreateScheduler(
 ) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
-		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
+		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs()
 	}
 
 	return fn(oc, storage, dec, removeSchedulerCb...)

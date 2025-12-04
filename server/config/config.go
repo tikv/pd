@@ -34,6 +34,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
@@ -164,6 +165,8 @@ type Config struct {
 	Microservice MicroserviceConfig `toml:"micro-service" json:"micro-service"`
 
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
 // NewConfig creates a new config.
@@ -172,7 +175,7 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease             = int64(3)
+	defaultLeaderLease             = int64(5)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB
@@ -213,8 +216,6 @@ const (
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
-	defaultEnableWitness       = false
-	defaultHaltScheduling      = false
 
 	defaultDashboardAddress = "auto"
 
@@ -226,8 +227,9 @@ const (
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
-	maxTSOUpdatePhysicalInterval     = 10 * time.Second
-	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
+	// MaxTSOUpdatePhysicalInterval is the max value of the config `TSOUpdatePhysicalInterval`.
+	MaxTSOUpdatePhysicalInterval = 10 * time.Second
+	minTSOUpdatePhysicalInterval = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
 	defaultLogLevel  = "info"
@@ -400,8 +402,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
-	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
-		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	if c.TSOUpdatePhysicalInterval.Duration > MaxTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = MaxTSOUpdatePhysicalInterval
 	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
@@ -645,8 +647,8 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// GetLeaderLease returns the leader lease.
-func (c *Config) GetLeaderLease() int64 {
+// GetLease returns the leader lease.
+func (c *Config) GetLease() int64 {
 	return c.LeaderLease
 }
 
@@ -744,6 +746,7 @@ type DashboardConfig struct {
 	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
 	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
 	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	TempDir               string `toml:"temp-dir" json:"temp-dir"`
 	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`

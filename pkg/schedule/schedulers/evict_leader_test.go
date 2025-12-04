@@ -16,10 +16,13 @@ package schedulers
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -91,13 +95,15 @@ func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 
-	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange)}
+	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange)}
 	con2 := emptyConf.clone()
 	re.Empty(con2.getKeyRangesByID(1))
 
-	con2.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
+	var err error
+	con2.StoreIDWithRanges[1], err = getKeyRanges([]string{"a", "b", "c", "d"})
+	re.NoError(err)
 	con3 := con2.clone()
-	re.Equal(len(con3.getRanges(1)), len(con2.getRanges(1)))
+	re.Len(con3.getRanges(1), len(con2.getRanges(1)))
 
 	con3.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
 	con4 := con3.clone()
@@ -136,4 +142,112 @@ func TestBatchEvict(t *testing.T) {
 		ops, _ := sl.Schedule(tc, false)
 		return len(ops) == 5
 	})
+}
+
+func TestEvictLeaderSchedulerCompatibility(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	saveConf := &evictLeaderSchedulerConfig{
+		StoreIDWithRanges: map[uint64][]keyutil.KeyRange{
+			1: {keyutil.KeyRange{StartKey: []byte(""), EndKey: []byte("")}},
+		},
+	}
+
+	configJSON, err := json.Marshal(saveConf)
+	re.NoError(err)
+
+	// Save the serialized config to storage
+	err = tc.GetStorage().SaveSchedulerConfig(string(types.EvictLeaderScheduler), configJSON)
+	re.NoError(err)
+
+	scheduleNames, configs, err := tc.GetStorage().LoadAllSchedulerConfigs()
+	re.NoError(err)
+	re.Len(scheduleNames, 1)
+	data := configs[0]
+	es, err := CreateScheduler(types.EvictLeaderScheduler, oc, tc.GetStorage(), ConfigJSONDecoder([]byte(data)), func(string) error { return nil })
+	re.NoError(err)
+	re.Equal(3, es.(*evictLeaderScheduler).conf.Batch)
+	re.NotEmpty(es.(*evictLeaderScheduler).conf.StoreIDWithRanges[1])
+}
+
+func TestEvictLeaderDeleteWithFailedCallback(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// When deleting the last store, if removeSchedulerCb fails,
+	// the scheduler should be able to rollback correctly.
+	callbackIsCalled := false
+	removeSchedulerCb := func(string) error {
+		callbackIsCalled = true
+		// Simulate removeSchedulerCb failure
+		return errors.New("failed to remove scheduler")
+	}
+
+	// Create scheduler with one store
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), removeSchedulerCb)
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+
+	// Verify the store is in the config
+	re.Contains(conf.StoreIDWithRanges, uint64(1))
+	keyRanges := conf.StoreIDWithRanges[1]
+	re.NotNil(keyRanges)
+
+	// Try to delete the last store, which should trigger removeSchedulerCb
+	resp, err := conf.delete(1)
+	re.Error(err)
+	re.Contains(err.Error(), "failed to remove scheduler")
+	re.True(callbackIsCalled)
+
+	re.Contains(conf.StoreIDWithRanges, uint64(1), "store should be restored after failed delete")
+	re.Equal(keyRanges, conf.StoreIDWithRanges[1], "key ranges should be restored")
+	re.Empty(resp)
+}
+
+func TestEvictLeaderDeleteWithSaveFailure(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Enable failpoint to simulate save failure
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
+	}()
+
+	removeSchedulerCb := func(string) error {
+		return nil
+	}
+
+	// Create scheduler with two stores
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, tc.GetStorage(),
+		ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), removeSchedulerCb)
+	re.NoError(err)
+	conf := sl.(*evictLeaderScheduler).conf
+
+	// Add another store
+	ranges, _ := getKeyRanges([]string{"", ""})
+	conf.resetStore(2, ranges)
+
+	// Verify both stores are in the config
+	re.Contains(conf.StoreIDWithRanges, uint64(1))
+	re.Contains(conf.StoreIDWithRanges, uint64(2))
+	keyRanges := conf.StoreIDWithRanges[1]
+
+	// Try to delete store 1, save should fail
+	resp, err := conf.delete(1)
+	re.Error(err)
+	re.Contains(err.Error(), "fail to persist")
+
+	// After failed save, store 1 should be restored
+	re.Contains(conf.StoreIDWithRanges, uint64(1), "store should be restored after save failure")
+	re.Equal(keyRanges, conf.StoreIDWithRanges[1], "key ranges should be restored")
+	re.Empty(resp)
 }

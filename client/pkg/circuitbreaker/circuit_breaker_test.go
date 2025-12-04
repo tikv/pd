@@ -20,9 +20,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // advance emulate the state machine clock moves forward by the given duration
 func (cb *CircuitBreaker) advance(duration time.Duration) {
@@ -228,6 +234,16 @@ func TestCircuitBreakerChangeSettings(t *testing.T) {
 	cb.advance(settings.ErrorRateWindow)
 	assertFastFail(cb, re)
 	re.Equal(StateOpen, cb.state.stateType)
+}
+
+func TestCircuitBreakerEnabled(t *testing.T) {
+	re := require.New(t)
+	cb := NewCircuitBreaker("test_cb", AlwaysClosedSettings)
+	re.False(cb.IsEnabled())
+	cb.ChangeSettings(func(config *Settings) {
+		config.ErrorRateThresholdPct = settings.ErrorRateThresholdPct
+	})
+	re.True(cb.IsEnabled())
 }
 
 func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreaker {

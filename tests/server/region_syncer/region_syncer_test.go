@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -42,6 +41,15 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/syncRegionChannelFull", `return(true)`))
+
+	mockSyncFull := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/syncer/syncRegionChannelFull", func() {
+		if mockSyncFull != nil {
+			// block the syncer and the tasks will be blocked in the runner.
+			<-mockSyncFull
+		}
+	}))
 
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
@@ -54,6 +62,7 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
+	rc.GetScheduleConfig().EnableHeartbeatConcurrentRunner = true
 	followerServer := cluster.GetServer(cluster.GetFollower())
 
 	testutil.Eventually(re, func() bool {
@@ -71,6 +80,45 @@ func TestRegionSyncer(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
+	testutil.Eventually(re, func() bool {
+		return len(rc.GetRegions()) == regionLen
+	})
+	close(mockSyncFull)
+
+	checkRegions := func() {
+		// ensure flush to region storage, we use a duration larger than the
+		// region storage flush rate limit (3s).
+		time.Sleep(4 * time.Second)
+
+		// test All regions have been synchronized to the cache of followerServer
+		re.NotNil(followerServer)
+		cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
+		re.Len(cacheRegions, regionLen)
+		testutil.Eventually(re, func() bool {
+			for _, region := range cacheRegions {
+				r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+				if region.GetMeta().String() != r.GetMeta().String() {
+					t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
+					return false
+				}
+				if region.GetStat().String() != r.GetStat().String() {
+					t.Logf("region.Stat: %v, r.Stat: %v", region.GetStat().String(), r.GetStat().String())
+					return false
+				}
+				if region.GetLeader().String() != r.GetLeader().String() {
+					t.Logf("region.Leader: %v, r.Leader: %v", region.GetLeader().String(), r.GetLeader().String())
+					return false
+				}
+				if region.GetBuckets().String() != r.GetBuckets().String() {
+					t.Logf("region.Buckets: %v, r.Buckets: %v", region.GetBuckets().String(), r.GetBuckets().String())
+					return false
+				}
+			}
+			return true
+		})
+	}
+	checkRegions()
+
 	// merge case
 	// region2 -> region1 -> region0
 	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
@@ -116,27 +164,7 @@ func TestRegionSyncer(t *testing.T) {
 		re.NoError(err)
 	}
 
-	// ensure flush to region storage, we use a duration larger than the
-	// region storage flush rate limit (3s).
-	time.Sleep(4 * time.Second)
-
-	// test All regions have been synchronized to the cache of followerServer
-	re.NotNil(followerServer)
-	cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
-	re.Len(cacheRegions, regionLen)
-	testutil.Eventually(re, func() bool {
-		assert := assert.New(t)
-		for _, region := range cacheRegions {
-			r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
-			if !(assert.Equal(region.GetMeta(), r.GetMeta()) &&
-				assert.Equal(region.GetStat(), r.GetStat()) &&
-				assert.Equal(region.GetLeader(), r.GetLeader()) &&
-				assert.Equal(region.GetBuckets(), r.GetBuckets())) {
-				return false
-			}
-		}
-		return true
-	})
+	checkRegions()
 
 	err = leaderServer.Stop()
 	re.NoError(err)
@@ -146,7 +174,7 @@ func TestRegionSyncer(t *testing.T) {
 		return !leaderServer.GetServer().GetRaftCluster().GetRegionSyncer().IsRunning()
 	})
 	re.NotNil(leaderServer)
-	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
+	loadRegions := leaderServer.GetServer().GetRegions()
 	re.Len(loadRegions, regionLen)
 	for _, region := range regions {
 		r := leaderServer.GetRegionInfoByID(region.GetID())
@@ -157,6 +185,8 @@ func TestRegionSyncer(t *testing.T) {
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/syncRegionChannelFull"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/syncRegionChannelFull"))
 }
 
 func TestFullSyncWithAddMember(t *testing.T) {
@@ -195,11 +225,15 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	re.NoError(pd2.Run())
 	re.Equal("pd1", cluster.WaitLeader())
 	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
+	var loadRegionLen int
+	testutil.Eventually(re, func() bool {
+		loadRegionLen = len(pd2.GetServer().GetBasicCluster().GetRegions())
+		return loadRegionLen == regionLen
+	})
 	re.NoError(cluster.ResignLeader())
 	re.Equal("pd2", cluster.WaitLeader())
-	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
-	re.Len(loadRegions, regionLen)
+	loadRegionLen = len(pd2.GetServer().GetRegions())
+	re.Equal(regionLen, loadRegionLen)
 }
 
 func TestPrepareChecker(t *testing.T) {
@@ -236,7 +270,9 @@ func TestPrepareChecker(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
+	testutil.Eventually(re, func() bool {
+		return len(pd2.GetServer().GetBasicCluster().GetRegions()) == regionLen
+	})
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
@@ -247,8 +283,9 @@ func TestPrepareChecker(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	time.Sleep(time.Second)
-	re.True(rc.IsPrepared())
+	testutil.Eventually(re, func() bool {
+		return rc.IsPrepared()
+	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
@@ -290,7 +327,9 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
+	testutil.Eventually(re, func() bool {
+		return len(pd2.GetServer().GetBasicCluster().GetRegions()) == regionLen
+	})
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)

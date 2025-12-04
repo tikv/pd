@@ -20,6 +20,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/core"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -121,7 +124,33 @@ func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *
 	testutil.Eventually(re, func() bool {
 		return tc.pd.GetLeaderServer().GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
 	})
+	// send a heartbeat immediately to make prepare checker pass
+	grpcPDClient := testutil.MustNewGrpcClient(re, tc.pd.GetLeaderServer().GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(tc.ctx)
+	re.NoError(err)
+	regions := tc.pd.GetLeaderServer().GetRegions()
+	for _, region := range regions {
+		re.NoError(tc.heartbeat(stream, region))
+	}
 	return primary
+}
+
+func (tc *TestSchedulingCluster) heartbeat(stream pdpb.PD_RegionHeartbeatClient, region *core.RegionInfo) error {
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(tc.pd.GetLeaderServer().GetClusterID()),
+		Region:          region.GetMeta(),
+		Leader:          region.GetLeader(),
+		DownPeers:       region.GetDownPeers(),
+		PendingPeers:    region.GetPendingPeers(),
+		BytesWritten:    region.GetBytesWritten(),
+		BytesRead:       region.GetBytesRead(),
+		KeysWritten:     region.GetKeysWritten(),
+		KeysRead:        region.GetKeysRead(),
+		ApproximateKeys: uint64(region.GetApproximateKeys()),
+		ApproximateSize: uint64(region.GetApproximateSize()),
+		Term:            region.GetTerm(),
+	}
+	return stream.Send(regionReq)
 }
 
 // GetServer returns the scheduling server by the given address.
