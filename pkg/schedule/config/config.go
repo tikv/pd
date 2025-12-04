@@ -65,7 +65,7 @@ const (
 	defaultEnablePlacementRules            = true
 	defaultEnableWitness                   = false
 	defaultHaltScheduling                  = false
-	defaultEnableAffinityScheduling        = true
+	defaultEnableAffinityScheduling        = false
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
@@ -83,8 +83,9 @@ const (
 	defaultMaxStorePreparingTime = 48 * time.Hour
 
 	// defaultMaxAffinityMergeRegionSize is the default maximum size of affinity region when regions can be merged.
-	// It means 1024 MB, according https://docs.pingcap.com/tidb/stable/tune-region-performance/#use-region-split-size-to-adjust-region-size
-	defaultMaxAffinityMergeRegionSize = 1024
+	// It means 256 MB, according https://docs.pingcap.com/tidb/stable/tune-region-performance/#use-region-split-size-to-adjust-region-
+	// The maximum size of region maybe be larger than 256 MB, such as 512 MB or 1 GB.
+	defaultMaxAffinityMergeRegionSize = 256
 
 	// RegionSizeToKeysRatio is the ratio between region size and region keys.
 	RegionSizeToKeysRatio = 10000
@@ -496,13 +497,9 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 }
 
 // GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
-// It returns 0 if the MaxMergeRegionSize is 0 or the MaxAffinityMergeRegionSize is 0.
-// It returns the greater one between the MaxMergeRegionSize and the MaxAffinityMergeRegionSize.
+// A zero value means the affinity merge is disabled.
 func (c *ScheduleConfig) GetMaxAffinityMergeRegionSize() uint64 {
-	if c.MaxMergeRegionSize == 0 || c.MaxAffinityMergeRegionSize == 0 {
-		return 0
-	}
-	return max(c.MaxAffinityMergeRegionSize, c.MaxMergeRegionSize)
+	return c.MaxAffinityMergeRegionSize
 }
 
 func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
