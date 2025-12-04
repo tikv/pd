@@ -85,6 +85,7 @@ const (
 	// defaultMaxAffinityMergeRegionSize is the default maximum size of affinity region when regions can be merged.
 	// It means 256 MB, according https://docs.pingcap.com/tidb/stable/tune-region-performance/#use-region-split-size-to-adjust-region-
 	// The maximum size of region maybe be larger than 256 MB, such as 512 MB or 1 GB.
+	// Because we will merge affinity region as far as possible, so defaultMaxAffinityMergeRegionSize is larger than defaultMaxMergeRegionSize.
 	defaultMaxAffinityMergeRegionSize = 256
 
 	// RegionSizeToKeysRatio is the ratio between region size and region keys.
