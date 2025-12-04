@@ -73,10 +73,10 @@ func EqualWithoutOrder[T comparable](a, b []T) bool {
 	return true
 }
 
-// HasDupSorted takes a sorted slice and checks whether it contains any duplicate elements.
-func HasDupSorted[T comparable](slice []T) bool {
-	for i := 1; i < len(slice); i++ {
-		if slice[i] == slice[i-1] {
+// HasDupInSorted takes a sorted slice and checks whether it contains any duplicate elements.
+func HasDupInSorted[T comparable](sortedSlice []T) bool {
+	for i := 1; i < len(sortedSlice); i++ {
+		if sortedSlice[i] == sortedSlice[i-1] {
 			return true
 		}
 	}
