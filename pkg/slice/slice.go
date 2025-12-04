@@ -58,3 +58,30 @@ func Remove[T comparable](slice []T, value T) []T {
 	}
 	return slice[:j]
 }
+<<<<<<< HEAD
+=======
+
+// EqualWithoutOrder checks if two slices are equal without considering the order.
+// Both slices a and b must not contain any duplicate elements.
+func EqualWithoutOrder[T comparable](a, b []T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, item := range a {
+		if !Contains(b, item) {
+			return false
+		}
+	}
+	return true
+}
+
+// HasDupInSorted takes a sorted slice and checks whether it contains any duplicate elements.
+func HasDupInSorted[T comparable](sortedSlice []T) bool {
+	for i := 1; i < len(sortedSlice); i++ {
+		if sortedSlice[i] == sortedSlice[i-1] {
+			return true
+		}
+	}
+	return false
+}
+>>>>>>> 12d3952d46 (affinity: add affinity storage, new config, label plan and error code (#9993))

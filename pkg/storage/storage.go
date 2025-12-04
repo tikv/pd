@@ -46,6 +46,11 @@ type Storage interface {
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
+<<<<<<< HEAD
+=======
+	endpoint.MaintenanceStorage
+	endpoint.AffinityStorage
+>>>>>>> 12d3952d46 (affinity: add affinity storage, new config, label plan and error code (#9993))
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.

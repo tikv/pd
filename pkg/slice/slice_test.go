@@ -94,3 +94,24 @@ func TestSliceRemove(t *testing.T) {
 	is = slice.Remove(is, 1)
 	re.Equal([]int64{}, is)
 }
+<<<<<<< HEAD
+=======
+
+func TestSliceEqualWithoutOrder(t *testing.T) {
+	re := require.New(t)
+	re.True(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b", "a"}))
+	re.True(slice.EqualWithoutOrder([]string{}, []string{}))
+	re.False(slice.EqualWithoutOrder([]string{}, []string{"a"}))
+	re.False(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b", "c"}))
+	re.False(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b"}))
+	re.False(slice.EqualWithoutOrder([]string{"a"}, []string{"b", "c"}))
+}
+
+func TestSliceHasDupInSorted(t *testing.T) {
+	re := require.New(t)
+	re.False(slice.HasDupInSorted([]string{"a", "b", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "a", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "b", "b"}))
+	re.False(slice.HasDupInSorted([]string(nil)))
+}
+>>>>>>> 12d3952d46 (affinity: add affinity storage, new config, label plan and error code (#9993))
