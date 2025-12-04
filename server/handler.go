@@ -273,6 +273,16 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 	}
 	for _, store := range c.GetStores() {
 		for _, label := range labels {
+			// set limit for tikv stores
+			if label.Key == core.EngineKey && label.Value == core.EngineTiKV {
+				if store.IsTiKV() {
+					err = c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			for _, sl := range store.GetLabels() {
 				if label.Key == sl.Key && label.Value == sl.Value {
 					// TODO: need to handle some of stores are persisted, and some of stores are not.
