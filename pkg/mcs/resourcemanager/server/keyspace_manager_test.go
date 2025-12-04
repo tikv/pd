@@ -438,6 +438,41 @@ func TestRUTracker(t *testing.T) {
 	})
 }
 
+func TestGroupRUTracker(t *testing.T) {
+	const floatDelta = 0.1
+	re := require.New(t)
+
+	grt := newGroupRUTracker()
+	re.NotNil(grt)
+	re.NotNil(grt.ruTrackers)
+	re.Empty(grt.ruTrackers)
+
+	now := time.Now()
+	totalRUPerSec := 0.0
+	for i := range 10 {
+		clientUniqueID := uint64(i)
+		grt.sample(clientUniqueID, now, 100)
+		grt.sample(clientUniqueID, now.Add(time.Second), 100)
+		ruPerSec := grt.getOrCreateRUTracker(clientUniqueID).getRUPerSec()
+		re.InDelta(100.0, ruPerSec, floatDelta)
+		totalRUPerSec += ruPerSec
+	}
+
+	re.Len(grt.ruTrackers, 10)
+	re.InDelta(totalRUPerSec, grt.getRUPerSec(), floatDelta)
+
+	staleClientUniqueIDs := grt.cleanupStaleRUTrackers()
+	re.Empty(staleClientUniqueIDs)
+	re.Len(grt.ruTrackers, 10)
+	// Manually set the last sample time to be stale.
+	for i := range 10 {
+		grt.getOrCreateRUTracker(uint64(i)).lastSampleTime = time.Now().Add(-slotExpireTimeout - time.Second)
+	}
+	staleClientUniqueIDs = grt.cleanupStaleRUTrackers()
+	re.Len(staleClientUniqueIDs, 10)
+	re.Empty(grt.ruTrackers)
+}
+
 func TestPersistAndReloadIntegrity(t *testing.T) {
 	re := require.New(t)
 	storage := storage.NewStorageWithMemoryBackend()
@@ -875,12 +910,12 @@ func TestConciliateFillRate(t *testing.T) {
 		// Mock the RU demand of each resource group.
 		now := time.Now()
 		for i, ruDemand := range tc.ruDemandList {
-			ruTracker := krgm.getOrCreateRUTracker(genGroupName(idx, i))
+			grt := krgm.getOrCreateGroupRUTracker(genGroupName(idx, i))
 			// Warm up the RU tracker.
-			ruTracker.sample(now, 0)
+			grt.sample(0, now, 0)
 			// Sample the RU demand.
 			now = now.Add(time.Second)
-			ruTracker.sample(now, ruDemand)
+			grt.sample(0, now, ruDemand)
 		}
 		// Conciliate the fill rate.
 		krgm.conciliateFillRates()
