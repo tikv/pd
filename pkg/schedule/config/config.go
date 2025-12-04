@@ -330,7 +330,7 @@ type ScheduleConfig struct {
 	// If the size of region is smaller than MaxAffinityMergeRegionSize,
 	// and it is affinity, it will try to merge with adjacent regions.
 	// To avoid introducing a new configuration parameter, we derive the maximum number of keys
-    // from the maximum size using the global size-to-keys ratio.
+	// from the maximum size using the global size-to-keys ratio.
 	MaxAffinityMergeRegionSize uint64 `toml:"max-affinity-merge-region-size" json:"max-affinity-merge-region-size"`
 }
 
