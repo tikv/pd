@@ -827,8 +827,11 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // MicroserviceConfig is the configuration for microservice.
 type MicroserviceConfig struct {
-	EnableSchedulingFallback      bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
-	EnableTSODynamicSwitching     bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	// If EnableResourceManagerFallback is false, resource manager service only
+	// works when api service is healthy. Please make sure api service is highly
+	// available before disabling this option.
 	EnableResourceManagerFallback bool `toml:"enable-resource-manager-fallback" json:"enable-resource-manager-fallback,string"`
 }
 

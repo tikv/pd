@@ -301,7 +301,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	runResourceManager := !s.IsServiceIndependent(mcs.ResourceManagerServiceName) || cfg.Microservice.IsResourceManagerFallbackEnabled()
+	runResourceManager := cfg.Microservice.IsResourceManagerFallbackEnabled()
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	if runResourceManager {
 		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])

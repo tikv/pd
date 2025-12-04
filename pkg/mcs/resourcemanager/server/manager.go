@@ -212,6 +212,9 @@ func (m *Manager) Init(ctx context.Context) error {
 		defer logutil.LogPanic()
 		m.persistLoop(ctx)
 	}()
+	// TODO: Add a goroutine to loadKeyspaceResourceGroups periodically to avoid
+	// the resource group exists gap between PD server and resource manager service
+	// during redirection.
 	log.Info("resource group manager finishes initialization")
 	return nil
 }
