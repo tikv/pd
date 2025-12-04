@@ -37,6 +37,7 @@ type AffinityGroupsResponse struct {
 func RegisterV2Router(engine *gin.Engine) {
 	root := engine.Group(APIPathPrefix)
 	redirector := multiservicesapi.ServiceRedirector()
+	root.Use(affinitySchedulingEnabledChecker())
 	root.GET("/affinity-groups", redirector, getAllAffinityGroups)
 	root.GET("/affinity-groups/:group_id", redirector, getAffinityGroup)
 }
@@ -58,6 +59,17 @@ func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
 		return nil, false
 	}
 	return manager, true
+}
+
+func affinitySchedulingEnabledChecker() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+		if svr.GetPersistConfig().IsAffinitySchedulingEnabled() {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrAffinityDisabled.FastGenByArgs().Error())
+	}
 }
 
 func getAllAffinityGroups(c *gin.Context) {

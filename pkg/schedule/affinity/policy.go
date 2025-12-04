@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -80,6 +81,7 @@ func (m *Manager) startAvailabilityCheckLoop() {
 	interval := getAvailabilityCheckInterval()
 	ticker := time.NewTicker(interval)
 	go func() {
+		defer logutil.LogPanic()
 		defer ticker.Stop()
 		for {
 			select {

@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -81,7 +82,9 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
-	cluster, err := tests.NewTestCluster(suite.ctx, 2)
+	cluster, err := tests.NewTestCluster(suite.ctx, 2, func(conf *config.Config, _ string) {
+		conf.Schedule.EnableAffinityScheduling = true
+	})
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
