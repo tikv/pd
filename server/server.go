@@ -679,7 +679,8 @@ func (s *Server) startGCTuner() {
 	defer tick.Stop()
 	totalMem, err := memory.MemTotal()
 	if err != nil {
-		log.Fatal("fail to get total memory", zap.Error(err))
+		log.Warn("fail to get total memory", zap.Error(err))
+		return
 	}
 	log.Info("memory info", zap.Uint64("total-mem", totalMem))
 	cfg := s.GetPDServerConfig()
