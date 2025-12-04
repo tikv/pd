@@ -137,10 +137,7 @@ func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 // tokenSlot is used to split a token bucket into multiple slots to
 // server different clients within the same resource group.
 type tokenSlot struct {
-	id uint64
-	// ruTracker is used to track the RU demand of this slot,
-	// which will be used to calculate a fair allocation for this slot.
-	rt                *ruTracker
+	id                uint64
 	fillRate          uint64
 	burstLimit        int64
 	curTokenCapacity  float64
@@ -151,7 +148,6 @@ type tokenSlot struct {
 func newTokenSlot(clientUniqueID uint64, now time.Time) *tokenSlot {
 	return &tokenSlot{
 		id:          clientUniqueID,
-		rt:          newRUTracker(defaultRUTrackerTimeConstant),
 		lastReqTime: now,
 	}
 }
@@ -174,6 +170,8 @@ type GroupTokenBucketState struct {
 	Initialized bool       `json:"initialized"`
 
 	resourceGroupName string
+	// groupRUTracker is used to get the real-time RU/s of each client.
+	grt *groupRUTracker
 	// ClientUniqueID -> TokenSlot
 	tokenSlots map[uint64]*tokenSlot
 	// Used to store tokens in the token slot that exceed burst limits,
@@ -229,7 +227,6 @@ func (gts *GroupTokenBucketState) resetLoan() {
 	gts.Tokens = 0
 	// Reset all slots.
 	for _, slot := range gts.tokenSlots {
-		slot.rt = newRUTracker(defaultRUTrackerTimeConstant)
 		slot.curTokenCapacity = 0
 		slot.lastTokenCapacity = 0
 	}
@@ -244,12 +241,10 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	if !exist && requiredToken != 0 {
 		// Create a new slot if the slot is not exist and the required token is not 0.
 		slot = newTokenSlot(clientUniqueID, now)
-		slot.rt.sample(now, requiredToken)
 		gtb.tokenSlots[clientUniqueID] = slot
 	} else if exist && requiredToken != 0 {
 		// Update the existing slot.
 		slot.lastReqTime = now
-		slot.rt.sample(now, requiredToken)
 	} else if requiredToken == 0 {
 		// Clean up the slot that required 0.
 		delete(gtb.tokenSlots, clientUniqueID)
@@ -292,19 +287,40 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	}
 
 	var (
-		demandSum                      = 0.0
-		demandMap                      = make(map[uint64]float64, len(gtb.tokenSlots))
 		totalFillRate, totalBurstLimit = gtb.getFillRateAndBurstLimit()
+		basicFillRate                  = float64(totalFillRate) * evenRatio
+		allocatedFillRate              = 0.0
+		allocationMap                  = make(map[uint64]float64, len(gtb.tokenSlots))
+		extraDemandSlots               = make(map[uint64]float64, len(gtb.tokenSlots))
+		extraDemandSum                 = 0.0
 	)
-	for clientUniqueID, slot := range gtb.tokenSlots {
-		ruDemand := slot.rt.getRUPerSec()
-		demandSum += ruDemand
-		demandMap[clientUniqueID] = ruDemand
+	for clientUniqueID := range gtb.tokenSlots {
+		allocation := gtb.grt.getOrCreateRUTracker(clientUniqueID).getRUPerSec()
+		// If the RU demand is greater than the basic fill rate, allocate the basic fill rate first.
+		if allocation > basicFillRate {
+			// Record the extra demand for the high demand slots.
+			extraDemand := allocation - basicFillRate
+			extraDemandSum += extraDemand
+			extraDemandSlots[clientUniqueID] = extraDemand
+			// Allocate the basic fill rate.
+			allocation = basicFillRate
+		}
+		allocationMap[clientUniqueID] = allocation
+		allocatedFillRate += allocation
 	}
+	remainingFillRate := float64(totalFillRate) - allocatedFillRate
+	// For the remaining fill rate, allocate it proportionally to the high demand slots.
+	if remainingFillRate > 0 {
+		for clientUniqueID, extraDemand := range extraDemandSlots {
+			allocationMap[clientUniqueID] += remainingFillRate * (extraDemand / extraDemandSum)
+		}
+	}
+	// Finally, distribute the fill rate and burst limit to each slot based on the allocation.
 	for clientUniqueID, slot := range gtb.tokenSlots {
-		demand := demandMap[clientUniqueID]
-		ratio := demand / demandSum
-		fillRate := float64(totalFillRate) * ratio
+		// Distribute the fill rate.
+		fillRate := allocationMap[clientUniqueID]
+		// Distribute the burst limit and assign tokens based on the allocation ratio.
+		ratio := fillRate / float64(totalFillRate)
 		burstLimit := float64(totalBurstLimit) * ratio
 		assignTokens := tokensForBalance * ratio
 		// Need to reserve burst limit to next balance.
