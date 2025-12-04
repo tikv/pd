@@ -113,7 +113,6 @@ func (s condition) String() string {
 	}
 }
 
-//nolint:unused
 func (s condition) storeStateString() string {
 	switch s {
 	case storeEvictLeader:
