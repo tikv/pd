@@ -349,7 +349,7 @@ func (m *Manager) AdjustGroup(g *Group) error {
 
 	voterStoreIDs := slices.Clone(g.VoterStoreIDs)
 	slices.Sort(voterStoreIDs)
-	if slice.HasDupSorted(voterStoreIDs) {
+	if slice.HasDupInSorted(voterStoreIDs) {
 		return errs.ErrAffinityGroupContent.FastGenByArgs("duplicate voter store ID")
 	}
 	if !slices.Contains(voterStoreIDs, g.LeaderStoreID) {
