@@ -310,9 +310,15 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	}
 	remainingFillRate := float64(totalFillRate) - allocatedFillRate
 	// For the remaining fill rate, allocate it proportionally to the high demand slots.
-	if remainingFillRate > 0 {
+	if remainingFillRate > 0 && len(extraDemandSlots) > 0 {
 		for clientUniqueID, extraDemand := range extraDemandSlots {
 			allocationMap[clientUniqueID] += remainingFillRate * (extraDemand / extraDemandSum)
+		}
+	} else if remainingFillRate > 0 && len(extraDemandSlots) == 0 {
+		// If there is no high demand slots, distribute the remaining fill rate to all slots evenly.
+		avg := remainingFillRate / float64(slotNum)
+		for clientUniqueID := range allocationMap {
+			allocationMap[clientUniqueID] += avg
 		}
 	}
 	// Finally, distribute the fill rate and burst limit to each slot based on the allocation.
