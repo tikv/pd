@@ -80,6 +80,7 @@ const (
 	defaultHotRegionsWriteInterval = 10 * time.Minute
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+	defaultStorePreparingPolicy  = "count"
 )
 
 var (
@@ -191,6 +192,11 @@ type ScheduleConfig struct {
 	// MaxStorePreparingTime is the max duration after which
 	// a store will be considered to be preparing.
 	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
+	// StorePreparingPolicy is the option to decide whether a store is preparing.
+	// there are some policies supported: ["count", "size"], default: "count"
+	// count(default): if the region count of the preparing store is less than the threshold, it will be considered preparing.
+	// size:if the approximate size of the preparing store is less than the threshold, it will be considered preparing.
+	StorePreparingPolicy string `toml:"store-preparing-policy" json:"store-preparing-policy"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
@@ -349,6 +355,10 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
 	configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
+
+	if !meta.IsDefined("store-preparing-policy") {
+		configutil.AdjustString(&c.StorePreparingPolicy, defaultStorePreparingPolicy)
+	}
 	if !meta.IsDefined("leader-schedule-limit") {
 		configutil.AdjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}

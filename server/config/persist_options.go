@@ -420,6 +420,11 @@ func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
 	return o.GetScheduleConfig().MaxStorePreparingTime.Duration
 }
 
+// GetStorePreparingPolicy returns the type of store preparing policy.
+func (o *PersistOptions) GetStorePreparingPolicy() constant.SchedulePolicy {
+	return constant.StringToSchedulePolicy(o.GetScheduleConfig().StorePreparingPolicy)
+}
+
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
 	return o.getTTLNumberOr(sc.LeaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
