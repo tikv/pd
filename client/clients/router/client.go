@@ -460,7 +460,7 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 		// GC all the router router stream connections.
 		c.routerConCtxMgr.GC(func(url string) bool {
 			if url != c.getLeaderURL() {
-				log.Info("[router] release the  router service stream connection", zap.String("url", url))
+				log.Info("[router] release the router service stream connection", zap.String("url", url))
 				return true
 			}
 			return false
@@ -607,9 +607,9 @@ batchLoop:
 			}
 			if fn == nil {
 				fn, streamURL, retry = c.dispatcherAPI(ctx)
-			}
-			if retry {
-				continue connectionCtxChoosingLoop
+				if retry {
+					continue connectionCtxChoosingLoop
+				}
 			}
 			break connectionCtxChoosingLoop
 		}
@@ -664,6 +664,7 @@ func (c *Cli) dispatcherAPI(ctx context.Context) (processFn, string, bool) {
 
 type processFn func() error
 
+// dispatcherRouterService returns the stream function, stream url and need retry again
 func (c *Cli) dispatcherRouterService(ctx context.Context) (processFn, string, bool) {
 	allowRouterServiceHandle := c.option.GetEnableRouterServiceHandler()
 	if allowRouterServiceHandle {
@@ -680,24 +681,44 @@ func (c *Cli) dispatcherRouterService(ctx context.Context) (processFn, string, b
 	if allowRouterServiceHandle {
 		return nil, "", false
 	}
-	connect := c.routerConCtxMgr.RandomlyPick()
-	if connect == nil {
-		log.Info("[router] router service stream connection is not ready")
-		c.updateRouterServiceConnection(ctx)
+
+	// Check whether allow the follower to handle this batch of requests.
+	allowFollowerHandle := c.option.GetEnableFollowerHandle()
+	if allowFollowerHandle {
+		// We need to ensure all requests in a same batch allow to be handled by the follower.
+		// IMPROVE: separate into the follower and leader handle batches.
+		c.batchController.IterCollectedRequests(func(req *Request) bool {
+			if !req.options.AllowFollowerHandle {
+				allowFollowerHandle = false
+				return false
+			}
+			return true
+		})
+	}
+	allowFollowerHandle = allowFollowerHandle && c.option.GetEnableFollowerHandle()
+	var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
+	if allowFollowerHandle {
+		connectionCtx = c.conCtxMgr.RandomlyPick()
+	} else {
+		connectionCtx = c.conCtxMgr.GetConnectionCtx(c.getLeaderURL())
+	}
+	if connectionCtx == nil {
+		log.Info("[router] router stream connection is not ready")
+		c.updateConnection(ctx)
 		return nil, "", true
 	}
 	// Check if the stream connection is canceled.
 	select {
-	case <-connect.Ctx.Done():
-		log.Info("[router] router service stream connection is canceled", zap.String("stream-url", connect.StreamURL))
-		c.routerConCtxMgr.Release(connect.StreamURL)
+	case <-connectionCtx.Ctx.Done():
+		log.Info("[router] router stream connection is canceled", zap.String("stream-url", connectionCtx.StreamURL))
+		c.routerConCtxMgr.Release(connectionCtx.StreamURL)
 		return nil, "", true
 	default:
 	}
 
 	return func() error {
-		return c.processRouterRequests(connect.Stream)
-	}, connect.StreamURL, false
+		return c.processRouterRequests(connectionCtx.Stream)
+	}, connectionCtx.StreamURL, false
 }
 
 type recvFn func() (*pdpb.QueryRegionResponse, error)

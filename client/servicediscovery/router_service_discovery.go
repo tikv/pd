@@ -165,7 +165,7 @@ func (r *routerServiceDiscovery) CheckMemberChanged() error {
 		log.Warn("[router] failed to check member changed", errs.ZapError(err))
 	}
 	if err := innerRetry(r.ctx, queryRetryMaxTimes, r.updateMember); err != nil {
-		log.Error("[router] failed to update member", errs.ZapError(err))
+		log.Warn("[router] failed to update member", errs.ZapError(err))
 		return err
 	}
 	return nil
