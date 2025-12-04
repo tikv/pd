@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -48,10 +49,6 @@ const (
 	// and trigger unnecessary warnings about clock offset.
 	// It's an empirical value.
 	jetLagWarningThreshold = 150 * time.Millisecond
-
-	// minStorageTimeout is the minimum timeout for saving timestamp to storage.
-	// it keeps with the defaultTSOSaveInterval - 1 second to ensure the leader has enough time to allocate more tso after save successfully.
-	minStorageTimeout = 4 * time.Second
 )
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
@@ -79,15 +76,16 @@ type timestampOracle struct {
 	metrics *tsoMetrics
 }
 
-func (t *timestampOracle) getStoreageTimeout() time.Duration {
-	if t.saveInterval-time.Second < minStorageTimeout {
-		return minStorageTimeout
+func (t *timestampOracle) getStorageTimeout() time.Duration {
+	timeout := t.saveInterval - time.Second
+	if timeout < config.DefaultTSOSaveInterval-1 {
+		return config.DefaultTSOSaveInterval - 1
 	}
-	return t.saveInterval - time.Second
+	return timeout
 }
 
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), t.getStoreageTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), t.getStorageTimeout())
 	defer cancel()
 	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
@@ -145,9 +143,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	ctx, cancelCtx := context.WithTimeout(context.Background(), t.getStoreageTimeout())
-	defer cancelCtx()
-	last, err := t.storage.LoadTimestamp(ctx, t.keyspaceGroupID)
+	last, err := t.storage.LoadTimestamp(t.keyspaceGroupID)
 	if err != nil {
 		return err
 	}

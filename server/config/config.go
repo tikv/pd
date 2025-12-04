@@ -54,11 +54,10 @@ type Config struct {
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
-	Name                       string `toml:"name" json:"name"`
-	DataDir                    string `toml:"data-dir" json:"data-dir"`
-	ForceNewCluster            bool   `json:"force-new-cluster"`
-	EnableGRPCGateway          bool   `json:"enable-grpc-gateway"`
-	EnableLeaderClientAutoSync bool   `toml:"enable-leader-client-auto-sync" json:"enable-leader-client-auto-sync"`
+	Name              string `toml:"name" json:"name"`
+	DataDir           string `toml:"data-dir" json:"data-dir"`
+	ForceNewCluster   bool   `json:"force-new-cluster"`
+	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -215,9 +214,8 @@ const (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
 	DefaultMinResolvedTSPersistenceInterval = time.Second
 
-	defaultEnableGRPCGateway          = true
-	defaultEnableLeaderClientAutoSync = false
-	defaultDisableErrorVerbose        = true
+	defaultEnableGRPCGateway   = true
+	defaultDisableErrorVerbose = true
 
 	defaultDashboardAddress = "auto"
 
@@ -226,7 +224,8 @@ const (
 	defaultMaxConcurrentTSOProxyStreamings = 5000
 	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
 
-	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
+	// DefaultTSOSaveInterval is the default value of the config `TSOSaveInterval`.
+	DefaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	// MaxTSOUpdatePhysicalInterval is the max value of the config `TSOUpdatePhysicalInterval`.
@@ -401,7 +400,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
 
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
+	configutil.AdjustDuration(&c.TSOSaveInterval, DefaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > MaxTSOUpdatePhysicalInterval {
@@ -452,9 +451,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
-	}
-	if !configMetaData.IsDefined("enable-leader-client-auto-sync") {
-		c.EnableLeaderClientAutoSync = defaultEnableLeaderClientAutoSync
 	}
 
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))

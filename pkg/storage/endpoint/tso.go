@@ -32,7 +32,7 @@ import (
 
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
-	LoadTimestamp(ctx context.Context, groupID uint32) (time.Time, error)
+	LoadTimestamp(groupID uint32) (time.Time, error)
 	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error
 	DeleteTimestamp(ctx context.Context, groupID uint32) error
 }
@@ -44,7 +44,7 @@ var _ TSOStorage = (*StorageEndpoint)(nil)
 // we must ensure that all keyspace groups are merged into the default
 // keyspace group. This guarantees the monotonicity of the TSO by loading
 // the timestamp from a single key.
-func (se *StorageEndpoint) LoadTimestamp(_ context.Context, groupID uint32) (time.Time, error) {
+func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
 	key := keypath.TimestampPath(groupID)
 	value, err := se.Load(key)
 	if err != nil {

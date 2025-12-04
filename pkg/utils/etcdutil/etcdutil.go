@@ -263,18 +263,18 @@ const (
 	etcdServerDisconnectedTimeout = 1 * time.Minute
 )
 
-// EtcdClientUsager marks the usager of the etcd client.
-type EtcdClientUsager string
+// EtcdClientPurpose marks the purpose of the etcd client.
+type EtcdClientPurpose string
 
 const (
-	// TestEtcdClientUsager is the default etcd client usager, used for testing.
-	TestEtcdClientUsager EtcdClientUsager = "default-etcd-client"
-	// ServerEtcdClientUsager is the etcd client usager for server, most of the time.
-	ServerEtcdClientUsager EtcdClientUsager = "server-etcd-client"
-	// ElectionEtcdClientUsager is the etcd client usager for election and tso.
-	ElectionEtcdClientUsager EtcdClientUsager = "election-etcd-client"
-	// McsEtcdClientUsager is the etcd client usager for mcs.
-	McsEtcdClientUsager EtcdClientUsager = "mcs-etcd-client"
+	// TestEtcdClientPurpose is the default etcd client purpose, used for testing.
+	TestEtcdClientPurpose EtcdClientPurpose = "default-etcd-client"
+	// ServerEtcdClientPurpose is the etcd client purpose for server, most of the time.
+	ServerEtcdClientPurpose EtcdClientPurpose = "server-etcd-client"
+	// ElectionEtcdClientPurpose is the etcd client purpose for election and tso.
+	ElectionEtcdClientPurpose EtcdClientPurpose = "election-etcd-client"
+	// McsEtcdClientPurpose is the etcd client purpose for mcs.
+	McsEtcdClientPurpose EtcdClientPurpose = "mcs-etcd-client"
 )
 
 func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
@@ -295,7 +295,7 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, usager EtcdClientUsager, enableChecker bool) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClientPurpose, enableChecker bool) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
@@ -310,7 +310,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, usager EtcdClient
 		tickerInterval = 100 * time.Millisecond
 	})
 	if enableChecker {
-		initHealthChecker(tickerInterval, tlsConfig, client, usager)
+		initHealthChecker(tickerInterval, tlsConfig, client, purpose)
 	}
 
 	return client, err
