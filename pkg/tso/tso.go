@@ -49,7 +49,9 @@ const (
 	// It's an empirical value.
 	jetLagWarningThreshold = 150 * time.Millisecond
 
-	minStorageTimeout = 5 * time.Second
+	// minStorageTimeout is the minimum timeout for saving timestamp to storage.
+	// it keeps with the defaultTSOSaveInterval - 1 second to ensure the leader has enough time to allocate more tso after save successfully.
+	minStorageTimeout = 4 * time.Second
 )
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
