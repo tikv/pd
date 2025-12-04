@@ -30,21 +30,45 @@ func TestRUTracker(t *testing.T) {
 
 	rt := newRUTracker(time.Second)
 	now := time.Now()
-	rt.sample(now, 100, time.Duration(0))
+	rt.sample(now, 100)
 	re.Zero(rt.getRUPerSec())
-	rt.sample(now, 100, time.Second)
+	now = now.Add(time.Second)
+	rt.sample(now, 100)
 	re.Equal(100.0, rt.getRUPerSec())
 	now = now.Add(time.Second)
-	rt.sample(now, 100, time.Second)
+	rt.sample(now, 100)
 	re.InDelta(100.0, rt.getRUPerSec(), floatDelta)
 	now = now.Add(time.Second)
-	rt.sample(now, 200, time.Second)
+	rt.sample(now, 200)
 	re.InDelta(150.0, rt.getRUPerSec(), floatDelta)
 	// EMA should eventually converge to 10000 RU/s.
 	const targetRUPerSec = 10000.0
 	testutil.Eventually(re, func() bool {
 		now = now.Add(time.Second)
-		rt.sample(now, targetRUPerSec, time.Second)
+		rt.sample(now, targetRUPerSec)
 		return math.Abs(rt.getRUPerSec()-targetRUPerSec) < floatDelta
 	})
+}
+
+func TestGroupRUTracker(t *testing.T) {
+	const floatDelta = 0.1
+	re := require.New(t)
+
+	grt := newGroupRUTracker()
+	re.NotNil(grt)
+	re.NotNil(grt.ruTrackers)
+	re.Empty(grt.ruTrackers)
+
+	now := time.Now()
+	for i := range 10 {
+		clientUniqueID := uint64(i)
+		grt.sample(clientUniqueID, now, 100)
+		grt.sample(clientUniqueID, now.Add(time.Second), 100)
+		re.InDelta(100.0, grt.getOrCreateRUTracker(clientUniqueID).getRUPerSec(), floatDelta)
+	}
+	re.Len(grt.ruTrackers, 10)
+
+	manager := &Manager{groupRUTrackers: make(map[string]*groupRUTracker)}
+	re.Same(manager.getOrCreateGroupRUTracker("rg1"), manager.getOrCreateGroupRUTracker("rg1"))
+	re.NotSame(manager.getOrCreateGroupRUTracker("rg1"), manager.getOrCreateGroupRUTracker("rg2"))
 }
