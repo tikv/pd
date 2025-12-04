@@ -520,10 +520,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "key", "201", "add-peer"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-<<<<<<< HEAD
 	re.Contains(string(output), "rate should less than")
-=======
-	re.Contains(string(output), "rate should be less than")
 
 	// store limit all engine tikv 21 remove peer for tikv stores
 	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "tikv", "21", "remove-peer"}
@@ -537,7 +534,6 @@ func TestStore(t *testing.T) {
 	json.Unmarshal(output, &allRemovePeerLimit)
 	re.Equal(float64(21), allRemovePeerLimit["1"]["remove-peer"].(float64))
 	re.Equal(float64(21), allRemovePeerLimit["3"]["remove-peer"].(float64))
->>>>>>> dadce5d31 (api: support to set store limit for tikv engine alone (#9978))
 }
 
 // https://github.com/tikv/pd/issues/5024

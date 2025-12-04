@@ -275,7 +275,7 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 		for _, label := range labels {
 			// set limit for tikv stores
 			if label.Key == core.EngineKey && label.Value == core.EngineTiKV {
-				if store.IsTiKV() {
+				if !store.IsTiFlash() {
 					err = c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
 					if err != nil {
 						return err
