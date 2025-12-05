@@ -530,6 +530,10 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			name:        "evict-slow-store-scheduler",
 			createdName: "evict-slow-store-scheduler",
 		},
+		{
+			name:        "evict-stopping-store-scheduler",
+			createdName: "evict-stopping-store-scheduler",
+		},
 	}
 	for _, testCase := range testCases {
 		input := make(map[string]any)
