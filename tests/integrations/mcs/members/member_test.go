@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,9 +56,10 @@ type memberTestSuite struct {
 
 	// We only test `DefaultKeyspaceGroupID` here.
 	// tsoAvailMembers is used to check the tso members which in the DefaultKeyspaceGroupID.
-	tsoAvailMembers map[string]bool
-	tsoNodes        map[string]bs.Server
-	schedulingNodes map[string]bs.Server
+	tsoAvailMembers      map[string]bool
+	tsoNodes             map[string]bs.Server
+	schedulingNodes      map[string]bs.Server
+	resourceManagerNodes map[string]bs.Server
 }
 
 func TestMemberTestSuite(t *testing.T) {
@@ -112,6 +114,18 @@ func (suite *memberTestSuite) SetupTest() {
 	tests.WaitForPrimaryServing(re, nodes)
 	suite.schedulingNodes = nodes
 
+	// resource manager
+	nodes = make(map[string]bs.Server)
+	for range 3 {
+		s, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		nodes[s.GetAddr()] = s
+		suite.cleanupFunc = append(suite.cleanupFunc, func() {
+			cleanup()
+		})
+	}
+	tests.WaitForPrimaryServing(re, nodes)
+	suite.resourceManagerNodes = nodes
+
 	suite.cleanupFunc = append(suite.cleanupFunc, func() {
 		cancel()
 	})
@@ -138,6 +152,10 @@ func (suite *memberTestSuite) TestMembers() {
 	members, err = suite.pdClient.GetMicroserviceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.Len(members, 3)
+
+	members, err = suite.pdClient.GetMicroserviceMembers(suite.ctx, "resource_manager")
+	re.NoError(err)
+	re.Len(members, 3)
 }
 
 func (suite *memberTestSuite) TestPrimary() {
@@ -149,6 +167,10 @@ func (suite *memberTestSuite) TestPrimary() {
 	primary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.NotEmpty(primary)
+
+	primary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, "resource_manager")
+	re.NoError(err)
+	re.NotEmpty(primary)
 }
 
 func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
@@ -157,7 +179,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling", "resource_manager"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -165,6 +187,8 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -187,7 +211,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 
 func (suite *memberTestSuite) TestTransferPrimary() {
 	re := suite.Require()
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -195,6 +219,8 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		// Test resign primary by random
@@ -205,7 +231,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		newPrimaryData["new_primary"] = ""
 		data, err := json.Marshal(newPrimaryData)
 		re.NoError(err)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -237,7 +263,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		newPrimaryData["new_primary"] = newPrimary
 		data, err = json.Marshal(newPrimaryData)
 		re.NoError(err)
-		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -256,7 +282,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		newPrimaryData["new_primary"] = newPrimary
 		data, err = json.Marshal(newPrimaryData)
 		re.NoError(err)
-		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusInternalServerError, resp.StatusCode)
@@ -266,7 +292,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 
 func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 	re := suite.Require()
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -274,6 +300,8 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -294,14 +322,14 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		newPrimaryData["new_primary"] = newPrimary
 		data, err := json.Marshal(newPrimaryData)
 		re.NoError(err)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
 		resp.Body.Close()
 
 		tests.WaitForPrimaryServing(re, nodes)
-		newPrimary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
+		newPrimary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, strings.ReplaceAll(service, "_", "-"))
 		re.NoError(err)
 		re.NotEqual(primary, newPrimary)
 
@@ -309,7 +337,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		nodes[newPrimary].Close()
 		tests.WaitForPrimaryServing(re, nodes)
 		// Primary should be different with before
-		anotherPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
+		anotherPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, strings.ReplaceAll(service, "_", "-"))
 		re.NoError(err)
 		re.NotEqual(newPrimary, anotherPrimary)
 	}
@@ -321,7 +349,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -329,6 +357,8 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -351,7 +381,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		newPrimaryData["new_primary"] = newPrimary
 		data, err := json.Marshal(newPrimaryData)
 		re.NoError(err)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -377,7 +407,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -385,6 +415,8 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -407,7 +439,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		newPrimaryData["new_primary"] = ""
 		data, err := json.Marshal(newPrimaryData)
 		re.NoError(err)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
