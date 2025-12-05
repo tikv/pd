@@ -172,7 +172,30 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	return false, ""
 }
 
+var localOnlyPaths = []string{
+	"/pd/api/v1/admin/log",
+	"/pd/api/v1/status",
+	"/pd/api/v1/health",
+	"/pd/api/v1/ping",
+	"/pd/api/v1/version",
+	"/pd/api/v1/debug/pprof",
+}
+
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	// Special case: GET /config should always be handled locally on followers
+	// to return a merged view of local and cluster configurations.
+	// POST /config should still be forwarded to the leader to update cluster-wide config.
+	if r.URL.Path == "/pd/api/v1/config" && r.Method == http.MethodGet {
+		next(w, r)
+		return
+	}
+	for _, path := range localOnlyPaths {
+		if strings.HasPrefix(r.URL.Path, path) {
+			next(w, r)
+			return
+		}
+	}
+
 	redirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 
