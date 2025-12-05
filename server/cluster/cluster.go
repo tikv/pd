@@ -53,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -181,6 +182,7 @@ type RaftCluster struct {
 	ruleManager              *placement.RuleManager
 	keyRangeManager          *keyrange.Manager
 	regionLabeler            *labeler.RegionLabeler
+	affinityManager          *affinity.Manager
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsaferecovery.Controller
 	progressManager          *progress.Manager
@@ -378,6 +380,12 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	if err != nil {
+		return err
+	}
+
+	// create affinity manager with region labeler for key range validation and rebuild
+	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
 	if err != nil {
 		return err
 	}
@@ -983,6 +991,11 @@ func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
 // GetRegionLabeler returns the region labeler.
 func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.regionLabeler
+}
+
+// GetAffinityManager returns the affinity manager reference.
+func (c *RaftCluster) GetAffinityManager() *affinity.Manager {
+	return c.affinityManager
 }
 
 // GetStorage returns the storage.
