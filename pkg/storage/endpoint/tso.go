@@ -94,7 +94,7 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, key string, ts tim
 
 // DeleteTimestamp deletes the timestamp from the storage.
 func (se *StorageEndpoint) DeleteTimestamp(ctx context.Context, key string) error {
-	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+	return se.RunInTxn(ctx, func(txn kv.Txn) error {
 		return txn.Remove(key)
 	})
 }
