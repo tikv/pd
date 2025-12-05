@@ -239,6 +239,11 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
+// GetConfig returns the config.
+func (s *Server) GetConfig() *Config {
+	return s.cfg
+}
+
 // GetControllerConfig returns the controller config.
 func (s *Server) GetControllerConfig() *ControllerConfig {
 	return &s.cfg.Controller

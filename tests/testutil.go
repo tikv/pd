@@ -468,3 +468,15 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 	}
 	return regions
 }
+
+// NewResourceManagerTestServer creates a resource manager server with given config for testing.
+func NewResourceManagerTestServer(ctx context.Context, cfg *rm.Config) (*rm.Server, testutil.CleanupFunc, error) {
+	s := rm.CreateServer(ctx, cfg)
+	if err := s.Run(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		s.Close()
+	}
+	return s, cleanup, nil
+}
