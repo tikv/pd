@@ -50,10 +50,10 @@ const (
 	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
-	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.
-	tsoQueryRetryMaxTimes = 10
-	// tsoQueryRetryInterval is the retry interval for querying TSO.
-	tsoQueryRetryInterval = 500 * time.Millisecond
+	// queryRetryMaxTimes is the max retry times for querying microservice.
+	queryRetryMaxTimes = 10
+	// queryRetryInterval is the retry interval for querying microservice.
+	queryRetryInterval = 500 * time.Millisecond
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -121,7 +121,6 @@ type tsoServerDiscovery struct {
 }
 
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
-
 type tsoServiceDiscovery struct {
 	metacli          metastorage.Client
 	serviceDiscovery ServiceDiscovery
@@ -266,10 +265,10 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			log.Info("[tso] exit check member loop")
 			return
 		}
-		// Make sure tsoQueryRetryMaxTimes * tsoQueryRetryInterval is far less than memberUpdateInterval,
+		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+		if err := innerRetry(c.ctx, queryRetryMaxTimes, c.updateMember); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -355,7 +354,7 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+	if err := innerRetry(c.ctx, queryRetryMaxTimes, c.updateMember); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}

@@ -27,13 +27,14 @@ import (
 )
 
 const (
-	defaultPDTimeout                             = 3 * time.Second
-	maxInitClusterRetries                        = 100
-	defaultMaxTSOBatchWaitInterval time.Duration = 0
-	defaultEnableTSOFollowerProxy                = false
-	defaultEnableFollowerHandle                  = false
-	defaultTSOClientRPCConcurrency               = 1
-	defaultEnableRouterClient                    = false
+	defaultPDTimeout                                = 3 * time.Second
+	maxInitClusterRetries                           = 100
+	defaultMaxTSOBatchWaitInterval    time.Duration = 0
+	defaultEnableTSOFollowerProxy                   = false
+	defaultEnableFollowerHandle                     = false
+	defaultTSOClientRPCConcurrency                  = 1
+	defaultEnableRouterClient                       = false
+	defaultEnableRouterServiceHandler               = false
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -54,6 +55,9 @@ const (
 	// It is stored as bool.
 	EnableRouterClient
 
+	// EnableRouterServiceHandler is the router service handle region requestion option.
+	EnableRouterServiceHandler
+
 	dynamicOptionCount
 )
 
@@ -73,20 +77,22 @@ type Option struct {
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
-	EnableTSOFollowerProxyCh chan struct{}
-	EnableFollowerHandleCh   chan struct{}
-	EnableRouterClientCh     chan struct{}
+	EnableTSOFollowerProxyCh    chan struct{}
+	EnableFollowerHandleCh      chan struct{}
+	EnableRouterClientCh        chan struct{}
+	EnableRouterServiceHandleCh chan struct{}
 }
 
 // NewOption creates a new PD client option with the default values set.
 func NewOption() *Option {
 	co := &Option{
-		Timeout:                  defaultPDTimeout,
-		MaxRetryTimes:            maxInitClusterRetries,
-		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
-		EnableFollowerHandleCh:   make(chan struct{}, 1),
-		EnableRouterClientCh:     make(chan struct{}, 1),
-		InitMetrics:              true,
+		Timeout:                     defaultPDTimeout,
+		MaxRetryTimes:               maxInitClusterRetries,
+		EnableTSOFollowerProxyCh:    make(chan struct{}, 1),
+		EnableFollowerHandleCh:      make(chan struct{}, 1),
+		EnableRouterClientCh:        make(chan struct{}, 1),
+		EnableRouterServiceHandleCh: make(chan struct{}, 1),
+		InitMetrics:                 true,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
@@ -94,6 +100,7 @@ func NewOption() *Option {
 	co.dynamicOptions[EnableFollowerHandle].Store(defaultEnableFollowerHandle)
 	co.dynamicOptions[TSOClientRPCConcurrency].Store(defaultTSOClientRPCConcurrency)
 	co.dynamicOptions[EnableRouterClient].Store(defaultEnableRouterClient)
+	co.dynamicOptions[EnableRouterServiceHandler].Store(defaultEnableRouterServiceHandler)
 	return co
 }
 
@@ -167,6 +174,21 @@ func (o *Option) GetEnableRouterClient() bool {
 	return o.dynamicOptions[EnableRouterClient].Load().(bool)
 }
 
+// SetEnableRouterServiceHandler sets the router service handle region requesting option.
+func (o *Option) SetEnableRouterServiceHandler(enable bool) {
+	if o.dynamicOptions[EnableRouterServiceHandler].CompareAndSwap(!enable, enable) {
+		select {
+		case o.EnableRouterServiceHandleCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// GetEnableRouterServiceHandler gets the router service  option.
+func (o *Option) GetEnableRouterServiceHandler() bool {
+	return o.dynamicOptions[EnableRouterServiceHandler].Load().(bool)
+}
+
 // ClientOption configures client.
 type ClientOption func(*Option)
 
@@ -235,6 +257,13 @@ func WithEnableRouterClient(enable bool) ClientOption {
 	}
 }
 
+// WithEnableRouterServiceHandler configures the client with router service handle option.
+func WithEnableRouterServiceHandler(enable bool) ClientOption {
+	return func(op *Option) {
+		op.SetEnableRouterServiceHandler(enable)
+	}
+}
+
 // WithEnableFollowerHandle configures the client with allow follower handle option.
 func WithEnableFollowerHandle(enable bool) ClientOption {
 	return func(op *Option) {
@@ -285,6 +314,7 @@ type GetRegionOp struct {
 	NeedBuckets                  bool
 	AllowFollowerHandle          bool
 	OutputMustContainAllKeyRange bool
+	AllowRouterServiceHandle     bool
 }
 
 // GetRegionOption configures GetRegionOp.
@@ -298,6 +328,11 @@ func WithBuckets() GetRegionOption {
 // WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
 func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.AllowFollowerHandle = true }
+}
+
+// WithAllowRouterServiceHandle means that client can use router service to handle this request.
+func WithAllowRouterServiceHandle() GetRegionOption {
+	return func(op *GetRegionOp) { op.AllowRouterServiceHandle = true }
 }
 
 // WithOutputMustContainAllKeyRange means the output must contain all key ranges.
