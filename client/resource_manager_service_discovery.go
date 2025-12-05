@@ -37,7 +37,7 @@ const (
 	// resourceManagerSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/primary".
 	resourceManagerSvcDiscoveryFormat = "/ms/%d/" + resourceManagerServiceName + "/primary"
-	serviceURLWatchRetryInterval      = 3 * time.Second
+	serviceURLRetryInterval           = 3 * time.Second
 )
 
 // ResourceManagerDiscovery is used to discover the resource manager service.
@@ -190,12 +190,20 @@ func (r *ResourceManagerDiscovery) ScheduleUpateServiceURL() {
 func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 	defer r.wg.Done()
 
+	var lastUpdateTime time.Time
+
 	for {
 		select {
 		case <-r.ctx.Done():
 			log.Info("[resource-manager] exit update service URL loop due to context canceled")
 			return
 		case <-r.updateServiceURLCh:
+			if time.Since(lastUpdateTime) < serviceURLRetryInterval {
+				log.Info("[resource-manager] skip updating service URL due to too frequent updates", zap.Duration("since", time.Since(lastUpdateTime)))
+				time.Sleep(serviceURLRetryInterval - time.Since(lastUpdateTime))
+			}
+			lastUpdateTime = time.Now()
+
 			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
 			url, newRevision, err := r.discoverServiceURL()
 			if err != nil {
