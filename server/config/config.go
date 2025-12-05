@@ -447,7 +447,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
-		return errors.New("tso max index is less than unique index")
+		return fmt.Errorf("tso max index:%d is less than unique index:%d", c.TSOMaxIndex, c.TSOUniqueIndex)
 	}
 
 	c.adjustLog(configMetaData.Child("log"))

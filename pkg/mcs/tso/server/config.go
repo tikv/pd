@@ -15,7 +15,6 @@
 package server
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -219,7 +218,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
 		log.Warn("tso max index is less than unique index", zap.Int64("max-index", c.TSOMaxIndex),
 			zap.Int64("unique-index", c.TSOUniqueIndex))
-		return errors.New("tso max index is less than unique index")
+		return fmt.Errorf("tso max index:%d is less than unique index:%d", c.TSOMaxIndex, c.TSOUniqueIndex)
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
