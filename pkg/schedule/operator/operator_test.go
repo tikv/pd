@@ -176,7 +176,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		storeOpInfluence[2] = &StoreInfluence{}
 	}
 
-	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(opInfluence, region)
+	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -194,7 +194,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[1])
 	resetInfluence()
 
-	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(opInfluence, region)
+	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:   0,
 		LeaderCount:  0,
@@ -213,7 +213,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 	resetInfluence()
 
-	AddPeer{ToStore: 2, PeerID: 2}.Influence(opInfluence, region)
+	AddPeer{ToStore: 2, PeerID: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -222,7 +222,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	TransferLeader{FromStore: 1, ToStore: 2}.Influence(opInfluence, region)
+	TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -238,7 +238,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	RemovePeer{FromStore: 1}.Influence(opInfluence, region)
+	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -254,7 +254,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -270,7 +270,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -2,

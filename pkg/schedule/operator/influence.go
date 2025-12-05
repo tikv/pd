@@ -18,10 +18,12 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
+	mu              syncutil.Mutex
 	StoresInfluence map[uint64]*StoreInfluence
 }
 
@@ -34,19 +36,45 @@ func NewOpInfluence() *OpInfluence {
 
 // Add adds another influence.
 func (m *OpInfluence) Add(other *OpInfluence) {
-	for id, v := range other.StoresInfluence {
-		m.GetStoreInfluence(id).add(v)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	otherCopy := other.getAllInfluenceCopy()
+	for id, v := range otherCopy {
+		m.getOrCreateStoreInfluenceWithLock(id).add(v)
 	}
 }
 
-// GetStoreInfluence get storeInfluence of specific store.
-func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ret := make(map[uint64]*StoreInfluence, len(m.StoresInfluence))
+	for id, v := range m.StoresInfluence {
+		ret[id] = &StoreInfluence{
+			RegionSize:   v.RegionSize,
+			RegionCount:  v.RegionCount,
+			LeaderSize:   v.LeaderSize,
+			LeaderCount:  v.LeaderCount,
+			WitnessCount: v.WitnessCount,
+			StepCost:     v.StepCost,
+		}
+	}
+	return ret
+}
+
+func (m *OpInfluence) getOrCreateStoreInfluenceWithLock(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
 		m.StoresInfluence[id] = storeInfluence
 	}
 	return storeInfluence
+}
+
+// GetStoreInfluence get storeInfluence of specific store.
+func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getOrCreateStoreInfluenceWithLock(id)
 }
 
 // StoreInfluence records influences that pending operators will make.

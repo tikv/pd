@@ -95,18 +95,18 @@ func TestPlacementRule(t *testing.T) {
 	}
 
 	// only store-1 can match the leader rule
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 
 	// all store can match the rules
 	job.Rule = core.PeerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 
 	// only store-1 can match the learner rule
 	job.Rule = core.LearnerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 }
 
@@ -171,7 +171,7 @@ func TestPrepareBalanceRange(t *testing.T) {
 		Rule:   core.LeaderScatter,
 		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 	re.Len(sc.scoreMap, 3)
