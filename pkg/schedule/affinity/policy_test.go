@@ -243,14 +243,14 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers("expire", 1, []uint64{1, 2})
 	re.NoError(err)
 	manager.checkStoresAvailability()
-	groupInfo := manager.getGroupForTest(re, "expire")
+	groupInfo := getGroupForTest(re, manager, "expire")
 	re.Equal(groupAvailable, groupInfo.GetState())
 
 	// Make store2 unhealthy so the group becomes degraded.
 	store2Disconnected := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Disconnected)
 	manager.checkStoresAvailability()
-	groupInfo = manager.getGroupForTest(re, "expire")
+	groupInfo = getGroupForTest(re, manager, "expire")
 	re.Equal(groupDegraded, groupInfo.GetState())
 
 	// Force the degraded state to be considered expired.

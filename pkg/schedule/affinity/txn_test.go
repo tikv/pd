@@ -187,7 +187,7 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	keyRanges := manager.createGroupForTest(re, "persist", 10)
+	keyRanges := createGroupForTest(re, manager, "persist", 10)
 	_, err = manager.UpdateAffinityGroupPeers("persist", 1, []uint64{1})
 	re.NoError(err)
 

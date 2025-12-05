@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func (m *Manager) getGroupForTest(re *require.Assertions, id string) *runtimeGroupInfo {
+func getGroupForTest(re *require.Assertions, m *Manager, id string) *runtimeGroupInfo {
 	m.RLock()
 	defer m.RUnlock()
 	group, ok := m.groups[id]
@@ -44,7 +44,7 @@ func (m *Manager) getGroupForTest(re *require.Assertions, id string) *runtimeGro
 	return &newGroup
 }
 
-func (m *Manager) createGroupForTest(re *require.Assertions, id string, rangeCount int) []keyutil.KeyRange {
+func createGroupForTest(re *require.Assertions, m *Manager, id string, rangeCount int) []keyutil.KeyRange {
 	gkr := GroupKeyRanges{
 		KeyRanges: make([]keyutil.KeyRange, rangeCount),
 		GroupID:   id,
@@ -59,7 +59,7 @@ func (m *Manager) createGroupForTest(re *require.Assertions, id string, rangeCou
 	return gkr.KeyRanges
 }
 
-func (m *Manager) testCacheStale(re *require.Assertions, region *core.RegionInfo) {
+func testCacheStale(re *require.Assertions, m *Manager, region *core.RegionInfo) {
 	cache, group := m.getCache(region)
 	if cache != nil && group != nil {
 		re.NotEqual(cache.affinityVer, group.affinityVer)
