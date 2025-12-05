@@ -30,9 +30,15 @@ import (
 
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
+<<<<<<< HEAD
 	LoadTimestamp(prefix string) (time.Time, error)
 	SaveTimestamp(key string, ts time.Time) error
 	DeleteTimestamp(key string) error
+=======
+	LoadTimestamp(groupID uint32) (time.Time, error)
+	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error
+	DeleteTimestamp(ctx context.Context, groupID uint32) error
+>>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -68,10 +74,40 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	return maxTSWindow, nil
 }
 
+<<<<<<< HEAD
 // SaveTimestamp saves the timestamp to the storage.
 func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
 		value, err := txn.Load(key)
+=======
+// SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
+// before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
+func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error {
+	logFilds := []zap.Field{
+		zap.Uint32("group-id", groupID),
+		zap.Time("ts", ts),
+		zap.String("leader-key", leadership.GetLeaderKey()),
+		zap.String("expected-leader-value", leadership.GetLeaderValue()),
+	}
+	log.Debug("saving timestamp to the storage", logFilds...)
+	// The PD leadership or TSO primary will always be granted first before the TSO timestamp window is saved.
+	// So we here check whether the leader value is filled to see if the requirement is met.
+	if len(leadership.GetLeaderValue()) == 0 {
+		return errors.Errorf("%s due to leadership has not been granted yet", errs.NotLeaderErr)
+	}
+	return se.RunInTxn(ctx, func(txn kv.Txn) error {
+		// Ensure the current server is leader by reading and comparing the leader value.
+		leaderValue, err := txn.Load(leadership.GetLeaderKey())
+		if err != nil {
+			return err
+		}
+		if expected := leadership.GetLeaderValue(); leaderValue != expected {
+			log.Error("leader value does not match", append(logFilds, zap.String("current-leader-value", leaderValue))...)
+			return errors.Errorf("%s due to leader value does not match, current: %s, expected: %s", errs.NotLeaderErr, leaderValue, expected)
+		}
+
+		value, err := txn.Load(keypath.TimestampPath(groupID))
+>>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 		if err != nil {
 			return err
 		}
@@ -93,8 +129,14 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 }
 
 // DeleteTimestamp deletes the timestamp from the storage.
+<<<<<<< HEAD
 func (se *StorageEndpoint) DeleteTimestamp(key string) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
 		return txn.Remove(key)
+=======
+func (se *StorageEndpoint) DeleteTimestamp(ctx context.Context, groupID uint32) error {
+	return se.RunInTxn(ctx, func(txn kv.Txn) error {
+		return txn.Remove(keypath.TimestampPath(groupID))
+>>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 	})
 }
