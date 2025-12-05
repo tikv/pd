@@ -52,15 +52,16 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 }
 
 // GetStore gets the store's information.
-// @Tags        store
-// @Summary  Get a store's information.
-// @Param    id  path  integer  true  "Store Id"
-// @Produce     json
-// @Success  200  {object}  response.StoreInfo
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  404  {string}  string  "The store does not exist."
-// @Failure     500  {string}  string  "PD server failed to proceed the request."
-// @Router   /store/{id} [get]
+//
+//	@Tags		store
+//	@Summary	Get a store's information.
+//	@Param		id	path	integer	true	"Store Id"
+//	@Produce	json
+//	@Success	200	{object}	response.StoreInfo
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	404	{string}	string	"The store does not exist."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/store/{id} [get]
 func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -81,17 +82,18 @@ func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteStore offline a store.
-// @Tags     store
-// @Summary  Take down a store from the cluster.
-// @Param    id     path   integer  true  "Store Id"
-// @Param    force  query  string   true  "force"  Enums(true, false)
-// @Produce  json
-// @Success  200  {string}  string  "The store is set as Offline."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  404  {string}  string  "The store does not exist."
-// @Failure  410  {string}  string  "The store has already been removed."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /store/{id} [delete]
+//
+//	@Tags		store
+//	@Summary	Take down a store from the cluster.
+//	@Param		id		path	integer	true	"Store Id"
+//	@Param		force	query	string	true	"force"	Enums(true, false)
+//	@Produce	json
+//	@Success	200	{string}	string	"The store is set as Offline."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	404	{string}	string	"The store does not exist."
+//	@Failure	410	{string}	string	"The store has already been removed."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/store/{id} [delete]
 func (h *storeHandler) DeleteStore(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -113,16 +115,17 @@ func (h *storeHandler) DeleteStore(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetStoreState sets the store's state.
-// @Tags     store
-// @Summary  Set the store's state.
-// @Param    id     path   integer  true  "Store Id"
-// @Param    state  query  string   true  "state"  Enums(Up, Offline)
-// @Produce  json
-// @Success  200  {string}  string  "The store's state is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  404  {string}  string  "The store does not exist."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /store/{id}/state [post]
+//
+//	@Tags		store
+//	@Summary	Set the store's state.
+//	@Param		id		path	integer	true	"Store Id"
+//	@Param		state	query	string	true	"state"	Enums(Up, Offline)
+//	@Produce	json
+//	@Success	200	{string}	string	"The store's state is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	404	{string}	string	"The store does not exist."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/store/{id}/state [post]
 func (h *storeHandler) SetStoreState(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -167,15 +170,16 @@ func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeI
 
 // SetStoreLabel sets the store's label.
 // FIXME: details of input json body params
-// @Tags     store
-// @Summary  Set the store's label.
-// @Param    id    path  integer  true  "Store Id"
-// @Param    body  body  object   true  "Labels in json format"
-// @Produce  json
-// @Success  200  {string}  string  "The store's label is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /store/{id}/label [post]
+//
+//	@Tags		store
+//	@Summary	Set the store's label.
+//	@Param		id		path	integer	true	"Store Id"
+//	@Param		body	body	object	true	"Labels in json format"
+//	@Produce	json
+//	@Success	200	{string}	string	"The store's label is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/store/{id}/label [post]
 func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -213,15 +217,16 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteStoreLabel deletes the store's label.
-// @Tags     store
-// @Summary  delete the store's label.
-// @Param    id    path  integer  true  "Store Id"
-// @Param    body  body  object   true  "Labels in json format"
-// @Produce  json
-// @Success  200  {string}  string  "The label is deleted for store."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /store/{id}/label [delete]
+//
+//	@Tags		store
+//	@Summary	delete the store's label.
+//	@Param		id		path	integer	true	"Store Id"
+//	@Param		body	body	object	true	"Labels in json format"
+//	@Produce	json
+//	@Success	200	{string}	string	"The label is deleted for store."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/store/{id}/label [delete]
 func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -249,15 +254,16 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 
 // SetStoreWeight sets the store's leader/region weight.
 // FIXME: details of input json body params
-// @Tags     store
-// @Summary  Set the store's leader/region weight.
-// @Param    id    path  integer  true  "Store Id"
-// @Param    body  body  object   true  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The store's weight is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /store/{id}/weight [post]
+//
+//	@Tags		store
+//	@Summary	Set the store's leader/region weight.
+//	@Param		id		path	integer	true	"Store Id"
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The store's weight is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/store/{id}/weight [post]
 func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -303,16 +309,17 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 
 // SetStoreLimit sets the store's limit.
 // FIXME: details of input json body params
-// @Tags     store
-// @Summary  Set the store's limit.
-// @Param    ttlSecond  query  integer  false  "ttl param is only for BR and lightning now. Don't use it."
-// @Param    id         path   integer  true   "Store Id"
-// @Param    body       body   object   true   "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The store's limit is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /store/{id}/limit [post]
+//
+//	@Tags		store
+//	@Summary	Set the store's limit.
+//	@Param		ttlSecond	query	integer	false	"ttl param is only for BR and lightning now. Don't use it."
+//	@Param		id			path	integer	true	"Store Id"
+//	@Param		body		body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The store's limit is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/store/{id}/limit [post]
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	if version := rc.GetScheduleConfig().StoreLimitVersion; version != storelimit.VersionV1 {
@@ -394,12 +401,13 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 }
 
 // RemoveTombStone removes tombstone records in the cluster.
-// @Tags     store
-// @Summary  Remove tombstone records in the cluster.
-// @Produce  json
-// @Success  200  {string}  string  "Remove tombstone successfully."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/remove-tombstone [delete]
+//
+//	@Tags		store
+//	@Summary	Remove tombstone records in the cluster.
+//	@Produce	json
+//	@Success	200	{string}	string	"Remove tombstone successfully."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/stores/remove-tombstone [delete]
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
 	err := getCluster(r).RemoveTombStoneRecords()
 	if err != nil {
@@ -412,16 +420,17 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 
 // SetAllStoresLimit sets the limit of all stores in the cluster.
 // FIXME: details of input json body params
-// @Tags     store
-// @Summary  Set limit of all stores in the cluster.
-// @Accept   json
-// @Param    ttlSecond  query  integer  false  "ttl param is only for BR and lightning now. Don't use it."
-// @Param    body       body   object   true   "json params"
-// @Produce  json
-// @Success  200  {string}  string  "Set store limit successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/limit [post]
+//
+//	@Tags		store
+//	@Summary	Set limit of all stores in the cluster.
+//	@Accept		json
+//	@Param		ttlSecond	query	integer	false	"ttl param is only for BR and lightning now. Don't use it."
+//	@Param		body		body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"Set store limit successfully."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/stores/limit [post]
 func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
 	cfg := h.GetScheduleConfig()
 	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
@@ -501,13 +510,14 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 
 // GetAllStoresLimit gets the limit of all stores in the cluster.
 // FIXME: details of output json body
-// @Tags     store
-// @Summary  Get limit of all stores in the cluster.
-// @Param    include_tombstone  query  bool  false  "include Tombstone"  default(false)
-// @Produce  json
-// @Success  200  {object}  string
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/limit [get]
+//
+//	@Tags		store
+//	@Summary	Get limit of all stores in the cluster.
+//	@Param		include_tombstone	query	bool	false	"include Tombstone"	default(false)
+//	@Produce	json
+//	@Success	200	{object}	string
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/stores/limit [get]
 func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
 	cfg := h.GetScheduleConfig()
 	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
@@ -550,13 +560,14 @@ type Progress struct {
 }
 
 // GetStoresProgress gets the progress of stores in the cluster.
-// @Tags     stores
-// @Summary  Get store progress in the cluster.
-// @Produce  json
-// @Success  200  {object}  Progress
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/progress [get]
+//
+//	@Tags		stores
+//	@Summary	Get store progress in the cluster.
+//	@Produce	json
+//	@Success	200	{object}	Progress
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/stores/progress [get]
 func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("id"); v != "" {
 		storeID, err := strconv.ParseUint(v, 10, 64)
@@ -601,14 +612,15 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 }
 
 // GetAllStores gets all stores in the cluster.
-// @Tags     store
-// @Summary     Get all stores in the cluster.
-// @Param       state  query  array  true  "Specify accepted store states."
-// @Produce  json
-// @Success     200  {object}  response.StoresInfo
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router      /stores [get]
-// @Deprecated  Better to use /stores/check instead.
+//
+//	@Tags		store
+//	@Summary	Get all stores in the cluster.
+//	@Param		state	query	array	true	"Specify accepted store states."
+//	@Produce	json
+//	@Success	200	{object}	response.StoresInfo
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/stores [get]
+//	@Deprecated	Better to use /stores/check instead.
 func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()
@@ -640,13 +652,14 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetStoresByState gets stores by states in the cluster.
-// @Tags     store
-// @Summary  Get all stores by states in the cluster.
-// @Param    state  query  array  true  "Specify accepted store states."
-// @Produce  json
-// @Success  200  {object}  response.StoresInfo
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/check [get]
+//
+//	@Tags		store
+//	@Summary	Get all stores by states in the cluster.
+//	@Param		state	query	array	true	"Specify accepted store states."
+//	@Produce	json
+//	@Success	200	{object}	response.StoresInfo
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/stores/check [get]
 func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()

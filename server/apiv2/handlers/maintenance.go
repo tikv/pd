@@ -46,16 +46,17 @@ func RegisterMaintenance(r *gin.RouterGroup) {
 }
 
 // StartMaintenanceTask starts a maintenance task.
-// @Tags     maintenance
-// @Summary  Start a maintenance task.
-// @Param    task_type  path  string  true   "The type of maintenance task"
-// @Param    task_id    path  string  true   "Unique identifier for the task"
-// @Accept   plain
-// @Produce  json
-// @Success  200  {string}  string  "Maintenance task started successfully."
-// @Failure  409  {object}  map[string]interface{}  "Another maintenance task is already running."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /maintenance/{task_type}/{task_id} [put]
+//
+//	@Tags		maintenance
+//	@Summary	Start a maintenance task.
+//	@Param		task_type	path	string	true	"The type of maintenance task"
+//	@Param		task_id		path	string	true	"Unique identifier for the task"
+//	@Accept		plain
+//	@Produce	json
+//	@Success	200	{string}	string					"Maintenance task started successfully."
+//	@Failure	409	{object}	map[string]interface{}	"Another maintenance task is already running."
+//	@Failure	500	{string}	string					"PD server failed to proceed the request."
+//	@Router		/maintenance/{task_type}/{task_id} [put]
 func StartMaintenanceTask(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	taskType := c.Param("task_type")
@@ -99,13 +100,14 @@ func StartMaintenanceTask(c *gin.Context) {
 }
 
 // GetMaintenanceTasks gets information about all ongoing maintenance tasks.
-// @Tags     maintenance
-// @Summary  Get information about all ongoing maintenance tasks.
-// @Produce  json
-// @Success  200  {array}  endpoint.MaintenanceTask
-// @Failure  404  {string}  string  "No maintenance task is running."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /maintenance [get]
+//
+//	@Tags		maintenance
+//	@Summary	Get information about all ongoing maintenance tasks.
+//	@Produce	json
+//	@Success	200	{array}		endpoint.MaintenanceTask
+//	@Failure	404	{string}	string	"No maintenance task is running."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/maintenance [get]
 func GetMaintenanceTasks(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	var tasks []*endpoint.MaintenanceTask
@@ -136,14 +138,15 @@ func GetMaintenanceTasks(c *gin.Context) {
 }
 
 // GetMaintenanceTaskByType gets information about the ongoing maintenance task for a specific type.
-// @Tags     maintenance
-// @Summary  Get information about the ongoing maintenance task for a specific type.
-// @Param    task_type  path  string  true  "The type of maintenance task"
-// @Produce  json
-// @Success  200  {object}  endpoint.MaintenanceTask
-// @Failure  404  {string}  string  "No maintenance task is running for this type."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /maintenance/{task_type} [get]
+//
+//	@Tags		maintenance
+//	@Summary	Get information about the ongoing maintenance task for a specific type.
+//	@Param		task_type	path	string	true	"The type of maintenance task"
+//	@Produce	json
+//	@Success	200	{object}	endpoint.MaintenanceTask
+//	@Failure	404	{string}	string	"No maintenance task is running for this type."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/maintenance/{task_type} [get]
 func GetMaintenanceTaskByType(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	taskType := c.Param("task_type")
@@ -164,16 +167,17 @@ func GetMaintenanceTaskByType(c *gin.Context) {
 }
 
 // DeleteMaintenanceTask deletes a maintenance task.
-// @Tags     maintenance
-// @Summary  Delete a maintenance task.
-// @Param    task_type  path  string  true  "The type of maintenance task"
-// @Param    task_id    path  string  true  "Unique identifier for the task"
-// @Produce  json
-// @Success  200  {string}  string  "Maintenance task deleted successfully."
-// @Failure  404  {string}  string  "No maintenance task is running for this type."
-// @Failure  409  {object}  map[string]interface{}  "Task ID does not match the current task."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /maintenance/{task_type}/{task_id} [delete]
+//
+//	@Tags		maintenance
+//	@Summary	Delete a maintenance task.
+//	@Param		task_type	path	string	true	"The type of maintenance task"
+//	@Param		task_id		path	string	true	"Unique identifier for the task"
+//	@Produce	json
+//	@Success	200	{string}	string					"Maintenance task deleted successfully."
+//	@Failure	404	{string}	string					"No maintenance task is running for this type."
+//	@Failure	409	{object}	map[string]interface{}	"Task ID does not match the current task."
+//	@Failure	500	{string}	string					"PD server failed to proceed the request."
+//	@Router		/maintenance/{task_type}/{task_id} [delete]
 func DeleteMaintenanceTask(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	taskType := c.Param("task_type")

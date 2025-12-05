@@ -157,7 +157,7 @@ docker-image:
 #### Build utils ###
 
 swagger-spec: install-tools
-	swag init --parseDependency --parseInternal --parseDepth 1 --dir server --generalInfo api/router.go --output docs/swagger
+	swag init --tags swagger --parseDependency --parseInternal --parseDepth 1 --dir server --generalInfo api/router.go --output docs/swagger
 	swag fmt --dir server
 
 dashboard-ui:
