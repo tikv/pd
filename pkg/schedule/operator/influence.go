@@ -38,9 +38,27 @@ func NewOpInfluence() *OpInfluence {
 func (m *OpInfluence) Add(other *OpInfluence) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for id, v := range other.StoresInfluence {
+	otherCopy := other.getAllInfluenceCopy()
+	for id, v := range otherCopy {
 		m.getOrCreateStoreInfluenceWithLock(id).add(v)
 	}
+}
+
+func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ret := make(map[uint64]*StoreInfluence, len(m.StoresInfluence))
+	for id, v := range m.StoresInfluence {
+		ret[id] = &StoreInfluence{
+			RegionSize:   v.RegionSize,
+			RegionCount:  v.RegionCount,
+			LeaderSize:   v.LeaderSize,
+			LeaderCount:  v.LeaderCount,
+			WitnessCount: v.WitnessCount,
+			StepCost:     v.StepCost,
+		}
+	}
+	return ret
 }
 
 func (m *OpInfluence) getOrCreateStoreInfluenceWithLock(id uint64) *StoreInfluence {
