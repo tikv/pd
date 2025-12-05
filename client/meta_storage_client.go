@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/metrics"
 )
 
 // MetaStorageClient is the interface for meta storage client.
@@ -116,7 +117,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationPut.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationPut.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &meta_storagepb.PutRequest{
@@ -134,7 +135,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 	resp, err := cli.Put(ctx, req)
 	cancel()
 
-	if err = c.respForMetaStorageErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -155,7 +156,7 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGet.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGet.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &meta_storagepb.GetRequest{
@@ -173,7 +174,7 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 	resp, err := cli.Get(ctx, req)
 	cancel()
 
-	if err = c.respForMetaStorageErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil

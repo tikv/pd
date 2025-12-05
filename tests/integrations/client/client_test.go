@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"path"
 	"reflect"
 	"sort"
@@ -40,6 +41,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	cb "github.com/tikv/pd/client/circuitbreaker"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
@@ -2189,4 +2191,177 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		)
 		return err != nil && strings.Contains(err.Error(), "found a hole region between")
 	})
+}
+
+func TestCircuitBreaker(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints)
+	defer cli.Close()
+
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	// wait cooldown
+	time.Sleep(time.Second)
+
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+}
+
+func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints)
+	defer cli.Close()
+
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
+		*config = cb.AlwaysClosedSettings
+	})
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.NoError(err)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
+}
+
+func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  20,
+	}
+
+	endpoints := runServer(re, cluster)
+
+	cli := setupCli(ctx, re, endpoints)
+	defer cli.Close()
+
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
+	// wait for cooldown
+	time.Sleep(time.Second)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
+	// trigger circuit breaker state to be half open
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		// We need to check the log to see if the circuit breaker is half open
+		return strings.Contains(l, "Transitioning to half-open state to test the service")
+	})
+
+	// The state is half open
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker", "return(true)"))
+	// change settings to always closed
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
+		*config = cb.AlwaysClosedSettings
+	})
+	// It won't be changed to open state.
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/triggerCircuitBreaker"))
 }
