@@ -152,6 +152,15 @@ func NewSlowLogTxn(client *clientv3.Client) clientv3.Txn {
 	}
 }
 
+// NewSlowLogTxnWithContext creates a SlowLogTxn with a specific context.
+func NewSlowLogTxnWithContext(ctx context.Context, client *clientv3.Client) clientv3.Txn {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	return &SlowLogTxn{
+		Txn:    client.Txn(ctx),
+		cancel: cancel,
+	}
+}
+
 // If takes a list of comparison. If all comparisons passed in succeed,
 // the operations passed into Then() will be executed. Or the operations
 // passed into Else() will be executed.
@@ -281,8 +290,11 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
+	failpoint.Inject("slowTxn", func() {
+		time.Sleep(10 * time.Second)
+	})
 	// Using slowLogTxn to commit transaction.
-	slowLogTxn := NewSlowLogTxn(txn.kv.client)
+	slowLogTxn := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client)
 	slowLogTxn.If(txn.conditions...)
 	slowLogTxn.Then(txn.operations...)
 	resp, err := slowLogTxn.Commit()

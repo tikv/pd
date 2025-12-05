@@ -63,7 +63,7 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	cfg.Dir = t.TempDir()
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls)
+	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 	servers = append(servers, etcd)
