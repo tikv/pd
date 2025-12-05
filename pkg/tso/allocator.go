@@ -81,6 +81,7 @@ func NewAllocator(
 ) *Allocator {
 	ctx, cancel := context.WithCancel(ctx)
 	keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
+	maxIndex, uniqueIndex := cfg.GetTSOIndex()
 	a := &Allocator{
 		ctx:             ctx,
 		cancel:          cancel,
@@ -95,6 +96,8 @@ func NewAllocator(
 			updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
 			maxResetTSGap:          cfg.GetMaxResetTSGap,
 			tsoMux:                 &tsoObject{},
+			uniqueIndex:            uniqueIndex,
+			maxIndex:               maxIndex,
 			metrics:                newTSOMetrics(keyspaceGroupIDStr),
 		},
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr),

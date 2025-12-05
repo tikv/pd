@@ -15,7 +15,10 @@
 package tso
 
 import (
+	"context"
+	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -69,5 +72,41 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 	for _, tt := range wrongCases {
 		_, err := ExtractKeyspaceGroupIDFromPath(compiledRegexp, tt.path)
 		re.Error(err)
+	}
+}
+
+func TestTSOIndex(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for _, ts := range []*timestampOracle{
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			maxIndex:    2,
+			uniqueIndex: 0,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			maxIndex:    2,
+			uniqueIndex: 1,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			maxIndex:    100,
+			uniqueIndex: 1,
+		},
+	} {
+		ts.tsoMux.logical = ts.uniqueIndex
+		for range 10 {
+			count := rand.Int63n(100)
+			_, logical := ts.generateTSO(ctx, count)
+			require.Equal(t, ts.uniqueIndex, logical%ts.maxIndex)
+		}
 	}
 }
