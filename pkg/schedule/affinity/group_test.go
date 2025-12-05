@@ -30,13 +30,13 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
-func TestCondition(t *testing.T) {
+func TestStoreCondition(t *testing.T) {
 	re := require.New(t)
-	re.Equal(groupDegraded, storeDisconnected.toGroupState())
-	re.Equal(groupDegraded, storeEvictLeader.toGroupState())
-	re.Equal(groupDegraded, storeLowSpace.toGroupState())
-	re.Equal(groupExpired, storeDown.toGroupState())
-	re.Equal(groupExpired, storeRemovingOrRemoved.toGroupState())
+	re.Equal(groupDegraded, storeDisconnected.groupAvailability())
+	re.Equal(groupDegraded, storeEvictLeader.groupAvailability())
+	re.Equal(groupDegraded, storeLowSpace.groupAvailability())
+	re.Equal(groupExpired, storeDown.groupAvailability())
+	re.Equal(groupExpired, storeRemovingOrRemoved.groupAvailability())
 
 	re.True(storeEvictLeader.affectsLeaderOnly())
 	re.False(storeDisconnected.affectsLeaderOnly())

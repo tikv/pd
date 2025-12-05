@@ -70,7 +70,7 @@ type Manager struct {
 	affinityRegionCount int
 	groups              map[string]*runtimeGroupInfo // {group_id} -> runtimeGroupInfo
 	regions             map[uint64]regionCache       // {region_id} -> regionCache
-	unavailableStores   map[uint64]condition         // {store_id} -> condition
+	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
@@ -91,7 +91,7 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
 		keyRanges:           make(map[string]GroupKeyRanges),
-		unavailableStores:   make(map[uint64]condition),
+		unavailableStores:   make(map[uint64]storeCondition),
 	}
 	if err := m.initialize(); err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func (m *Manager) initGroupLocked(group *Group) {
 			LeaderStoreID:   group.LeaderStoreID,
 			VoterStoreIDs:   slices.Clone(group.VoterStoreIDs),
 		},
-		state:               groupDegraded,
+		availability:        groupDegraded,
 		degradedExpiredAt:   newDegradedExpiredAtFromNow(),
 		AffinityVer:         1,
 		AffinityRegionCount: 0,
@@ -208,7 +208,7 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 		return nil, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID)
 	}
 
-	groupInfo.SetState(groupAvailable)
+	groupInfo.SetAvailability(groupAvailable)
 	groupInfo.LeaderStoreID = leaderStoreID
 	groupInfo.VoterStoreIDs = slices.Clone(voterStoreIDs)
 	m.resetCountLocked(groupInfo)
@@ -216,34 +216,34 @@ func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterSt
 	return newGroupState(groupInfo), nil
 }
 
-func (m *Manager) updateGroupStateLocked(groupID string, state condition) {
+func (m *Manager) updateGroupAvailabilityLocked(groupID string, availability groupAvailability) {
 	groupInfo, ok := m.groups[groupID]
 	if !ok {
 		return
 	}
-	groupInfo.SetState(state)
+	groupInfo.SetAvailability(availability)
 	m.resetCountLocked(groupInfo)
 }
 
-// ExpireAffinityGroup changes the Group state to groupExpired.
+// ExpireAffinityGroup changes the Group availability to groupExpired.
 func (m *Manager) ExpireAffinityGroup(groupID string) {
 	m.Lock()
 	defer m.Unlock()
-	m.updateGroupStateLocked(groupID, groupExpired)
+	m.updateGroupAvailabilityLocked(groupID, groupExpired)
 }
 
-// DegradeAffinityGroup changes the Group state to groupDegraded.
+// DegradeAffinityGroup changes the Group availability to groupDegraded.
 func (m *Manager) DegradeAffinityGroup(groupID string) {
 	m.Lock()
 	defer m.Unlock()
-	m.updateGroupStateLocked(groupID, groupDegraded)
+	m.updateGroupAvailabilityLocked(groupID, groupDegraded)
 }
 
-// RestoreAffinityGroup changes the Group state to groupAvailable.
+// RestoreAffinityGroup changes the Group availability to groupAvailable.
 func (m *Manager) RestoreAffinityGroup(groupID string) {
 	m.Lock()
 	defer m.Unlock()
-	m.updateGroupStateLocked(groupID, groupAvailable)
+	m.updateGroupAvailabilityLocked(groupID, groupAvailable)
 }
 
 func (m *Manager) updateGroupLabelRuleLocked(groupID string, labelRule *labeler.LabelRule, needClear bool) {
