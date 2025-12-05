@@ -376,11 +376,6 @@ error = '''
 etcd move leader error
 '''
 
-["PD:etcd:ErrEtcdTLSConfig"]
-error = '''
-etcd TLS config error
-'''
-
 ["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
 etcd transaction failed, conflicted and rolled back
@@ -454,6 +449,11 @@ send request error
 ["PD:grpcutil:ErrSecurityConfig"]
 error = '''
 security config error: %s
+'''
+
+["PD:grpcutil:ErrTLSConfig"]
+error = '''
+TLS config error
 '''
 
 ["PD:hex:ErrHexDecodingString"]

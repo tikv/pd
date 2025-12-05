@@ -338,7 +338,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
 	}
@@ -379,7 +379,7 @@ func (s *Server) initGRPCServiceLabels() {
 }
 
 func (s *Server) startClient() error {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
 	}
