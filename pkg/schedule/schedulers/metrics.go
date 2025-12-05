@@ -105,6 +105,33 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
 		}, []string{"type", "rw", "dim"})
 
+<<<<<<< HEAD
+=======
+	evictedSlowStoreStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "evicted_slow_store_status",
+			Help:      "Store evicted status due to slow",
+		}, []string{"store", "slow_type"})
+
+	evictedStoppingStoreStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "evicted_stopping_store_status",
+			Help:      "Store evicted status due to stopping",
+		}, []string{"store"})
+
+	slowStoreTriggerLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "slow_store_trigger_limit",
+			Help:      "slow store trigger limit",
+		}, []string{"store", "slow_type"})
+
+>>>>>>> 9450168983 (scheduler: graceful shutdown implement (#9720))
 	storeSlowTrendEvictedStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -173,6 +200,12 @@ func init() {
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
+<<<<<<< HEAD
+=======
+	prometheus.MustRegister(evictedSlowStoreStatusGauge)
+	prometheus.MustRegister(evictedStoppingStoreStatusGauge)
+	prometheus.MustRegister(slowStoreTriggerLimitGauge)
+>>>>>>> 9450168983 (scheduler: graceful shutdown implement (#9720))
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
@@ -266,7 +299,8 @@ var (
 	evictLeaderNoTargetStoreCounter = evictLeaderCounterWithEvent("no-target-store")
 	evictLeaderNewOperatorCounter   = evictLeaderCounterWithEvent("new-operator")
 
-	evictSlowStoreCounter = schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), "schedule")
+	evictSlowStoreCounter     = schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), "schedule")
+	evictStoppingStoreCounter = schedulerCounter.WithLabelValues(types.EvictStoppingStoreScheduler.String(), "schedule")
 
 	grantHotRegionCounter     = grantHotRegionCounterWithEvent("schedule")
 	grantHotRegionSkipCounter = grantHotRegionCounterWithEvent("skip")

@@ -408,6 +408,15 @@ func (f *StoreStateFilter) slowStoreEvicted(_ config.SharedConfigProvider, store
 	return statusOK
 }
 
+func (f *StoreStateFilter) stoppingStoreEvicted(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if store.EvictedAsStoppingStore() {
+		f.Reason = storeStateStopping
+		return statusStoreRejectLeader
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
 func (f *StoreStateFilter) slowTrendEvicted(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if store.IsEvictedAsSlowTrend() {
 		f.Reason = storeStateSlowTrend
@@ -517,8 +526,13 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 	case witnessSource:
 		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:
+<<<<<<< HEAD
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
 			f.slowStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+=======
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransferIn,
+			f.slowStoreEvicted, f.stoppingStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+>>>>>>> 9450168983 (scheduler: graceful shutdown implement (#9720))
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}

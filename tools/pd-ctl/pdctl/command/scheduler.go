@@ -161,6 +161,11 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewSlowTrendEvictLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceWitnessSchedulerCommand())
 	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
+<<<<<<< HEAD:tools/pd-ctl/pdctl/command/scheduler.go
+=======
+	c.AddCommand(NewBalanceRangeSchedulerCommand())
+	c.AddCommand(NewEvictStoppingStoreSchedulerCommand())
+>>>>>>> 9450168983 (scheduler: graceful shutdown implement (#9720)):tools/pd-ctl/pdctl/command/scheduler_command.go
 	return c
 }
 
@@ -297,6 +302,16 @@ func NewEvictSlowStoreSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "evict-slow-store-scheduler",
 		Short: "add a scheduler to detect and evict slow stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewEvictStoppingStoreSchedulerCommand returns a command to add a evict-stopping-store-scheduler.
+func NewEvictStoppingStoreSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-stopping-store-scheduler",
+		Short: "add a scheduler to detect and evict stopping stores",
 		Run:   addSchedulerCommandFunc,
 	}
 	return c
@@ -520,6 +535,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigBalanceLeaderCommand(),
 		newSplitBucketCommand(),
 		newConfigEvictSlowStoreCommand(),
+		newConfigEvictStoppingStoreCommand(),
 		newConfigShuffleHotRegionSchedulerCommand(),
 		newConfigEvictSlowTrendCommand(),
 	)
@@ -904,6 +920,25 @@ func newConfigEvictSlowTrendCommand() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use:   "show",
 		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+	return c
+}
+
+func newConfigEvictStoppingStoreCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-stopping-store-scheduler",
+		Short: "evict-stopping-store-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "show the config item",
 		Run:   listSchedulerConfigCommandFunc,
 	}, &cobra.Command{
 		Use:   "set <key> <value>",

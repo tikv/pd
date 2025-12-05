@@ -149,6 +149,11 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 	return s.slowStoreEvicted
 }
 
+// EvictedAsStoppingStore returns if the store should be evicted as a stopping store.
+func (s *StoreInfo) EvictedAsStoppingStore() bool {
+	return s.rawStats.IsStopping
+}
+
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
 func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 	return s.slowTrendEvicted
@@ -208,6 +213,13 @@ func (s *StoreInfo) IsSlow() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.slowTrendEvicted || s.rawStats.GetSlowScore() >= slowStoreThreshold
+}
+
+// IsStopping checks if the store is in stopping state.
+func (s *StoreInfo) IsStopping() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.GetIsStopping()
 }
 
 // GetSlowTrend returns the slow trend information of the store.
@@ -830,6 +842,19 @@ func (s *StoresInfo) SlowStoreEvicted(storeID uint64) error {
 	return nil
 }
 
+// StoppingStoreEvicted marks a store as a stopping store and prevents transferring
+// leader to the store
+func (s *StoresInfo) StoppingStoreEvicted(storeID uint64) error {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(StoppingStoreEvicted())
+	return nil
+}
+
 // SlowStoreRecovered cleans the evicted state of a store.
 func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
 	s.Lock()
@@ -841,6 +866,19 @@ func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
 		return
 	}
 	s.stores[storeID] = store.Clone(SlowStoreRecovered())
+}
+
+// StoppingStoreRecovered cleans the evicted state of a store.
+func (s *StoresInfo) StoppingStoreRecovered(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's evicted as a stopping store state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(StoppingStoreRecovered())
 }
 
 // SlowTrendEvicted marks a store as a slow trend and prevents transferring

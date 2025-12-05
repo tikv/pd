@@ -186,6 +186,13 @@ func schedulersRegister() {
 		}
 	})
 
+	// evict stopping store
+	RegisterSliceDecoderBuilder(types.EvictStoppingStoreScheduler, func([]string) ConfigDecoder {
+		return func(any) error {
+			return nil
+		}
+	})
+
 	RegisterScheduler(types.EvictSlowStoreScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := initEvictSlowStoreSchedulerConfig()
@@ -194,6 +201,21 @@ func schedulersRegister() {
 		}
 		conf.cluster = opController.GetCluster()
 		sche := newEvictSlowStoreScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
+	})
+
+	RegisterScheduler(types.EvictStoppingStoreScheduler, func(opController *operator.Controller,
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := initEvictStoppingStoreSchedulerConfig()
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		if conf.Batch == 0 {
+			conf.Batch = EvictLeaderBatchSize
+		}
+		conf.cluster = opController.GetCluster()
+		sche := newEvictStoppingStoreScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
