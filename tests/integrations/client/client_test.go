@@ -46,6 +46,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
@@ -79,6 +80,59 @@ const (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestUniqueIndex(t *testing.T) {
+	re := require.New(t)
+
+	checkUniqueIndex(re, 1)
+	checkUniqueIndex(re, 0)
+}
+
+func TestUniqueIndexWithFollowerHandle(t *testing.T) {
+	re := require.New(t)
+	checkUniqueIndex(re, 1, opt.WithEnableFollowerHandle(true))
+	checkUniqueIndex(re, 0, opt.WithEnableFollowerHandle(true))
+}
+
+func checkUniqueIndex(re *require.Assertions, uniqueIndex int64, opts ...opt.ClientOption) {
+	maxIndex := int64(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.TSOMaxIndex = maxIndex
+		conf.TSOUniqueIndex = uniqueIndex
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	endpointsWithWrongURL := append([]string{}, endpoints...)
+	// inject wrong http scheme
+	for i := range endpointsWithWrongURL {
+		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
+	}
+	cli := setupCli(ctx, re, endpointsWithWrongURL, opts...)
+	defer cli.Close()
+
+	var l1 int64
+	testutil.Eventually(re, func() bool {
+		_, l1, err = cli.GetTS(ctx)
+		return err == nil
+	})
+	re.Equal(uniqueIndex, l1%maxIndex)
+
+	tsList := make([]tso.TSFuture, 0, 10)
+	for range 10 {
+		ts := cli.GetTSAsync(ctx)
+		tsList = append(tsList, ts)
+	}
+
+	for _, ts := range tsList {
+		_, l1, err = ts.Wait()
+		re.Equal(uniqueIndex, l1%maxIndex)
+	}
 }
 
 func TestClientLeaderChange(t *testing.T) {

@@ -91,6 +91,12 @@ type Config struct {
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
+	// TSOUniqueIndex is the current TSO unique index.
+	TSOUniqueIndex int64 `toml:"tso-unique-index" json:"tso-unique-index"`
+
+	// TSOMaxIndex is the current TSO max index, which should be same if these clusters needs to write.
+	TSOMaxIndex int64 `toml:"tso-max-index" json:"tso-max-index"`
+
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
 	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
 	// more TSOs provided, and at the same time consuming more CPU time.
@@ -253,6 +259,8 @@ const (
 
 	defaultEnableSchedulingFallback  = true
 	defaultEnableTSODynamicSwitching = false
+
+	tsoMaxIndexUpperLimit = 10
 )
 
 var (
@@ -439,6 +447,14 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
+	}
+
+	if c.TSOMaxIndex > tsoMaxIndexUpperLimit {
+		return errors.New(fmt.Sprintf("tso max index:%d should be less than %d", c.TSOMaxIndex, tsoMaxIndexUpperLimit))
+	}
+
+	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
+		return fmt.Errorf("tso max index:%d is less than unique index:%d", c.TSOMaxIndex, c.TSOUniqueIndex)
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
