@@ -164,7 +164,7 @@ func TestExitWatch(t *testing.T) {
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
 		cfg2 := etcd2.Config()
 		etcd3 := etcdutil.MustAddEtcdMember(t, &cfg2, client)
-		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls)
+		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 		re.NoError(err)
 		// close the original leader
 		server.Server.HardStop()
@@ -208,7 +208,7 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 	re := require.New(t)
 	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
+	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	defer client2.Close()
 
@@ -244,7 +244,7 @@ func TestRequestProgress(t *testing.T) {
 		defer os.RemoveAll(fname)
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 		defer clean()
-		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
+		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 		re.NoError(err)
 		defer client2.Close()
 
