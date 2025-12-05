@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"time"
@@ -358,7 +359,7 @@ func (m *Manager) AdjustGroup(g *Group) error {
 	}
 	for _, storeID := range voterStoreIDs {
 		if m.storeSetInformer.GetStore(storeID) == nil {
-			return errs.ErrAffinityGroupContent.FastGenByArgs("store does not exist")
+			return errs.ErrAffinityGroupContent.FastGenByArgs(fmt.Sprintf("store %d does not exist", storeID))
 		}
 	}
 
