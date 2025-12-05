@@ -27,94 +27,66 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-// condition is an enumeration that includes both Store state and Group state.
-type condition int
+// groupAvailability is an enum that represents the Group’s availability lifecycle.
+// groupAvailable, groupDegraded, and groupExpired define the Group’s availability lifecycle.
+// The groupDegraded status should have an expiration time.
+// Roughly:
+//
+//	groupAvailable ──degraded (e.g. store evict-leader)───────────────> groupDegraded
+//	groupDegraded  ──recovered────────────────────────────────────────> groupAvailable // expected to be temporary
+//	groupDegraded  ──expired──────────────────────────────────────────> groupExpired
+//	groupAvailable ──directly failed (e.g. store removed)─────────────> groupExpired
+//	groupExpired   ──reconfigured (e.g. peers moved to healthy stores)→ groupAvailable
+//
+// groupDegraded is intended to be a temporary status that may return to groupAvailable,
+// while groupExpired usually represents a terminal status under the current topology,
+// but can become groupAvailable again after the Group’s stores/peers are reconfigured.
+// groupDegraded has an expiration time (degradedExpiredAt). Once it expires, the Group is
+// automatically treated as groupExpired.
+type groupAvailability int
 
 const (
-	// groupAvailable indicates that the current Group allows affinity scheduling and disallows other balancing scheduling.
-	groupAvailable condition = iota
-
-	// groupDegraded indicates that the current Group does not generate affinity scheduling but still disallows other balancing scheduling.
-	// All values greater than groupAvailable and less than or equal to groupDegraded represent groupDegraded states.
-	// The groupDegraded state should have an expiration time. After it expires, it should be treated as groupExpired.
-	storeEvictLeader
-	storeDisconnected
-	storePreparing
-	storeLowSpace
+	groupAvailable groupAvailability = iota
 	groupDegraded
-
-	// groupExpired indicates that the current Group does not generate affinity scheduling and allows other balancing scheduling.
-	// All values greater than groupDegraded and less than or equal to groupExpired represent groupExpired states.
-	storeDown
-	storeRemovingOrRemoved
 	groupExpired
-
-	// groupAvailable, groupDegraded, and groupExpired define the Group’s availability lifecycle.
-	// Roughly:
-	//   groupAvailable ──degraded (e.g. store evict-leader)───────────────> groupDegraded
-	//   groupDegraded  ──recovered────────────────────────────────────────> groupAvailable // expected to be temporary
-	//   groupDegraded  ──expired──────────────────────────────────────────> groupExpired
-	//   groupAvailable ──directly failed (e.g. store removed)─────────────> groupExpired
-	//   groupExpired   ──reconfigured (e.g. peers moved to healthy stores)→ groupAvailable
-	// groupDegraded is intended to be a temporary state that may return to groupAvailable,
-	// while groupExpired usually represents a terminal state under the current topology,
-	// but can become groupAvailable again after the Group’s stores/peers are reconfigured.
-	// groupDegraded has an expiration time (degradedExpiredAt); once it expires, the Group is
-	// automatically treated as groupExpired.
 )
 
-// Phase is a status intended for API display
-type Phase string
-
-const (
-	// PhasePending indicates that the Group is still determining the StoreIDs.
-	// If the Group has no KeyRanges, it remains in PhasePending forever.
-	PhasePending = Phase("pending")
-	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
-	PhasePreparing = Phase("preparing")
-	// PhaseStable indicates that the Group has completed the required scheduling and is currently in a stable state.
-	PhaseStable = Phase("stable")
-)
-
-// idPattern is a regex that specifies acceptable characters of the id.
-// Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
-// numbers (0-9), hyphens (-), and underscores (_).
-const idPattern = "^[-A-Za-z0-9_]{1,64}$"
-
-var idRegexp = regexp.MustCompile(idPattern)
-
-// toGroupState converts the condition into the corresponding Group state.
-func (s condition) toGroupState() condition {
-	if s == groupAvailable {
-		return groupAvailable
-	} else if s <= groupDegraded {
-		return groupDegraded
-	}
-	return groupExpired
-}
-
-func (s condition) affectsLeaderOnly() bool {
-	switch s {
-	case storeEvictLeader:
-		return true
-	default:
-		return false
-	}
-}
-
-func (s condition) String() string {
-	switch s.toGroupState() {
+func (a groupAvailability) String() string {
+	switch a {
+	case groupAvailable:
+		return "available"
 	case groupDegraded:
 		return "degraded"
 	case groupExpired:
 		return "expired"
 	default:
-		return "available"
+		return "unknown"
 	}
 }
 
-func (s condition) storeStateString() string {
-	switch s {
+// storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
+// which are split into three groups separated by degradedBoundary.
+type storeCondition int
+
+const (
+	storeAvailable storeCondition = iota
+
+	// All values greater than storeAvailable and less than degradedBoundary will trigger groupDegraded.
+	storeEvictLeader
+	storeDisconnected
+	storePreparing
+	storeLowSpace
+	degradedBoundary
+
+	// All values greater than degradedBoundary will trigger groupExpired.
+	storeDown
+	storeRemovingOrRemoved
+)
+
+func (c storeCondition) String() string {
+	switch c {
+	case storeAvailable:
+		return "available"
 	case storeEvictLeader:
 		return "evicted"
 	case storeDisconnected:
@@ -131,6 +103,44 @@ func (s condition) storeStateString() string {
 		return "unknown"
 	}
 }
+
+func (c storeCondition) groupAvailability() groupAvailability {
+	switch {
+	case c == storeAvailable:
+		return groupAvailable
+	case c <= degradedBoundary:
+		return groupDegraded
+	default:
+		return groupExpired
+	}
+}
+
+func (c storeCondition) affectsLeaderOnly() bool {
+	switch c {
+	case storeEvictLeader:
+		return true
+	default:
+		return false
+	}
+}
+
+// Phase is a status intended for API display
+type Phase string
+
+const (
+	// PhasePending indicates that the Group is still determining the StoreIDs.
+	// If the Group has no KeyRanges, it remains in PhasePending forever.
+	PhasePending = Phase("pending")
+	// PhasePreparing indicates that the Group is scheduling Regions according to the required Peers.
+	PhasePreparing = Phase("preparing")
+	// PhaseStable indicates that the Group has completed the required scheduling and is currently in a stable status.
+	PhaseStable = Phase("stable")
+)
+
+// idRegexp is a regex that specifies acceptable characters of the id.
+// Valid id must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
+// numbers (0-9), hyphens (-), and underscores (_).
+var idRegexp = regexp.MustCompile("^[-A-Za-z0-9_]{1,64}$")
 
 // Group defines an affinity group. Regions belonging to it will tend to have the same distribution.
 // NOTE: This type is exported by HTTP API and persisted in storage. Please pay more attention when modifying it.
@@ -204,10 +214,9 @@ func (g *GroupState) isRegionAffinity(region *core.RegionInfo) bool {
 type runtimeGroupInfo struct {
 	Group
 
-	// state should use the condition enum values whose names start with group.
-	// state must be used together with degradedExpiredAt. Therefore, GetState and SetState must always be used to
-	// read or modify them, and state must not be accessed directly.
-	state condition
+	// availability must be used together with degradedExpiredAt. Therefore, GetAvailability and SetAvailability must
+	// always be used to read or modify them, and availability must not be accessed directly.
+	availability groupAvailability
 	// degradedExpiredAt indicates the expiration time of groupDegraded. After this time, it should be treated as groupExpired.
 	degradedExpiredAt uint64
 	// AffinityVer initializes at 1 and increments by 1 each time the Group changes.
@@ -255,67 +264,56 @@ func newGroupState(g *runtimeGroupInfo) *GroupState {
 	}
 }
 
-// IsAvailable indicates that the Group is currently in the groupAvailable state,
+// IsAvailable indicates that the Group is currently in the groupAvailable status,
 // which allows affinity scheduling and disallows other balancing scheduling.
 func (g *runtimeGroupInfo) IsAvailable() bool {
-	return g.state.toGroupState() == groupAvailable
+	return g.GetAvailability() == groupAvailable
 }
 
-// IsExpired indicates that the Group is currently in the groupExpired state,
+// IsExpired indicates that the Group is currently in the groupExpired status,
 // which disallows affinity scheduling and allows other balancing scheduling.
 func (g *runtimeGroupInfo) IsExpired() bool {
-	switch g.state.toGroupState() {
-	case groupExpired:
-		return true
-	case groupDegraded:
-		return uint64(time.Now().Unix()) > g.degradedExpiredAt
-	default:
-		return false
-	}
+	return g.GetAvailability() == groupExpired
 }
 
-// GetState returns a condition whose value is always group-prefixed. It handles degradedExpiredAt internally.
-func (g *runtimeGroupInfo) GetState() condition {
-	state := g.state.toGroupState()
-	if state == groupAvailable {
-		return groupAvailable
-	} else if g.IsExpired() {
+// GetAvailability returns the group availability. It handles degradedExpiredAt internally.
+func (g *runtimeGroupInfo) GetAvailability() groupAvailability {
+	if g.availability == groupDegraded && uint64(time.Now().Unix()) > g.degradedExpiredAt {
 		return groupExpired
 	}
-	return groupDegraded
+	return g.availability
 }
 
-// SetState updates state and degradedExpiredAt with the following behavior:
-// - When the current state is groupAvailable
-//   - newState = groupAvailable: do nothing
-//   - newState = groupDegraded: change the state to groupDegraded and set degradedExpiredAt based on the current time
-//   - newState = groupExpired: change the state to groupExpired
+// SetAvailability updates availability and degradedExpiredAt with the following behavior:
+// - When the current availability is groupAvailable
+//   - newAvailability = groupAvailable: do nothing
+//   - newAvailability = groupDegraded: change the availability to groupDegraded and set degradedExpiredAt based on the current time
+//   - newAvailability = groupExpired: change the availability to groupExpired
 //
-// - When the current state is groupDegraded
-//   - newState = groupAvailable: change the state to groupAvailable
-//   - newState = groupDegraded: do nothing and do not refresh degradedExpiredAt
-//   - newState = groupExpired: change the state to groupExpired
+// - When the current availability is groupDegraded
+//   - newAvailability = groupAvailable: change the availability to groupAvailable
+//   - newAvailability = groupDegraded: do nothing and do not refresh degradedExpiredAt
+//   - newAvailability = groupExpired: change the availability to groupExpired
 //
-// - When the current state is groupExpired
-//   - newState = groupAvailable: change the state to groupAvailable
-//   - newState = groupDegraded: do nothing and do not refresh degradedExpiredAt
-//   - newState = groupExpired: do nothing
-func (g *runtimeGroupInfo) SetState(newState condition) {
+// - When the current availability is groupExpired
+//   - newAvailability = groupAvailable: change the availability to groupAvailable
+//   - newAvailability = groupDegraded: do nothing and do not refresh degradedExpiredAt
+//   - newAvailability = groupExpired: do nothing
+func (g *runtimeGroupInfo) SetAvailability(newAvailability groupAvailability) {
 	// If the expiration time has been reached, change groupDegraded to groupExpired.
-	if g.state == groupDegraded && g.IsExpired() {
-		g.state = groupExpired
+	if g.availability == groupDegraded && g.IsExpired() {
+		g.availability = groupExpired
 	}
-	// Update state
-	newState = newState.toGroupState()
-	if newState == groupDegraded {
+	// Update availability
+	if newAvailability == groupDegraded {
 		// Only set the expiration time when transitioning from groupAvailable to groupDegraded.
-		// Do nothing if the original state is already groupDegraded or groupExpired.
-		if g.state == groupAvailable {
-			g.state = groupDegraded
+		// Do nothing if the original availability is already groupDegraded or groupExpired.
+		if g.availability == groupAvailable {
+			g.availability = groupDegraded
 			g.degradedExpiredAt = newDegradedExpiredAtFromNow()
 		}
 	} else {
-		g.state = newState
+		g.availability = newAvailability
 	}
 }
 

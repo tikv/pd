@@ -99,7 +99,7 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 	// Test 7: Group not in effect should return false
 	manager.ExpireAffinityGroup("test_group")
 	groupInfo = getGroupForTest(re, manager, "test_group")
-	re.Equal(groupExpired, groupInfo.GetState())
+	re.Equal(groupExpired, groupInfo.GetAvailability())
 	region6 := generateRegionForTest(6, []uint64{1, 2, 3}, ranges[5])
 	_, isAffinity = manager.GetRegionAffinityGroupState(region6)
 	re.False(isAffinity, "Group not in effect should return false")
@@ -262,8 +262,8 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	re.Zero(globalAffinityCount, "global affinity region count should be 0")
 }
 
-// TestStateChangeRegionCount verifies that changing group state clears region cache.
-func TestStateChangeRegionCount(t *testing.T) {
+// TestAvailabilityChangeRegionCount verifies that changing group availability clears region cache.
+func TestAvailabilityChangeRegionCount(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -283,8 +283,8 @@ func TestStateChangeRegionCount(t *testing.T) {
 	re.NoError(err)
 
 	// Create a group
-	ranges := createGroupForTest(re, manager, "state-test", 1)
-	_, err = manager.UpdateAffinityGroupPeers("state-test", 1, []uint64{1, 2, 3})
+	ranges := createGroupForTest(re, manager, "availability-test", 1)
+	_, err = manager.UpdateAffinityGroupPeers("availability-test", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 
 	// Add regions to cache
@@ -293,12 +293,12 @@ func TestStateChangeRegionCount(t *testing.T) {
 	re.True(isAffinity)
 
 	// Verify region is cached
-	groupState1 := manager.GetAffinityGroupState("state-test")
+	groupState1 := manager.GetAffinityGroupState("availability-test")
 	re.NotNil(groupState1)
 	re.Equal(1, groupState1.RegionCount)
 	re.Equal(1, groupState1.AffinityRegionCount)
 
-	// Make store 2 unhealthy to trigger state change to degraded
+	// Make store 2 unhealthy to trigger availability change to degraded
 	store2 := storeInfos.GetStore(2)
 	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
 	storeInfos.PutStore(store2Down)
@@ -307,14 +307,14 @@ func TestStateChangeRegionCount(t *testing.T) {
 	manager.checkStoresAvailability()
 
 	// Verify group state changed
-	groupInfo := getGroupForTest(re, manager, "state-test")
+	groupInfo := getGroupForTest(re, manager, "availability-test")
 	re.False(groupInfo.IsAffinitySchedulingEnabled())
 
 	// Verify cache is cleared
-	groupState2 := manager.GetAffinityGroupState("state-test")
+	groupState2 := manager.GetAffinityGroupState("availability-test")
 	re.NotNil(groupState2)
 	testCacheStale(re, manager, region)
-	re.Zero(groupState2.AffinityRegionCount, "AffinityRegionCount should be 0 after state change")
+	re.Zero(groupState2.AffinityRegionCount, "AffinityRegionCount should be 0 after availability change")
 
 	// Verify global cache is also cleared
 	manager.RLock()
@@ -528,7 +528,7 @@ func TestDegradedExpiration(t *testing.T) {
 	re.NotNil(groupState)
 	re.True(groupState.AffinitySchedulingEnabled)
 
-	// Make store 2 unhealthy to trigger degraded state
+	// Make store 2 unhealthy to trigger degraded status
 	store2 := storeInfos.GetStore(2)
 	store2Down := store2.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store2Down)
@@ -536,7 +536,7 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify group became degraded
 	groupInfo := getGroupForTest(re, manager, "expiration-test")
-	re.Equal(groupDegraded, groupInfo.GetState())
+	re.Equal(groupDegraded, groupInfo.GetAvailability())
 	re.False(groupInfo.IsAffinitySchedulingEnabled())
 
 	// Record the expiration time
@@ -559,7 +559,7 @@ func TestDegradedExpiration(t *testing.T) {
 
 	// Verify group is now expired
 	re.True(groupInfo.IsExpired())
-	re.Equal(groupExpired, groupInfo.GetState())
+	re.Equal(groupExpired, groupInfo.GetAvailability())
 
 	// Verify scheduling is still disallowed
 	groupState2 := manager.GetAffinityGroupState("expiration-test")

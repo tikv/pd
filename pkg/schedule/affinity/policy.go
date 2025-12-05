@@ -45,7 +45,7 @@ type logEntry struct {
 	level            string // "info", "warn"
 	groupID          string
 	unavailableStore uint64
-	state            condition
+	availability     groupAvailability
 }
 
 // ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
@@ -102,9 +102,9 @@ func (m *Manager) checkStoresAvailability() {
 		return
 	}
 	unavailableStores := m.generateUnavailableStores()
-	isUnavailableStoresChanged, groupStateChanges := m.getGroupStateChanges(unavailableStores)
+	isUnavailableStoresChanged, groupAvailabilityChanges := m.getGroupAvailabilityChanges(unavailableStores)
 	if isUnavailableStoresChanged {
-		m.setGroupStateChanges(unavailableStores, groupStateChanges)
+		m.setGroupAvailabilityChanges(unavailableStores, groupAvailabilityChanges)
 	}
 	m.collectMetrics()
 }
@@ -120,19 +120,19 @@ func (m *Manager) collectMetrics() {
 	affinityRegionCount.Set(float64(m.affinityRegionCount))
 }
 
-func (m *Manager) generateUnavailableStores() map[uint64]condition {
-	unavailableStores := make(map[uint64]condition)
+func (m *Manager) generateUnavailableStores() map[uint64]storeCondition {
+	unavailableStores := make(map[uint64]storeCondition)
 	stores := m.storeSetInformer.GetStores()
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
 		switch {
-		// Check the groupExpired-related store state first
+		// First the conditions that will mark the group as expired
 		case store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving():
 			unavailableStores[store.GetID()] = storeRemovingOrRemoved
 		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
 
-		// Then check the groupDegraded-related store state
+		// Then the conditions that will mark the group as degraded
 		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()):
 			unavailableStores[store.GetID()] = storeEvictLeader
 		case store.IsDisconnected():
@@ -148,9 +148,9 @@ func (m *Manager) generateUnavailableStores() map[uint64]condition {
 	return unavailableStores
 }
 
-func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (isUnavailableStoresChanged bool, groupStateChanges map[string]condition) {
+func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]storeCondition) (isUnavailableStoresChanged bool, groupAvailabilityChanges map[string]groupAvailability) {
 	var logEntries []logEntry
-	groupStateChanges = make(map[string]condition)
+	groupAvailabilityChanges = make(map[string]groupAvailability)
 
 	// Validate whether unavailableStores has changed.
 	m.RLock()
@@ -160,28 +160,28 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 		return false, nil
 	}
 
-	// Analyze which Groups have changed state
+	// Analyze which Groups have changed availability
 	// Collect log messages to print after releasing lock
 	for _, groupInfo := range m.groups {
 		var unavailableStore uint64
-		var maxState condition
+		var maxCondition storeCondition
 		for _, storeID := range groupInfo.VoterStoreIDs {
-			if state, ok := unavailableStores[storeID]; ok && (!state.affectsLeaderOnly() || storeID == groupInfo.LeaderStoreID) {
-				if unavailableStore == 0 || state > maxState {
+			if condition, ok := unavailableStores[storeID]; ok && (!condition.affectsLeaderOnly() || storeID == groupInfo.LeaderStoreID) {
+				if unavailableStore == 0 || condition > maxCondition {
 					unavailableStore = storeID
-					maxState = state
+					maxCondition = condition
 				}
 			}
 		}
-		newState := maxState.toGroupState()
-		if newState != groupInfo.GetState() {
-			groupStateChanges[groupInfo.ID] = newState
+		newAvailability := maxCondition.groupAvailability()
+		if newAvailability != groupInfo.GetAvailability() {
+			groupAvailabilityChanges[groupInfo.ID] = newAvailability
 			if unavailableStore != 0 {
 				logEntries = append(logEntries, logEntry{
 					level:            "warn",
 					groupID:          groupInfo.ID,
 					unavailableStore: unavailableStore,
-					state:            newState,
+					availability:     newAvailability,
 				})
 			} else {
 				logEntries = append(logEntries, logEntry{
@@ -200,7 +200,7 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 			log.Warn("affinity group invalidated due to unavailable stores",
 				zap.String("group-id", entry.groupID),
 				zap.Uint64("unavailable-store", entry.unavailableStore),
-				zap.String("state", entry.state.String()))
+				zap.String("availability", entry.availability.String()))
 		case "info":
 			log.Info("affinity group become available", zap.String("group-id", entry.groupID))
 		}
@@ -209,12 +209,12 @@ func (m *Manager) getGroupStateChanges(unavailableStores map[uint64]condition) (
 	return
 }
 
-func (m *Manager) setGroupStateChanges(unavailableStores map[uint64]condition, groupStateChanges map[string]condition) {
+func (m *Manager) setGroupAvailabilityChanges(unavailableStores map[uint64]storeCondition, groupAvailabilityChanges map[string]groupAvailability) {
 	m.Lock()
 	defer m.Unlock()
 	m.unavailableStores = unavailableStores
-	for groupID, state := range groupStateChanges {
-		m.updateGroupStateLocked(groupID, state)
+	for groupID, availability := range groupAvailabilityChanges {
+		m.updateGroupAvailabilityLocked(groupID, availability)
 	}
 }
 
@@ -222,9 +222,9 @@ func (m *Manager) hasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint
 	m.RLock()
 	defer m.RUnlock()
 	for _, storeID := range voterStoreIDs {
-		state, ok := m.unavailableStores[storeID]
-		if ok && (!state.affectsLeaderOnly() || storeID == leaderStoreID) {
-			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, state.storeStateString()))
+		condition, ok := m.unavailableStores[storeID]
+		if ok && (!condition.affectsLeaderOnly() || storeID == leaderStoreID) {
+			return errs.ErrAffinityGroupContent.GenWithStackByArgs(fmt.Sprintf("store %d is %s", storeID, condition.String()))
 		}
 	}
 	return nil
