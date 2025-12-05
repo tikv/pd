@@ -31,8 +31,8 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(prefix string) (time.Time, error)
-	SaveTimestamp(key string, ts time.Time) error
-	DeleteTimestamp(key string) error
+	SaveTimestamp(ctx context.Context, key string, ts time.Time) error
+	DeleteTimestamp(ctx context.Context, key string) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -69,8 +69,8 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 }
 
 // SaveTimestamp saves the timestamp to the storage.
-func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
-	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, key string, ts time.Time) error {
+	return se.RunInTxn(ctx, func(txn kv.Txn) error {
 		value, err := txn.Load(key)
 		if err != nil {
 			return err
@@ -93,7 +93,7 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 }
 
 // DeleteTimestamp deletes the timestamp from the storage.
-func (se *StorageEndpoint) DeleteTimestamp(key string) error {
+func (se *StorageEndpoint) DeleteTimestamp(ctx context.Context, key string) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
 		return txn.Remove(key)
 	})

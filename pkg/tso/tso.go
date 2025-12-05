@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/server/config"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -80,6 +81,14 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+}
+
+func (t *timestampOracle) getStorageTimeout() time.Duration {
+	timeout := t.saveInterval - time.Second
+	if timeout < config.DefaultTSOSaveInterval-1 {
+		return config.DefaultTSOSaveInterval - 1
+	}
+	return timeout
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
