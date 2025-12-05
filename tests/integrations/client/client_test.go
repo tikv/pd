@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/client/clients/tso"
 	"math"
 	"math/rand"
 	"os"
@@ -47,6 +46,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
@@ -84,15 +84,23 @@ func TestMain(m *testing.M) {
 
 func TestUniqueIndex(t *testing.T) {
 	re := require.New(t)
-	checkUniqueIndex(re, 2, 1)
-	//checkUniqueIndex(re, 2, 0)
+
+	checkUniqueIndex(re, 1)
+	checkUniqueIndex(re, 0)
 }
 
-func checkUniqueIndex(re *require.Assertions, maxIndex int64, uniqueIndex int64) {
+func TestUniqueIndexWithFollowerHandle(t *testing.T) {
+	re := require.New(t)
+	checkUniqueIndex(re, 1, opt.WithEnableFollowerHandle(true))
+	checkUniqueIndex(re, 0, opt.WithEnableFollowerHandle(true))
+}
+
+func checkUniqueIndex(re *require.Assertions, uniqueIndex int64, opts ...opt.ClientOption) {
+	maxIndex := int64(2)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.TSOMaxIndex = maxIndex
 		conf.TSOUniqueIndex = uniqueIndex
 	})
@@ -105,7 +113,7 @@ func checkUniqueIndex(re *require.Assertions, maxIndex int64, uniqueIndex int64)
 	for i := range endpointsWithWrongURL {
 		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
 	}
-	cli := setupCli(ctx, re, endpointsWithWrongURL)
+	cli := setupCli(ctx, re, endpointsWithWrongURL, opts...)
 	defer cli.Close()
 
 	var l1 int64

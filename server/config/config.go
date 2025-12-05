@@ -258,6 +258,8 @@ const (
 
 	defaultEnableSchedulingFallback  = true
 	defaultEnableTSODynamicSwitching = false
+
+	tsoMaxIndexUpperLimit = 10
 )
 
 var (
@@ -444,6 +446,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
+	}
+
+	if c.TSOMaxIndex > tsoMaxIndexUpperLimit {
+		return errors.New(fmt.Sprintf("tso max index:%d should be less than %d", c.TSOMaxIndex, tsoMaxIndexUpperLimit))
 	}
 
 	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {

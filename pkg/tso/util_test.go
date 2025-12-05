@@ -78,33 +78,35 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 func TestTSOIndex(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	for range 10 {
-		count := rand.Int63n(100)
-		for _, ts := range []*timestampOracle{
-			{
-				tsoMux: &tsoObject{
-					physical: time.Now(),
-				},
-				maxIndex:    2,
-				uniqueIndex: 0,
+
+	for _, ts := range []*timestampOracle{
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
 			},
-			{
-				tsoMux: &tsoObject{
-					physical: time.Now(),
-				},
-				maxIndex:    2,
-				uniqueIndex: 1,
+			maxIndex:    2,
+			uniqueIndex: 0,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
 			},
-			{
-				tsoMux: &tsoObject{
-					physical: time.Now(),
-				},
-				maxIndex:    100,
-				uniqueIndex: 1,
+			maxIndex:    2,
+			uniqueIndex: 1,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
 			},
-		} {
-			_, p := ts.generateTSO(ctx, count)
-			require.Equal(t, ts.uniqueIndex, p%ts.maxIndex)
+			maxIndex:    100,
+			uniqueIndex: 1,
+		},
+	} {
+		ts.tsoMux.logical = ts.uniqueIndex
+		for range 10 {
+			count := rand.Int63n(100)
+			_, logical := ts.generateTSO(ctx, count)
+			require.Equal(t, ts.uniqueIndex, logical%ts.maxIndex)
 		}
 	}
 }
