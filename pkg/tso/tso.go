@@ -82,6 +82,9 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+
+	uniqueIndex int64
+	maxIndex    int64
 }
 
 func (t *timestampOracle) getStorageTimeout() time.Duration {
@@ -102,7 +105,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// Do not update the zero physical time if the `force` flag is false.
-	if t.tsoMux.physical == typeutil.ZeroTime && !force {
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) && !force {
 		return
 	}
 	// make sure the ts won't fall back
@@ -110,32 +113,30 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
 		t.tsoMux.updateTime = time.Now()
+		t.tsoMux.logical = t.uniqueIndex
 	}
 }
 
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	if t.tsoMux.physical == typeutil.ZeroTime {
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
 		return typeutil.ZeroTime, 0
 	}
 	return t.tsoMux.physical, t.tsoMux.logical
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(ctx context.Context, count int64, suffixBits int) (physical int64, logical int64, lastUpdateTime time.Time) {
+func (t *timestampOracle) generateTSO(ctx context.Context, count int64, _ int) (physical int64, logical int64, lastUpdateTime time.Time) {
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if t.tsoMux.physical == typeutil.ZeroTime {
-		return 0, 0, typeutil.ZeroTime
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
+		return 0, t.uniqueIndex, typeutil.ZeroTime
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
-	t.tsoMux.logical += count
+	t.tsoMux.logical += count * t.maxIndex
 	logical = t.tsoMux.logical
-	if suffixBits > 0 && t.suffix >= 0 {
-		logical = t.calibrateLogical(logical, suffixBits)
-	}
 	// Return the last update time
 	lastUpdateTime = t.tsoMux.updateTime
 	t.tsoMux.updateTime = time.Now()
@@ -404,7 +405,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 var maxRetryCount = 10
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32, _ int) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
@@ -412,7 +413,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 	}
 	for i := range maxRetryCount {
 		currentPhysical, _ := t.getTSO()
-		if currentPhysical == typeutil.ZeroTime {
+		if currentPhysical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			if leadership.Check() {
 				time.Sleep(200 * time.Millisecond)
@@ -422,7 +423,8 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical, _ = t.generateTSO(ctx, int64(count), suffixBits)
+		resp.Physical, resp.Logical, _ = t.generateTSO(ctx, int64(count), int(t.maxIndex))
+		resp.SuffixBits = uint32(t.maxIndex)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -439,7 +441,6 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 		if !leadership.Check() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
-		resp.SuffixBits = uint32(suffixBits)
 		return resp, nil
 	}
 	t.metrics.exceededMaxRetryEvent.Inc()
@@ -454,5 +455,6 @@ func (t *timestampOracle) ResetTimestamp() {
 	t.tsoMux.physical = typeutil.ZeroTime
 	t.tsoMux.logical = 0
 	t.tsoMux.updateTime = typeutil.ZeroTime
+	t.tsoMux.logical = t.uniqueIndex
 	t.lastSavedTime.Store(typeutil.ZeroTime)
 }

@@ -72,6 +72,59 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+func TestUniqueIndex(t *testing.T) {
+	re := require.New(t)
+
+	checkUniqueIndex(re, 1)
+	checkUniqueIndex(re, 0)
+}
+
+func TestUniqueIndexWithFollowerHandle(t *testing.T) {
+	re := require.New(t)
+	checkUniqueIndex(re, 1)
+	checkUniqueIndex(re, 0)
+}
+
+func checkUniqueIndex(re *require.Assertions, uniqueIndex int64) {
+	maxIndex := int64(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.TSOMaxIndex = maxIndex
+		conf.TSOUniqueIndex = uniqueIndex
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	endpointsWithWrongURL := append([]string{}, endpoints...)
+	// inject wrong http scheme
+	for i := range endpointsWithWrongURL {
+		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
+	}
+	cli := setupCli(ctx, re, endpointsWithWrongURL)
+	defer cli.Close()
+
+	var l1 int64
+	testutil.Eventually(re, func() bool {
+		_, l1, err = cli.GetTS(ctx)
+		return err == nil
+	})
+	re.Equal(uniqueIndex, l1%maxIndex)
+
+	tsList := make([]pd.TSFuture, 0, 10)
+	for range 10 {
+		ts := cli.GetTSAsync(ctx)
+		tsList = append(tsList, ts)
+	}
+
+	for _, ts := range tsList {
+		_, l1, err = ts.Wait()
+		re.Equal(uniqueIndex, l1%maxIndex)
+	}
+}
+
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
