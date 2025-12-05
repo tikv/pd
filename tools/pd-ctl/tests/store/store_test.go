@@ -502,6 +502,19 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "rate should be less than")
+
+	// store limit all engine tikv 21 remove peer for tikv stores
+	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "tikv", "21", "remove-peer"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+
+	args = []string{"-u", pdAddr, "store", "limit", "remove-peer"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	allRemovePeerLimit = make(map[string]map[string]any)
+	json.Unmarshal(output, &allRemovePeerLimit)
+	re.Equal(float64(21), allRemovePeerLimit["1"]["remove-peer"].(float64))
+	re.Equal(float64(21), allRemovePeerLimit["3"]["remove-peer"].(float64))
 }
 
 // https://github.com/tikv/pd/issues/5024

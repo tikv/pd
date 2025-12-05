@@ -111,10 +111,10 @@ func TestSliceEqualWithoutOrder(t *testing.T) {
 	re.False(slice.EqualWithoutOrder([]string{"a"}, []string{"b", "c"}))
 }
 
-func TestSliceHasDupSorted(t *testing.T) {
+func TestSliceHasDupInSorted(t *testing.T) {
 	re := require.New(t)
-	re.False(slice.HasDupSorted([]string{"a", "b", "c"}))
-	re.True(slice.HasDupSorted([]string{"a", "a", "c"}))
-	re.True(slice.HasDupSorted([]string{"a", "b", "b"}))
-	re.False(slice.HasDupSorted([]string(nil)))
+	re.False(slice.HasDupInSorted([]string{"a", "b", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "a", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "b", "b"}))
+	re.False(slice.HasDupInSorted([]string(nil)))
 }
