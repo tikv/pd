@@ -1801,11 +1801,12 @@ func (c *RaftCluster) checkStores() {
 	stores := c.GetStores()
 
 	for _, store := range stores {
-		isUp, isOffline := c.checkStore(store, stores)
-		if isUp {
+		storeID := store.GetID()
+		isInUp, isInOffline := c.checkStore(storeID)
+		if isInUp {
 			upStoreCount++
 		}
-		if isOffline {
+		if isInOffline {
 			offlineStores = append(offlineStores, store.GetMeta())
 		}
 	}
@@ -1822,10 +1823,16 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo) (isUp, isOffline bool) {
-	storeID := store.GetID()
+func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		log.Warn("store not found when checking, may be deleted", zap.Uint64("store-id", storeID))
+		return false, false
+	}
+
 	// the store has already been tombstone
 	if store.IsRemoved() {
 		if store.DownTime() > gcTombstoneInterval {
@@ -1851,7 +1858,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 					errs.ZapError(err))
 			}
 		} else if c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared()) {
-			threshold := c.getThreshold(stores, store)
+			threshold := c.getThreshold(c.GetStores(), store)
 			regionSize := float64(store.GetRegionSize())
 			log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
 			if regionSize >= threshold {
@@ -1871,7 +1878,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 
 	if store.IsUp() {
 		if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
-			isUp = true
+			isInUp = true
 		}
 		return
 	}
@@ -1892,7 +1899,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 				errs.ZapError(err))
 		}
 	} else {
-		isOffline = true
+		isInOffline = true
 	}
 	return
 }
