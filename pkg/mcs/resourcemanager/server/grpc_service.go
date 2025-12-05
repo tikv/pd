@@ -231,7 +231,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
 					}
 					// Sample the latest RU demand.
-					krgm.getOrCreateRUTracker(rg.Name).sample(now, requiredToken)
+					krgm.getOrCreateGroupRUTracker(rg.Name).sample(clientUniqueID, now, requiredToken)
 					if tokens == nil {
 						continue
 					}

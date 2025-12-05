@@ -65,9 +65,9 @@ type consumptionItem struct {
 
 type keyspaceResourceGroupManager struct {
 	syncutil.RWMutex
-	groups     map[string]*ResourceGroup
-	ruTrackers map[string]*ruTracker
-	sl         *serviceLimiter
+	groups          map[string]*ResourceGroup
+	groupRUTrackers map[string]*groupRUTracker
+	sl              *serviceLimiter
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
@@ -75,11 +75,11 @@ type keyspaceResourceGroupManager struct {
 
 func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.ResourceGroupStorage) *keyspaceResourceGroupManager {
 	return &keyspaceResourceGroupManager{
-		groups:     make(map[string]*ResourceGroup),
-		ruTrackers: make(map[string]*ruTracker),
-		keyspaceID: keyspaceID,
-		storage:    storage,
-		sl:         newServiceLimiter(keyspaceID, 0, storage),
+		groups:          make(map[string]*ResourceGroup),
+		groupRUTrackers: make(map[string]*groupRUTracker),
+		keyspaceID:      keyspaceID,
+		storage:         storage,
+		sl:              newServiceLimiter(keyspaceID, 0, storage),
 	}
 }
 
@@ -287,35 +287,34 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
 	return krgm.sl.ServiceLimit, true
 }
 
-func (krgm *keyspaceResourceGroupManager) getOrCreateRUTracker(name string) *ruTracker {
-	rt := krgm.getRUTracker(name)
-	if rt == nil {
+func (krgm *keyspaceResourceGroupManager) getOrCreateGroupRUTracker(name string) *groupRUTracker {
+	grt := krgm.getGroupRUTracker(name)
+	if grt == nil {
 		krgm.Lock()
 		// Double check the RU tracker is not created by other goroutine.
-		rt = krgm.ruTrackers[name]
-		if rt == nil {
-			rt = newRUTracker(defaultRUTrackerTimeConstant)
-			krgm.ruTrackers[name] = rt
+		grt = krgm.groupRUTrackers[name]
+		if grt == nil {
+			grt = newGroupRUTracker()
+			krgm.groupRUTrackers[name] = grt
 		}
 		krgm.Unlock()
 	}
-	return rt
+	return grt
 }
 
-func (krgm *keyspaceResourceGroupManager) getRUTracker(name string) *ruTracker {
+func (krgm *keyspaceResourceGroupManager) getGroupRUTracker(name string) *groupRUTracker {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	return krgm.ruTrackers[name]
+	return krgm.groupRUTrackers[name]
 }
 
-// ruTracker is used to track the RU consumption within a keyspace.
-// It uses the algorithm of time-aware exponential moving average (EMA) to
-// sample and calculate the real-time RU/s of each resource group. The main
-// reason for choosing this EMA algorithm is that conventional EMA algorithms or
-// moving average algorithms over a time window cannot handle non-fixed frequency
-// data sampling well. Since the reporting interval of RU consumption depends on
-// the RU consumption rate of the workload, it is necessary to introduce a time
-// dimension to calculate real-time RU/s more accurately.
+// ruTracker is used to track the RU consumption dynamically.
+// It uses the algorithm of time-aware exponential moving average (EMA) to sample
+// and calculate the real-time RU/s. The main reason for choosing this EMA algorithm
+// is that conventional EMA algorithms or moving average algorithms over a time window
+// cannot handle non-fixed frequency data sampling well. Since the reporting interval
+// of RU consumption depends on the RU consumption rate of the workload, it is necessary
+// to introduce a time dimension to calculate real-time RU/s more accurately.
 type ruTracker struct {
 	syncutil.RWMutex
 	initialized bool
@@ -374,6 +373,64 @@ func (rt *ruTracker) getRUPerSec() float64 {
 	rt.RLock()
 	defer rt.RUnlock()
 	return rt.lastEMA
+}
+
+// groupRUTracker is used to track the RU consumption of a resource group.
+// It matains a map of RU trackers for each client unique ID.
+type groupRUTracker struct {
+	syncutil.RWMutex
+	ruTrackers map[uint64]*ruTracker
+}
+
+func newGroupRUTracker() *groupRUTracker {
+	return &groupRUTracker{
+		ruTrackers: make(map[uint64]*ruTracker),
+	}
+}
+
+func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracker {
+	grt.RLock()
+	rt := grt.ruTrackers[clientUniqueID]
+	grt.RUnlock()
+	if rt == nil {
+		grt.Lock()
+		// Double check the RU tracker is not created by other goroutine.
+		rt = grt.ruTrackers[clientUniqueID]
+		if rt == nil {
+			rt = newRUTracker(defaultRUTrackerTimeConstant)
+			grt.ruTrackers[clientUniqueID] = rt
+		}
+		grt.Unlock()
+	}
+	return rt
+}
+
+func (grt *groupRUTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
+	grt.getOrCreateRUTracker(clientUniqueID).sample(now, totalRU)
+}
+
+func (grt *groupRUTracker) getRUPerSec() float64 {
+	grt.RLock()
+	defer grt.RUnlock()
+	totalRUPerSec := 0.0
+	for _, rt := range grt.ruTrackers {
+		totalRUPerSec += rt.getRUPerSec()
+	}
+	return totalRUPerSec
+}
+
+func (grt *groupRUTracker) cleanupStaleRUTrackers() []uint64 {
+	grt.Lock()
+	defer grt.Unlock()
+	staleClientUniqueIDs := make([]uint64, 0, len(grt.ruTrackers))
+	for clientUniqueID, rt := range grt.ruTrackers {
+		if time.Since(rt.lastSampleTime) < slotExpireTimeout {
+			continue
+		}
+		delete(grt.ruTrackers, clientUniqueID)
+		staleClientUniqueIDs = append(staleClientUniqueIDs, clientUniqueID)
+	}
+	return staleClientUniqueIDs
 }
 
 // conciliateFillRates is used to conciliate the fill rate of each resource group.
@@ -511,8 +568,8 @@ func (krgm *keyspaceResourceGroupManager) getPriorityQueues() [][]*ResourceGroup
 
 func (krgm *keyspaceResourceGroupManager) setZeroFillRateForAllGroups(queue []*ResourceGroup) {
 	for _, group := range queue {
-		ruTracker := krgm.getRUTracker(group.Name)
-		if ruTracker == nil || ruTracker.getRUPerSec() == 0 {
+		grt := krgm.getGroupRUTracker(group.Name)
+		if grt == nil || grt.getRUPerSec() == 0 {
 			continue
 		}
 		// Only set the active resource groups to avoid unnecessary overrides.
@@ -526,12 +583,12 @@ func (krgm *keyspaceResourceGroupManager) calculateDemandInfo(queue []*ResourceG
 		burstRUDemandMap: make(map[string]float64, len(queue)),
 	}
 	for _, group := range queue {
-		ruTracker := krgm.getRUTracker(group.Name)
+		grt := krgm.getGroupRUTracker(group.Name)
 		// Not found the RU tracker, skip this group.
-		if ruTracker == nil {
+		if grt == nil {
 			continue
 		}
-		ruPerSec := ruTracker.getRUPerSec()
+		ruPerSec := grt.getRUPerSec()
 		fillRateSetting := group.getFillRate(true)
 		burstLimitSetting := float64(group.getBurstLimit(true))
 		// Calculate the basic RU demand of the resource group.
