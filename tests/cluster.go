@@ -506,6 +506,13 @@ type TestCluster struct {
 // and so on, which determined by the number of servers you set.
 type ConfigOption func(conf *config.Config, serverName string)
 
+// WithGCTuner set WithGCTuner for tests
+func WithGCTuner(enabled bool) ConfigOption {
+	return func(conf *config.Config, _ string) {
+		conf.PDServerCfg.EnableGOGCTuner = enabled
+	}
+}
+
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	return createTestCluster(ctx, initialServerCount, nil, opts...)
@@ -521,7 +528,8 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
 	for _, cfg := range config.InitialServers {
-		serverConf, err := cfg.Generate(opts...)
+		allOpts := append([]ConfigOption{WithGCTuner(false)}, opts...)
+		serverConf, err := cfg.Generate(allOpts...)
 		if err != nil {
 			return nil, err
 		}

@@ -70,30 +70,33 @@ func SetDefaultGOGC() {
 // threshold: disable tuning if threshold == 0
 func Tuning(threshold uint64) {
 	// disable gc tuner if percent is zero
-	if threshold <= 0 && globalTuner != nil {
-		globalTuner.stop()
-		globalTuner = nil
-		return
+	if t := globalTuner.Load(); t == nil {
+		t1 := newTuner(threshold)
+		globalTuner.CompareAndSwap(nil, &t1)
+	} else {
+		if threshold <= 0 {
+			(*t).stop()
+			globalTuner.CompareAndSwap(t, nil)
+		} else {
+			(*t).setThreshold(threshold)
+		}
 	}
-
-	if globalTuner == nil {
-		globalTuner = newTuner(threshold)
-		return
-	}
-	globalTuner.setThreshold(threshold)
 }
 
 // GetGOGC returns the current GCPercent.
-func GetGOGC() uint32 {
-	if globalTuner == nil {
-		return defaultGCPercent
+func GetGOGC() (percent uint32) {
+	t := globalTuner.Load()
+	if globalTuner.Load() == nil {
+		percent = defaultGCPercent
+	} else {
+		percent = (*t).getGCPercent()
 	}
-	return globalTuner.getGCPercent()
+	return percent
 }
 
 // only allow one gc tuner in one process
 // It is not thread-safe. so it is a private, singleton pattern to avoid misuse.
-var globalTuner *tuner
+var globalTuner atomic.Pointer[*tuner]
 
 /*
 // 			Heap
