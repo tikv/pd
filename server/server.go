@@ -1770,6 +1770,7 @@ func (s *Server) campaignLeader() {
 		// to be new leader.
 		cancel()
 		s.member.ResetLeader()
+		log.Info("set service member to 0", zap.String("mode", s.mode))
 		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
 	})
 
