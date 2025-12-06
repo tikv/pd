@@ -95,6 +95,14 @@ var (
 			Name:      "store_sync",
 			Help:      "The state of store sync config",
 		}, []string{"address", "state"})
+
+	storeTriggerNetworkSlowEvict = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "store_trigger_network_slow_evict",
+			Help:      "The count of store trigger network slow evict",
+		}, []string{"store"})
 )
 
 func init() {
@@ -108,4 +116,5 @@ func init() {
 	prometheus.MustRegister(storesETAGauge)
 	prometheus.MustRegister(storeSyncConfigEvent)
 	prometheus.MustRegister(updateStoreStatsGauge)
+	prometheus.MustRegister(storeTriggerNetworkSlowEvict)
 }

@@ -778,6 +778,10 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	if err != nil {
 		val = value
 	}
+	boolVal, err := strconv.ParseBool(value)
+	if err == nil {
+		val = boolVal
+	}
 	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-leader-priorities" || key == "write-peer-priorities") {
 		input[key] = strings.Split(value, ",")
 	} else {
