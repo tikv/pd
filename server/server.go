@@ -278,7 +278,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	// create audit backend
 	s.auditBackends = []audit.Backend{
 		audit.NewLocalLogBackend(true),
-		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
+		audit.NewPrometheusBackend(serviceAuditHistogram, serviceAuditCounter, false),
 	}
 	s.serviceRateLimiter = ratelimit.NewController(s.ctx, "http", apiConcurrencyGauge)
 	s.grpcServiceRateLimiter = ratelimit.NewController(s.ctx, "grpc", apiConcurrencyGauge)
