@@ -15,12 +15,13 @@
 package tso
 
 import (
-	"github.com/tikv/pd/server/config"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/keypath"
+
+	"github.com/tikv/pd/server/config"
 )
 
 func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {

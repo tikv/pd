@@ -226,9 +226,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), t.getStorageTimeout())
-	defer cancel()
-	if err = t.storage.SaveTimestamp(ctx, t.GetTimestampPath(), save); err != nil {
+	if err = t.saveTimestamp(save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -301,9 +299,7 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), t.getStorageTimeout())
-		defer cancel()
-		if err := t.storage.SaveTimestamp(ctx, t.GetTimestampPath(), save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -387,9 +383,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), t.getStorageTimeout())
-		defer cancel()
-		if err := t.storage.SaveTimestamp(ctx, t.GetTimestampPath(), save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.String("dc-location", t.dcLocation),

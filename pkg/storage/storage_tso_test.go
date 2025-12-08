@@ -23,10 +23,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/failpoint"
-
-	"github.com/tikv/pd/pkg/election"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -55,13 +51,13 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 	l1 := path.Join(ltaKey, dc1LocationKey, keypath.TimestampKey)
 	l2 := path.Join(ltaKey, dc2LocationKey, keypath.TimestampKey)
 
-	err := storage.SaveTimestamp(l1, localTS1)
+	err := storage.SaveTimestamp(defaultContext, l1, localTS1)
 	re.NoError(err)
 	globalTS := time.Now().Round(0)
-	err = storage.SaveTimestamp(keypath.TimestampKey, globalTS)
+	err = storage.SaveTimestamp(defaultContext, keypath.TimestampKey, globalTS)
 	re.NoError(err)
 	localTS2 := time.Now().Round(0)
-	err = storage.SaveTimestamp(l2, localTS2)
+	err = storage.SaveTimestamp(defaultContext, l2, localTS2)
 	re.NoError(err)
 	// return the max ts between global and local
 	ts, err := storage.LoadTimestamp("")
