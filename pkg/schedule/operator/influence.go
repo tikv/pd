@@ -23,7 +23,7 @@ import (
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
-	mu              syncutil.Mutex
+	mu              syncutil.RWMutex
 	StoresInfluence map[uint64]*StoreInfluence
 }
 
@@ -40,13 +40,13 @@ func (m *OpInfluence) Add(other *OpInfluence) {
 	defer m.mu.Unlock()
 	otherCopy := other.getAllInfluenceCopy()
 	for id, v := range otherCopy {
-		m.getOrCreateStoreInfluenceWithLock(id).add(v)
+		m.getOrCreateStoreInfluenceLocked(id).add(v)
 	}
 }
 
 func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	ret := make(map[uint64]*StoreInfluence, len(m.StoresInfluence))
 	for id, v := range m.StoresInfluence {
 		ret[id] = &StoreInfluence{
@@ -61,7 +61,7 @@ func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
 	return ret
 }
 
-func (m *OpInfluence) getOrCreateStoreInfluenceWithLock(id uint64) *StoreInfluence {
+func (m *OpInfluence) getOrCreateStoreInfluenceLocked(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
@@ -74,7 +74,7 @@ func (m *OpInfluence) getOrCreateStoreInfluenceWithLock(id uint64) *StoreInfluen
 func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.getOrCreateStoreInfluenceWithLock(id)
+	return m.getOrCreateStoreInfluenceLocked(id)
 }
 
 // StoreInfluence records influences that pending operators will make.
