@@ -1540,17 +1540,13 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			log.Info("delete the keyspace group tso key",
 				zap.Uint32("keyspace-group-id", groupID))
 			// Clean up the remaining TSO keys.
-<<<<<<< HEAD
 			// TODO: support the Local TSO Allocator clean up.
 			err := kgm.tsoSvcStorage.DeleteTimestamp(
+				kgm.ctx,
 				keypath.TimestampPath(
 					keypath.KeyspaceGroupGlobalTSPath(groupID),
 				),
 			)
-=======
-
-			err := kgm.storage.DeleteTimestamp(kgm.ctx, groupID)
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 			if err != nil {
 				log.Warn("failed to delete the keyspace group tso key",
 					zap.Uint32("keyspace-group-id", groupID),

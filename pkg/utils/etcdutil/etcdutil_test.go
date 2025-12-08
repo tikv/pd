@@ -226,14 +226,8 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	defer etcd2.Close()
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
-<<<<<<< HEAD
 	// scale in etcd1
 	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
-=======
-	// Create a client connected to etcd2 to perform the removal
-	cfg2 := etcd2.Config()
-	client3, err := CreateEtcdClient(nil, cfg2.ListenClientUrls, TestEtcdClientPurpose, true)
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 	re.NoError(err)
 	checkMembers(re, client2, []*embed.Etcd{etcd2})
 }

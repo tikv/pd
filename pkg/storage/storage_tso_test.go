@@ -15,72 +15,30 @@
 package storage
 
 import (
-<<<<<<< HEAD
+	"context"
 	"path"
 	"strconv"
-=======
-	"context"
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-<<<<<<< HEAD
-=======
 
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-<<<<<<< HEAD
-=======
-const (
-	testGroupID     = uint32(1)
-	testLeaderKey   = "test-leader-key"
-	testLeaderValue = "test-leader-value"
-)
-
 var defaultContext = context.Background()
 
-func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	storage = NewStorageWithEtcdBackend(client)
-	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test")
-	err := leadership.Campaign(60, testLeaderValue)
-	require.NoError(t, err)
-	return storage, clean, leadership
-}
-
-func TestSaveTimestampWithTimeout(t *testing.T) {
-	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/slowTxn", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/slowTxn"))
-	}()
-	storage, clean, leadership := prepare(t)
-	defer clean()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership)
-	re.ErrorIs(err, context.DeadlineExceeded)
-}
-
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
 	storage, clean := newTestStorage(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
-<<<<<<< HEAD
-	err := storage.SaveTimestamp(keypath.TimestampKey, expectedTS)
-=======
-	err := storage.SaveTimestamp(defaultContext, testGroupID, expectedTS, leadership)
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
+	err := storage.SaveTimestamp(defaultContext, keypath.TimestampKey, expectedTS)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
@@ -120,19 +78,12 @@ func TestTimestampTxn(t *testing.T) {
 	storage, clean := newTestStorage(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
-<<<<<<< HEAD
-	err := storage.SaveTimestamp(keypath.TimestampKey, globalTS1)
+	err := storage.SaveTimestamp(defaultContext, keypath.TimestampKey, globalTS1)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(keypath.TimestampKey, globalTS2)
-=======
-	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS1, leadership)
-	re.NoError(err)
+	err = storage.SaveTimestamp(defaultContext, keypath.TimestampKey, globalTS2)
 
-	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS2, leadership)
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 	re.Error(err)
 
 	ts, err := storage.LoadTimestamp("")
@@ -140,57 +91,8 @@ func TestTimestampTxn(t *testing.T) {
 	re.Equal(globalTS1, ts)
 }
 
-<<<<<<< HEAD
 func newTestStorage(t *testing.T) (Storage, func()) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 	return NewStorageWithEtcdBackend(client, rootPath), clean
-=======
-func TestSaveTimestampWithLeaderCheck(t *testing.T) {
-	re := require.New(t)
-	storage, clean, leadership := prepare(t)
-	defer clean()
-
-	// testLeaderKey -> testLeaderValue
-	globalTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
-	re.NoError(err)
-	ts, err := storage.LoadTimestamp(testGroupID)
-	re.NoError(err)
-	re.Equal(globalTS, ts)
-
-	err = storage.SaveTimestamp(context.Background(), testGroupID, globalTS.Add(time.Second), &election.Leadership{})
-	re.True(errs.IsLeaderChanged(err))
-	ts, err = storage.LoadTimestamp(testGroupID)
-	re.NoError(err)
-	re.Equal(globalTS, ts)
-
-	// testLeaderKey -> ""
-	err = storage.Save(leadership.GetLeaderKey(), "")
-	re.NoError(err)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
-	re.True(errs.IsLeaderChanged(err))
-	ts, err = storage.LoadTimestamp(testGroupID)
-	re.NoError(err)
-	re.Equal(globalTS, ts)
-
-	// testLeaderKey -> non-existent
-	err = storage.Remove(leadership.GetLeaderKey())
-	re.NoError(err)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
-	re.True(errs.IsLeaderChanged(err))
-	ts, err = storage.LoadTimestamp(testGroupID)
-	re.NoError(err)
-	re.Equal(globalTS, ts)
-
-	// testLeaderKey -> testLeaderValue
-	err = storage.Save(leadership.GetLeaderKey(), testLeaderValue)
-	re.NoError(err)
-	globalTS = globalTS.Add(time.Second)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
-	re.NoError(err)
-	ts, err = storage.LoadTimestamp(testGroupID)
-	re.NoError(err)
-	re.Equal(globalTS, ts)
->>>>>>> f75df33d1d (tso: improve the high availability of etcd client for etcd save timestamp (#9986))
 }
