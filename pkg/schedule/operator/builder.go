@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -673,12 +674,35 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 			b.targetLeaderStoreID = targetLeaderStoreID
 			continue
 		}
+		indistinguishable := true
 		for _, f := range leaderPreferFuncs {
 			if best, next := f(b.targetLeaderStoreID), f(targetLeaderStoreID); best < next {
 				b.targetLeaderStoreID = targetLeaderStoreID
+				indistinguishable = false
 				break
 			} else if best > next {
+				indistinguishable = false
 				break
+			}
+		}
+		// If all comparison functions consider these two stores are indistinguishable,
+		// we use leader score as the final tie breaker.
+		if indistinguishable {
+			current := b.GetBasicCluster().GetStore(b.targetLeaderStoreID)
+			candidate := b.GetBasicCluster().GetStore(targetLeaderStoreID)
+
+			currentCountScore := current.LeaderScore(constant.ByCount, 0)
+			candidateCountScore := candidate.LeaderScore(constant.ByCount, 0)
+
+			if currentCountScore > candidateCountScore {
+				b.targetLeaderStoreID = targetLeaderStoreID
+			} else if currentCountScore == candidateCountScore {
+				currentSizeScore := current.LeaderScore(constant.BySize, 0)
+				candidateSizeScore := candidate.LeaderScore(constant.BySize, 0)
+
+				if currentSizeScore > candidateSizeScore {
+					b.targetLeaderStoreID = targetLeaderStoreID
+				}
 			}
 		}
 	}
