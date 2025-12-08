@@ -3179,6 +3179,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3274,6 +3275,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3388,6 +3390,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.EvictStoppingStoreScheduler.String()))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
