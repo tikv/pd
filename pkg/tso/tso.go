@@ -77,11 +77,11 @@ type timestampOracle struct {
 }
 
 func (t *timestampOracle) getStorageTimeout() time.Duration {
-	timeout := t.saveInterval - time.Second
-	if timeout < config.DefaultTSOSaveInterval-1 {
-		return config.DefaultTSOSaveInterval - 1
+	timeout := t.saveInterval
+	if timeout < config.DefaultTSOSaveInterval {
+		return config.DefaultTSOSaveInterval - time.Second
 	}
-	return timeout
+	return timeout - time.Second
 }
 
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
