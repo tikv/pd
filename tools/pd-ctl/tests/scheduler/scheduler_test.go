@@ -77,12 +77,12 @@ func (suite *schedulerTestSuite) TearDownTest() {
 		cmd := ctl.GetRootCmd()
 
 		var currentSchedulers []string
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &currentSchedulers)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &currentSchedulers)
 		for _, scheduler := range suite.defaultSchedulers {
 			if slice.NoneOf(currentSchedulers, func(i int) bool {
 				return currentSchedulers[i] == scheduler
 			}) {
-				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler}, nil)
+				echo := tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler}, nil)
 				re.Contains(echo, "Success!")
 			}
 		}
@@ -90,7 +90,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 			if slice.NoneOf(suite.defaultSchedulers, func(i int) bool {
 				return suite.defaultSchedulers[i] == scheduler
 			}) {
-				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", scheduler}, nil)
+				echo := tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", scheduler}, nil)
 				re.Contains(echo, "Success!")
 			}
 		}
@@ -343,9 +343,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
 	re.Contains(echo, "Success")
 
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-stopping-store-scheduler"}, nil)
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-stopping-store-scheduler"}, nil)
 	re.Contains(echo, "Success")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-stopping-store-scheduler"}, nil)
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-stopping-store-scheduler"}, nil)
 	re.Contains(echo, "Success")
 
 	// test show scheduler with paused and disabled status.
@@ -548,39 +548,6 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		return !strings.Contains(echo, "evict-leader-scheduler")
 	})
 
-<<<<<<< HEAD
-=======
-	// test balance key range scheduler
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler"}, nil)
-	re.NotContains(echo, "Success!")
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "test", "a", "b"}, nil)
-	re.Contains(echo, "Success!")
-	var rangeConf []map[string]any
-	var jobConf map[string]any
-	testutil.Eventually(re, func() bool {
-		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
-		if len(rangeConf) == 0 {
-			return false
-		}
-		jobConf = rangeConf[0]
-		return jobConf["rule"] == "learner-scatter" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
-	})
-	re.Equal(float64(30*time.Minute.Nanoseconds()), jobConf["timeout"])
-	re.Equal("running", jobConf["status"])
-	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
-	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
-	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
-
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "learner", "a", "b"}, nil)
-	re.Contains(echo, "Success!")
-	testutil.Eventually(re, func() bool {
-		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
-		return len(rangeConf) == 2
-	})
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-range-scheduler"}, nil)
-	re.Contains(echo, "Success!")
-
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))
 	// test balance leader config
 	conf = make(map[string]any)
 	conf1 := make(map[string]any)
@@ -607,50 +574,35 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 
-<<<<<<< HEAD
 	// test evict-stopping-store scheduler config
 	conf = make(map[string]any)
 	conf1 = make(map[string]any)
 	testutil.Eventually(re, func() bool {
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-stopping-store-scheduler", "show"}, &conf)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-stopping-store-scheduler", "show"}, &conf)
 		return conf["batch"] == 3.
 	})
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-stopping-store-scheduler", "set", "batch", "10"}, nil)
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-stopping-store-scheduler", "set", "batch", "10"}, nil)
 	re.Contains(echo, "Success!")
 	testutil.Eventually(re, func() bool {
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-stopping-store-scheduler"}, &conf1)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-stopping-store-scheduler"}, &conf1)
 		return conf1["batch"] == 10.
 	})
 
 	// test evict slow store scheduler config
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-store-scheduler"}, nil)
-=======
-	// test evict slow store scheduler
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-store-scheduler"}, nil)
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))
+
 	re.Contains(echo, "Success!")
 	conf = make(map[string]any)
 	conf1 = make(map[string]any)
 	testutil.Eventually(re, func() bool {
-<<<<<<< HEAD
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "show"}, &conf)
+		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "show"}, &conf)
 		return conf["recovery-duration"] == 1800.
 	})
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "recovery-duration", "100"}, nil)
-	re.Contains(echo, "Success!")
-	testutil.Eventually(re, func() bool {
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
-		return conf1["recovery-duration"] == 100.
-=======
-		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "show"}, &conf)
-		return conf["batch"] == 3.
-	})
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "batch", "10"}, nil)
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "recovery-duration", "100"}, nil)
 	re.Contains(echo, "Success!")
 	testutil.Eventually(re, func() bool {
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
-		return conf1["batch"] == 10.
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))
+		return conf1["recovery-duration"] == 100.
 	})
 }
 
@@ -701,17 +653,9 @@ func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.T
 	// case 2: add grant-hot-region-scheduler when balance-hot-region-scheduler is paused
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-hot-region-scheduler", "60"}, nil)
 	re.Contains(echo, "Success!")
-<<<<<<< HEAD
 	suite.checkDefaultSchedulers(re, cmd, pdAddr)
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
-	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
-=======
-	suite.checkDefaultSchedulers(cmd, pdAddr)
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
 	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-hot-region-scheduler"}, nil)
-	re.Contains(echo, "Success!")
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))
 
 	// case 3: add grant-hot-region-scheduler when balance-hot-region-scheduler is disabled
 	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, map[string]bool{
@@ -942,7 +886,7 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 	expected1["write-leader-priorities"] = []any{"query", "byte"}
 	checkHotSchedulerConfig(expected1)
 	// cannot set qps as write-peer-priorities
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
 	re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
 	checkHotSchedulerConfig(expected1)
 }
@@ -964,7 +908,6 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
 
-<<<<<<< HEAD
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -996,43 +939,19 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 
 	suite.checkDefaultSchedulers(re, cmd, pdAddr)
 
-	echo := mustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
+	echo := tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
 	re.Contains(echo, "Success!")
 	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "1 store(s) RegionNotMatchRule; ")
 
 	// scheduler delete command
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
-=======
-	echo := tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
-	re.Contains(echo, "Success!")
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "region-schedule-limit", "0"}, nil)
-	re.Contains(echo, "Success!")
-	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "balance-region-scheduler reach limit")
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
 
-	// scheduler delete command
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-leader-scheduler"}, nil)
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))
 	re.Contains(echo, "Success!")
 	checkSchedulerDescribeCommand("balance-region-scheduler", "disabled", "")
 
-<<<<<<< HEAD
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
-	re.Contains(echo, "Success!")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
-=======
-	// scheduler add command
-	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
-	re.Contains(echo, "Success!")
-	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
-
-	// scheduler pause command
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
 	re.Contains(echo, "Success!")
-	checkSchedulerDescribeCommand("balance-leader-scheduler", "paused", "")
-
-	// scheduler resume command
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))
 	re.Contains(echo, "Success!")
 	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
 }
@@ -1148,82 +1067,3 @@ func compareGrantHotRegionSchedulerConfig(expect, actual map[string]any) bool {
 	}
 	return true
 }
-<<<<<<< HEAD
-=======
-
-// TestHotSchedulerUpgrade tests the config change after pd upgrade to 5.2.0
-// It only tests the config change of hot scheduler with non ms.
-// Because it change the cluster version, so need to test in another test.
-func TestHotSchedulerUpgrade(t *testing.T) {
-	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
-	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := ctl.GetRootCmd()
-	stores := []*metapb.Store{
-		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-	}
-	for _, store := range stores {
-		pdTests.MustPutStore(re, cluster, store)
-	}
-	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-	// wait scheduelrs run
-	testutil.Eventually(re, func() bool {
-		schedulers := []string{}
-		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
-		return len(schedulers) == len(sc.DefaultSchedulers)
-	})
-	// check config in version 2.0
-	var conf map[string]any
-	tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
-	re.NotContains(conf["write-leader-priorities"], "query")
-	// test compatibility
-	re.Equal("2.0.0", leaderServer.GetClusterVersion().String())
-	for _, store := range stores {
-		version := versioninfo.HotScheduleWithQuery
-		store.Version = versioninfo.MinSupportedVersion(version).String()
-		store.LastHeartbeat = time.Now().UnixNano()
-		pdTests.MustPutStore(re, cluster, store)
-	}
-	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
-	// after upgrading, we can use query automatically.
-	testutil.Eventually(re, func() bool {
-		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
-		return slice.Contains(conf["write-leader-priorities"].([]any), "query")
-	})
-	// cannot set qps as write-peer-priorities
-	echo := tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
-	re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
-}
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))

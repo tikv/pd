@@ -73,11 +73,7 @@ func GetRootCmd() *cobra.Command {
 		command.NewKeyspaceGroupCommand(),
 		command.NewKeyspaceCommand(),
 		command.NewResourceManagerCommand(),
-<<<<<<< HEAD
-=======
-		command.NewMaintenanceCommand(),
 		command.NewMicroServicesCommand(),
->>>>>>> d5d5a03917 (ctl: support to query the members and primary by using pdctl (#9564))
 	)
 
 	return rootCmd

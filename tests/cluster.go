@@ -33,13 +33,12 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
-	ks "github.com/tikv/pd/pkg/keyspace/constant"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/tso"
+	ptso "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -238,7 +237,7 @@ func (s *TestServer) GetLeader() *pdpb.Member {
 // of PD cluster for given dc-location.
 func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
 	// For the leader of Global TSO Allocator, it's the PD leader
-	if dcLocation == tso.GlobalDCLocation {
+	if dcLocation == ptso.GlobalDCLocation {
 		return s.GetLeader()
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -246,7 +245,7 @@ func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
 	if err != nil {
 		return nil
 	}
-	return allocator.(*tso.LocalTSOAllocator).GetAllocatorLeader()
+	return allocator.(*ptso.LocalTSOAllocator).GetAllocatorLeader()
 }
 
 // GetKeyspaceManager returns the current TestServer's Keyspace Manager.
@@ -293,7 +292,7 @@ func (s *TestServer) IsLeader() bool {
 
 // IsAllocatorLeader returns whether the server is a TSO Allocator leader or not.
 func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
-	if dcLocation == tso.GlobalDCLocation {
+	if dcLocation == ptso.GlobalDCLocation {
 		return s.IsLeader()
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -301,7 +300,7 @@ func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
 	if err != nil {
 		return false
 	}
-	return !s.server.IsClosed() && allocator.(*tso.LocalTSOAllocator).IsAllocatorLeader()
+	return !s.server.IsClosed() && allocator.(*ptso.LocalTSOAllocator).IsAllocatorLeader()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -441,7 +440,7 @@ func (s *TestServer) WaitLeader() bool {
 }
 
 // GetTSOAllocatorManager returns the server's TSO Allocator Manager.
-func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
+func (s *TestServer) GetTSOAllocatorManager() *ptso.AllocatorManager {
 	return s.server.GetTSOAllocatorManager()
 }
 
@@ -896,7 +895,7 @@ func (c *TestCluster) GetDefaultTSOPrimaryServer() *tso.Server {
 	if c.tsoCluster == nil {
 		return nil
 	}
-	return c.tsoCluster.GetPrimaryServer(ks.DefaultKeyspaceID, ks.DefaultKeyspaceGroupID)
+	return c.tsoCluster.GetPrimaryServer(uint32(0), uint32(0))
 }
 
 // SetSchedulingCluster sets the scheduling cluster.

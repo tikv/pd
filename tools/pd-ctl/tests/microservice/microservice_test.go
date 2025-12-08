@@ -84,7 +84,7 @@ func (suite *microServiceSuite) startCluster() {
 		cancel()
 	})
 
-	cluster, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	cluster, err := pdTests.NewTestAPICluster(ctx, 1)
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -93,7 +93,7 @@ func (suite *microServiceSuite) startCluster() {
 	re.NoError(leaderServer.BootstrapCluster())
 	leaderServer.GetRaftCluster().SetPrepared()
 	// start scheduling cluster
-	tc, err := pdTests.NewTestSchedulingCluster(ctx, 2, cluster)
+	tc, err := pdTests.NewTestSchedulingCluster(ctx, 2, cluster.GetConfig().GetClientURL())
 	re.NoError(err)
 	tc.WaitForPrimaryServing(re)
 	tc.GetPrimaryServer().GetCluster().SetPrepared()
