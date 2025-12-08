@@ -27,15 +27,16 @@ const (
 	ResourceManagerCategory = "resource-manager"
 	ruMeteringVersion       = "1"
 
-	meteringDataOltpRUField              = "oltp_ru"
-	meteringDataOlapRUField              = "olap_ru"
+	meteringDataOLTPRUField              = "oltp_ru"
+	meteringDataOLAPRUField              = "olap_ru"
+	meteringDataWriteBytesField          = "write_bytes"
 	meteringDataCrossAZTrafficBytesField = "cross_az_traffic_bytes"
 )
 
 type ruMetering struct {
-	// TODO: distinguish the DML and DDL RU consumption from the OLTP RU.
 	oltpRU              float64
 	olapRU              float64
+	writeBytes          uint64
 	crossAZTrafficBytes uint64
 }
 
@@ -46,6 +47,7 @@ func (rm *ruMetering) add(consumption *consumptionItem) {
 	} else {
 		rm.oltpRU += ru
 	}
+	rm.writeBytes += uint64(consumption.WriteBytes)
 	rm.crossAZTrafficBytes += consumption.ReadCrossAzTrafficBytes + consumption.WriteCrossAzTrafficBytes
 }
 
@@ -55,6 +57,10 @@ func (rm *ruMetering) oltpMeteringValue() common.MeteringValue {
 
 func (rm *ruMetering) olapMeteringValue() common.MeteringValue {
 	return metering.NewRUValue(rm.olapRU)
+}
+
+func (rm *ruMetering) writeBytesMeteringValue() common.MeteringValue {
+	return metering.NewBytesValue(rm.writeBytes)
 }
 
 func (rm *ruMetering) crossAZTrafficBytesMeteringValue() common.MeteringValue {
@@ -113,8 +119,9 @@ func (c *ruCollector) Aggregate() []map[string]any {
 			metering.DataVersionField:            ruMeteringVersion,
 			metering.DataClusterIDField:          keyspaceName, // keyspaceName is the logical cluster ID in the metering data.
 			metering.DataSourceNameField:         metering.SourceNamePD,
-			meteringDataOltpRUField:              ruMetering.oltpMeteringValue(),
-			meteringDataOlapRUField:              ruMetering.olapMeteringValue(),
+			meteringDataOLTPRUField:              ruMetering.oltpMeteringValue(),
+			meteringDataOLAPRUField:              ruMetering.olapMeteringValue(),
+			meteringDataWriteBytesField:          ruMetering.writeBytesMeteringValue(),
 			meteringDataCrossAZTrafficBytesField: ruMetering.crossAZTrafficBytesMeteringValue(),
 		})
 	}
