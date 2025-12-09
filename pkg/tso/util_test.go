@@ -16,9 +16,12 @@ package tso
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/keypath"
+
+	"github.com/tikv/pd/server/config"
 )
 
 func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
@@ -90,4 +93,16 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupPrimaryPath(t *testing.T) {
 		re.Equal(tt.id, id)
 		re.NoError(err)
 	}
+}
+
+func TestTimeStamp(t *testing.T) {
+	re := require.New(t)
+	oracle := timestampOracle{
+		saveInterval: config.DefaultTSOSaveInterval + time.Second,
+	}
+	re.Equal(config.DefaultTSOSaveInterval, oracle.getStorageTimeout())
+	oracle.saveInterval = config.DefaultTSOSaveInterval
+	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
+	oracle.saveInterval = config.DefaultTSOSaveInterval - 2*time.Second
+	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
 }

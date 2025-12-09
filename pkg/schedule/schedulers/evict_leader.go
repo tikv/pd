@@ -430,7 +430,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		if !inputHasStoreID {
 			handler.config.resumeLeaderTransferIfExist(id)
-			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
+			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
 	} else if exist {
@@ -440,14 +440,14 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	newRanges, err = getKeyRanges(ranges)
 	if err != nil {
 		handler.config.resumeLeaderTransferIfExist(id)
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// StoreIDWithRanges is only changed in update function.
 	err = handler.config.update(id, newRanges, batch)
 	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
