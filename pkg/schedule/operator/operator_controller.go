@@ -863,13 +863,8 @@ func (oc *Controller) OperatorCount(kind OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-<<<<<<< HEAD
-func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, opts ...OpInfluenceOption) OpInfluence {
-	influence := OpInfluence{
-=======
 func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInfluenceOption) *OpInfluence {
 	influence := &OpInfluence{
->>>>>>> 63c9a670cb (operator: fix data race avoid panic (#9979))
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
 	oc.operators.Range(
@@ -877,7 +872,7 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInflue
 			op := value.(*Operator)
 			if !op.CheckTimeout() && !op.CheckSuccess() {
 				region := cluster.GetRegion(op.RegionID())
-				for _, opt := range opts {
+				for _, opt := range ops {
 					if !opt(region) {
 						return true
 					}

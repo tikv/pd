@@ -44,10 +44,6 @@ func (m *OpInfluence) Add(other *OpInfluence) {
 	}
 }
 
-<<<<<<< HEAD
-// GetStoreInfluence get storeInfluence of specific store.
-func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
-=======
 func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -66,7 +62,6 @@ func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
 }
 
 func (m *OpInfluence) getOrCreateStoreInfluenceLocked(id uint64) *StoreInfluence {
->>>>>>> 63c9a670cb (operator: fix data race avoid panic (#9979))
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
