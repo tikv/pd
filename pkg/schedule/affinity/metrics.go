@@ -35,8 +35,4 @@ var (
 
 func init() {
 	prometheus.MustRegister(affinityStatusGauge)
-	// Touch metrics to avoid unused warnings before the policy wiring is added.
-	_ = groupCount
-	_ = regionCount
-	_ = affinityRegionCount
 }
