@@ -56,7 +56,7 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	validate := func(ranges []GroupKeyRanges) error {
 		manager.Lock()
 		defer manager.Unlock()
-		return manager.validateNoKeyRangeOverlap(ranges)
+		return manager.validateNoOverlapLocked(ranges)
 	}
 
 	// Test 1: Non-overlapping ranges should succeed
