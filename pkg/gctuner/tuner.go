@@ -60,11 +60,6 @@ func init() {
 	SetMaxGCPercent(defaultMaxGCPercent)
 }
 
-// SetDefaultGOGC is to set the default GOGC value.
-func SetDefaultGOGC() {
-	util.SetGCPercent(int(defaultGCPercent))
-}
-
 // Tuning sets the threshold of heap which will be respect by gogc tuner.
 // When Tuning, the env GOGC will not be take effect.
 // threshold: disable tuning if threshold == 0
@@ -158,14 +153,20 @@ func (t *tuner) tuning() {
 
 	inuse := readMemoryInuse()
 	threshold := t.getThreshold()
-	log.Debug("tuning", zap.Uint64("inuse", inuse), zap.Uint64("threshold", threshold),
+	log.Info("tuning", zap.Uint64("inuse", inuse), zap.Uint64("threshold", threshold),
 		zap.Bool("enable-go-gc-tuner", EnableGOGCTuner.Load()))
 	// stop gc tuning
 	if threshold <= 0 {
 		return
 	}
 	if EnableGOGCTuner.Load() {
-		t.setGCPercent(calcGCPercent(inuse, threshold))
+		percent := calcGCPercent(inuse, threshold)
+		log.Info("tuning", zap.Uint64("inuse", inuse),
+			zap.Uint64("threshold", threshold),
+			zap.Bool("enable-go-gc-tuner", EnableGOGCTuner.Load()),
+			zap.Uint32("new-gc-percent", percent),
+		)
+		t.setGCPercent(percent)
 	}
 }
 
