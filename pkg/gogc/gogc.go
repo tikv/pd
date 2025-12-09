@@ -30,14 +30,14 @@ func init() {
 	}
 }
 
-// SetGOGC update GOGC and related metrics.
-func SetGOGC(val int) int {
+// SetGCPercent update GOGC percent and related metrics.
+// return the previous value of GOGC percent if success.
+func SetGCPercent(val int) {
 	if val <= 0 {
 		val = 100
 	}
-	result := debug.SetGCPercent(val)
+	debug.SetGCPercent(val)
 	atomic.StoreInt64(&gogcValue, int64(val))
-	return result
 }
 
 // GetGOGC returns the current value of GOGC.

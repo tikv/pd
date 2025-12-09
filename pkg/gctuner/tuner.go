@@ -62,7 +62,7 @@ func init() {
 
 // SetDefaultGOGC is to set the default GOGC value.
 func SetDefaultGOGC() {
-	util.SetGOGC(int(defaultGCPercent))
+	util.SetGCPercent(int(defaultGCPercent))
 }
 
 // Tuning sets the threshold of heap which will be respect by gogc tuner.
@@ -83,8 +83,8 @@ func Tuning(threshold uint64) {
 	}
 }
 
-// GetGOGC returns the current GCPercent.
-func GetGOGC() (percent uint32) {
+// GetGOGCPercent returns the current GCPercent.
+func GetGOGCPercent() (percent uint32) {
 	t := globalTuner.Load()
 	if t == nil {
 		percent = defaultGCPercent
@@ -140,10 +140,9 @@ func (t *tuner) getThreshold() uint64 {
 	return t.threshold.Load()
 }
 
-func (t *tuner) setGCPercent(percent uint32) uint32 {
-	result := uint32(util.SetGOGC(int(percent)))
-	t.gcPercent.Store(result)
-	return result
+func (t *tuner) setGCPercent(percent uint32) {
+	util.SetGCPercent(int(percent))
+	t.gcPercent.Store(percent)
 }
 
 func (t *tuner) getGCPercent() uint32 {

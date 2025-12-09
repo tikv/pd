@@ -23,8 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var testHeap []byte
-
 func TestTuner(t *testing.T) {
 	EnableGOGCTuner.Store(true)
 	memLimit := uint64(1000 * units.MiB) // 1000 MB
@@ -34,7 +32,6 @@ func TestTuner(t *testing.T) {
 	require.Equal(t, defaultGCPercent, tn.getGCPercent())
 
 	// no heap
-	testHeap = make([]byte, 1)
 	runtime.GC()
 	runtime.GC()
 	for range 100 {
@@ -44,7 +41,7 @@ func TestTuner(t *testing.T) {
 	}
 
 	// 1/4 threshold
-	testHeap = make([]byte, threshold/4)
+
 	for range 100 {
 		runtime.GC()
 		require.GreaterOrEqual(t, tn.getGCPercent(), maxGCPercent.Load()/2)
@@ -52,7 +49,7 @@ func TestTuner(t *testing.T) {
 	}
 
 	// 1/2 threshold
-	testHeap = make([]byte, threshold/2)
+
 	runtime.GC()
 	for range 100 {
 		runtime.GC()
@@ -63,7 +60,7 @@ func TestTuner(t *testing.T) {
 	}
 
 	// 3/4 threshold
-	testHeap = make([]byte, threshold/4*3)
+
 	runtime.GC()
 	for range 100 {
 		runtime.GC()
@@ -72,7 +69,7 @@ func TestTuner(t *testing.T) {
 	}
 
 	// out of threshold
-	testHeap = make([]byte, threshold+1024)
+
 	runtime.GC()
 	for range 100 {
 		runtime.GC()
@@ -97,4 +94,30 @@ func TestCalcGCPercent(t *testing.T) {
 	require.Equal(t, uint32(100), calcGCPercent(3*gb, 4*gb))
 	require.Equal(t, minGCPercent.Load(), calcGCPercent(4*gb, 4*gb))
 	require.Equal(t, minGCPercent.Load(), calcGCPercent(5*gb, 4*gb))
+}
+
+func TestGetGOGC(t *testing.T) {
+	re := require.New(t)
+	defer func() {
+		Tuning(0)
+		gt := globalTuner.Load()
+		re.Nil(gt)
+	}()
+	re.Equal(defaultGCPercent, GetGOGCPercent())
+	// init tuner
+	threshold := uint64(units.GiB)
+	Tuning(threshold)
+	re.Equal(defaultGCPercent, GetGOGCPercent())
+	gt := globalTuner.Load()
+	re.Equal(threshold, (*gt).getThreshold())
+
+	// update threshold
+	threshold = 50
+	Tuning(threshold)
+	re.Equal(threshold, (*gt).getThreshold())
+
+	// update gc percent
+	percent := uint32(30)
+	(*gt).setGCPercent(percent)
+	re.Equal(percent, GetGOGCPercent())
 }
