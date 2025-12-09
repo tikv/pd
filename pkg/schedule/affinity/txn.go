@@ -17,6 +17,7 @@ package affinity
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -115,7 +116,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	}
 
 	// Step 2: Convert and validate key ranges no overlaps
-	if err := m.validateNoKeyRangeOverlap(changes); err != nil {
+	if err := m.validateNoKeyRangeOverlapLocked(changes); err != nil {
 		return err
 	}
 
@@ -360,7 +361,6 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	defer m.metaMutex.Unlock()
 
 	// Step 1: Validate the added KeyRanges.
-	var newRangesToValidate []GroupKeyRanges
 	for _, op := range addOps {
 		currentRanges, err := m.getCurrentRanges(op.GroupID)
 		if err != nil {
@@ -372,16 +372,10 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 			GroupID:   op.GroupID,
 			KeyRanges: slices.Concat(currentRanges.KeyRanges, op.KeyRanges),
 		}
-
-		// Collect new ranges for overlap validation
-		newRangesToValidate = append(newRangesToValidate, GroupKeyRanges{
-			KeyRanges: op.KeyRanges,
-			GroupID:   op.GroupID,
-		})
 	}
 	// Validate no overlaps with newly added ranges
-	if len(newRangesToValidate) > 0 {
-		if err := m.validateNoKeyRangeOverlap(newRangesToValidate); err != nil {
+	if len(addOps) > 0 {
+		if err := m.validateNoKeyRangeOverlapLocked(addOps); err != nil {
 			return err
 		}
 	}
@@ -488,12 +482,7 @@ func (m *Manager) getCurrentRanges(groupID string) (GroupKeyRanges, error) {
 		return GroupKeyRanges{}, errors.Errorf("label rule not found for group %s", groupID)
 	}
 
-	dataSlice, ok := labelRule.Data.([]*labeler.KeyRangeRule)
-	if !ok {
-		return GroupKeyRanges{}, errors.Errorf("invalid label rule data type for group %s, got type %T", groupID, labelRule.Data)
-	}
-
-	return parseKeyRangesFromData(dataSlice, groupID)
+	return extractKeyRangesFromLabelRule(labelRule)
 }
 
 // applyRemoveOps filters out ranges that match remove operations.
@@ -583,6 +572,8 @@ func decodeHexKey(hexStr, groupID, keyType string) ([]byte, error) {
 }
 
 // extractKeyRangesFromLabelRule extracts key ranges from a label rule data.
+// This function expects the rule to have already been processed by checkAndAdjust(),
+// which guarantees that rule.Data is of type []*labeler.KeyRangeRule.
 func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) (GroupKeyRanges, error) {
 	if rule == nil || rule.Data == nil {
 		return GroupKeyRanges{}, nil
@@ -593,33 +584,13 @@ func extractKeyRangesFromLabelRule(rule *labeler.LabelRule) (GroupKeyRanges, err
 		return GroupKeyRanges{}, nil
 	}
 
-	switch data := rule.Data.(type) {
-	case []*labeler.KeyRangeRule:
-		return parseKeyRangesFromData(data, groupID)
-	case []any:
-		converted := make([]*labeler.KeyRangeRule, 0, len(data))
-		for _, item := range data {
-			entry, ok := item.(map[string]any)
-			if !ok {
-				return GroupKeyRanges{}, errs.ErrInvalidLabelRuleFormat.FastGenByArgs("is not a map")
-			}
-			startKey, ok := entry["start_key"].(string)
-			if !ok {
-				return GroupKeyRanges{}, errs.ErrInvalidLabelRuleFormat.FastGenByArgs("missing or invalid 'start_key'")
-			}
-			endKey, ok := entry["end_key"].(string)
-			if !ok {
-				return GroupKeyRanges{}, errs.ErrInvalidLabelRuleFormat.FastGenByArgs("missing or invalid 'end_key'")
-			}
-			converted = append(converted, &labeler.KeyRangeRule{
-				StartKeyHex: startKey,
-				EndKeyHex:   endKey,
-			})
-		}
-		return parseKeyRangesFromData(converted, groupID)
-	default:
-		return GroupKeyRanges{}, errs.ErrAffinityGroupContent.FastGenByArgs("invalid label rule data format")
+	data, ok := rule.Data.([]*labeler.KeyRangeRule)
+	if !ok {
+		return GroupKeyRanges{}, errs.ErrAffinityGroupContent.FastGenByArgs(
+			fmt.Sprintf("invalid label rule data type for group %s, got type %T", groupID, rule.Data))
 	}
+
+	return parseKeyRangesFromData(data, groupID)
 }
 
 // checkKeyRangesOverlap checks if two key ranges overlap.
@@ -658,10 +629,10 @@ type flattenKeyRange struct {
 	groupID string
 }
 
-// validateNoKeyRangeOverlap validates that the given key ranges do not overlap with existing ones.
+// validateNoKeyRangeOverlapLocked validates that the given key ranges do not overlap with existing ones.
 // It should be called with the manager lock held.
 // Uses in-memory keyRanges cache to avoid repeated labeler access and reduce lock contention.
-func (m *Manager) validateNoKeyRangeOverlap(newRanges []GroupKeyRanges) error {
+func (m *Manager) validateNoKeyRangeOverlapLocked(newRanges []GroupKeyRanges) error {
 	var allNewRanges []flattenKeyRange
 	for _, gkr := range newRanges {
 		for _, kr := range gkr.KeyRanges {
