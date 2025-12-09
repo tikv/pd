@@ -221,17 +221,18 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				ResourceGroupName: rg.Name,
 				KeyspaceId:        &rmpb.KeyspaceIDValue{Value: keyspaceID},
 			}
-			requiredToken := 0.0
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						requiredToken = re.GetValue()
-						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, krgm.getServiceLimiter())
+						requiredToken := re.GetValue()
+						// Sample the latest RU demand.
+						grt := krgm.getOrCreateGroupRUTracker(rg.Name)
+						grt.sample(clientUniqueID, now, requiredToken)
+						// Request the tokens from the resource group.
+						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, grt, krgm.getServiceLimiter())
 					}
-					// Sample the latest RU demand.
-					krgm.getOrCreateGroupRUTracker(rg.Name).sample(clientUniqueID, now, requiredToken)
 					if tokens == nil {
 						continue
 					}
