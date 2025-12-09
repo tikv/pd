@@ -241,7 +241,7 @@ const (
 	defaultServerMemoryLimitGCTrigger = 0.7
 	minServerMemoryLimitGCTrigger     = 0.5
 	maxServerMemoryLimitGCTrigger     = 0.99
-	defaultEnableGOGCTuner            = false
+	defaultEnableGOGCTuner            = true
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
