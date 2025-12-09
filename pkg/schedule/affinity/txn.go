@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -116,7 +117,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	}
 
 	// Step 2: Convert and validate key ranges no overlaps
-	if err := m.validateNoKeyRangeOverlapLocked(changes); err != nil {
+	if err := m.validateNoOverlapLocked(changes); err != nil {
 		return err
 	}
 
@@ -375,7 +376,7 @@ func (m *Manager) UpdateAffinityGroupKeyRanges(addOps, removeOps []GroupKeyRange
 	}
 	// Validate no overlaps with newly added ranges
 	if len(addOps) > 0 {
-		if err := m.validateNoKeyRangeOverlapLocked(addOps); err != nil {
+		if err := m.validateNoOverlapLocked(addOps); err != nil {
 			return err
 		}
 	}
@@ -629,61 +630,49 @@ type flattenKeyRange struct {
 	groupID string
 }
 
-// validateNoKeyRangeOverlapLocked validates that the given key ranges do not overlap with existing ones.
+// validateNoOverlapLocked validates that the given key ranges do not overlap with existing ones.
 // It should be called with the manager lock held.
 // Uses in-memory keyRanges cache to avoid repeated labeler access and reduce lock contention.
-func (m *Manager) validateNoKeyRangeOverlapLocked(newRanges []GroupKeyRanges) error {
-	var allNewRanges []flattenKeyRange
-	for _, gkr := range newRanges {
+// Complexity: O(M log M) where M is the total number of ranges (new + existing).
+func (m *Manager) validateNoOverlapLocked(newRanges []GroupKeyRanges) error {
+	// Combine new ranges with existing ranges
+	combined := slices.Concat(newRanges, slices.Collect(maps.Values(m.keyRanges)))
+	return validateNoOverlap(combined)
+}
+
+// validateNoOverlap validates that ranges in the given slice don't overlap with each other.
+// This is a pure function that doesn't access any manager state.
+// Complexity: O(M log M) where M is the total number of ranges.
+func validateNoOverlap(ranges []GroupKeyRanges) error {
+	var allRanges []flattenKeyRange
+	for _, gkr := range ranges {
 		for _, kr := range gkr.KeyRanges {
-			allNewRanges = append(allNewRanges, flattenKeyRange{
+			allRanges = append(allRanges, flattenKeyRange{
 				KeyRange: kr,
 				groupID:  gkr.GroupID,
 			})
 		}
 	}
 
-	// Step 1: Check for overlaps within the new ranges themselves
-	// This is O(N²) where N is the total number of new ranges across all groups
-	for i := range allNewRanges {
-		for j := i + 1; j < len(allNewRanges); j++ {
-			if checkKeyRangesOverlap(
-				allNewRanges[i].StartKey, allNewRanges[i].EndKey,
-				allNewRanges[j].StartKey, allNewRanges[j].EndKey,
-			) {
-				if allNewRanges[i].groupID == allNewRanges[j].groupID {
-					return errs.ErrAffinityGroupContent.FastGenByArgs(
-						"key ranges overlap within group " + allNewRanges[i].groupID)
-				}
-				return errs.ErrAffinityGroupContent.FastGenByArgs(
-					"key range overlaps between groups: " +
-						allNewRanges[i].groupID + " and " + allNewRanges[j].groupID)
-			}
-		}
-	}
+	// Sort by start key
+	slices.SortFunc(allRanges, func(a, b flattenKeyRange) int {
+		return bytes.Compare(a.StartKey, b.StartKey)
+	})
 
-	// Step 2: Check new ranges against ALL existing ranges
-	// This is O(N × G×R) where N is new ranges, G is existing groups, R is ranges per group
-	// We must check against all existing groups, including those being updated,
-	// to catch cases like:
-	// - Adding ranges to group A and group B, where A's new range overlaps with B's existing range
-	// - Adding duplicate range to the same group
-	for _, newRange := range allNewRanges {
-		for _, existingGKR := range m.keyRanges {
-			for _, existingRange := range existingGKR.KeyRanges {
-				if checkKeyRangesOverlap(
-					newRange.StartKey, newRange.EndKey,
-					existingRange.StartKey, existingRange.EndKey,
-				) {
-					if newRange.groupID == existingGKR.GroupID {
-						return errs.ErrAffinityGroupContent.FastGenByArgs(
-							"key range overlaps with existing ranges in group " + newRange.groupID)
-					}
-					return errs.ErrAffinityGroupContent.FastGenByArgs(
-						"key range overlaps between groups: " +
-							newRange.groupID + " and " + existingGKR.GroupID)
-				}
+	// Check adjacent ranges for overlap
+	// After sorting, if any two ranges overlap, they must be adjacent in the sorted order
+	for i := range len(allRanges) - 1 {
+		if checkKeyRangesOverlap(
+			allRanges[i].StartKey, allRanges[i].EndKey,
+			allRanges[i+1].StartKey, allRanges[i+1].EndKey,
+		) {
+			if allRanges[i].groupID == allRanges[i+1].groupID {
+				return errs.ErrAffinityGroupContent.FastGenByArgs(
+					"key ranges overlap within group " + allRanges[i].groupID)
 			}
+			return errs.ErrAffinityGroupContent.FastGenByArgs(
+				"key range overlaps between groups: " +
+					allRanges[i].groupID + " and " + allRanges[i+1].groupID)
 		}
 	}
 
@@ -732,34 +721,8 @@ func (m *Manager) loadRegionLabel() error {
 	})
 
 	// Validate that all key ranges are non-overlapping
-	for i := range allRanges {
-		// Check within the same group
-		for idx1 := range allRanges[i].KeyRanges {
-			for idx2 := idx1 + 1; idx2 < len(allRanges[i].KeyRanges); idx2++ {
-				if checkKeyRangesOverlap(
-					allRanges[i].KeyRanges[idx1].StartKey, allRanges[i].KeyRanges[idx1].EndKey,
-					allRanges[i].KeyRanges[idx2].StartKey, allRanges[i].KeyRanges[idx2].EndKey,
-				) {
-					return errs.ErrAffinityGroupContent.FastGenByArgs(
-						"found overlapping key ranges within group " + allRanges[i].GroupID + " during rebuild")
-				}
-			}
-		}
-		// Check between different groups
-		for _, rangeI := range allRanges[i].KeyRanges {
-			for j := i + 1; j < len(allRanges); j++ {
-				for _, rangeJ := range allRanges[j].KeyRanges {
-					if checkKeyRangesOverlap(
-						rangeI.StartKey, rangeI.EndKey,
-						rangeJ.StartKey, rangeJ.EndKey,
-					) {
-						return errs.ErrAffinityGroupContent.FastGenByArgs(
-							"found overlapping key ranges during rebuild: group " +
-								allRanges[i].GroupID + " overlaps with group " + allRanges[j].GroupID)
-					}
-				}
-			}
-		}
+	if err := validateNoOverlap(allRanges); err != nil {
+		return err
 	}
 
 	log.Info("rebuilt group-label mapping",
