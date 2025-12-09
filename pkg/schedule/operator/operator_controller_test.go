@@ -73,20 +73,20 @@ func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 	oc.SetOperator(op)
 	re.True(op.Start())
 	influence := NewOpInfluence()
-	AddOpInfluence(op, *influence, bc)
+	AddOpInfluence(op, influence, bc)
 	re.Equal(int64(-96), influence.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is same even if the region size changed.
 	region = region.Clone(core.SetApproximateSize(100))
 	tc.PutRegion(region)
 	influence1 := NewOpInfluence()
-	AddOpInfluence(op, *influence1, bc)
+	AddOpInfluence(op, influence1, bc)
 	re.Equal(int64(-96), influence1.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is valid even if the region is removed.
 	tc.RemoveRegion(region)
 	influence2 := NewOpInfluence()
-	AddOpInfluence(op, *influence2, bc)
+	AddOpInfluence(op, influence2, bc)
 	re.Equal(int64(-96), influence2.GetStoreInfluence(2).RegionSize)
 }
 
@@ -754,7 +754,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	op := NewTestOperator(1, epoch, OpRegion, steps...)
 	re.True(controller.AddOperator(op))
 
-	check := func(influence OpInfluence, id uint64, expect *StoreInfluence) {
+	check := func(influence *OpInfluence, id uint64, expect *StoreInfluence) {
 		si := influence.GetStoreInfluence(id)
 		re.Equal(si.LeaderCount, expect.LeaderCount)
 		re.Equal(si.LeaderSize, expect.LeaderSize)
