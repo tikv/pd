@@ -414,24 +414,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	if len(tsoServerURL) > 0 {
 		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, updateMemberTimeout)
 		if err != nil {
-<<<<<<< HEAD:client/tso_service_discovery.go
-			if c.tsoServerDiscovery.countFailure() {
-				log.Error("[tso] failed to find the keyspace group",
-					zap.Uint32("keyspace-id-in-request", keyspaceID),
-					zap.String("tso-server-url", tsoServerURL),
-					errs.ZapError(err))
-			}
-			return err
-		}
-		c.tsoServerDiscovery.resetFailure()
-=======
 			log.Error("[tso] failed to find the keyspace group",
 				zap.Uint32("keyspace-id-in-request", keyspaceID),
 				zap.String("tso-server-url", tsoServerURL),
 				errs.ZapError(err))
 			return err
 		}
->>>>>>> 23882d656f (client: fix tso service discovery (#9595)):client/servicediscovery/tso_service_discovery.go
 	} else {
 		// There is no error but no tso server URL found, which means
 		// the server side hasn't been upgraded to the version that
@@ -571,7 +559,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 		urls []string
 		err  error
 	)
-	urls, err = sd.(*serviceDiscovery).discoverMicroservice(tsoService)
+	urls, err = sd.(*pdServiceDiscovery).discoverMicroservice(tsoService)
 	if err != nil {
 		return "", err
 	}
@@ -579,17 +567,8 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 	c.Lock()
 	defer c.Unlock()
 	t := c.tsoServerDiscovery
-<<<<<<< HEAD:client/tso_service_discovery.go
-	if len(t.urls) == 0 || t.failureCount == len(t.urls) {
-		urls, err = sd.(*pdServiceDiscovery).discoverMicroservice(tsoService)
-		if err != nil {
-			return "", err
-		}
-		failpoint.Inject("serverReturnsNoTSOAddrs", func() {
-=======
 	failpoint.Inject("serverReturnsNoTSOAddrs", func() {
 		if len(t.urls) == 0 {
->>>>>>> 23882d656f (client: fix tso service discovery (#9595)):client/servicediscovery/tso_service_discovery.go
 			log.Info("[failpoint] injected error: server returns no tso URLs")
 			urls = nil
 		}

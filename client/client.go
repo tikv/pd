@@ -629,8 +629,8 @@ func (c *client) GetServiceDiscovery() ServiceDiscovery {
 }
 
 // GetTSOServiceDiscovery returns the TSO service discovery object. Only used for testing.
-func (c *client) GetTSOServiceDiscovery() sd.ServiceDiscovery {
-	return c.inner.tsoSvcDiscovery
+func (c *client) GetTSOServiceDiscovery() ServiceDiscovery {
+	return c.tsoSvcDiscovery
 }
 
 // UpdateOption updates the client option.
