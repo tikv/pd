@@ -1542,6 +1542,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			// Clean up the remaining TSO keys.
 			// TODO: support the Local TSO Allocator clean up.
 			err := kgm.tsoSvcStorage.DeleteTimestamp(
+				kgm.ctx,
 				keypath.TimestampPath(
 					keypath.KeyspaceGroupGlobalTSPath(groupID),
 				),
