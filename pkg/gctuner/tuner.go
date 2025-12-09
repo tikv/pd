@@ -86,7 +86,7 @@ func Tuning(threshold uint64) {
 // GetGOGC returns the current GCPercent.
 func GetGOGC() (percent uint32) {
 	t := globalTuner.Load()
-	if globalTuner.Load() == nil {
+	if t == nil {
 		percent = defaultGCPercent
 	} else {
 		percent = (*t).getGCPercent()
