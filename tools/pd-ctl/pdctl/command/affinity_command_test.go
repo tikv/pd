@@ -33,7 +33,7 @@ func TestBuildAffinityGroupDefinitionsTable(t *testing.T) {
 	defs, err := buildAffinityGroupDefinitions(info, "")
 	re.NoError(err)
 	re.Len(defs, 1)
-	re.Equal("_tidb_c_t_123", defs[0].id)
+	re.Equal("_tidb_t_123", defs[0].id)
 	re.Len(defs[0].ranges, 1)
 	start, end := tableKeyRange(123)
 	re.Equal(start, defs[0].ranges[0].StartKey)
@@ -58,35 +58,35 @@ func TestBuildAffinityGroupDefinitionsPartition(t *testing.T) {
 	defs, err := buildAffinityGroupDefinitions(info, "")
 	re.NoError(err)
 	re.Len(defs, 2)
-	re.ElementsMatch([]string{"_tidb_p_t_10_p101", "_tidb_p_t_10_p102"}, collectGroupIDs(defs))
+	re.ElementsMatch([]string{"_tidb_pt_10_p101", "_tidb_pt_10_p102"}, collectGroupIDs(defs))
 
 	// single partition by name
 	defs, err = buildAffinityGroupDefinitions(info, "p2")
 	re.NoError(err)
 	re.Len(defs, 1)
-	re.Equal("_tidb_p_t_10_p102", defs[0].id)
+	re.Equal("_tidb_pt_10_p102", defs[0].id)
 
 	// single partition by ID string
 	defs, err = buildAffinityGroupDefinitions(info, "101")
 	re.NoError(err)
 	re.Len(defs, 1)
-	re.Equal("_tidb_p_t_10_p101", defs[0].id)
+	re.Equal("_tidb_pt_10_p101", defs[0].id)
 }
 
 func TestParseGroupIDs(t *testing.T) {
 	re := require.New(t)
 	groupStates := map[string]*pd.AffinityGroupState{
-		"_tidb_c_t_5":     nil,
-		"_tidb_p_t_6_p7":  nil,
-		"_tidb_p_t_6_p8":  nil,
+		"_tidb_t_5":       nil,
+		"_tidb_pt_6_p7":   nil,
+		"_tidb_pt_6_p8":   nil,
 		"unrelated_group": nil,
 	}
 	parsed := parseGroupIDs(groupStates)
 	re.ElementsMatch([]int64{5, 6}, parsed.tableIDs)
 	re.ElementsMatch([]int64{7, 8}, parsed.partitionIDs)
-	re.Contains(parsed.tableGroups, "_tidb_c_t_5")
-	re.Contains(parsed.partitionGroups, "_tidb_p_t_6_p7")
-	re.Contains(parsed.partitionGroups, "_tidb_p_t_6_p8")
+	re.Contains(parsed.tableGroups, "_tidb_t_5")
+	re.Contains(parsed.partitionGroups, "_tidb_pt_6_p7")
+	re.Contains(parsed.partitionGroups, "_tidb_pt_6_p8")
 }
 
 func TestEncodeTablePrefix(t *testing.T) {

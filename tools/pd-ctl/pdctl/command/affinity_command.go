@@ -36,8 +36,8 @@ import (
 )
 
 const (
-	tableGroupIDPattern     = "_tidb_c_t_%d"
-	partitionGroupIDPattern = "_tidb_p_t_%d_p%d"
+	tableGroupIDPattern     = "_tidb_t_%d"
+	partitionGroupIDPattern = "_tidb_pt_%d_p%d"
 	httpRequestTimeout      = 30 * time.Second
 	defaultTiDBStatusAddr   = "http://127.0.0.1:10080"
 )
@@ -46,8 +46,8 @@ const (
 // - tableGroupRegexp must match tableGroupIDPattern format
 // - partitionGroupRegexp must match partitionGroupIDPattern format
 var (
-	partitionGroupRegexp = regexp.MustCompile(`^_tidb_p_t_(\d+)_p(\d+)$`)
-	tableGroupRegexp     = regexp.MustCompile(`^_tidb_c_t_(\d+)$`)
+	partitionGroupRegexp = regexp.MustCompile(`^_tidb_pt_(\d+)_p(\d+)$`)
+	tableGroupRegexp     = regexp.MustCompile(`^_tidb_t_(\d+)$`)
 )
 
 // ciStr represents a case-insensitive string (TiDB's CIStr type).
