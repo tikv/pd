@@ -675,14 +675,15 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 			continue
 		}
 		indistinguishable := true
+	compare_loop:
 		for _, f := range leaderPreferFuncs {
 			if best, next := f(b.targetLeaderStoreID), f(candidateStoreID); best < next {
 				b.targetLeaderStoreID = candidateStoreID
 				indistinguishable = false
-				break
+				break compare_loop
 			} else if best > next {
 				indistinguishable = false
-				break
+				break compare_loop
 			}
 		}
 		// If all comparison functions consider these two stores are indistinguishable,
