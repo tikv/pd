@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"io"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -101,10 +102,19 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 		return err
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 1)
+	var reportOnce sync.Once
+	reportErr := func(err error) {
+		reportOnce.Do(func() {
+			errCh <- err
+		})
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
 
 	// client -> server
 	go func() {
+		defer wg.Done()
 		defer func() { _ = delegateStream.CloseSend() }()
 		for {
 			in, err := stream.Recv()
@@ -113,11 +123,11 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 					// The client has finished sending messages.
 					break
 				}
-				errCh <- err
+				reportErr(err)
 				return
 			}
 			if err := delegateStream.Send(in); err != nil {
-				errCh <- err
+				reportErr(err)
 				return
 			}
 		}
@@ -125,6 +135,7 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 
 	// server -> client
 	go func() {
+		defer wg.Done()
 		for {
 			out, err := delegateStream.Recv()
 			if err != nil {
@@ -132,14 +143,19 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 					// The server has finished sending messages.
 					break
 				}
-				errCh <- err
+				reportErr(err)
 				return
 			}
 			if err := stream.Send(out); err != nil {
-				errCh <- err
+				reportErr(err)
 				return
 			}
 		}
+	}()
+
+	go func() {
+		wg.Wait()
+		reportErr(nil)
 	}()
 
 	return <-errCh
