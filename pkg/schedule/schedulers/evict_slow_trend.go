@@ -40,7 +40,7 @@ const (
 	minReCheckDurationGap = 120 // default gap for re-check the slow node, unit: s
 	// We use 1800 seconds as the default gap for recovery, which is 30 minutes.
 	// This is based on the SLA level reflected by AWS EBS. And we can adjust it later if needed.
-	defaultRecoveryDurationGap = 1800 // default gap for recovery, unit: s.
+	defaultRecoverySec = 1800 // default gap for recovery, unit: s.
 )
 
 type slowCandidate struct {
@@ -51,7 +51,7 @@ type slowCandidate struct {
 
 type evictSlowTrendSchedulerParam struct {
 	// Duration gap for recovering the candidate, unit: s.
-	RecoveryDurationGap uint64 `json:"recovery-duration"`
+	RecoverySec uint64 `json:"recovery-duration"`
 	// Only evict one store for now
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
 }
@@ -74,8 +74,8 @@ func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 		evictCandidate:     slowCandidate{},
 		lastEvictCandidate: slowCandidate{},
 		evictSlowTrendSchedulerParam: evictSlowTrendSchedulerParam{
-			RecoveryDurationGap: defaultRecoveryDurationGap,
-			EvictedStores:       make([]uint64, 0),
+			RecoverySec:   defaultRecoverySec,
+			EvictedStores: make([]uint64, 0),
 		},
 	}
 }
@@ -84,7 +84,7 @@ func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerParam
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowTrendSchedulerParam{
-		RecoveryDurationGap: conf.RecoveryDurationGap,
+		RecoverySec: conf.RecoverySec,
 	}
 }
 
@@ -155,11 +155,11 @@ func (conf *evictSlowTrendSchedulerConfig) lastCandidateCapturedSecs() uint64 {
 func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
-	recoveryDurationGap := conf.RecoveryDurationGap
+	recoverySec := conf.RecoverySec
 	failpoint.Inject("transientRecoveryGap", func() {
-		recoveryDurationGap = 0
+		recoverySec = 0
 	})
-	return conf.lastCandidateCapturedSecs() >= recoveryDurationGap
+	return conf.lastCandidateCapturedSecs() >= recoverySec
 }
 
 func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
@@ -241,20 +241,20 @@ func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *htt
 	}
 	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
 	if !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+		handler.rd.JSON(w, http.StatusBadRequest, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 	handler.config.Lock()
 	defer handler.config.Unlock()
-	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
-	recoveryDurationGap := uint64(recoveryDurationGapFloat)
-	handler.config.RecoveryDurationGap = recoveryDurationGap
+	prevRecoverySec := handler.config.RecoverySec
+	recoverySec := uint64(recoveryDurationGapFloat)
+	handler.config.RecoverySec = recoverySec
 	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		handler.config.RecoverySec = prevRecoverySec
 		return
 	}
-	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
+	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoverySec), zap.Uint64("cur", recoverySec))
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
@@ -311,7 +311,7 @@ func (s *evictSlowTrendScheduler) ReloadConfig() error {
 		new[id] = struct{}{}
 	}
 	pauseAndResumeLeaderTransfer(s.conf.cluster, old, new)
-	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
+	s.conf.RecoverySec = newCfg.RecoverySec
 	s.conf.EvictedStores = newCfg.EvictedStores
 	return nil
 }
