@@ -112,7 +112,7 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 func (l *RegionLabeler) loadRules() error {
 	var toDelete []string
 	err := l.storage.LoadRegionRules(func(k, v string) {
-		r, err := NewLabelRuleFromJSON([]byte(v))
+		r, err := NewLabelRuleFromJSONWithoutCheck([]byte(v))
 		if err != nil {
 			log.Error("failed to unmarshal label rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
