@@ -661,23 +661,23 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 		b.preferOldPeerAsLeader,
 	}
 
-	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
-		peer := b.targetPeers[targetLeaderStoreID]
+	for _, candidateStoreID := range b.targetPeers.IDs() {
+		peer := b.targetPeers[candidateStoreID]
 		if !b.allowLeader(peer, b.forceTargetLeader) {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.
-		if role, ok := b.expectedRoles[targetLeaderStoreID]; ok && role == placement.Follower {
+		if role, ok := b.expectedRoles[candidateStoreID]; ok && role == placement.Follower {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
-			b.targetLeaderStoreID = targetLeaderStoreID
+			b.targetLeaderStoreID = candidateStoreID
 			continue
 		}
 		indistinguishable := true
 		for _, f := range leaderPreferFuncs {
-			if best, next := f(b.targetLeaderStoreID), f(targetLeaderStoreID); best < next {
-				b.targetLeaderStoreID = targetLeaderStoreID
+			if best, next := f(b.targetLeaderStoreID), f(candidateStoreID); best < next {
+				b.targetLeaderStoreID = candidateStoreID
 				indistinguishable = false
 				break
 			} else if best > next {
@@ -689,19 +689,19 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 		// we use leader score as the final tie breaker.
 		if indistinguishable {
 			current := b.GetBasicCluster().GetStore(b.targetLeaderStoreID)
-			candidate := b.GetBasicCluster().GetStore(targetLeaderStoreID)
+			candidate := b.GetBasicCluster().GetStore(candidateStoreID)
 
 			currentCountScore := current.LeaderScore(constant.ByCount, 0)
 			candidateCountScore := candidate.LeaderScore(constant.ByCount, 0)
 
 			if currentCountScore > candidateCountScore {
-				b.targetLeaderStoreID = targetLeaderStoreID
+				b.targetLeaderStoreID = candidateStoreID
 			} else if currentCountScore == candidateCountScore {
 				currentSizeScore := current.LeaderScore(constant.BySize, 0)
 				candidateSizeScore := candidate.LeaderScore(constant.BySize, 0)
 
 				if currentSizeScore > candidateSizeScore {
-					b.targetLeaderStoreID = targetLeaderStoreID
+					b.targetLeaderStoreID = candidateStoreID
 				}
 			}
 		}
