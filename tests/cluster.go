@@ -114,7 +114,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	if len(services) > 0 && !cfg.Microservice.IsResourceManagerFallbackEnabled() {
+	if !cfg.Microservice.IsResourceManagerFallbackEnabled() {
 		serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
 	}
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
