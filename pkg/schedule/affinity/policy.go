@@ -113,7 +113,7 @@ func (g *runtimeGroupInfo) GetNewAvailability(unavailableStores map[uint64]store
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// In the future, we may want to use a more sophisticated strategy rather than first-win.
-	if group == nil || !group.RegularSchedulingEnabled {
+	if group == nil || group.AffinitySchedulingEnabled {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
