@@ -69,7 +69,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	suite.backendEndpoints = pdLeaderServer.GetAddr()
-	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
 }
 
@@ -279,4 +279,63 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re.Equal(cfg.IsLocalTSOEnabled(), primary.GetConfig().IsLocalTSOEnabled())
 	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
 	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
+}
+
+// TestForwardingBehavior specifically tests the API forwarding logic.
+func (suite *tsoAPITestSuite) TestForwardingBehavior() {
+	re := suite.Require()
+
+	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
+	var follower *tso.Server
+	for _, srv := range suite.tsoCluster.GetServers() {
+		if srv.Name() != primary.Name() {
+			follower = srv
+			break
+		}
+	}
+	re.NotNil(follower)
+	re.True(primary.IsServing())
+	re.False(follower.IsServing())
+	re.NotEqual(follower.GetConfig().GetListenAddr(), primary.GetConfig().GetListenAddr())
+
+	followerAddr := follower.GetAddr()
+	followerURL := func(path string) string {
+		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
+	}
+
+	// Test: PUT /admin/log should be handled by the follower locally.
+	logURL := followerURL("/admin/log")
+	level := "debug"
+	logPayload, err := json.Marshal(level)
+	re.NoError(err)
+	req, _ := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	// Test: GET /config should be handled by the follower locally.
+	configURL := followerURL("/config")
+	var followerCfg tso.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &followerCfg)
+	re.NoError(err)
+	re.Equal(follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.NotEqual(primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(level, followerCfg.Log.Level)
+
+	// Test: GET /keyspace-groups/members should be handled by the follower locally.
+	membersURL := followerURL("/keyspace-groups/members")
+	var kgms map[uint32]*apis.KeyspaceGroupMember
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, membersURL, &kgms)
+	re.NoError(err)
+	re.Len(kgms, 1)
+	kgm := kgms[constant.DefaultKeyspaceGroupID]
+	re.NotNil(kgm)
+	re.Len(kgm.Member.ListenUrls, 1)
+	respListenURL := kgm.Member.ListenUrls[0]
+	re.Equal(follower.GetConfig().GetListenAddr(), respListenURL)
+	re.NotEqual(primary.GetConfig().GetListenAddr(), respListenURL)
+	re.False(kgm.IsPrimary)
 }

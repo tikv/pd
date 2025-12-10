@@ -231,7 +231,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 	<-batchingTimer.C
 	defer batchingTimer.Stop()
 
-	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
+	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberMaxBackoffTime, updateMemberTimeout)
 tsoBatchLoop:
 	for {
 		select {

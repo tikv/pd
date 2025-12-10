@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -157,7 +158,7 @@ func TestSortedEqual(t *testing.T) {
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
 
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	// test RegionFromHeartbeat
 	for _, testCase := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
@@ -212,11 +213,44 @@ func TestInherit(t *testing.T) {
 		if testCase.originExists {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
 			origin.approximateSize = int64(testCase.originSize)
+			origin.approximateKeys = 1
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(testCase.size)
+		r.approximateKeys = 1
 		r.Inherit(origin, false)
 		re.Equal(int64(testCase.expect), r.approximateSize)
+	}
+
+	// case for approximateKeys
+	// New logic: keys are only inherited when size==0
+	keysTestCases := []struct {
+		originExists bool
+		originSize   int64
+		originKeys   int64
+		size         int64
+		keys         int64
+		expectKeys   int64
+	}{
+		{false, 0, 0, 0, 0, 0},     // no origin, size=0, keys=0 -> keys remain 0 (size set to 1 only)
+		{false, 0, 0, 1, 0, 0},     // no origin, size=1, keys=0 -> keys remain 0 (no inheritance)
+		{false, 0, 0, 1, 100, 100}, // no origin, size=1, keys=100 -> keys remain 100
+		{true, 1, 50, 1, 100, 100}, // origin exists, size=1, keys=100 -> keys remain 100
+		{true, 10, 100, 0, 0, 100}, // origin exists, size=0, keys=0 -> inherit both (size=10, keys=100)
+		{true, 5, 200, 0, 0, 200},  // origin exists, size=0, keys=0 -> inherit both (size=5, keys=200)
+	}
+	for _, testCase := range keysTestCases {
+		var origin *RegionInfo
+		if testCase.originExists {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.approximateSize = testCase.originSize
+			origin.approximateKeys = testCase.originKeys
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.approximateSize = testCase.size
+		r.approximateKeys = testCase.keys
+		r.Inherit(origin, false)
+		re.Equal(testCase.expectKeys, r.approximateKeys)
 	}
 
 	// bucket
@@ -669,8 +703,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
-		ranges := []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
+		ranges := []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -684,11 +718,11 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
-		ranges = []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
-			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		ranges = []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -952,7 +986,7 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		PendingPeers:    []*metapb.Peer{peers[1]},
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
@@ -1152,11 +1186,11 @@ func TestScanRegion(t *testing.T) {
 		err                  error
 	)
 	scanError := func(startKey, endKey []byte, limit int) {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
@@ -1219,7 +1253,7 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 
 	for limit := 1; limit <= 18; limit++ {
-		keyRanges := NewKeyRangesWithSize(2)
+		keyRanges := keyutil.NewKeyRangesWithSize(2)
 		keyRanges.Append([]byte("a"), []byte("b"))
 		keyRanges.Append([]byte("b0"), []byte("")) // ensure the key ranges are not merged
 		resp, err := regions.BatchScanRegions(keyRanges, WithLimit(limit))

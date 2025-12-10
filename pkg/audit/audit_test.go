@@ -40,7 +40,7 @@ func TestLabelMatcher(t *testing.T) {
 	re.False(matcher.Match(labels2))
 }
 
-func TestPrometheusHistogramBackend(t *testing.T) {
+func TestPrometheusBackend(t *testing.T) {
 	re := require.New(t)
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -49,15 +49,25 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 			Name:      "audit_handling_seconds_test",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "caller_id", "ip"})
+		}, []string{"service", "method"})
+
+	serviceAuditCounterTest := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_requests_total_test",
+			Help:      "Total number of service requests for audit test",
+		}, []string{"service", "method", "caller_id"})
 
 	prometheus.MustRegister(serviceAuditHistogramTest)
+	prometheus.MustRegister(serviceAuditCounterTest)
 
 	ts := httptest.NewServer(promhttp.Handler())
 	defer ts.Close()
 
-	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
+	backend := NewPrometheusBackend(serviceAuditHistogramTest, serviceAuditCounterTest, true)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
+	re.NoError(err)
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
 	info.CallerID = "user1"
@@ -83,8 +93,8 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{caller_id=\"user1\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 2")
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{caller_id=\"user2\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{method=\"HTTP\",service=\"test\"}")
+	re.Contains(output, "pd_service_audit_requests_total_test{caller_id=\"user1\",method=\"HTTP\",service=\"test\"}")
 }
 
 func TestLocalLogBackendUsingFile(t *testing.T) {

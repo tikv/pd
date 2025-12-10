@@ -18,6 +18,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // rangeCluster isolates the cluster by range.
@@ -101,18 +102,23 @@ func (r *rangeCluster) GetTolerantSizeRatio() float64 {
 }
 
 // RandFollowerRegions returns a random region that has a follower on the store.
-func (r *rangeCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+func (r *rangeCluster) RandFollowerRegions(storeID uint64, ranges []keyutil.KeyRange) []*core.RegionInfo {
 	return r.subCluster.RandFollowerRegions(storeID, ranges)
 }
 
 // RandLeaderRegions returns a random region that has leader on the store.
-func (r *rangeCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+func (r *rangeCluster) RandLeaderRegions(storeID uint64, ranges []keyutil.KeyRange) []*core.RegionInfo {
 	return r.subCluster.RandLeaderRegions(storeID, ranges)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
 func (r *rangeCluster) GetAverageRegionSize() int64 {
 	return r.subCluster.GetAverageRegionSize()
+}
+
+// GetAvgNetworkSlowScore returns the average network slow score.
+func (r *rangeCluster) GetAvgNetworkSlowScore(id uint64) uint64 {
+	return r.subCluster.GetAvgNetworkSlowScore(id)
 }
 
 // GetRegionStores returns all stores that contains the region's peer.

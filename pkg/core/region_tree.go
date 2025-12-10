@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -87,6 +88,33 @@ func newRegionTreeWithCountRef() *regionTree {
 		notFromStorageRegionsCnt: 0,
 		countRef:                 true,
 	}
+}
+
+// GetCountByRange returns the number of regions in the range [startKey, endKey).
+func (t *regionTree) GetCountByRange(startKey, endKey []byte) int {
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	item, startIndex := t.tree.GetWithIndex(start)
+	// if item is nil, it means that the startKey is not found in the tree, we need to check the previous item, avoid
+	// to the startKey in the previous iterm.
+	// regions: [a c] [c f] [f h], startKey: b
+	// the first item is index 2 [c,f]
+	if item == nil {
+		item = t.tree.GetAt(startIndex - 1)
+		// if the item is not nil and the start key in the previous item range, the previous should be included.
+		if item != nil && bytes.Compare(item.GetEndKey(), startKey) > 0 {
+			startIndex--
+		}
+	}
+	var endIndex int
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = t.tree.Len()
+	} else {
+		_, endIndex = t.tree.GetWithIndex(end)
+	}
+	return endIndex - startIndex
 }
 
 func (t *regionTree) length() int {
@@ -323,7 +351,7 @@ func (t *regionTree) getAdjacentItem(item *regionItem) (prev *regionItem, next *
 	return prev, next
 }
 
-func (t *regionTree) randomRegion(ranges []KeyRange) *RegionInfo {
+func (t *regionTree) randomRegion(ranges []keyutil.KeyRange) *RegionInfo {
 	regions := t.RandomRegions(1, ranges)
 	if len(regions) == 0 {
 		return nil
@@ -332,7 +360,7 @@ func (t *regionTree) randomRegion(ranges []KeyRange) *RegionInfo {
 }
 
 // RandomRegions get n random regions within the given ranges.
-func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
+func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionInfo {
 	treeLen := t.length()
 	if treeLen == 0 || n < 1 {
 		return nil

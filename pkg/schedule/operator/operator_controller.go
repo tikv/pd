@@ -15,6 +15,7 @@
 package operator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -31,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
@@ -554,13 +556,12 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			continue
 		}
 		limit := store.GetStoreLimit()
-		for n, v := range storelimit.TypeNameValue {
+		for _, v := range storelimit.TypeNameValue {
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
 			limit.Take(stepCost, v, op.GetPriorityLevel())
-			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
 
@@ -836,6 +837,25 @@ func (oc *Controller) GetHistory(start time.Time) []OpHistory {
 	return history
 }
 
+// OpInfluenceOption is used to filter the region.
+// returns true if the region meets the condition, it will ignore this region in the influence calculation.
+// returns false if the region does not meet the condition, it will calculate the influence of this region.
+type OpInfluenceOption func(region *core.RegionInfo) bool
+
+// WithRangeOption returns an OpInfluenceOption that filters the region by the key ranges.
+func WithRangeOption(ranges []keyutil.KeyRange) OpInfluenceOption {
+	return func(region *core.RegionInfo) bool {
+		kr := keyutil.NewKeyRange(string(region.GetStartKey()), string(region.GetEndKey()))
+		for _, r := range ranges {
+			// exclude the continued range
+			if r.OverLapped(&kr) && !(bytes.Equal(r.StartKey, kr.EndKey) || bytes.Equal(r.EndKey, kr.StartKey)) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 // OperatorCount gets the count of operators filtered by kind.
 // kind only has one OpKind.
 func (oc *Controller) OperatorCount(kind OpKind) uint64 {
@@ -843,7 +863,7 @@ func (oc *Controller) OperatorCount(kind OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster) OpInfluence {
+func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, opts ...OpInfluenceOption) OpInfluence {
 	influence := OpInfluence{
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
@@ -852,6 +872,11 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster) OpInfluence {
 			op := value.(*Operator)
 			if !op.CheckTimeout() && !op.CheckSuccess() {
 				region := cluster.GetRegion(op.RegionID())
+				for _, opt := range opts {
+					if !opt(region) {
+						return true
+					}
+				}
 				if region != nil {
 					op.UnfinishedInfluence(influence, region)
 				}

@@ -28,6 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
 
@@ -213,8 +215,8 @@ func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKi
 	return tolerantSizeRatio
 }
 
-func getKeyRanges(args []string) ([]core.KeyRange, error) {
-	var ranges []core.KeyRange
+func getKeyRanges(args []string) ([]keyutil.KeyRange, error) {
+	var ranges []keyutil.KeyRange
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
@@ -225,10 +227,10 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 			return nil, errs.ErrQueryUnescape.Wrap(err)
 		}
 		args = args[2:]
-		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+		ranges = append(ranges, keyutil.NewKeyRange(startKey, endKey))
 	}
 	if len(ranges) == 0 {
-		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+		return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}, nil
 	}
 	return ranges, nil
 }
@@ -407,4 +409,97 @@ func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, old, new ma
 			log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
 		}
 	}
+}
+
+// getCountThreshold calculates the count threshold for a given key range and rule.
+func getCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, kr keyutil.KeyRange, rule core.Rule) float64 {
+	start := time.Now()
+	cfg := c.GetSchedulerConfig()
+	if !cfg.IsPlacementRulesEnabled() {
+		var regionCount int
+		var weight float64
+		if rule == core.LeaderScatter {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey)
+			weight = 1
+		} else {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey) * cfg.GetMaxReplicas()
+			weight = core.GetStoreTopoWeight(store, stores, cfg.GetLocationLabels(), cfg.GetMaxReplicas())
+		}
+
+		return float64(regionCount) * weight
+	}
+
+	keys := c.GetRuleManager().GetSplitKeys(kr.StartKey, kr.EndKey)
+	if len(keys) == 0 {
+		return calculateRangeCount(c, stores, store, kr.StartKey, kr.EndKey, rule)
+	}
+
+	storeRegionCount := 0.0
+	startKey := kr.StartKey
+	for _, key := range keys {
+		endKey := key
+		storeRegionCount += calculateRangeCount(c, stores, store, startKey, endKey, rule)
+		startKey = endKey
+	}
+	// the range from the last split key to the last key
+	storeRegionCount += calculateRangeCount(c, stores, store, startKey, kr.EndKey, rule)
+	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
+	return storeRegionCount
+}
+
+func isSatisfyRole(r core.Rule, role placement.PeerRoleType) bool {
+	switch r {
+	case core.LeaderScatter:
+		return role == placement.Leader || role == placement.Voter
+	case core.LearnerScatter:
+		return role == placement.Learner
+	default:
+		return true
+	}
+}
+
+func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte, r core.Rule) float64 {
+	var storeCount float64
+	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
+	for _, rule := range rules {
+		if !isSatisfyRole(r, rule.Role) {
+			continue
+		}
+
+		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+			continue
+		}
+
+		var matchStores []*core.StoreInfo
+		for _, s := range stores {
+			if s.IsRemoving() || s.IsRemoved() {
+				continue
+			}
+			if placement.MatchLabelConstraints(s, rule.LabelConstraints) {
+				matchStores = append(matchStores, s)
+			}
+		}
+		if len(matchStores) == 0 {
+			return 0.0
+		}
+		regionCount := c.GetRegionCount(startKey, endKey)
+		var weight float64
+		if r == core.LeaderScatter {
+			weight = 1.0 / float64(len(matchStores))
+		} else {
+			weight = core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+			regionCount *= rule.Count
+		}
+		storeCount += float64(regionCount) * weight
+		log.Debug("calculate range result",
+			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
+			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
+			zap.Uint64("store-id", store.GetID()),
+			zap.String("rule", rule.String()),
+			zap.Int("region-count", regionCount),
+			zap.Float64("weight", weight),
+			zap.Float64("store-count", storeCount),
+		)
+	}
+	return storeCount
 }

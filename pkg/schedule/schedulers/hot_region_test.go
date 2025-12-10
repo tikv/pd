@@ -285,7 +285,11 @@ func TestSplitBucketsBySize(t *testing.T) {
 	re.NoError(err)
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
 	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"), core.SetApproximateSize(1000))
+	solve.opTy = movePeer
+	store := core.NewStoreInfoWithLabel(1, nil)
+	solve.cur.srcStore = &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store}}
+	solve.cur.dstStore = &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store}}
 
 	testdata := []struct {
 		hotBuckets [][]byte
@@ -325,6 +329,37 @@ func TestSplitBucketsBySize(t *testing.T) {
 		re.NoError(err)
 		re.Equal(expectOp.Brief(), op.Brief())
 	}
+	checkFn := func() {
+		enabledBucket := tc.IsEnableRegionBucket()
+		for _, data := range testdata {
+			b := &metapb.Buckets{
+				RegionId:   1,
+				PeriodInMs: 1000,
+				Keys:       data.hotBuckets,
+			}
+			region.UpdateBuckets(b, region.GetBuckets())
+			solve.cur.region = region
+			ops := solve.buildOperators()
+			if data.splitKeys == nil {
+				re.Empty(ops)
+				continue
+			}
+			if !enabledBucket {
+				re.Empty(ops)
+				return
+			}
+			re.Len(ops, 1)
+			op := ops[0]
+			re.Equal(splitHotReadBuckets, op.Desc())
+
+			expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+			re.NoError(err)
+			re.Equal(expectOp.Brief(), op.Brief())
+		}
+	}
+	checkFn()
+	tc.SetRegionBucketEnabled(false)
+	checkFn()
 }
 
 func TestSplitBucketsByLoad(t *testing.T) {

@@ -597,6 +597,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			return
 		}
 		if bs.rank.isAvailable(bs.cur) && bs.rank.betterThan(bs.best) {
+			if !bs.isReadyToBuild() {
+				return
+			}
 			if newOps := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
 				clone := *bs.cur
@@ -1127,12 +1130,9 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serialize running when each 2 store's pending influence is close.
 func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
-	srcStoreID := bs.cur.srcStore.GetID()
-	dstStoreID := bs.cur.dstStore.GetID()
 	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
 	srcPending, dstPending := bs.cur.getPendingLoad(dim)
 	if reverse {
-		srcStoreID, dstStoreID = dstStoreID, srcStoreID
 		srcRate, dstRate = dstRate, srcRate
 		srcPending, dstPending = dstPending, srcPending
 	}
@@ -1141,7 +1141,6 @@ func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
 		return false
 	}
 	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(srcStoreID, 10), strconv.FormatUint(dstStoreID, 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
@@ -1268,12 +1267,9 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 }
 
 func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
-	if !bs.isReadyToBuild() {
-		return nil
-	}
-
+	enabledBucket := bs.GetStoreConfig().IsEnableRegionBucket()
 	splitRegions := make([]*core.RegionInfo, 0)
-	if bs.opTy == movePeer {
+	if bs.opTy == movePeer && enabledBucket {
 		for _, region := range []*core.RegionInfo{bs.cur.region, bs.cur.revertRegion} {
 			if region == nil {
 				continue
@@ -1506,7 +1502,7 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
-		balanceDirectionCounter.WithLabelValues(bs.sche.GetName(), sourceLabel, targetLabel))
+	)
 	op.Counters = append(op.Counters,
 		hotSchedulerNewOperatorCounter,
 		opCounter(typ))

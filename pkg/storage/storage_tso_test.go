@@ -15,22 +15,26 @@
 package storage
 
 import (
+	"context"
 	"path"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
+
+var defaultContext = context.Background()
 
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
 	storage, clean := newTestStorage(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(keypath.TimestampKey, expectedTS)
+	err := storage.SaveTimestamp(defaultContext, keypath.TimestampKey, expectedTS)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
@@ -47,13 +51,13 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 	l1 := path.Join(ltaKey, dc1LocationKey, keypath.TimestampKey)
 	l2 := path.Join(ltaKey, dc2LocationKey, keypath.TimestampKey)
 
-	err := storage.SaveTimestamp(l1, localTS1)
+	err := storage.SaveTimestamp(defaultContext, l1, localTS1)
 	re.NoError(err)
 	globalTS := time.Now().Round(0)
-	err = storage.SaveTimestamp(keypath.TimestampKey, globalTS)
+	err = storage.SaveTimestamp(defaultContext, keypath.TimestampKey, globalTS)
 	re.NoError(err)
 	localTS2 := time.Now().Round(0)
-	err = storage.SaveTimestamp(l2, localTS2)
+	err = storage.SaveTimestamp(defaultContext, l2, localTS2)
 	re.NoError(err)
 	// return the max ts between global and local
 	ts, err := storage.LoadTimestamp("")
@@ -70,11 +74,12 @@ func TestTimestampTxn(t *testing.T) {
 	storage, clean := newTestStorage(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
-	err := storage.SaveTimestamp(keypath.TimestampKey, globalTS1)
+	err := storage.SaveTimestamp(defaultContext, keypath.TimestampKey, globalTS1)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(keypath.TimestampKey, globalTS2)
+	err = storage.SaveTimestamp(defaultContext, keypath.TimestampKey, globalTS2)
+
 	re.Error(err)
 
 	ts, err := storage.LoadTimestamp("")

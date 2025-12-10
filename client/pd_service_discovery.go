@@ -44,7 +44,8 @@ const (
 	memberUpdateInterval        = time.Minute
 	serviceModeUpdateInterval   = 3 * time.Second
 	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
-	updateMemberBackOffBaseTime = 100 * time.Millisecond
+	updateMemberMaxBackoffTime  = 100 * time.Millisecond
+	updateMemberBackOffBaseTime = 20 * time.Millisecond
 
 	httpScheme  = "http"
 	httpsScheme = "https"
@@ -545,7 +546,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
-	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
+	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberMaxBackoffTime, updateMemberTimeout)
 	for {
 		select {
 		case <-ctx.Done():

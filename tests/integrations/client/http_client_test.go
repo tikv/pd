@@ -188,12 +188,21 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.NoError(err)
 	re.Len(hotWriteRegions.AsPeer, 4)
 	re.Len(hotWriteRegions.AsLeader, 4)
-	historyHorRegions, err := client.GetHistoryHotRegions(ctx, &pd.HistoryHotRegionsRequest{
+
+	distribution, err := client.GetRegionDistributionByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), "tikv")
+	re.NoError(err)
+	re.Len(distribution.RegionDistributions, 4)
+	sort.Slice(distribution.RegionDistributions, func(i, j int) bool {
+		return distribution.RegionDistributions[i].StoreID < distribution.RegionDistributions[j].StoreID
+	})
+	re.Equal(2, distribution.RegionDistributions[0].RegionLeaderCount)
+	re.Equal(2, distribution.RegionDistributions[0].RegionPeerCount)
+	historyHotRegions, err := client.GetHistoryHotRegions(ctx, &pd.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
 	})
 	re.NoError(err)
-	re.Empty(historyHorRegions.HistoryHotRegion)
+	re.Empty(historyHotRegions.HistoryHotRegion)
 	stores, err := client.GetStores(ctx)
 	re.NoError(err)
 	re.Equal(4, stores.Count)
@@ -348,6 +357,49 @@ func (suite *httpClientTestSuite) TestRule() {
 	err = client.SetPlacementRule(ctx, testRule)
 	re.NoError(err)
 	suite.checkRuleResult(ctx, re, testRule, 1, true)
+
+	// ***** Test placement rule failed passing check after transfer leader
+	// Transfer the leader to another store to ensure the PD follower
+	// exists stale store labels.
+	suite.transferLeader(ctx, re)
+	tranferLeaderRule := []*pd.GroupBundle{
+		{
+			ID: "test-transfer-leader",
+			Rules: []*pd.Rule{
+				{
+					GroupID:  "test-transfer-leader",
+					ID:       "readonly",
+					Role:     pd.Voter,
+					Count:    3,
+					StartKey: []byte{},
+					EndKey:   []byte{},
+					LabelConstraints: []pd.LabelConstraint{
+						{
+							Key:    "$mode",
+							Op:     pd.In,
+							Values: []string{"readonly"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.Error(err)
+	re.ErrorContains(err, "invalid rule content, rule 'readonly' from rule group 'test-transfer-leader' can not match any store")
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"$mode": "readonly",
+	})
+	err = client.SetPlacementRuleBundles(ctx, tranferLeaderRule, true)
+	re.NoError(err)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+
+	suite.transferLeader(ctx, re)
+	suite.checkRuleResult(ctx, re, tranferLeaderRule[0].Rules[0], 1, true)
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "$mode"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) checkRuleResult(
@@ -536,6 +588,66 @@ func (suite *httpClientTestSuite) TestConfig() {
 	re.Empty(resp.Kvs)
 }
 
+func (suite *httpClientTestSuite) TestTTLConfigPersist() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	configKey := "schedule.max-pending-peer-count"
+
+	testCases := []struct {
+		inputValue        any
+		expectedEtcdValue string
+	}{
+		{
+			inputValue:        uint64(10000000),
+			expectedEtcdValue: "10000000",
+		},
+		{
+			inputValue:        int(20000000),
+			expectedEtcdValue: "20000000",
+		},
+		{
+			inputValue:        float64(2147483647),
+			expectedEtcdValue: "2147483647",
+		},
+		{
+			inputValue:        float64(1234567890.0),
+			expectedEtcdValue: "1234567890",
+		},
+		{
+			inputValue:        float64(0.0),
+			expectedEtcdValue: "0",
+		},
+		{
+			inputValue:        float64(987.65),
+			expectedEtcdValue: "987.65",
+		},
+		{
+			inputValue:        int(-1),
+			expectedEtcdValue: "-1",
+		},
+		{
+			inputValue:        int32(-2147483647),
+			expectedEtcdValue: "-2147483647",
+		},
+	}
+
+	for _, tc := range testCases {
+		newConfig := map[string]any{
+			configKey: tc.inputValue,
+		}
+		err := client.SetConfig(ctx, newConfig, 10000)
+		re.NoError(err)
+		resp, err := suite.cluster.GetEtcdClient().Get(ctx, sc.TTLConfigPrefix+"/"+configKey)
+		re.NoError(err)
+		re.Len(resp.Kvs, 1)
+		re.Equal([]byte(tc.expectedEtcdValue), resp.Kvs[0].Value)
+		err = client.SetConfig(ctx, newConfig, 0)
+		re.NoError(err)
+	}
+}
+
 func (suite *httpClientTestSuite) TestScheduleConfig() {
 	re := suite.Require()
 	client := suite.client
@@ -566,9 +678,15 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 
 	err = client.CreateScheduler(ctx, schedulerName, 1)
 	re.NoError(err)
-	schedulers, err = client.GetSchedulers(ctx)
-	re.NoError(err)
-	re.Contains(schedulers, schedulerName)
+	checkScheduler := func() {
+		schedulers, err = client.GetSchedulers(ctx)
+		re.NoError(err)
+		re.Contains(schedulers, schedulerName)
+		config, err := client.GetSchedulerConfig(ctx, schedulerName)
+		re.NoError(err)
+		re.Contains(config, "store-id-ranges")
+		re.Contains(config, "batch")
+	}
 	err = client.SetSchedulerDelay(ctx, schedulerName, 100)
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
@@ -578,21 +696,57 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	schedulers, err = client.GetSchedulers(ctx)
 	re.NoError(err)
 	re.NotContains(schedulers, schedulerName)
+
+	input := map[string]any{
+		"store_id": 1,
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
+	checkScheduler()
+	re.NoError(client.DeleteScheduler(ctx, schedulerName))
+	const schedulerName2 = "balance-range-scheduler"
+	input = map[string]any{
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"alias":     "test",
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName2, input))
+	checkFn := func() map[string]any {
+		config, err := client.GetSchedulerConfig(ctx, schedulerName2)
+		re.NoError(err)
+		jobs, ok := config.([]any)
+		re.True(ok, config)
+		res := make([]map[string]any, 0, len(jobs))
+		for _, job := range jobs {
+			jobMap, ok := job.(map[string]any)
+			re.True(ok, config)
+			res = append(res, jobMap)
+		}
+		return res[0]
+	}
+	job := checkFn()
+	jobID := uint64(job["job-id"].(float64))
+	re.Equal(uint64(0), jobID)
+	_, ok := job["start"].(*time.Time)
+	re.False(ok, job)
+
+	// cancel one job
+	re.NoError(client.CancelSchedulerJob(ctx, schedulerName2, jobID))
+	job = checkFn()
+	status, ok := job["status"]
+	re.True(ok)
+	re.Equal("cancelled", status)
 }
 
-func (suite *httpClientTestSuite) TestStoreLabels() {
-	re := suite.Require()
+func (suite *httpClientTestSuite) setStoreLabels(ctx context.Context, re *require.Assertions, storeLabels map[string]string) int64 {
 	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
 	resp, err := client.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
 	re.Empty(firstStore.Store.Labels, nil)
-	storeLabels := map[string]string{
-		"zone": "zone1",
-	}
+
 	err = client.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels)
 	re.NoError(err)
 
@@ -609,17 +763,27 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 		re.Equal(value, labelsMap[key])
 	}
 
-	re.NoError(client.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
-	store, err := client.GetStore(ctx, uint64(firstStore.Store.ID))
-	re.NoError(err)
-	re.Empty(store.Store.Labels)
+	return firstStore.Store.ID
 }
 
-func (suite *httpClientTestSuite) TestTransferLeader() {
+func (suite *httpClientTestSuite) TestStoreLabels() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+
+	storeID := suite.setStoreLabels(ctx, re, map[string]string{
+		"zone": "zone1",
+	})
+
+	re.NoError(client.DeleteStoreLabel(ctx, storeID, "zone"))
+	store, err := client.GetStore(ctx, uint64(storeID))
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
+}
+
+func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
+	client := suite.client
 	members, err := client.GetMembers(ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
@@ -650,6 +814,13 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
+}
+func (suite *httpClientTestSuite) TestTransferLeader() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	suite.transferLeader(ctx, re)
 }
 
 func (suite *httpClientTestSuite) TestVersion() {
