@@ -16,9 +16,8 @@ package keypath
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +27,6 @@ func TestRegionPath(t *testing.T) {
 	f := func(id uint64) string {
 		return fmt.Sprintf("/pd/0/raft/r/%020d", id)
 	}
-	rand.New(rand.NewSource(time.Now().Unix()))
 	for range 1000 {
 		id := rand.Uint64()
 		re.Equal(f(id), RegionPath(id))

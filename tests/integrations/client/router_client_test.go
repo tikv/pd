@@ -16,7 +16,7 @@ package client_test
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 	"sync"
 	"testing"
@@ -289,7 +289,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 			var (
 				r                   *router.Region
 				err                 error
-				seed                = rand.Intn(100)
+				seed                = rand.IntN(100)
 				allowFollowerHandle = seed%2 == 0
 			)
 			// Randomly sleep to avoid the concurrent requests to be dispatched at the same time.

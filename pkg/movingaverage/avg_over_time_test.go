@@ -15,7 +15,7 @@
 package movingaverage
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -118,7 +118,7 @@ func TestUnstableInterval(t *testing.T) {
 	}
 	// same rate, different interval
 	for range 1000 {
-		r := float64(rand.Intn(5))
+		r := float64(rand.IntN(5))
 		aot.Add(1000*r, time.Second*time.Duration(r))
 		re.LessOrEqual(aot.Get(), 1010.)
 		re.GreaterOrEqual(aot.Get(), 990.)

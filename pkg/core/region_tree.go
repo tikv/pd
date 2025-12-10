@@ -16,7 +16,7 @@ package core
 
 import (
 	"bytes"
-	"math/rand"
+	"math/rand/v2"
 
 	"go.uber.org/zap"
 
@@ -446,7 +446,7 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 			}
 		}
 		for curLen < n {
-			randIndex = rand.Intn(endIndex-startIndex) + startIndex
+			randIndex = rand.IntN(endIndex-startIndex) + startIndex
 			region = t.tree.GetAt(randIndex).RegionInfo
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)
@@ -469,7 +469,7 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 				continue
 			}
 
-			randIndex = rand.Intn(endIndex-startIndex) + startIndex
+			randIndex = rand.IntN(endIndex-startIndex) + startIndex
 			region = t.tree.GetAt(randIndex).RegionInfo
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)

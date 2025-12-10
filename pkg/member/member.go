@@ -16,7 +16,7 @@ package member
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -372,8 +372,7 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	if len(etcdLeaderIDs) == 0 {
 		return errors.New("no valid pd to transfer etcd leader")
 	}
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	nextEtcdLeaderID := etcdLeaderIDs[r.Intn(len(etcdLeaderIDs))]
+	nextEtcdLeaderID := etcdLeaderIDs[rand.IntN(len(etcdLeaderIDs))]
 	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
 }
 

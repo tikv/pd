@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -801,7 +801,7 @@ func TestRegionHeartbeat(t *testing.T) {
 		// Add a down peer.
 		region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 			{
-				Peer:        region.GetPeers()[rand.Intn(len(region.GetPeers()))],
+				Peer:        region.GetPeers()[rand.IntN(len(region.GetPeers()))],
 				DownSeconds: 42,
 			},
 		}))
@@ -810,7 +810,7 @@ func TestRegionHeartbeat(t *testing.T) {
 		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Add a pending peer.
-		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
+		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
 		checkRegions(re, cluster.BasicCluster, regions[:i+1])
@@ -843,7 +843,7 @@ func TestRegionHeartbeat(t *testing.T) {
 
 		// Change one peer to witness
 		region = region.Clone(
-			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}),
+			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}),
 			core.WithIncConfVer(),
 		)
 		regions[i] = region
@@ -2550,7 +2550,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			for range 1000 {
-				re.NoError(tc.addRegionStore(uint64(i%5), rand.Intn(200)))
+				re.NoError(tc.addRegionStore(uint64(i%5), rand.IntN(200)))
 			}
 		}(i)
 	}
