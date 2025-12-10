@@ -281,7 +281,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}); err != nil {
 		return nil, err
 	}
-	if err := m.hasUnavailableStore(leaderStoreID, voterStoreIDs); err != nil {
+	if err := m.checkHasUnavailableStore(leaderStoreID, voterStoreIDs); err != nil {
 		return nil, err
 	}
 

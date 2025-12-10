@@ -21,6 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -34,18 +35,78 @@ const (
 	defaultAvailabilityCheckInterval = 10 * time.Second
 )
 
-var (
-	// availabilityCheckIntervalForTest can be set in tests to speed up availability checks.
-	// Default is 0, which means use defaultAvailabilityCheckInterval.
-	availabilityCheckIntervalForTest time.Duration
+// storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
+// which are split into three groups separated by degradedBoundary.
+type storeCondition int
+
+const (
+	storeAvailable storeCondition = iota
+
+	// All values greater than storeAvailable and less than degradedBoundary will trigger groupDegraded.
+	storeEvictLeader
+	storeDisconnected
+	storePreparing
+	storeLowSpace
+	degradedBoundary
+
+	// All values greater than degradedBoundary will trigger groupExpired.
+	storeDown
+	storeRemovingOrRemoved
 )
 
-// logEntry is used to collect log messages to print after releasing lock
-type logEntry struct {
-	level            string // "info", "warn"
-	groupID          string
-	unavailableStore uint64
-	availability     groupAvailability
+func (c storeCondition) String() string {
+	switch c {
+	case storeAvailable:
+		return "available"
+	case storeEvictLeader:
+		return "evicted"
+	case storeDisconnected:
+		return "disconnected"
+	case storePreparing:
+		return "preparing"
+	case storeLowSpace:
+		return "low-space"
+	case storeDown:
+		return "down"
+	case storeRemovingOrRemoved:
+		return "removing-or-removed"
+	default:
+		return "unknown"
+	}
+}
+
+func (c storeCondition) groupAvailability() groupAvailability {
+	switch {
+	case c == storeAvailable:
+		return groupAvailable
+	case c <= degradedBoundary:
+		return groupDegraded
+	default:
+		return groupExpired
+	}
+}
+
+func (c storeCondition) affectsLeaderOnly() bool {
+	switch c {
+	case storeEvictLeader:
+		return true
+	default:
+		return false
+	}
+}
+
+// GetNewAvailability uses the given unavailableStores to compute a new groupAvailability.
+// Note that this function does not update runtimeGroupInfo.
+func (g *runtimeGroupInfo) GetNewAvailability(unavailableStores map[uint64]storeCondition) groupAvailability {
+	maxCondition := storeAvailable
+	for _, storeID := range g.VoterStoreIDs {
+		if condition, ok := unavailableStores[storeID]; ok && (!condition.affectsLeaderOnly() || storeID == g.LeaderStoreID) {
+			if maxCondition == storeAvailable || condition > maxCondition {
+				maxCondition = condition
+			}
+		}
+	}
+	return maxCondition.groupAvailability()
 }
 
 // ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
@@ -63,23 +124,14 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	_, _ = m.updateAffinityGroupPeersWithAffinityVer(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
 }
 
-// getAvailabilityCheckInterval returns the availability check interval, which can be overridden for testing.
-func getAvailabilityCheckInterval() time.Duration {
-	if availabilityCheckIntervalForTest > 0 {
-		return availabilityCheckIntervalForTest
-	}
-	return defaultAvailabilityCheckInterval
-}
-
-// SetAvailabilityCheckIntervalForTest sets the availability check interval for testing. Only use this in tests.
-func SetAvailabilityCheckIntervalForTest(interval time.Duration) {
-	availabilityCheckIntervalForTest = interval
-}
-
 // startAvailabilityCheckLoop starts a goroutine to periodically check store availability and invalidate groups with unavailable stores.
+// TODO: If critical operations are added, a graceful shutdown is required.
 func (m *Manager) startAvailabilityCheckLoop() {
-	interval := getAvailabilityCheckInterval()
+	interval := defaultAvailabilityCheckInterval
 	ticker := time.NewTicker(interval)
+	failpoint.Inject("changeAvailabilityCheckInterval", func() {
+		ticker.Reset(100 * time.Millisecond)
+	})
 	go func() {
 		defer logutil.LogPanic()
 		defer ticker.Stop()
@@ -149,8 +201,9 @@ func (m *Manager) generateUnavailableStores() map[uint64]storeCondition {
 }
 
 func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]storeCondition) (isUnavailableStoresChanged bool, groupAvailabilityChanges map[string]groupAvailability) {
-	var logEntries []logEntry
 	groupAvailabilityChanges = make(map[string]groupAvailability)
+	availableGroupCount := 0
+	unavailableGroupCount := 0
 
 	// Validate whether unavailableStores has changed.
 	m.RLock()
@@ -163,47 +216,23 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 	// Analyze which Groups have changed availability
 	// Collect log messages to print after releasing lock
 	for _, groupInfo := range m.groups {
-		var unavailableStore uint64
-		var maxCondition storeCondition
-		for _, storeID := range groupInfo.VoterStoreIDs {
-			if condition, ok := unavailableStores[storeID]; ok && (!condition.affectsLeaderOnly() || storeID == groupInfo.LeaderStoreID) {
-				if unavailableStore == 0 || condition > maxCondition {
-					unavailableStore = storeID
-					maxCondition = condition
-				}
-			}
-		}
-		newAvailability := maxCondition.groupAvailability()
+		newAvailability := groupInfo.GetNewAvailability(unavailableStores)
 		if newAvailability != groupInfo.GetAvailability() {
 			groupAvailabilityChanges[groupInfo.ID] = newAvailability
-			if unavailableStore != 0 {
-				logEntries = append(logEntries, logEntry{
-					level:            "warn",
-					groupID:          groupInfo.ID,
-					unavailableStore: unavailableStore,
-					availability:     newAvailability,
-				})
-			} else {
-				logEntries = append(logEntries, logEntry{
-					level:   "info",
-					groupID: groupInfo.ID,
-				})
-			}
+		}
+		if newAvailability == groupAvailable {
+			availableGroupCount++
+		} else {
+			unavailableGroupCount++
 		}
 	}
 	m.RUnlock()
 
-	// Log after releasing lock
-	for _, entry := range logEntries {
-		switch entry.level {
-		case "warn":
-			log.Warn("affinity group invalidated due to unavailable stores",
-				zap.String("group-id", entry.groupID),
-				zap.Uint64("unavailable-store", entry.unavailableStore),
-				zap.String("availability", entry.availability.String()))
-		case "info":
-			log.Info("affinity group become available", zap.String("group-id", entry.groupID))
-		}
+	if len(unavailableStores) > 0 {
+		log.Warn("affinity groups invalidated due to unavailable stores",
+			zap.Int("unavailable-store-count", len(unavailableStores)),
+			zap.Int("unavailable-group-count", unavailableGroupCount),
+			zap.Int("available-group-count", availableGroupCount))
 	}
 
 	return
@@ -218,7 +247,7 @@ func (m *Manager) setGroupAvailabilityChanges(unavailableStores map[uint64]store
 	}
 }
 
-func (m *Manager) hasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
+func (m *Manager) checkHasUnavailableStore(leaderStoreID uint64, voterStoreIDs []uint64) error {
 	m.RLock()
 	defer m.RUnlock()
 	for _, storeID := range voterStoreIDs {

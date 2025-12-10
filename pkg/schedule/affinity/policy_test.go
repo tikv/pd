@@ -262,3 +262,59 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 	manager.checkStoresAvailability()
 	re.True(groupInfo.IsExpired())
 }
+
+// TestGroupAvailabilityPriority verifies availability picks the strongest condition
+// and respects leader-only constraints.
+func TestGroupAvailabilityPriority(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	for i := uint64(1); i <= 3; i++ {
+		storeInfo := core.NewStoreInfo(&metapb.Store{Id: i, Address: "s"})
+		storeInfo = storeInfo.Clone(core.SetLastHeartbeatTS(time.Now()))
+		storeInfos.PutStore(storeInfo)
+	}
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	// Case 1: leader-only constraint should degrade when on leader, ignored on followers.
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "leader-only"}}))
+	_, err = manager.UpdateAffinityGroupPeers("leader-only", 1, []uint64{1, 2})
+	re.NoError(err)
+
+	// evict-leader on leader -> degraded
+	unavailable := map[uint64]storeCondition{1: storeEvictLeader}
+	changed, changes := manager.getGroupAvailabilityChanges(unavailable)
+	re.True(changed)
+	manager.setGroupAvailabilityChanges(unavailable, changes)
+	groupInfo := getGroupForTest(re, manager, "leader-only")
+	re.Equal(groupDegraded, groupInfo.GetAvailability())
+
+	// evict-leader only on follower should not change availability
+	unavailable = map[uint64]storeCondition{2: storeEvictLeader}
+	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
+	re.True(changed)
+	manager.setGroupAvailabilityChanges(unavailable, changes)
+	groupInfo = getGroupForTest(re, manager, "leader-only")
+	re.Equal(groupAvailable, groupInfo.GetAvailability())
+
+	// Case 2: when multiple conditions exist, higher severity (expired) wins.
+	re.NoError(manager.CreateAffinityGroups([]GroupKeyRanges{{GroupID: "priority"}}))
+	_, err = manager.UpdateAffinityGroupPeers("priority", 1, []uint64{1, 2})
+	re.NoError(err)
+	unavailable = map[uint64]storeCondition{
+		1: storeDisconnected,      // degraded
+		2: storeRemovingOrRemoved, // expired
+	}
+	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
+	re.True(changed)
+	manager.setGroupAvailabilityChanges(unavailable, changes)
+	groupInfo = getGroupForTest(re, manager, "priority")
+	re.Equal(groupExpired, groupInfo.GetAvailability())
+}
