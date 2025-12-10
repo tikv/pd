@@ -162,7 +162,6 @@ func (m *Manager) initGroupLocked(group *Group) {
 	}
 }
 
-//nolint:unused
 func (m *Manager) noGroupsExist(groups []*Group) error {
 	m.RLock()
 	defer m.RUnlock()
@@ -174,7 +173,6 @@ func (m *Manager) noGroupsExist(groups []*Group) error {
 	return nil
 }
 
-//nolint:unused
 func (m *Manager) allGroupsExist(groupIDs []string) error {
 	m.RLock()
 	defer m.RUnlock()
@@ -186,7 +184,6 @@ func (m *Manager) allGroupsExist(groupIDs []string) error {
 	return nil
 }
 
-//nolint:unused
 func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule) {
 	m.Lock()
 	defer m.Unlock()
@@ -202,7 +199,6 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	groupInfo.AffinityVer++
 }
 
-//nolint:unused
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -276,7 +272,6 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo.RangeCount = rangeCount
 }
 
-//nolint:unused
 func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
 	m.Lock()
 	defer m.Unlock()
@@ -303,7 +298,6 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	delete(m.groups, groupID)
 }
 
-//nolint:unused
 func (m *Manager) deleteGroups(groupIDs []string) {
 	m.Lock()
 	defer m.Unlock()
