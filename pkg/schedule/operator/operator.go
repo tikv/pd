@@ -416,7 +416,7 @@ func (o *Operator) GetPriorityLevel() constant.PriorityLevel {
 }
 
 // UnfinishedInfluence calculates the store difference which unfinished operator steps make.
-func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (o *Operator) UnfinishedInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
 			o.steps[int(step)].Influence(opInfluence, region)
@@ -425,7 +425,7 @@ func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.Reg
 }
 
 // TotalInfluence calculates the store difference which whole operator steps make.
-func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (o *Operator) TotalInfluence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	// skip if region is nil and not cache influence.
 	if region == nil && o.influence == nil {
 		return
@@ -433,7 +433,7 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 	if o.influence == nil {
 		o.influence = NewOpInfluence()
 		for step := range o.steps {
-			o.steps[step].Influence(*o.influence, region)
+			o.steps[step].Influence(o.influence, region)
 		}
 	}
 	opInfluence.Add(o.influence)

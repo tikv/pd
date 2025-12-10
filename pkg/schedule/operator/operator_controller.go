@@ -861,8 +861,8 @@ func (oc *Controller) OperatorCount(kind OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInfluenceOption) OpInfluence {
-	influence := OpInfluence{
+func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInfluenceOption) *OpInfluence {
+	influence := &OpInfluence{
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
 	oc.operators.Range(
@@ -885,7 +885,7 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInflue
 }
 
 // GetFastOpInfluence get fast finish operator influence
-func (oc *Controller) GetFastOpInfluence(cluster *core.BasicCluster, influence OpInfluence) {
+func (oc *Controller) GetFastOpInfluence(cluster *core.BasicCluster, influence *OpInfluence) {
 	for _, id := range oc.fastOperators.GetAllID() {
 		value, ok := oc.fastOperators.Get(id)
 		if !ok {
@@ -906,14 +906,14 @@ func (oc *Controller) CleanAllOpRecords() {
 }
 
 // AddOpInfluence add operator influence for cluster
-func AddOpInfluence(op *Operator, influence OpInfluence, cluster *core.BasicCluster) {
+func AddOpInfluence(op *Operator, influence *OpInfluence, cluster *core.BasicCluster) {
 	region := cluster.GetRegion(op.RegionID())
 	op.TotalInfluence(influence, region)
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*Operator, cluster *core.BasicCluster) OpInfluence {
-	influence := *NewOpInfluence()
+func NewTotalOpInfluence(operators []*Operator, cluster *core.BasicCluster) *OpInfluence {
+	influence := NewOpInfluence()
 
 	for _, op := range operators {
 		AddOpInfluence(op, influence, cluster)

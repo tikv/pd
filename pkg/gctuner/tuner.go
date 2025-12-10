@@ -60,40 +60,38 @@ func init() {
 	SetMaxGCPercent(defaultMaxGCPercent)
 }
 
-// SetDefaultGOGC is to set the default GOGC value.
-func SetDefaultGOGC() {
-	util.SetGOGC(int(defaultGCPercent))
-}
-
 // Tuning sets the threshold of heap which will be respect by gogc tuner.
 // When Tuning, the env GOGC will not be take effect.
 // threshold: disable tuning if threshold == 0
 func Tuning(threshold uint64) {
 	// disable gc tuner if percent is zero
-	if threshold <= 0 && globalTuner != nil {
-		globalTuner.stop()
-		globalTuner = nil
-		return
+	if t := globalTuner.Load(); t == nil {
+		t1 := newTuner(threshold)
+		globalTuner.CompareAndSwap(nil, &t1)
+	} else {
+		if threshold <= 0 {
+			(*t).stop()
+			globalTuner.CompareAndSwap(t, nil)
+		} else {
+			(*t).setThreshold(threshold)
+		}
 	}
-
-	if globalTuner == nil {
-		globalTuner = newTuner(threshold)
-		return
-	}
-	globalTuner.setThreshold(threshold)
 }
 
-// GetGOGC returns the current GCPercent.
-func GetGOGC() uint32 {
-	if globalTuner == nil {
-		return defaultGCPercent
+// GetGOGCPercent returns the current GCPercent.
+func GetGOGCPercent() (percent uint32) {
+	t := globalTuner.Load()
+	if t == nil {
+		percent = defaultGCPercent
+	} else {
+		percent = (*t).getGCPercent()
 	}
-	return globalTuner.getGCPercent()
+	return percent
 }
 
 // only allow one gc tuner in one process
 // It is not thread-safe. so it is a private, singleton pattern to avoid misuse.
-var globalTuner *tuner
+var globalTuner atomic.Pointer[*tuner]
 
 /*
 // 			Heap
@@ -137,10 +135,9 @@ func (t *tuner) getThreshold() uint64 {
 	return t.threshold.Load()
 }
 
-func (t *tuner) setGCPercent(percent uint32) uint32 {
-	result := uint32(util.SetGOGC(int(percent)))
-	t.gcPercent.Store(result)
-	return result
+func (t *tuner) setGCPercent(percent uint32) {
+	util.SetGCPercent(int(percent))
+	t.gcPercent.Store(percent)
 }
 
 func (t *tuner) getGCPercent() uint32 {
@@ -156,14 +153,20 @@ func (t *tuner) tuning() {
 
 	inuse := readMemoryInuse()
 	threshold := t.getThreshold()
-	log.Debug("tuning", zap.Uint64("inuse", inuse), zap.Uint64("threshold", threshold),
+	log.Info("tuning", zap.Uint64("inuse", inuse), zap.Uint64("threshold", threshold),
 		zap.Bool("enable-go-gc-tuner", EnableGOGCTuner.Load()))
 	// stop gc tuning
 	if threshold <= 0 {
 		return
 	}
 	if EnableGOGCTuner.Load() {
-		t.setGCPercent(calcGCPercent(inuse, threshold))
+		percent := calcGCPercent(inuse, threshold)
+		log.Info("tuning", zap.Uint64("inuse", inuse),
+			zap.Uint64("threshold", threshold),
+			zap.Bool("enable-go-gc-tuner", EnableGOGCTuner.Load()),
+			zap.Uint32("new-gc-percent", percent),
+		)
+		t.setGCPercent(percent)
 	}
 }
 
