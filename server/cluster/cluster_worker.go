@@ -28,6 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -135,6 +137,13 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
 		return nil, errors.New("region split is paused by replication mode")
 	}
+
+	region := c.GetRegion(reqRegion.GetId())
+	if !filter.AllowAutoSplit(c, region, request.Reason) {
+		c.hbstreams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+		return nil, errors.New("cannot split affinity region")
+	}
+
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 

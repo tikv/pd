@@ -218,7 +218,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Debug("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
+		rule, err := labeler.NewLabelRuleFromJSONWithoutCheck(kv.Value)
 		if err != nil {
 			return err
 		}

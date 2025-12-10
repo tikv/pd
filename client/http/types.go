@@ -703,3 +703,82 @@ type Health struct {
 	ClientUrls []string `json:"client_urls"`
 	Health     bool     `json:"health"`
 }
+
+// AffinityGroupKeyRange represents a key range for affinity group operations.
+type AffinityGroupKeyRange struct {
+	StartKey []byte `json:"start_key"`
+	EndKey   []byte `json:"end_key"`
+}
+
+// CreateAffinityGroupInput defines the input for a single group in the creation request.
+type CreateAffinityGroupInput struct {
+	Ranges []AffinityGroupKeyRange `json:"ranges"`
+}
+
+// CreateAffinityGroupsRequest defines the body for the POST request to create affinity groups.
+type CreateAffinityGroupsRequest struct {
+	AffinityGroups map[string]CreateAffinityGroupInput `json:"affinity_groups"`
+	TableGroup     string                              `json:"table_group,omitempty"`
+}
+
+// AffinityGroup defines an affinity group.
+type AffinityGroup struct {
+	ID              string   `json:"id"`
+	CreateTimestamp uint64   `json:"create_timestamp"`
+	LeaderStoreID   uint64   `json:"leader_store_id,omitempty"`
+	VoterStoreIDs   []uint64 `json:"voter_store_ids,omitempty"`
+}
+
+// AffinityGroupState defines the runtime state of an affinity group.
+type AffinityGroupState struct {
+	AffinityGroup
+	Phase               string `json:"phase"`
+	RangeCount          int    `json:"range_count"`
+	RegionCount         int    `json:"region_count"`
+	AffinityRegionCount int    `json:"affinity_region_count"`
+}
+
+// IsPending indicates that the Group is still determining the StoreIDs.
+// If the Group has no KeyRanges, it remains in pending forever.
+func (s *AffinityGroupState) IsPending() bool {
+	return s.Phase == "pending"
+}
+
+// IsPreparing indicates that the Group is scheduling Regions according to the required Peers.
+func (s *AffinityGroupState) IsPreparing() bool {
+	return s.Phase == "preparing"
+}
+
+// IsStable indicates that the Group has completed the required scheduling and is currently in a stable state.
+func (s *AffinityGroupState) IsStable() bool {
+	return s.Phase == "stable"
+}
+
+// AffinityGroupsResponse defines the success response for affinity group operations.
+type AffinityGroupsResponse struct {
+	AffinityGroups map[string]*AffinityGroupState `json:"affinity_groups"`
+}
+
+// BatchDeleteAffinityGroupsRequest defines the body for batch delete request.
+type BatchDeleteAffinityGroupsRequest struct {
+	IDs   []string `json:"ids"`
+	Force bool     `json:"force,omitempty"`
+}
+
+// GroupRangesModification defines add or remove operations for a specific group.
+type GroupRangesModification struct {
+	ID     string                  `json:"id"`
+	Ranges []AffinityGroupKeyRange `json:"ranges"`
+}
+
+// BatchModifyAffinityGroupsRequest defines the body for batch modify request.
+type BatchModifyAffinityGroupsRequest struct {
+	Add    []GroupRangesModification `json:"add,omitempty"`
+	Remove []GroupRangesModification `json:"remove,omitempty"`
+}
+
+// UpdateAffinityGroupPeersRequest defines the body for updating peer distribution of an affinity group.
+type UpdateAffinityGroupPeersRequest struct {
+	LeaderStoreID uint64   `json:"leader_store_id"`
+	VoterStoreIDs []uint64 `json:"voter_store_ids"`
+}
