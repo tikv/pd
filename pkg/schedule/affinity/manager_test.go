@@ -16,6 +16,7 @@ package affinity
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -137,6 +138,47 @@ func TestBasicGroupOperations(t *testing.T) {
 	err = manager.DeleteAffinityGroups([]string{"group1"}, false)
 	re.NoError(err)
 	re.False(manager.IsGroupExist("group1"))
+}
+
+// TestSyncLabelRuleBeforeGroup ensures label rules arriving before group sync are applied after group creation.
+func TestSyncLabelRuleBeforeGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	store1 := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "test1"})
+	store1 = store1.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store1)
+
+	conf := mockconfig.NewTestOptions()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	re.NoError(err)
+
+	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	gkr := GroupKeyRanges{
+		GroupID: "group-label-first",
+		KeyRanges: []keyutil.KeyRange{
+			{StartKey: []byte{0x01}, EndKey: []byte{0x02}},
+		},
+	}
+	labelRule := MakeLabelRule(gkr)
+	// Simulate watcher path (JSON roundtrip) to ensure Data types match real events.
+	b, err := json.Marshal(labelRule)
+	re.NoError(err)
+	parsedRule, err := labeler.NewLabelRuleFromJSON(b)
+	re.NoError(err)
+	re.NoError(manager.SyncKeyRangesFromEtcd(parsedRule))
+
+	// Group arrives after label rule.
+	manager.SyncGroupFromEtcd(&Group{ID: gkr.GroupID})
+
+	state := manager.GetAffinityGroupState(gkr.GroupID)
+	re.NotNil(state)
+	re.Equal(1, state.RangeCount)
 }
 
 // TestRegionCountStaleCache documents that RegionCount counts stale cache entries when group changes.
