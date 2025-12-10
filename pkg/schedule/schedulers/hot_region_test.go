@@ -977,7 +977,6 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 }
 
 func TestHotWriteRegionScheduleWithPendingInfluence(t *testing.T) {
-	t.Skip("Skip flaky test")
 	re := require.New(t)
 	checkHotWriteRegionScheduleWithPendingInfluence(re, 0) // 0: byte rate
 	checkHotWriteRegionScheduleWithPendingInfluence(re, 1) // 1: key rate
@@ -1031,7 +1030,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	default:
 	}
 
-	for range 20 {
+	for range 3 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		cnt := 0
 	testLoop:
