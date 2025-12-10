@@ -33,7 +33,6 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-//nolint:unused
 func getGroupForTest(re *require.Assertions, m *Manager, id string) *runtimeGroupInfo {
 	m.RLock()
 	defer m.RUnlock()
@@ -45,7 +44,6 @@ func getGroupForTest(re *require.Assertions, m *Manager, id string) *runtimeGrou
 	return &newGroup
 }
 
-//nolint:unused
 func createGroupForTest(re *require.Assertions, m *Manager, id string, rangeCount int) []keyutil.KeyRange {
 	gkr := GroupKeyRanges{
 		KeyRanges: make([]keyutil.KeyRange, rangeCount),
@@ -61,7 +59,6 @@ func createGroupForTest(re *require.Assertions, m *Manager, id string, rangeCoun
 	return gkr.KeyRanges
 }
 
-//nolint:unused
 func testCacheStale(re *require.Assertions, m *Manager, region *core.RegionInfo) {
 	cache, group := m.getCache(region)
 	if cache != nil && group != nil {
@@ -71,8 +68,6 @@ func testCacheStale(re *require.Assertions, m *Manager, region *core.RegionInfo)
 
 // generateRegionForTest generates a test Region from the given information,
 // where voterStoreIDs[0] is used as the leaderStoreID.
-//
-//nolint:unparam
 func generateRegionForTest(id uint64, voterStoreIDs []uint64, keyRange keyutil.KeyRange) *core.RegionInfo {
 	peers := make([]*metapb.Peer, len(voterStoreIDs))
 	for i, storeID := range voterStoreIDs {
