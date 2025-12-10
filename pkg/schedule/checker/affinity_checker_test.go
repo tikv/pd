@@ -17,10 +17,10 @@ package checker
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -188,12 +189,6 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Enable fast health check for testing (100ms instead of 10s)
-	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
-	defer func() {
-		affinity.SetAvailabilityCheckIntervalForTest(0) // Reset to default
-	}()
-
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 
@@ -249,10 +244,9 @@ func TestAffinityAvailabilityCheckWithOfflineStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Enable fast health check
-	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval", "return(true)"))
 	defer func() {
-		affinity.SetAvailabilityCheckIntervalForTest(0)
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"))
 	}()
 
 	opt := newAffinityTestOptions()
@@ -284,10 +278,12 @@ func TestAffinityAvailabilityCheckWithOfflineStore(t *testing.T) {
 	tc.SetStoreOffline(2)
 
 	// Wait for health check to run
-	time.Sleep(200 * time.Millisecond)
+	testutil.Eventually(re, func() bool {
+		groupInfo = affinityManager.GetAffinityGroupState("test_group")
+		return groupInfo != nil && !groupInfo.AffinitySchedulingEnabled
+	})
 
 	// Group should be invalidated because store 2 is removing
-	groupInfo = affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupInfo)
 	re.False(groupInfo.AffinitySchedulingEnabled, "Group should be invalidated when store is removing")
 	re.Equal(affinity.PhasePending, groupInfo.Phase)
@@ -299,10 +295,9 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Enable fast health check
-	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval", "return(true)"))
 	defer func() {
-		affinity.SetAvailabilityCheckIntervalForTest(0)
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"))
 	}()
 
 	opt := newAffinityTestOptions()
@@ -329,10 +324,13 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 	tc.SetStoreDown(3)
 
 	// Wait for health check
-	time.Sleep(200 * time.Millisecond)
+	var groupInfo *affinity.GroupState
+	testutil.Eventually(re, func() bool {
+		groupInfo = affinityManager.GetAffinityGroupState("test_group")
+		return groupInfo != nil && !groupInfo.AffinitySchedulingEnabled
+	})
 
 	// Group should be invalidated
-	groupInfo := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupInfo)
 	re.False(groupInfo.AffinitySchedulingEnabled, "Group should be invalidated when stores are down")
 	re.Equal(affinity.PhasePending, groupInfo.Phase)
@@ -342,11 +340,13 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 	tc.SetStoreUp(2)
 	tc.SetStoreDown(3)
 
-	// Wait for health check
-	time.Sleep(200 * time.Millisecond)
+	// Wait for health check - group should still be invalidated
+	testutil.Eventually(re, func() bool {
+		groupInfo = affinityManager.GetAffinityGroupState("test_group")
+		return groupInfo != nil && !groupInfo.AffinitySchedulingEnabled
+	})
 
 	// Group should still be invalidated (store 3 still down)
-	groupInfo = affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupInfo)
 	re.False(groupInfo.AffinitySchedulingEnabled, "Group should remain invalidated while any store is unhealthy")
 	re.Equal(affinity.PhasePending, groupInfo.Phase)
@@ -356,11 +356,18 @@ func TestAffinityAvailabilityCheckWithDownStores(t *testing.T) {
 	tc.SetStoreUp(2)
 	tc.SetStoreUp(3)
 
-	// Wait for health check
-	time.Sleep(200 * time.Millisecond)
+	// Wait for health check to mark group as available again
+	testutil.Eventually(re, func() bool {
+		groupInfo = affinityManager.GetAffinityGroupState("test_group")
+		// Check that the group is no longer invalidated (Phase should not be Pending)
+		return groupInfo != nil && groupInfo.Phase != affinity.PhasePending
+	})
+
+	// Manually observe region to enable affinity scheduling
 	region := tc.GetRegion(1)
 	groupInfo = affinityManager.GetAffinityGroupState("test_group")
 	affinityManager.ObserveAvailableRegion(region, groupInfo)
+
 	// Now group should be restored
 	groupInfo, isAffinity := affinityManager.GetRegionAffinityGroupState(region)
 	re.True(isAffinity)
@@ -1866,8 +1873,10 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	affinity.SetAvailabilityCheckIntervalForTest(100 * time.Millisecond)
-	defer affinity.SetAvailabilityCheckIntervalForTest(0)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/affinity/changeAvailabilityCheckInterval"))
+	}()
 
 	opt := newAffinityTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -1891,8 +1900,12 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	re.NoError(err)
 
 	// Wait for availability checker to mark the group as not schedulable.
-	time.Sleep(200 * time.Millisecond)
-	groupState := affinityManager.GetAffinityGroupState("test_group")
+	var groupState *affinity.GroupState
+	testutil.Eventually(re, func() bool {
+		groupState = affinityManager.GetAffinityGroupState("test_group")
+		return groupState != nil && !groupState.AffinitySchedulingEnabled
+	})
+
 	re.NotNil(groupState)
 	re.False(groupState.AffinitySchedulingEnabled)
 	re.Equal(affinity.PhasePending, groupState.Phase)

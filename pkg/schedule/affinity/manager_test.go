@@ -49,61 +49,96 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-
-	// Create region labeler
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
 	re.NoError(err)
 
-	// Create affinity group
+	// Create affinity group with 6 key ranges for testing
 	ranges := createGroupForTest(re, manager, "test_group", 6)
 
-	// Test 0: voterStoreIDs will be sorted.
+	// Setup: voterStoreIDs will be sorted.
 	_, err = manager.UpdateAffinityGroupPeers("test_group", 1, []uint64{3, 2, 1})
 	re.NoError(err)
 	groupInfo := getGroupForTest(re, manager, "test_group")
 	re.True(slices.Equal([]uint64{1, 2, 3}, groupInfo.VoterStoreIDs))
 
-	// Test 1: Region not belonging to any affinity group should return false
-	region1 := generateRegionForTest(1, []uint64{1, 2, 3}, nonOverlappingRange)
-	_, isAffinity := manager.GetRegionAffinityGroupState(region1)
-	re.False(isAffinity, "Region not in group should return false")
+	// Test the positive case first
+	t.Run("region conforming to affinity", func(t *testing.T) {
+		re := require.New(t)
+		region := generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
+		_, isAffinity := manager.GetRegionAffinityGroupState(region)
+		re.True(isAffinity)
+	})
 
-	// Test 2: Region conforming to affinity requirements should return true
-	region1 = generateRegionForTest(1, []uint64{1, 2, 3}, ranges[0])
-	_, isAffinity = manager.GetRegionAffinityGroupState(region1)
-	re.True(isAffinity, "Region conforming to affinity should return true")
+	// Test negative cases: all should return false
+	testCases := []struct {
+		name          string
+		regionID      uint64
+		peers         []uint64
+		keyRange      keyutil.KeyRange
+		withoutLeader bool
+		setup         func()
+	}{
+		{
+			name:     "region not in any affinity group",
+			regionID: 1,
+			peers:    []uint64{1, 2, 3},
+			keyRange: nonOverlappingRange,
+		},
+		{
+			name:     "region with wrong leader",
+			regionID: 1,
+			peers:    []uint64{2, 1, 3},
+			keyRange: ranges[1],
+		},
+		{
+			name:     "region with wrong voter stores",
+			regionID: 3,
+			peers:    []uint64{1, 2, 4},
+			keyRange: ranges[2],
+		},
+		{
+			name:     "region with different number of voters",
+			regionID: 4,
+			peers:    []uint64{1, 2},
+			keyRange: ranges[3],
+		},
+		{
+			name:          "region without leader",
+			regionID:      5,
+			peers:         []uint64{1, 2, 3},
+			keyRange:      ranges[4],
+			withoutLeader: true,
+		},
+		{
+			name:     "group not in effect",
+			regionID: 6,
+			peers:    []uint64{1, 2, 3},
+			keyRange: ranges[5],
+			setup: func() {
+				manager.ExpireAffinityGroup("test_group")
+			},
+		},
+	}
 
-	// Test 3: Region with wrong leader should return false. Use the same RegionID to verify cache invalidation.
-	region2 := generateRegionForTest(1, []uint64{2, 1, 3}, ranges[1])
-	_, isAffinity = manager.GetRegionAffinityGroupState(region2)
-	re.False(isAffinity, "Region with wrong leader should return false")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			if tc.setup != nil {
+				tc.setup()
+			}
 
-	// Test 4: Region with wrong voter stores should return false
-	region3 := generateRegionForTest(3, []uint64{1, 2, 4}, ranges[2])
-	_, isAffinity = manager.GetRegionAffinityGroupState(region3)
-	re.False(isAffinity, "Region with wrong voter stores should return false")
+			region := generateRegionForTest(tc.regionID, tc.peers, tc.keyRange)
+			if tc.withoutLeader {
+				region = region.Clone(core.WithLeader(nil))
+			}
 
-	// Test 5: Region with different number of voters should return false
-	region4 := generateRegionForTest(4, []uint64{1, 2}, ranges[3])
-	_, isAffinity = manager.GetRegionAffinityGroupState(region4)
-	re.False(isAffinity, "Region with wrong number of voters should return false")
-
-	// Test 6: Region without leader should return false
-	region5 := generateRegionForTest(5, []uint64{1, 2, 3}, ranges[4])
-	region5 = region5.Clone(core.WithLeader(nil))
-	_, isAffinity = manager.GetRegionAffinityGroupState(region5)
-	re.False(isAffinity, "Region without leader should return false")
-
-	// Test 7: Group not in effect should return false
-	manager.ExpireAffinityGroup("test_group")
-	groupInfo = getGroupForTest(re, manager, "test_group")
-	re.Equal(groupExpired, groupInfo.GetAvailability())
-	region6 := generateRegionForTest(6, []uint64{1, 2, 3}, ranges[5])
-	_, isAffinity = manager.GetRegionAffinityGroupState(region6)
-	re.False(isAffinity, "Group not in effect should return false")
+			_, isAffinity := manager.GetRegionAffinityGroupState(region)
+			re.False(isAffinity)
+		})
+	}
 }
 
 // TestBasicGroupOperations tests basic group CRUD operations

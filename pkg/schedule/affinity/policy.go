@@ -21,6 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -32,12 +33,6 @@ import (
 const (
 	// defaultAvailabilityCheckInterval is the default interval for checking store availability.
 	defaultAvailabilityCheckInterval = 10 * time.Second
-)
-
-var (
-	// availabilityCheckIntervalForTest can be set in tests to speed up availability checks.
-	// Default is 0, which means use defaultAvailabilityCheckInterval.
-	availabilityCheckIntervalForTest time.Duration
 )
 
 // logEntry is used to collect log messages to print after releasing lock
@@ -63,23 +58,13 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 	_, _ = m.updateAffinityGroupPeersWithAffinityVer(group.ID, group.affinityVer, leaderStoreID, voterStoreIDs)
 }
 
-// getAvailabilityCheckInterval returns the availability check interval, which can be overridden for testing.
-func getAvailabilityCheckInterval() time.Duration {
-	if availabilityCheckIntervalForTest > 0 {
-		return availabilityCheckIntervalForTest
-	}
-	return defaultAvailabilityCheckInterval
-}
-
-// SetAvailabilityCheckIntervalForTest sets the availability check interval for testing. Only use this in tests.
-func SetAvailabilityCheckIntervalForTest(interval time.Duration) {
-	availabilityCheckIntervalForTest = interval
-}
-
 // startAvailabilityCheckLoop starts a goroutine to periodically check store availability and invalidate groups with unavailable stores.
 func (m *Manager) startAvailabilityCheckLoop() {
-	interval := getAvailabilityCheckInterval()
+	interval := defaultAvailabilityCheckInterval
 	ticker := time.NewTicker(interval)
+	failpoint.Inject("changeAvailabilityCheckInterval", func() {
+		ticker.Reset(100 * time.Millisecond)
+	})
 	go func() {
 		defer logutil.LogPanic()
 		defer ticker.Stop()
