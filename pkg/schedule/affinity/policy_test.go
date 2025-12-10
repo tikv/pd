@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
-func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
+func TestObserveAvailableRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -81,11 +81,41 @@ func TestObserveAvailableRegionOnlyFirstTime(t *testing.T) {
 		&metapb.Peer{Id: 21, StoreId: 2, Role: metapb.PeerRole_Voter},
 	)
 	manager.ObserveAvailableRegion(region2, manager.GetAffinityGroupState("g"))
-	state2 := manager.GetAffinityGroupState("g")
-	re.NotNil(state2)
-	re.True(state2.AffinitySchedulingEnabled)
-	re.Equal(uint64(1), state2.LeaderStoreID)
-	re.ElementsMatch([]uint64{1}, state2.VoterStoreIDs)
+	state = manager.GetAffinityGroupState("g")
+	re.NotNil(state)
+	re.True(state.AffinitySchedulingEnabled)
+	re.Equal(uint64(1), state.LeaderStoreID)
+	re.ElementsMatch([]uint64{1}, state.VoterStoreIDs)
+
+	// A degraded group must not change voterStoreIDs.
+	manager.DegradeAffinityGroup("g")
+	state = manager.GetAffinityGroupState("g")
+	re.NotNil(state)
+	re.False(state.AffinitySchedulingEnabled)
+	re.False(state.RegularSchedulingEnabled)
+
+	manager.ObserveAvailableRegion(region2, state) // region2 changes voter store IDs
+	state = manager.GetAffinityGroupState("g")
+	re.NotNil(state)
+	re.False(state.AffinitySchedulingEnabled)
+	re.False(state.RegularSchedulingEnabled)
+
+	manager.ObserveAvailableRegion(region1, state) // region1 does not change voter store IDs
+	state = manager.GetAffinityGroupState("g")
+	re.NotNil(state)
+	re.True(state.AffinitySchedulingEnabled)
+
+	// An expired group can change voterStoreIDs.
+	manager.ExpireAffinityGroup("g")
+	state = manager.GetAffinityGroupState("g")
+	re.NotNil(state)
+	re.False(state.AffinitySchedulingEnabled)
+	re.True(state.RegularSchedulingEnabled)
+
+	manager.ObserveAvailableRegion(region2, state) // region2 changes voter store IDs
+	state = manager.GetAffinityGroupState("g")
+	re.NotNil(state)
+	re.True(state.AffinitySchedulingEnabled)
 }
 
 func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {

@@ -195,7 +195,9 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
 	tc.AddRegionStore(3, 10)
-	tc.AddLeaderRegion(1, 1, 2, 3) // Leader on store 1
+	tc.AddRegionStore(4, 10)
+	tc.AddLeaderRegion(100, 4, 2, 3)
+	tc.AddLeaderRegion(200, 1, 2, 3)
 
 	affinityManager := tc.GetAffinityManager()
 	affinityChecker := NewAffinityChecker(tc, opt)
@@ -215,27 +217,36 @@ func TestAffinityCheckerGroupState(t *testing.T) {
 	re.True(groupInfo.AffinitySchedulingEnabled)
 	re.Equal(affinity.PhasePreparing, groupInfo.Phase)
 
-	// Checker should create operator for leader transfer (1 -> 2)
-	ops := affinityChecker.Check(tc.GetRegion(1))
+	// For cases where the Region and Group voter store IDs do not fully overlap.
+	// Checker should create operator for move peer (4 -> 1) and leader transfer (4 -> 2)
+	ops := affinityChecker.Check(tc.GetRegion(100))
 	re.NotNil(ops)
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
-
 	// Simulate health check invalidating the group
 	affinityManager.DegradeAffinityGroup("test_group")
-
 	// Checker should NOT create operator when group is degraded
-	ops = affinityChecker.Check(tc.GetRegion(1))
+	ops = affinityChecker.Check(tc.GetRegion(100))
 	re.Nil(ops, "Checker should not create operator for degraded group")
-
 	// Simulate health check restoring the group
 	affinityManager.RestoreAffinityGroup("test_group")
-
 	// Checker should create operator again after group is restored
-	ops = affinityChecker.Check(tc.GetRegion(1))
+	ops = affinityChecker.Check(tc.GetRegion(100))
 	re.NotNil(ops, "Checker should create operator for restored group")
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
+
+	// For cases where the Region and Group voter store IDs exactly match.
+	ops = affinityChecker.Check(tc.GetRegion(200))
+	re.NotNil(ops)
+	re.Len(ops, 1)
+	re.Equal("affinity-move-region", ops[0].Desc())
+	// Simulate health check invalidating the group
+	affinityManager.DegradeAffinityGroup("test_group")
+	// If the voter store IDs remain unchanged, a valid Region will cause the Group to restore.
+	ops = affinityChecker.Check(tc.GetRegion(200))
+	re.True(affinityManager.GetAffinityGroupState("test_group").AffinitySchedulingEnabled)
+	re.Nil(ops, "Checker should not create operator for same peers")
 }
 
 // TestAffinityAvailabilityCheckWithOfflineStore tests that groups are invalidated when stores go offline.
