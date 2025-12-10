@@ -244,6 +244,17 @@ func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, er
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	return client.Do(req)
+}
+
+// PutJSON is used to do put request
+func PutJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return client.Do(req)
 }
 
