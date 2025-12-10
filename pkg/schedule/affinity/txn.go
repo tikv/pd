@@ -281,7 +281,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 	}); err != nil {
 		return nil, err
 	}
-	if err := m.hasUnavailableStore(leaderStoreID, voterStoreIDs); err != nil {
+	if err := m.checkHasUnavailableStore(leaderStoreID, voterStoreIDs); err != nil {
 		return nil, err
 	}
 
@@ -302,7 +302,7 @@ func (m *Manager) updateAffinityGroupPeersWithAffinityVer(groupID string, affini
 		if group.affinityVer != affinityVer {
 			return group, nil
 		}
-		// Group must not change voterStoreIDs while it is not in the expired status.
+		// Group must not change voterStoreIDs while it is not in the expired status. Changing only leaderStoreID is allowed.
 		// RegularSchedulingEnabled == IsExpired
 		// The VoterStoreIDs are already sorted, so they can be compared directly
 		if !group.RegularSchedulingEnabled && !slices.Equal(voterStoreIDs, group.VoterStoreIDs) {

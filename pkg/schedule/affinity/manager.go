@@ -73,7 +73,11 @@ type Manager struct {
 	unavailableStores   map[uint64]storeCondition    // {store_id} -> storeCondition
 
 	// The following members are protected by metaMutex only, not protected by RWMutex.
-	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges, cached in memory to reduce labeler lock contention
+	// keyRanges cached in memory to reduce labeler lock contention
+	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
+	// labelRuleBuffer is a buffer used during etcd synchronization.
+	// When synchronizing via etcd, LabelRule information may arrive earlier than group information.
+	labelRuleBuffer map[string]*labeler.LabelRule
 }
 
 // NewManager creates a new affinity Manager.
@@ -90,8 +94,9 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		affinityRegionCount: 0,
 		groups:              make(map[string]*runtimeGroupInfo),
 		regions:             make(map[uint64]regionCache),
-		keyRanges:           make(map[string]GroupKeyRanges),
 		unavailableStores:   make(map[uint64]storeCondition),
+		keyRanges:           make(map[string]GroupKeyRanges),
+		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
 	if err := m.initialize(); err != nil {
 		return nil, err
@@ -162,7 +167,6 @@ func (m *Manager) initGroupLocked(group *Group) {
 	}
 }
 
-//nolint:unused
 func (m *Manager) noGroupsExist(groups []*Group) error {
 	m.RLock()
 	defer m.RUnlock()
@@ -174,7 +178,6 @@ func (m *Manager) noGroupsExist(groups []*Group) error {
 	return nil
 }
 
-//nolint:unused
 func (m *Manager) allGroupsExist(groupIDs []string) error {
 	m.RLock()
 	defer m.RUnlock()
@@ -186,7 +189,6 @@ func (m *Manager) allGroupsExist(groupIDs []string) error {
 	return nil
 }
 
-//nolint:unused
 func (m *Manager) createGroups(groups []*Group, labelRules []*labeler.LabelRule) {
 	m.Lock()
 	defer m.Unlock()
@@ -202,7 +204,6 @@ func (m *Manager) resetCountLocked(groupInfo *runtimeGroupInfo) {
 	groupInfo.AffinityVer++
 }
 
-//nolint:unused
 func (m *Manager) updateGroupPeers(groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*GroupState, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -276,7 +277,6 @@ func (m *Manager) updateGroupLabelRuleLockedWithCount(groupID string, labelRule 
 	groupInfo.RangeCount = rangeCount
 }
 
-//nolint:unused
 func (m *Manager) updateGroupLabelRules(labels map[string]*labeler.LabelRule, needClear bool) {
 	m.Lock()
 	defer m.Unlock()
@@ -303,7 +303,6 @@ func (m *Manager) deleteGroupLocked(groupID string) {
 	delete(m.groups, groupID)
 }
 
-//nolint:unused
 func (m *Manager) deleteGroups(groupIDs []string) {
 	m.Lock()
 	defer m.Unlock()
@@ -465,6 +464,14 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 	)
 	if !exists {
 		labelRule = m.regionLabeler.GetLabelRule(GetLabelRuleID(group.ID))
+
+		// If regionLabeler has not been synchronized but SyncKeyRangesFromEtcd has already run, read from the buffer.
+		if labelRule == nil {
+			labelRule = m.labelRuleBuffer[group.ID]
+		}
+		// Once group created, the buffer must be deleted.
+		delete(m.labelRuleBuffer, group.ID)
+
 		if labelRule != nil {
 			gkr, labelErr = extractKeyRangesFromLabelRule(labelRule)
 		}
@@ -511,7 +518,9 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 func (m *Manager) SyncGroupDeleteFromEtcd(groupID string) {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+
 	delete(m.keyRanges, groupID)
+	delete(m.labelRuleBuffer, groupID)
 
 	m.Lock()
 	defer m.Unlock()
@@ -539,22 +548,18 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 		return err
 	}
 
-	// Fast path: avoid taking write lock if no group exists.
-	m.RLock()
-	if _, exists := m.groups[groupID]; !exists {
-		m.RUnlock()
-		return nil
-	}
-	m.RUnlock()
-
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 	m.Lock()
 	defer m.Unlock()
 
-	if _, groupExists := m.groups[groupID]; !groupExists {
+	if _, exists := m.groups[groupID]; !exists && len(gkr.KeyRanges) > 0 {
+		// Store LabelRule information in the buffer when it is synchronized before the group.
+		m.labelRuleBuffer[groupID] = labelRule
 		return nil
 	}
+	// Once group created, the buffer must be deleted.
+	delete(m.labelRuleBuffer, groupID)
 
 	if len(gkr.KeyRanges) > 0 {
 		m.keyRanges[groupID] = gkr
@@ -579,7 +584,9 @@ func (m *Manager) SyncKeyRangesDeleteFromEtcd(ruleID string) {
 	// Clear keyRanges cache (needs metaMutex)
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
+
 	delete(m.keyRanges, groupID)
+	delete(m.labelRuleBuffer, groupID)
 
 	// Update group label rule (needs RWMutex)
 	m.Lock()

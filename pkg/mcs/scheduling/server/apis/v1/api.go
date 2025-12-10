@@ -65,11 +65,9 @@ var (
 	}
 )
 
-func init() {
-	scheserver.SetUpRestHandler = func(srv *scheserver.Service) (http.Handler, apiutil.APIServiceGroup) {
-		s := NewService(srv)
-		return s.apiHandlerEngine, apiServiceGroup
-	}
+// APIServiceGroup returns the service group info.
+func APIServiceGroup() apiutil.APIServiceGroup {
+	return apiServiceGroup
 }
 
 // Service is the tso service.
@@ -128,6 +126,11 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterStoresRouter()
 	s.RegisterPrimaryRouter()
 	return s
+}
+
+// Engine returns the underlying gin engine.
+func (s *Service) Engine() *gin.Engine {
+	return s.apiHandlerEngine
 }
 
 // RegisterAdminRouter registers the router of the admin handler.

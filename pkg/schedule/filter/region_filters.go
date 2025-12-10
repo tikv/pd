@@ -172,6 +172,16 @@ func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusOK
 }
 
+// HasWitnessPeers checks if the region has witness peers.
+func HasWitnessPeers(region *core.RegionInfo) bool {
+	for _, peer := range region.GetPeers() {
+		if peer.GetIsWitness() {
+			return true
+		}
+	}
+	return false
+}
+
 // SnapshotSenderFilter filer the region who's leader store reaches the limit.
 type SnapshotSenderFilter struct {
 	senders map[uint64]struct{}
