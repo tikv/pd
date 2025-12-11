@@ -438,8 +438,8 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 		}
 	)
 	// This is a fast path to reduce the unnecessary iterations when we only have one range.
-	if rangeLen <= 1 {
-		if rangeLen == 1 {
+	if len(ranges) <= 1 {
+		if len(ranges) == 1 {
 			startKey, endKey = ranges[0].StartKey, ranges[0].EndKey
 			if setAndCheckStartEndIndices() {
 				return regions
