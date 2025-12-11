@@ -8,7 +8,7 @@ KMS error
 
 ["PD:affinity:ErrAffinityDisabled"]
 error = '''
-affinity is disabled
+affinity is disabled by config
 '''
 
 ["PD:affinity:ErrAffinityGroupConflict"]
@@ -29,6 +29,11 @@ affinity group %s already exists
 ["PD:affinity:ErrAffinityGroupNotFound"]
 error = '''
 affinity group %s not found
+'''
+
+["PD:affinity:ErrAffinityInternal"]
+error = '''
+affinity internal error
 '''
 
 ["PD:affinity:ErrEmptyRequest"]

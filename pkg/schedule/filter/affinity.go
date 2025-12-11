@@ -20,33 +20,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
-	"github.com/tikv/pd/pkg/schedule/plan"
 )
-
-type affinityFilter struct {
-	affinityManager *affinity.Manager
-}
-
-// NewAffinityFilter creates a RegionFilter that filters all affinity regions.
-func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
-	return &affinityFilter{
-		affinityManager: cluster.GetAffinityManager(),
-	}
-}
-
-// Select implements the RegionFilter interface.
-func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
-	if f.affinityManager != nil {
-		group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
-		if group != nil && !group.RegularSchedulingEnabled {
-			return statusRegionAffinity
-		}
-	}
-	return statusOK
-}
 
 // For affinity regions, we use calculation: (maxSize + buffer) * multiplier
 // Derived from default values:
@@ -68,10 +44,7 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 		return true
 	}
 
-	switch reason {
-	case pdpb.SplitReason_SIZE, pdpb.SplitReason_LOAD:
-	default:
-		// For ADMIN type, splitting is always allowed.
+	if reason == pdpb.SplitReason_ADMIN {
 		return true
 	}
 

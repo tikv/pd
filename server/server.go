@@ -2175,7 +2175,7 @@ func (s *Server) GetAffinityManager() (*affinity.Manager, error) {
 	}
 	manager := rc.GetAffinityManager()
 	if manager == nil {
-		return nil, errs.ErrAffinityDisabled
+		return nil, errs.ErrAffinityInternal
 	}
 	return manager, nil
 }
