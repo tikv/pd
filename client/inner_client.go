@@ -73,7 +73,7 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		return err
 	}
 	c.routerSvcDiscovery = sd.NewRouterServiceDiscovery(c.ctx, c, c.serviceDiscovery,
-		c.keyspaceID, c.tlsCfg, c.option)
+		c.tlsCfg, c.option)
 
 	// Check if the router service client has been enabled.
 	if c.option.GetEnableRouterServiceHandler() {
@@ -313,10 +313,10 @@ func (c *innerClient) setup() error {
 	return nil
 }
 
-// getRegionAPIClient gets the region API service client according to the options.
-// It returns the service client, the context built for gRPC target, and a boolean indicating whether it's a router client.
-// when can't get from the client from the router service or follower, it will get from the leader PD client.
-func (c *innerClient) getRegionAPIClient(ctx context.Context, options *opt.GetRegionOp) (sd.ServiceClient, context.Context, bool) {
+// getServiceClient returns the service client according to the options.
+// It returns the service client, the context built for gRPC target, and a boolean indicating whether it's a router service client.
+// when can't get the client from the router service or follower, it will rollback to the leader client.
+func (c *innerClient) getServiceClient(ctx context.Context, options *opt.GetRegionOp) (sd.ServiceClient, context.Context, bool) {
 	var (
 		serviceClient  sd.ServiceClient
 		mustLeader     bool

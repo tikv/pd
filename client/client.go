@@ -438,11 +438,6 @@ func (c *client) GetTSOServiceDiscovery() sd.ServiceDiscovery {
 	return c.inner.tsoSvcDiscovery
 }
 
-// GetRouterServiceDiscovery returns the Router service discovery object. Only used for testing.
-func (c *client) GetRouterServiceDiscovery() sd.ServiceDiscovery {
-	return c.inner.routerSvcDiscovery
-}
-
 // UpdateOption updates the client option.
 func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 	switch option {
@@ -712,12 +707,8 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		log.Info("[pd] get region from router client begin")
-		res, e := routerClient.GetRegion(ctx, key, opts...)
-		log.Info("[pd] get region from router client finished")
-		return res, e
+		return routerClient.GetRegion(ctx, key, opts...)
 	}
-	log.Info("[pd] get region from api client")
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -731,12 +722,12 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 		resp *pdpb.GetRegionResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterClient := c.inner.getRegionAPIClient(ctx, options)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, options)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 
-	if isRouterClient {
+	if isRouterServiceClient {
 		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
 	} else {
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
@@ -753,7 +744,6 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	log.Info("[pd] get region from api client finish", zap.Bool("isRouterClient", isRouterClient))
 	return router.ConvertToRegion(resp), nil
 }
 
@@ -785,11 +775,11 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 		resp *pdpb.GetRegionResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterClient := c.inner.getRegionAPIClient(ctx, options)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, options)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	if isRouterClient {
+	if isRouterServiceClient {
 		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
 	} else {
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
@@ -836,12 +826,12 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 		resp *pdpb.GetRegionResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterClient := c.inner.getRegionAPIClient(ctx, options)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, options)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 
-	if isRouterClient {
+	if isRouterServiceClient {
 		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
 	} else {
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
@@ -876,10 +866,11 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		scanCtx, cancel = context.WithTimeout(ctx, c.inner.option.Timeout)
 		defer cancel()
 	}
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
+
 	req := &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
@@ -890,8 +881,9 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		serviceClient sd.ServiceClient
 		cctx          context.Context
 	)
-
-	serviceClient, cctx, _ = c.inner.getRegionAPIClient(scanCtx, options)
+	// the scan region api is not supported by the router service, so we need to use the leader client.
+	option.AllowRouterServiceHandle = false
+	serviceClient, cctx, _ = c.inner.getServiceClient(scanCtx, option)
 
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
@@ -929,9 +921,9 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 		scanCtx, cancel = context.WithTimeout(ctx, c.inner.option.Timeout)
 		defer cancel()
 	}
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	pbRanges := make([]*pdpb.KeyRange, 0, len(ranges))
 	for _, r := range ranges {
@@ -939,21 +931,21 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 	}
 	req := &pdpb.BatchScanRegionsRequest{
 		Header:             c.requestHeader(),
-		NeedBuckets:        options.NeedBuckets,
+		NeedBuckets:        option.NeedBuckets,
 		Ranges:             pbRanges,
 		Limit:              int32(limit),
-		ContainAllKeyRange: options.OutputMustContainAllKeyRange,
+		ContainAllKeyRange: option.OutputMustContainAllKeyRange,
 	}
 	var (
 		resp *pdpb.BatchScanRegionsResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterClient := c.inner.getRegionAPIClient(ctx, options)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 
-	if isRouterClient {
+	if isRouterServiceClient {
 		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
 	} else {
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
@@ -1043,12 +1035,12 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		err  error
 	)
 
-	serviceClient, cctx, isRouterClient := c.inner.getRegionAPIClient(ctx, &opt.GetRegionOp{AllowRouterServiceHandle: true})
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{AllowRouterServiceHandle: true})
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 
-	if isRouterClient {
+	if isRouterServiceClient {
 		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetStore(cctx, req)
 	} else {
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetStore(cctx, req)
@@ -1097,12 +1089,12 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 		resp *pdpb.GetAllStoresResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterclient := c.inner.getRegionAPIClient(ctx, &opt.GetRegionOp{AllowRouterServiceHandle: true})
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{AllowRouterServiceHandle: true})
 
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	if isRouterclient {
+	if isRouterServiceClient {
 		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
 	} else {
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)

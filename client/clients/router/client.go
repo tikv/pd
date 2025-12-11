@@ -425,26 +425,26 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 	if c.option.GetEnableRouterServiceHandler() {
 		conns := c.getAllRouterClientConns()
 		if len(conns) == 0 {
-			log.Warn("[router] no router node found")
+			log.Warn("[router] no router service node found")
 			return
 		}
-		// Add the missing follower router stream connections.
+		// Add the missing router service stream connections.
 		for url, conn := range conns {
 			if c.routerConCtxMgr.Exist(url) {
-				log.Debug("[router] the router node remains unchanged", zap.String("url", url))
+				log.Debug("[router] the router service remains unchanged", zap.String("url", url))
 				continue
 			}
 			cctx, cancel := context.WithCancel(ctx)
 			stream, err := routerpb.NewRouterClient(conn).QueryRegion(cctx)
 			if err != nil {
-				log.Error("[router] failed to create the router stream connection", errs.ZapError(err))
+				log.Error("[router] failed to create the router service stream connection", errs.ZapError(err))
 			}
 			// Store the stream connection context if it is successfully created.
 			if stream != nil {
 				c.routerConCtxMgr.Store(cctx, cancel, url, stream)
-				log.Info("[router] successfully established the router stream connection", zap.String("url", url))
+				log.Info("[router] successfully established the router service stream connection", zap.String("url", url))
 			} else {
-				log.Warn("[router] failed to create the router stream connection")
+				log.Warn("[router] failed to create the router service stream connection")
 				cancel()
 			}
 		}
@@ -457,9 +457,11 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 			return false
 		})
 	} else {
-		// GC all the router router stream connections.
-		log.Info("[router] release all router service stream connection")
-		c.routerConCtxMgr.ReleaseAll()
+		// GC all the router service stream connections.
+		if c.routerConCtxMgr.Size() > 0 {
+			log.Info("[router] release all router service stream connection")
+			c.routerConCtxMgr.ReleaseAll()
+		}
 	}
 }
 

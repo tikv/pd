@@ -707,7 +707,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 	}
 
 	if len(t.urls) == 0 || !EqualWithoutOrder(t.urls, urls) {
-		log.Info("update tso server URLs", zap.Strings("urls", urls))
+		log.Info("update tso server URLs", zap.Strings("sortedUrls", urls))
 		t.urls = urls
 		t.selectIdx = 0
 	}

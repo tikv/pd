@@ -141,11 +141,16 @@ func (suite *serverTestSuite) TestStoreAPI() {
 
 	// test router store apis
 	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
-	time.Sleep(1000 * time.Millisecond)
 
-	store, err := cli.GetStore(suite.ctx, store1)
-	re.NoError(err)
-	re.Equal(store1, store.GetId())
+	// wait the router service watch the store info
+	testutil.Eventually(re, func() bool {
+		store, err := cli.GetStore(suite.ctx, store1)
+		if err != nil {
+			return true
+		}
+		re.Equal(store1, store.GetId())
+		return true
+	})
 
 	stores, err := cli.GetAllStores(suite.ctx)
 	re.NoError(err)
