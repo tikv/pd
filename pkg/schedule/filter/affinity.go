@@ -55,7 +55,7 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 
 	if affinityManager := cluster.GetAffinityManager(); affinityManager != nil {
 		group, _ := affinityManager.GetRegionAffinityGroupState(region)
-		if group != nil && !group.RegularSchedulingEnabled {
+		if group != nil && !group.RegularSchedulingAllowed {
 			maxSize := (configSize + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
 			maxKeys := maxSize * config.RegionSizeToKeysRatio
 			// Only block splitting when the Region is in the affinity state.

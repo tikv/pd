@@ -36,7 +36,8 @@ func TestStoreCondition(t *testing.T) {
 	re.Equal(groupDegraded, storeEvictLeader.groupAvailability())
 	re.Equal(groupDegraded, storeLowSpace.groupAvailability())
 	re.Equal(groupExpired, storeDown.groupAvailability())
-	re.Equal(groupExpired, storeRemovingOrRemoved.groupAvailability())
+	re.Equal(groupExpired, storeRemoving.groupAvailability())
+	re.Equal(groupExpired, storeRemoved.groupAvailability())
 
 	re.True(storeEvictLeader.affectsLeaderOnly())
 	re.False(storeDisconnected.affectsLeaderOnly())
@@ -51,7 +52,7 @@ func TestGroupState(t *testing.T) {
 			LeaderStoreID: 1,
 			VoterStoreIDs: []uint64{1, 2, 3},
 		},
-		AffinitySchedulingEnabled: true,
+		AffinitySchedulingAllowed: true,
 	}
 	// keyRange is unused in this test.
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, nonOverlappingRange)
@@ -61,7 +62,7 @@ func TestGroupState(t *testing.T) {
 	region = generateRegionForTest(100, []uint64{1, 2, 4}, nonOverlappingRange)
 	re.False(group.isRegionAffinity(region))
 
-	group.AffinitySchedulingEnabled = false
+	group.AffinitySchedulingAllowed = false
 	region = generateRegionForTest(100, []uint64{1, 2, 3}, nonOverlappingRange)
 	re.False(group.isRegionAffinity(region))
 }
