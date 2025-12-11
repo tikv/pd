@@ -447,6 +447,17 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
+<<<<<<< HEAD
+=======
+
+	kye := keyutil.NewKeyRange("a", "g")
+	suite.tc.KeyRangeManager.Append([]keyutil.KeyRange{kye})
+	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	ops, _ = lb.Schedule(suite.tc, false)
+	re.Empty(ops)
+	suite.tc.KeyRangeManager.Delete([]keyutil.KeyRange{kye})
+>>>>>>> 1b0f53fbc6 (schedule: add affinity filter and kvproto update and use affinity mananager (#10038))
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {

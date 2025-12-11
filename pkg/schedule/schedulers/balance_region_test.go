@@ -652,7 +652,17 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 		core.SetApproximateKeys(1),
 	)
 	tc.PutRegion(region)
+<<<<<<< HEAD
 	operators, _ := sb.Schedule(tc, false)
+=======
+
+	tc.KeyRangeManager.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+	operators, _ := sb.Schedule(tc, false)
+	re.Empty(operators)
+	tc.KeyRangeManager.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+
+	operators, _ = sb.Schedule(tc, false)
+>>>>>>> 1b0f53fbc6 (schedule: add affinity filter and kvproto update and use affinity mananager (#10038))
 	re.NotEmpty(operators)
 
 	for i := uint64(10); i < 111; i++ {

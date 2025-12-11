@@ -60,6 +60,7 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -2151,8 +2152,22 @@ func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
 }
 
+<<<<<<< HEAD
 // GetGlobalTSOAllocator return global tso allocator
 // It only is used for test.
 func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
 	return s.cluster.GetGlobalTSOAllocator()
+=======
+// GetAffinityManager gets the affinity manager.
+func (s *Server) GetAffinityManager() (*affinity.Manager, error) {
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	manager := rc.GetAffinityManager()
+	if manager == nil {
+		return nil, errs.ErrAffinityInternal
+	}
+	return manager, nil
+>>>>>>> 1b0f53fbc6 (schedule: add affinity filter and kvproto update and use affinity mananager (#10038))
 }

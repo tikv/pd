@@ -16,6 +16,7 @@ package core
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -41,7 +42,6 @@ type SchedulerCluster interface {
 	buckets.BucketStatInformer
 
 	GetSchedulerConfig() sc.SchedulerConfigProvider
-	GetRegionLabeler() *labeler.RegionLabeler
 	GetStoreConfig() sc.StoreConfigProvider
 }
 
@@ -61,9 +61,15 @@ type SharedCluster interface {
 
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
+	GetRegionLabeler() *labeler.RegionLabeler
 	GetRuleManager() *placement.RuleManager
 	GetKeyRangeManager() *keyrange.Manager
+<<<<<<< HEAD
 	AllocID() (uint64, error)
+=======
+	GetAffinityManager() *affinity.Manager
+	AllocID(uint32) (uint64, uint32, error)
+>>>>>>> 1b0f53fbc6 (schedule: add affinity filter and kvproto update and use affinity mananager (#10038))
 	IsSchedulingHalted() bool
 }
 
