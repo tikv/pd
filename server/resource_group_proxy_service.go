@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 type resourceGroupProxyServer struct {
@@ -114,6 +115,7 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 
 	// client -> server
 	go func() {
+		defer logutil.LogPanic()
 		defer wg.Done()
 		defer func() { _ = delegateStream.CloseSend() }()
 		for {
@@ -135,6 +137,7 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 
 	// server -> client
 	go func() {
+		defer logutil.LogPanic()
 		defer wg.Done()
 		for {
 			out, err := delegateStream.Recv()
