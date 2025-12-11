@@ -99,6 +99,11 @@ type CheckerConfigProvider interface {
 type SharedConfigProvider interface {
 	GetMaxReplicas() int
 	IsPlacementRulesEnabled() bool
+<<<<<<< HEAD
+=======
+	IsAffinitySchedulingEnabled() bool
+	GetMaxAffinityMergeRegionSize() uint64
+>>>>>>> aef91a5ee6 (affinity: refactor and address comments (#10050))
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetLowSpaceRatio() float64

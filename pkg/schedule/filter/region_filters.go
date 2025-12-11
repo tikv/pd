@@ -197,3 +197,28 @@ func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
 	}
 	return statusRegionLeaderSendSnapshotThrottled
 }
+<<<<<<< HEAD
+=======
+
+type affinityFilter struct {
+	affinityManager *affinity.Manager
+}
+
+// NewAffinityFilter creates a RegionFilter that filters all affinity regions.
+func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
+	return &affinityFilter{
+		affinityManager: cluster.GetAffinityManager(),
+	}
+}
+
+// Select implements the RegionFilter interface.
+func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
+	if f.affinityManager != nil {
+		group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
+		if group != nil && !group.RegularSchedulingAllowed {
+			return statusRegionAffinity
+		}
+	}
+	return statusOK
+}
+>>>>>>> aef91a5ee6 (affinity: refactor and address comments (#10050))
