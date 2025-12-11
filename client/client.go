@@ -634,6 +634,11 @@ func (c *client) GetServiceDiscovery() ServiceDiscovery {
 	return c.pdSvcDiscovery
 }
 
+// GetTSOServiceDiscovery returns the TSO service discovery object. Only used for testing.
+func (c *client) GetTSOServiceDiscovery() ServiceDiscovery {
+	return c.tsoSvcDiscovery
+}
+
 // UpdateOption updates the client option.
 func (c *client) UpdateOption(option DynamicOption, value any) error {
 	switch option {
