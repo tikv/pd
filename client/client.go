@@ -729,6 +729,7 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 }
 
 // GetLocalTSAsync implements the TSOClient interface.
+<<<<<<< HEAD
 func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
 	defer trace.StartRegion(ctx, "pdclient.GetLocalTSAsync").End()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
@@ -737,6 +738,15 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	}
 
 	return c.dispatchTSORequestWithRetry(ctx, dcLocation)
+=======
+//
+// Deprecated: the Local TSO feature has been deprecated. Regardless of the
+// parameters passed, the behavior of this interface will be equivalent to
+// `GetTSAsync`. If you want to use a separately deployed TSO service,
+// please refer to the deployment of the TSO microservice.
+func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
+	return c.GetTSAsync(ctx)
+>>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 }
 
 func (c *client) dispatchTSORequestWithRetry(ctx context.Context, dcLocation string) TSFuture {
@@ -781,9 +791,19 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 }
 
 // GetLocalTS implements the TSOClient interface.
+<<<<<<< HEAD
 func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
 	resp := c.GetLocalTSAsync(ctx, dcLocation)
 	return resp.Wait()
+=======
+//
+// Deprecated: the Local TSO feature has been deprecated. Regardless of the
+// parameters passed, the behavior of this interface will be equivalent to
+// `GetTS`. If you want to use a separately deployed TSO service,
+// please refer to the deployment of the TSO microservice.
+func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logical int64, err error) {
+	return c.GetTS(ctx)
+>>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 }
 
 // GetMinTS implements the TSOClient interface.

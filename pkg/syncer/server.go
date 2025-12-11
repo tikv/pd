@@ -394,3 +394,25 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 	case <-ctx.Done():
 	}
 }
+<<<<<<< HEAD
+=======
+
+func (s *RegionSyncer) closeAllClient() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, sender := range s.mu.streams {
+		resp := &pdpb.SyncRegionResponse{
+			Header: &pdpb.ResponseHeader{
+				ClusterId: keypath.ClusterID(),
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: "server stopped, close the region syncer client",
+				},
+			},
+		}
+		if err := sender.Send(resp); err != nil {
+			log.Warn("region syncer send close message meet error", errs.ZapError(errs.ErrGRPCSend, err))
+		}
+	}
+}
+>>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))

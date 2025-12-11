@@ -1636,6 +1636,70 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
+<<<<<<< HEAD
+=======
+// QueryRegion provides a stream processing of the region query.
+func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return err
+	}
+	if done != nil {
+		defer done()
+	}
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		// TODO: add forwarding logic.
+		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
+			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
+		}
+
+		var rc *cluster.RaftCluster
+
+		if s.member.IsServing() {
+			rc = s.GetRaftCluster()
+			if rc == nil {
+				resp := &pdpb.QueryRegionResponse{
+					Header: grpcutil.NotBootstrappedHeader(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
+			}
+		} else {
+			rc = s.cluster
+			if !rc.GetRegionSyncer().IsRunning() {
+				resp := &pdpb.QueryRegionResponse{
+					Header: grpcutil.RegionNotFound(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
+			}
+		}
+		start := time.Now()
+		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)
+		queryRegionDuration.Observe(time.Since(start).Seconds())
+		grpcutil.RequestCounter("QueryRegion", request.Header, resp.Header.Error, regionRequestCounter)
+		if err := stream.Send(resp); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+}
+
+// ScanRegions implements gRPC PDServer.
+//
+>>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 // Deprecated: use BatchScanRegions instead.
 // ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {

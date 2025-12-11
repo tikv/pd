@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+<<<<<<< HEAD
+=======
+//go:build !without_dashboard
+
+>>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 package dashboard_test
 
 import (

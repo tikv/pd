@@ -2135,15 +2135,20 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 				zap.Stringer("store", store.GetMeta()))
 		}
 	}
-	var stores string
 	if len(failedStores) != 0 {
+<<<<<<< HEAD
 		for i, storeID := range failedStores {
 			stores += fmt.Sprintf("%d", storeID)
 			if i != len(failedStores)-1 {
 				stores += ", "
 			}
+=======
+		ids := make([]string, 0, len(failedStores))
+		for _, storeID := range failedStores {
+			ids = append(ids, strconv.FormatUint(storeID, 10))
+>>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 		}
-		return errors.Errorf("failed stores: %v", stores)
+		return errors.Errorf("failed stores: %v", strings.Join(ids, ", "))
 	}
 	return nil
 }
