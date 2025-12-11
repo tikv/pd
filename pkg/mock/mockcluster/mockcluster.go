@@ -216,7 +216,7 @@ func (mc *Cluster) initRuleManager() {
 		mc.RuleManager = placement.NewRuleManager(mc.ctx, mc.GetStorage(), mc, mc.GetSharedConfig())
 		err := mc.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel, false)
 		if err != nil {
-			log.Error("failed to initialize rule manager", errs.ZapError(err))
+			log.Info("failed to initialize rule manager", errs.ZapError(err))
 		}
 	}
 }

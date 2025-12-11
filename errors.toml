@@ -8,7 +8,7 @@ KMS error
 
 ["PD:affinity:ErrAffinityDisabled"]
 error = '''
-affinity is disabled by config
+affinity is disabled
 '''
 
 ["PD:affinity:ErrAffinityGroupConflict"]
