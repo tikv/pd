@@ -42,6 +42,7 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -114,6 +115,9 @@ type Server struct {
 	configWatcher *config.Watcher
 	ruleWatcher   *rule.Watcher
 	metaWatcher   *meta.Watcher
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -162,6 +166,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -360,6 +365,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing scheduling server ...")
+	s.cgMonitor.StopMonitor()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))
 	}

@@ -588,7 +588,7 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit),
 	)
 
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
 	for i := range candidates.Stores {
 		solver.Target = candidates.Stores[len(candidates.Stores)-i-1]
 		solver.targetScore = s.score(solver.targetStoreID())
@@ -645,7 +645,7 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 	return nil
 }
 
-func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) error {
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence, job *balanceRangeSchedulerJob) error {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	// todo: if supports to balance region size, it needs to change here.
 	var kind constant.ScheduleKind

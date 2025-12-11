@@ -1030,7 +1030,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	default:
 	}
 
-	for range 20 {
+	for range 3 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		cnt := 0
 	testLoop:

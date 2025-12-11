@@ -398,6 +398,8 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 }
 
 func (s *RegionSyncer) closeAllClient() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, sender := range s.mu.streams {
 		resp := &pdpb.SyncRegionResponse{
 			Header: &pdpb.ResponseHeader{

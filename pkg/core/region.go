@@ -221,7 +221,7 @@ type RegionHeartbeatRequest interface {
 func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint64) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
-	// The size of empty region will be correct by the previous RegionInfo.
+	// The size and keys of empty region will be corrected by the previous RegionInfo.
 	regionSize := heartbeat.GetApproximateSize() / units.MiB
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
@@ -270,13 +270,25 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 }
 
 // Inherit inherits the buckets and region size from the parent region if bucket enabled.
-// correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
+// correct approximate size, keys and buckets by the previous size if here exists a reported RegionInfo.
 // See https://github.com/tikv/tikv/issues/11114
 func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
-	// regionSize should not be zero if region is not empty.
+	// Background:
+	// There are scenarios where TiKV reports size=0 and keys=0, which doesn't necessarily mean
+	// the region is empty, but rather that the statistics haven't been calculated yet:
+	//  1. After a leader transfer: When the new leader sends its first heartbeat, the statistics
+	//     (keys/size) might not have been recalculated yet, so it returns 0.
+	//  2. After an unsafe destroy range: Statistics are temporarily unavailable.
+	//
+	// To distinguish between "truly empty region" and "uninitialized statistics", TiKV uses:
+	// - size=0, keys=0: Uninitialized (need to inherit from previous values)
+	// - size=1, keys=0: Truly empty region
+	// - size>1, keys>0: Region has data
+	// Ref: https://github.com/tikv/tikv/pull/19181
 	if r.GetApproximateSize() == 0 {
 		if origin != nil {
 			r.approximateSize = origin.approximateSize
+			r.approximateKeys = origin.approximateKeys
 		} else {
 			r.approximateSize = EmptyRegionApproximateSize
 		}

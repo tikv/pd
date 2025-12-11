@@ -39,6 +39,7 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 		Consumption: &rmpb.Consumption{
 			RRU:                      100.0,
 			WRU:                      50.0,
+			WriteBytes:               1024,
 			ReadCrossAzTrafficBytes:  1024,
 			WriteCrossAzTrafficBytes: 2048,
 		},
@@ -58,8 +59,9 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	re.Equal(ruMeteringVersion, record[metering.DataVersionField])
 	re.Equal(testKeyspaceName, record[metering.DataClusterIDField])
 	re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
-	re.Equal(metering.NewRUValue(150.0), record[meteringDataOltpRUField])
-	re.Equal(metering.NewRUValue(150.0), record[meteringDataOlapRUField])
+	re.Equal(metering.NewRUValue(150.0), record[meteringDataOLTPRUField])
+	re.Equal(metering.NewRUValue(150.0), record[meteringDataOLAPRUField])
+	re.Equal(metering.NewBytesValue(2048), record[meteringDataWriteBytesField])
 	re.Equal(metering.NewBytesValue(6144), record[meteringDataCrossAZTrafficBytesField])
 }
 
@@ -72,6 +74,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 		Consumption: &rmpb.Consumption{
 			RRU:                      50.0,
 			WRU:                      30.0,
+			WriteBytes:               1024,
 			ReadCrossAzTrafficBytes:  100,
 			WriteCrossAzTrafficBytes: 200,
 		},
@@ -84,6 +87,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 		Consumption: &rmpb.Consumption{
 			RRU:                      75.0,
 			WRU:                      25.0,
+			WriteBytes:               1024,
 			ReadCrossAzTrafficBytes:  300,
 			WriteCrossAzTrafficBytes: 400,
 		},
@@ -104,14 +108,16 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 		case testKeyspaceName1:
 			re.Equal(testKeyspaceName1, keyspaceName)
 			re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
-			re.Equal(metering.NewRUValue(80.0), record[meteringDataOltpRUField])
-			re.Equal(metering.NewRUValue(0.0), record[meteringDataOlapRUField])
+			re.Equal(metering.NewRUValue(80.0), record[meteringDataOLTPRUField])
+			re.Equal(metering.NewRUValue(0.0), record[meteringDataOLAPRUField])
+			re.Equal(metering.NewBytesValue(1024), record[meteringDataWriteBytesField])
 			re.Equal(metering.NewBytesValue(300), record[meteringDataCrossAZTrafficBytesField])
 		case testKeyspaceName2:
 			re.Equal(testKeyspaceName2, keyspaceName)
 			re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
-			re.Equal(metering.NewRUValue(0.0), record[meteringDataOltpRUField])
-			re.Equal(metering.NewRUValue(100.0), record[meteringDataOlapRUField])
+			re.Equal(metering.NewRUValue(0.0), record[meteringDataOLTPRUField])
+			re.Equal(metering.NewRUValue(100.0), record[meteringDataOLAPRUField])
+			re.Equal(metering.NewBytesValue(1024), record[meteringDataWriteBytesField])
 			re.Equal(metering.NewBytesValue(700), record[meteringDataCrossAZTrafficBytesField])
 		default:
 			re.Fail("unexpected keyspace", keyspaceName)

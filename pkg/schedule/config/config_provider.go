@@ -88,13 +88,16 @@ type CheckerConfigProvider interface {
 	GetPatrolRegionWorkerCount() int
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
+	GetMaxAffinityMergeRegionSize() uint64
 	GetReplicaScheduleLimit() uint64
+	GetRegionScheduleLimit() uint64
 }
 
 // SharedConfigProvider is the interface for shared configurations.
 type SharedConfigProvider interface {
 	GetMaxReplicas() int
 	IsPlacementRulesEnabled() bool
+	IsAffinitySchedulingEnabled() bool
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetLowSpaceRatio() float64

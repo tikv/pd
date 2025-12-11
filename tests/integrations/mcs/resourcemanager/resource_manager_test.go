@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1529,7 +1529,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 
 	getAddr := func() string {
 		server := suite.cluster.GetLeaderServer()
-		if rand.Intn(100)%2 == 1 {
+		if rand.IntN(100)%2 == 1 {
 			server = suite.cluster.GetServer(suite.cluster.GetFollower())
 		}
 		return server.GetAddr()

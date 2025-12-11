@@ -93,14 +93,17 @@ func NewWatcher(
 	}
 	err := cw.initializeConfigWatcher()
 	if err != nil {
+		cw.Close()
 		return nil, err
 	}
 	err = cw.initializeTTLConfigWatcher()
 	if err != nil {
+		cw.Close()
 		return nil, err
 	}
 	err = cw.initializeSchedulerConfigWatcher()
 	if err != nil {
+		cw.Close()
 		return nil, err
 	}
 	return cw, nil

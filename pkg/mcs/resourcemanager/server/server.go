@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/sysutil"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -85,6 +86,9 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // GetMeteringWriter returns the metering writer.
@@ -128,6 +132,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -228,6 +233,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing resource manager server ...")
+	s.cgMonitor.StopMonitor()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))
 	}

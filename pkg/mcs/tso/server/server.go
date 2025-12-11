@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/sysutil"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -86,6 +87,9 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // Implement the following methods defined in bs.Server
@@ -161,6 +165,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -172,6 +177,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing tso server ...")
+	s.cgMonitor.StopMonitor()
 	// close tso service loops in the keyspace group manager
 	s.keyspaceGroupManager.Close()
 	if err := s.serviceRegister.Deregister(); err != nil {

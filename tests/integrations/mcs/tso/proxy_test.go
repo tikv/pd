@@ -17,7 +17,7 @@ package tso
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -337,7 +337,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				default:
 				}
 
-				req := reqs[rand.Intn(requestsPerClient)]
+				req := reqs[rand.IntN(requestsPerClient)]
 				err := streams[i].Send(req)
 				if err != nil && !mustReliable {
 					respErr.Store(err)

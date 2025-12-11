@@ -37,6 +37,8 @@ linters:
               desc: Use 'sync/atomic' instead of 'go.uber.org/atomic'
             - pkg: github.com/pkg/errors
               desc: Use 'github.com/pingcap/errors' instead of 'github.com/pkg/errors'
+            - pkg: "math/rand$"
+              desc: "Use 'math/rand/v2' instead of 'math/rand'" 
     errcheck:
       exclude-functions:
         - (*github.com/unrolled/render.Render).JSON
@@ -51,6 +53,10 @@ linters:
         - appendAssign
         - exitAfterDefer
         - ifElseChain
+        - deprecatedComment
+    # govet:
+    #   disable:
+    #     - buildtag
     goheader:
       values:
         regexp:

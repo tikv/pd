@@ -17,7 +17,7 @@ package simulator
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"sync"
@@ -224,7 +224,7 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 	var node *Node
 	if e.ID == 0 {
 		arrNodes := raft.conn.getNodes()
-		i := rand.Intn(len(arrNodes))
+		i := rand.IntN(len(arrNodes))
 		node = nodes[arrNodes[i].GetId()]
 	} else {
 		node = nodes[uint64(e.ID)]

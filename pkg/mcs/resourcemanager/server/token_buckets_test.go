@@ -226,7 +226,7 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 	initialTime := time.Now()
 
 	// Initialize the token bucket
-	gtb.init(initialTime, clientUniqueID)
+	gtb.init(initialTime)
 	gtb.Tokens = 50000
 
 	const timeIncrement = 5 * time.Second
@@ -271,5 +271,100 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 		re.LessOrEqualf(math.Abs(tb.Tokens-tc.assignedTokens), 1e-7, "Test case %d failed: expected tokens %f, got %f", i, tc.assignedTokens, tb.Tokens)
 		re.Equalf(tc.expectedTrickleMs, trickle, "Test case %d failed: expected trickle %d, got %d", i, tc.expectedTrickleMs, trickle)
 		currentTime = currentTime.Add(timeIncrement)
+	}
+}
+
+func TestBalanceSlotTokensFillRateAllocation(t *testing.T) {
+	re := require.New(t)
+
+	now := time.Now()
+	testCases := []struct {
+		name          string
+		fillRate      uint64
+		clientDemands map[uint64]float64
+		expectedFill  map[uint64]uint64
+	}{
+		{
+			name:     "One low demand with two high demands",
+			fillRate: 180,
+			clientDemands: map[uint64]float64{
+				1: 80,
+				2: 30,
+				3: 70,
+			},
+			expectedFill: map[uint64]uint64{
+				1: 80,
+				2: 30,
+				3: 70,
+			},
+		},
+		{
+			name:     "One high demand with two low demands",
+			fillRate: 180,
+			clientDemands: map[uint64]float64{
+				1: 15,
+				2: 120,
+				3: 45,
+			},
+			expectedFill: map[uint64]uint64{
+				1: 15,
+				2: 120,
+				3: 45,
+			},
+		},
+		{
+			name:     "Three low demands with even allocation",
+			fillRate: 180,
+			clientDemands: map[uint64]float64{
+				1: 10,
+				2: 10,
+				3: 10,
+			},
+			expectedFill: map[uint64]uint64{
+				1: 60,
+				2: 60,
+				3: 60,
+			},
+		},
+		{
+			name:     "Three high demands with even allocation",
+			fillRate: 90,
+			clientDemands: map[uint64]float64{
+				1: 60,
+				2: 60,
+				3: 60,
+			},
+			expectedFill: map[uint64]uint64{
+				1: 30,
+				2: 30,
+				3: 30,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		// Create a new group token bucket.
+		gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+			Tokens: 0,
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   tc.fillRate,
+				BurstLimit: int64(tc.fillRate),
+			},
+		})
+		gtb.grt = newGroupRUTracker()
+		// Mock the RU demand for each client RU tracker.
+		for clientID, demand := range tc.clientDemands {
+			gtb.tokenSlots[clientID] = newTokenSlot(clientID, now)
+			rt := gtb.grt.getOrCreateRUTracker(clientID)
+			rt.initialized = true
+			rt.lastSampleTime = now
+			rt.lastEMA = demand
+		}
+		// Balance the slots.
+		gtb.balanceSlotTokens(now, 1, 1, 0)
+		// Check the fill rate of each slot.
+		for clientID, expected := range tc.expectedFill {
+			re.Equal(expected, gtb.tokenSlots[clientID].fillRate, "%s - client %d", tc.name, clientID)
+		}
 	}
 }

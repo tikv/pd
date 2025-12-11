@@ -15,7 +15,7 @@
 package grpcutil
 
 import (
-	"math/rand"
+	"math/rand/v2"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -33,7 +33,7 @@ const (
 
 // RequestCounter increments the region request counter with the given method, header, error, and counter.
 func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
-	if err == nil && rand.Intn(100) != 0 {
+	if err == nil && rand.IntN(100) != 0 {
 		// sample 1% region requests to avoid high cardinality
 		return
 	}

@@ -309,6 +309,7 @@ enable-remove-extra-replica = false
 `)
 	re.NoError(err)
 	re.Equal(math.MaxInt8, cfg.PDServerCfg.FlowRoundByDigit)
+	re.True(cfg.PDServerCfg.EnableGOGCTuner)
 	re.True(cfg.Schedule.EnableReplaceOfflineReplica)
 	re.False(cfg.Schedule.EnableRemoveDownReplica)
 	re.False(cfg.Schedule.EnableMakeUpReplica)

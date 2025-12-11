@@ -17,7 +17,7 @@ package typeutil
 import (
 	"encoding/json"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -27,7 +27,7 @@ import (
 func TestParseTimestamp(t *testing.T) {
 	re := require.New(t)
 	for range 3 {
-		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
+		t := time.Now().Add(time.Second * time.Duration(rand.Int32N(1000)))
 		data := Uint64ToBytes(uint64(t.UnixNano()))
 		nt, err := ParseTimestamp(data)
 		re.NoError(err)
@@ -42,7 +42,7 @@ func TestParseTimestamp(t *testing.T) {
 func TestSubTimeByWallClock(t *testing.T) {
 	re := require.New(t)
 	for range 100 {
-		r := rand.Int63n(1000)
+		r := rand.Int64N(1000)
 		t1 := time.Now()
 		// Add r seconds.
 		t2 := t1.Add(time.Second * time.Duration(r))

@@ -1,6 +1,6 @@
 module github.com/tikv/pd/client
 
-go 1.23.12
+go 1.25.5
 
 require (
 	github.com/BurntSushi/toml v0.3.1

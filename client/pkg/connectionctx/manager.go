@@ -16,7 +16,7 @@ package connectionctx
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 )
 
@@ -132,7 +132,7 @@ func (c *Manager[T]) RandomlyPick() *ConnectionCtx[T] {
 	idx := 0
 	var connectionCtx *ConnectionCtx[T]
 	for _, cc := range c.connectionCtxs {
-		j := rand.Intn(idx + 1)
+		j := rand.IntN(idx + 1)
 		if j < 1 {
 			connectionCtx = cc
 		}
