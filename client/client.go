@@ -25,7 +25,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -257,7 +256,6 @@ func createClientWithKeyspace(
 			cancel:                  clientCancel,
 			tlsCfg:                  tlsCfg,
 			option:                  opt.NewOption(),
-			group:                   &singleflight.Group{},
 		},
 	}
 
@@ -378,7 +376,6 @@ func newClientWithKeyspaceName(
 			svrUrls:                 svrAddrs,
 			tlsCfg:                  tlsCfg,
 			option:                  opt.NewOption(),
-			group:                   &singleflight.Group{},
 		},
 	}
 
@@ -715,9 +712,12 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	defer cancel()
 
 	if routerClient := c.getRouterClient(); routerClient != nil {
-		return routerClient.GetRegion(ctx, key, opts...)
+		log.Info("[pd] get region from router client begin")
+		res, e := routerClient.GetRegion(ctx, key, opts...)
+		log.Info("[pd] get region from router client finished")
+		return res, e
 	}
-
+	log.Info("[pd] get region from api client")
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -753,6 +753,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
+	log.Info("[pd] get region from api client finish", zap.Bool("isRouterClient", isRouterClient))
 	return router.ConvertToRegion(resp), nil
 }
 

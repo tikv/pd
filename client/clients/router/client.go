@@ -458,13 +458,8 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 		})
 	} else {
 		// GC all the router router stream connections.
-		c.routerConCtxMgr.GC(func(url string) bool {
-			if url != c.getLeaderURL() {
-				log.Info("[router] release the router service stream connection", zap.String("url", url))
-				return true
-			}
-			return false
-		})
+		log.Info("[router] release all router service stream connection")
+		c.routerConCtxMgr.ReleaseAll()
 	}
 }
 
@@ -601,15 +596,12 @@ batchLoop:
 				continue batchLoop
 			default:
 			}
-			fn, streamURL, retry = c.dispatcherRouterService(ctx)
+			fn, streamURL = c.dispatcherToRouterService(ctx)
+			if fn == nil {
+				fn, streamURL, retry = c.dispatcherToPD(ctx)
+			}
 			if retry {
 				continue connectionCtxChoosingLoop
-			}
-			if fn == nil {
-				fn, streamURL, retry = c.dispatcherAPI(ctx)
-				if retry {
-					continue connectionCtxChoosingLoop
-				}
 			}
 			break connectionCtxChoosingLoop
 		}
@@ -623,7 +615,7 @@ batchLoop:
 	}
 }
 
-func (c *Cli) dispatcherAPI(ctx context.Context) (processFn, string, bool) {
+func (c *Cli) dispatcherToPD(ctx context.Context) (processFn, string, bool) {
 	allowFollowerHandle := c.option.GetEnableFollowerHandle()
 	// Check whether allow the follower to handle this batch of requests.
 	if allowFollowerHandle {
@@ -638,64 +630,6 @@ func (c *Cli) dispatcherAPI(ctx context.Context) (processFn, string, bool) {
 		})
 	}
 
-	var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
-	if allowFollowerHandle {
-		connectionCtx = c.conCtxMgr.RandomlyPick()
-	} else {
-		connectionCtx = c.conCtxMgr.GetConnectionCtx(c.getLeaderURL())
-	}
-	if connectionCtx == nil {
-		log.Info("[router] router stream connection is not ready")
-		c.updateRouterServiceConnection(ctx)
-		return nil, "", true
-	}
-	// Check if the stream connection is canceled.
-	select {
-	case <-connectionCtx.Ctx.Done():
-		log.Info("[router] router stream connection is canceled", zap.String("stream-url", connectionCtx.StreamURL))
-		c.routerConCtxMgr.Release(connectionCtx.StreamURL)
-		return nil, "", true
-	default:
-	}
-	return func() error {
-		return c.processRequests(connectionCtx.Stream)
-	}, connectionCtx.StreamURL, false
-}
-
-type processFn func() error
-
-// dispatcherRouterService returns the stream function, stream url and need retry again
-func (c *Cli) dispatcherRouterService(ctx context.Context) (processFn, string, bool) {
-	allowRouterServiceHandle := c.option.GetEnableRouterServiceHandler()
-	if allowRouterServiceHandle {
-		// We need to ensure all requests in a same batch allow to be handled by the router service.
-		c.batchController.IterCollectedRequests(func(req *Request) bool {
-			if !req.options.AllowRouterServiceHandle {
-				allowRouterServiceHandle = false
-				return false
-			}
-			return true
-		})
-	}
-	allowRouterServiceHandle = allowRouterServiceHandle && c.option.GetEnableRouterServiceHandler()
-	if allowRouterServiceHandle {
-		return nil, "", false
-	}
-
-	// Check whether allow the follower to handle this batch of requests.
-	allowFollowerHandle := c.option.GetEnableFollowerHandle()
-	if allowFollowerHandle {
-		// We need to ensure all requests in a same batch allow to be handled by the follower.
-		// IMPROVE: separate into the follower and leader handle batches.
-		c.batchController.IterCollectedRequests(func(req *Request) bool {
-			if !req.options.AllowFollowerHandle {
-				allowFollowerHandle = false
-				return false
-			}
-			return true
-		})
-	}
-	allowFollowerHandle = allowFollowerHandle && c.option.GetEnableFollowerHandle()
 	var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
 	if allowFollowerHandle {
 		connectionCtx = c.conCtxMgr.RandomlyPick()
@@ -715,10 +649,47 @@ func (c *Cli) dispatcherRouterService(ctx context.Context) (processFn, string, b
 		return nil, "", true
 	default:
 	}
-
 	return func() error {
-		return c.processRouterRequests(connectionCtx.Stream)
+		return c.processRequests(connectionCtx.Stream)
 	}, connectionCtx.StreamURL, false
+}
+
+type processFn func() error
+
+// dispatcherToRouterService returns the stream function, stream url and need retry again
+func (c *Cli) dispatcherToRouterService(ctx context.Context) (processFn, string) {
+	allowRouterServiceHandle := c.option.GetEnableRouterServiceHandler() && c.routerConCtxMgr.Size() > 0
+	if allowRouterServiceHandle {
+		// We need to ensure all requests in a same batch allow to be handled by the router service.
+		c.batchController.IterCollectedRequests(func(req *Request) bool {
+			if !req.options.AllowRouterServiceHandle {
+				allowRouterServiceHandle = false
+				return false
+			}
+			return true
+		})
+	}
+	allowRouterServiceHandle = allowRouterServiceHandle && c.option.GetEnableRouterServiceHandler() && c.routerConCtxMgr.Size() > 0
+	if !allowRouterServiceHandle {
+		return nil, ""
+	}
+	connectionCtx := c.routerConCtxMgr.RandomlyPick()
+	if connectionCtx == nil {
+		log.Info("[router] router service stream connection is not ready")
+		c.updateRouterServiceConnection(ctx)
+		return nil, ""
+	}
+	streamCtx, streamURL, stream := connectionCtx.Ctx, connectionCtx.StreamURL, connectionCtx.Stream
+	select {
+	case <-streamCtx.Done():
+		log.Info("[router] router service stream connection is canceled", zap.String("stream-url", streamURL))
+		c.routerConCtxMgr.Release(streamURL)
+		return nil, ""
+	default:
+	}
+	return func() error {
+		return c.processRouterRequests(stream)
+	}, streamURL
 }
 
 type recvFn func() (*pdpb.QueryRegionResponse, error)
@@ -729,8 +700,86 @@ func (c *Cli) processRouterRequests(stream routerpb.Router_QueryRegionClient) er
 }
 
 func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
-	return c.processRequestsInner(stream.Send, stream.Recv)
+	var (
+		requests     = c.batchController.GetCollectedRequests()
+		traceRegions = make([]*trace.Region, 0, len(requests))
+		spans        = make([]opentracing.Span, 0, len(requests))
+	)
+	for _, req := range requests {
+		traceRegions = append(traceRegions, trace.StartRegion(req.requestCtx, "pdclient.regionReqSend"))
+		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
+			spans = append(spans, span.Tracer().StartSpan("pdclient.processRegionRequests", opentracing.ChildOf(span.Context())))
+		}
+	}
+	defer func() {
+		for i := range spans {
+			spans[i].Finish()
+		}
+		for i := range traceRegions {
+			traceRegions[i].End()
+		}
+	}()
+
+	queryReq := &pdpb.QueryRegionRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: c.svcDiscovery.GetClusterID(),
+		},
+		Keys:     make([][]byte, 0, len(requests)),
+		PrevKeys: make([][]byte, 0, len(requests)),
+		Ids:      make([]uint64, 0, len(requests)),
+	}
+	for _, req := range requests {
+		if !queryReq.NeedBuckets && req.options.NeedBuckets {
+			queryReq.NeedBuckets = true
+		}
+		if req.key != nil {
+			queryReq.Keys = append(queryReq.Keys, req.key)
+		} else if req.prevKey != nil {
+			queryReq.PrevKeys = append(queryReq.PrevKeys, req.prevKey)
+		} else if req.id != 0 {
+			queryReq.Ids = append(queryReq.Ids, req.id)
+		} else {
+			panic("invalid region query request received")
+		}
+	}
+	start := time.Now()
+	err := stream.Send(queryReq)
+	if err != nil {
+		return err
+	}
+	metrics.QueryRegionBatchSendLatency.Observe(
+		time.Since(
+			c.batchController.GetExtraBatchingStartTime(),
+		).Seconds(),
+	)
+	resp, err := stream.Recv()
+	if err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
+		return err
+	}
+	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
+	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
+	// Currently, header errors can occur due to an unready PD leader or follower,
+	// resulting in either a `NOT_BOOTSTRAPPED` or `REGION_NOT_FOUND` error.
+	if headerErr := resp.GetHeader().GetError(); headerErr != nil {
+		return errors.New(headerErr.String())
+	}
+	if keysLen := len(queryReq.Keys); keysLen > 0 {
+		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+	}
+	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
+		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+	}
+	if idsLen := len(queryReq.Ids); idsLen > 0 {
+		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+	}
+	c.doneCollectedRequests(resp)
+	return nil
 }
+
+// func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
+// 	return c.processRequestsInner(stream.Send, stream.Recv)
+// }
 
 func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	var (
@@ -831,6 +880,7 @@ func (c *Cli) handleProcessRequestError(
 	if c.option.GetEnableRouterServiceHandler() {
 		c.routerConCtxMgr.Release(streamURL)
 	}
+
 	if errs.IsLeaderChange(err) {
 		// If the leader changes, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of router requests can be sent to the new leader.

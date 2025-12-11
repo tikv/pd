@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
@@ -60,7 +59,6 @@ type innerClient struct {
 	wg     sync.WaitGroup
 	tlsCfg *tls.Config
 	option *opt.Option
-	group  *singleflight.Group
 }
 
 func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
@@ -122,14 +120,18 @@ func (c *innerClient) enableRouterClient() {
 		return
 	}
 	c.RUnlock()
-	_, err, _ := c.group.Do("router-client", func() (any, error) {
-		routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.routerSvcDiscovery, c.option)
-		c.routerClient = routerClient
-		return nil, nil
-	})
-	if err != nil {
-		log.Error("[pd] failed to enable router client", zap.Error(err))
+	// Create a new router client first before acquiring the lock.
+	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.routerSvcDiscovery, c.option)
+	c.Lock()
+	// Double check if the router client has been enabled.
+	if c.routerClient != nil {
+		// Release the lock and close the router client.
+		c.Unlock()
+		routerClient.Close()
+		return
 	}
+	c.routerClient = routerClient
+	c.Unlock()
 }
 
 func (c *innerClient) disableRouterClient() {
@@ -171,12 +173,9 @@ func (c *innerClient) disableRouterServiceClient() {
 }
 
 func (c *innerClient) enableRouterServiceClient() {
-	_, err, _ := c.group.Do("router-service", func() (any, error) {
-		return nil, c.routerSvcDiscovery.Init()
-	})
-	if err != nil {
-		log.Error("[pd] failed to enable router service client", zap.Error(err))
-	}
+	c.Lock()
+	defer c.Unlock()
+	c.routerSvcDiscovery.Init()
 }
 
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
