@@ -53,6 +53,10 @@ linters:
         - appendAssign
         - exitAfterDefer
         - ifElseChain
+        - deprecatedComment
+    # govet:
+    #   disable:
+    #     - buildtag
     goheader:
       values:
         regexp:

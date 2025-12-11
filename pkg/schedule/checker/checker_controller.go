@@ -461,7 +461,9 @@ func (c *Controller) CheckSuspectRanges() {
 			if !success {
 				continue
 			}
-			regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], suspectRegionLimit)
+			startKey := keyRange[0]
+			endKey := keyRange[1]
+			regions := c.cluster.ScanRegions(startKey, endKey, suspectRegionLimit)
 			if len(regions) == 0 {
 				continue
 			}
@@ -472,8 +474,8 @@ func (c *Controller) CheckSuspectRanges() {
 			// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
 			// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
 			lastRegion := regions[len(regions)-1]
-			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
-				c.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
+			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), endKey) < 0 {
+				c.AddSuspectKeyRange(lastRegion.GetEndKey(), endKey)
 			}
 			c.AddPendingProcessedRegions(false, regionIDList...)
 		}
