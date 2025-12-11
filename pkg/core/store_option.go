@@ -98,6 +98,15 @@ func SetStoreState(state metapb.StoreState, physicallyDestroyed ...bool) StoreCr
 	}
 }
 
+// SetNodeState sets the node state for the store.
+func SetNodeState(nodeState metapb.NodeState) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.NodeState = nodeState
+		store.meta = meta
+	}
+}
+
 // PauseLeaderTransfer prevents the store from been selected as source or
 // target store of TransferLeader.
 func PauseLeaderTransfer() StoreCreateOption {

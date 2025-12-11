@@ -19,6 +19,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
@@ -49,6 +50,7 @@ type Cluster struct {
 	ruleManager       *placement.RuleManager
 	keyRangeManager   *keyrange.Manager
 	labelerManager    *labeler.RegionLabeler
+	affinityManager   *affinity.Manager
 	regionStats       *statistics.RegionStatistics
 	labelStats        *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
@@ -95,6 +97,11 @@ func NewCluster(
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
+	affinityManager, err := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,
@@ -102,6 +109,7 @@ func NewCluster(
 		ruleManager:       ruleManager,
 		keyRangeManager:   keyrange.NewManager(),
 		labelerManager:    labelerManager,
+		affinityManager:   affinityManager,
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx, basicCluster),
 		labelStats:        statistics.NewLabelStatistics(),
@@ -171,6 +179,11 @@ func (c *Cluster) GetKeyRangeManager() *keyrange.Manager {
 // GetRegionLabeler returns the region labeler.
 func (c *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.labelerManager
+}
+
+// GetAffinityManager returns the affinity manager.
+func (c *Cluster) GetAffinityManager() *affinity.Manager {
+	return c.affinityManager
 }
 
 // GetRegionSplitter returns the region splitter.

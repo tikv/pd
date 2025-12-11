@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -55,6 +56,7 @@ type Cluster struct {
 	*placement.RuleManager
 	keyRangeManager *keyrange.Manager
 	*labeler.RegionLabeler
+	AffinityManager *affinity.Manager
 	*statistics.HotStat
 	*config.PersistOptions
 	pendingProcessedRegions map[uint64]struct{}
@@ -82,6 +84,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	// It should be updated to the latest feature version.
 	c.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	c.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, c.Storage, time.Second*5)
+	c.AffinityManager, _ = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig(), c.RegionLabeler)
 	return c
 }
 
@@ -222,6 +225,11 @@ func (mc *Cluster) GetKeyRangeManager() *keyrange.Manager {
 // GetRegionLabeler returns the region labeler of the cluster.
 func (mc *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return mc.RegionLabeler
+}
+
+// GetAffinityManager returns the affinity manager of the cluster.
+func (mc *Cluster) GetAffinityManager() *affinity.Manager {
+	return mc.AffinityManager
 }
 
 // SetStoreUp sets store state to be up.

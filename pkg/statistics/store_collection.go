@@ -247,6 +247,7 @@ func (s *storeStatistics) collect() {
 	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
+	configs["max-affinity-merge-region-size"] = float64(s.opt.GetMaxAffinityMergeRegionSize())
 	configs["region-max-size"] = float64(s.opt.GetRegionMaxSize())
 	configs["region-split-size"] = float64(s.opt.GetRegionSplitSize())
 	configs["region-split-keys"] = float64(s.opt.GetRegionSplitKeys())

@@ -79,7 +79,7 @@ type Manager struct {
 // NewManager creates a new affinity Manager.
 func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider, regionLabeler *labeler.RegionLabeler) (*Manager, error) {
 	if regionLabeler == nil {
-		return nil, errs.ErrAffinityDisabled
+		return nil, errs.ErrAffinityInternal
 	}
 	m := &Manager{
 		ctx:                 ctx,

@@ -185,7 +185,7 @@ func (m *Manager) generateUnavailableStores() map[uint64]storeCondition {
 			unavailableStores[store.GetID()] = storeDown
 
 		// Then the conditions that will mark the group as degraded
-		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()):
+		case !store.AllowLeaderTransfer() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()):
 			unavailableStores[store.GetID()] = storeEvictLeader
 		case store.IsDisconnected():
 			unavailableStores[store.GetID()] = storeDisconnected
