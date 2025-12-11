@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/docker/go-units"
@@ -90,11 +91,14 @@ func (suite *affinityHandlerTestSuite) TearDownTest() {
 // Helper functions for affinity group API calls
 
 func getAffinityGroupURL(serverAddr string, paths ...string) string {
-	url := serverAddr + "/pd/api/v2/affinity-groups"
+	var builder strings.Builder
+	builder.WriteString(serverAddr)
+	builder.WriteString("/pd/api/v2/affinity-groups")
 	for _, path := range paths {
-		url += "/" + path
+		builder.WriteString("/")
+		builder.WriteString(path)
 	}
-	return url
+	return builder.String()
 }
 
 // mustCreateAffinityGroups creates affinity groups and expects success.
