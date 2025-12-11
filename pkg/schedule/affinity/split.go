@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package filter
+package affinity
 
 import (
-	"strconv"
-
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/config"
-	sche "github.com/tikv/pd/pkg/schedule/core"
 )
 
 // For affinity regions, we use calculation: (maxSize + buffer) * multiplier
@@ -33,14 +30,10 @@ const (
 	affinityRegionSizeMultiplier = 4
 )
 
-// AllowAutoSplit returns true if the region can be auto split
-func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reason pdpb.SplitReason) bool {
+// AllowSplit returns true if the region can be auto split
+func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) bool {
 	if region == nil {
 		// The default behavior is to allow it.
-		return true
-	}
-
-	if !cluster.GetCheckerConfig().IsAffinitySchedulingEnabled() {
 		return true
 	}
 
@@ -48,23 +41,24 @@ func AllowAutoSplit(cluster sche.ClusterInformer, region *core.RegionInfo, reaso
 		return true
 	}
 
-	configSize := int64(cluster.GetCheckerConfig().GetMaxAffinityMergeRegionSize())
+	if !m.conf.IsAffinitySchedulingEnabled() {
+		return true
+	}
+
+	configSize := int64(m.conf.GetMaxAffinityMergeRegionSize())
 	if configSize == 0 {
 		return true
 	}
 
-	if affinityManager := cluster.GetAffinityManager(); affinityManager != nil {
-		group, _ := affinityManager.GetRegionAffinityGroupState(region)
-		if group != nil && !group.RegularSchedulingAllowed {
-			maxSize := (configSize + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
-			maxKeys := maxSize * config.RegionSizeToKeysRatio
-			// Only block splitting when the Region is in the affinity state.
-			// But still allow splitting if the Region size is too big.
-			if region.GetApproximateSize() < maxSize && region.GetApproximateKeys() < maxKeys {
-				sourceID := strconv.FormatUint(region.GetLeader().GetStoreId(), 10)
-				filterSourceCounter.WithLabelValues("split-deny-by-affinity", reason.String(), sourceID).Inc()
-				return false
-			}
+	group, _ := m.GetRegionAffinityGroupState(region)
+	if group != nil && !group.RegularSchedulingAllowed {
+		maxSize := (configSize + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
+		maxKeys := maxSize * config.RegionSizeToKeysRatio
+		// Only block splitting when the Region is in the affinity state.
+		// But still allow splitting if the Region size is too big.
+		if region.GetApproximateSize() < maxSize && region.GetApproximateKeys() < maxKeys {
+			regionSplitDenyCount.Inc()
+			return false
 		}
 	}
 
