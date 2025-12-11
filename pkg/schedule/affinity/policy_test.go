@@ -182,8 +182,8 @@ func TestStoreHealthCheck(t *testing.T) {
 	store2 = store2.Clone(core.SetLastHeartbeatTS(time.Now()))
 	storeInfos.PutStore(store2)
 
-	// Set store3 to be unhealthy (disconnected)
-	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
+	// Set store3 to be disconnected
+	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
 	storeInfos.PutStore(store3)
 
 	conf := mockconfig.NewTestOptions()
@@ -240,8 +240,28 @@ func TestStoreHealthCheck(t *testing.T) {
 	// Check health again
 	manager.checkGroupsAvailability()
 
-	// Group2 should be restored to effect state
+	// Group2 should be restored to available status
 	re.True(manager.groups["group2"].IsAffinitySchedulingAllowed())
+
+	// Set store3 to be down
+	store3 = store3.Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
+	storeInfos.PutStore(store3)
+
+	// Check health again
+	manager.checkGroupsAvailability()
+
+	// After health check, group2 should be invalidated (store3 is unhealthy)
+	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
+
+	// Now make store3 healthy again
+	store3Healthy = store3.Clone(core.SetLastHeartbeatTS(time.Now()))
+	storeInfos.PutStore(store3Healthy)
+
+	// Check health again
+	manager.checkGroupsAvailability()
+
+	// Group2 should not be restored from expired status
+	re.False(manager.groups["group2"].IsAffinitySchedulingAllowed())
 }
 
 // TestDegradedGroupShouldExpire verifies a degraded group should move to expired even when
