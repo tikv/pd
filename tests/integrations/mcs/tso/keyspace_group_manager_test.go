@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -970,7 +970,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 		id := suite.allocID()
 		keyspaceGroups = append(keyspaceGroups, &endpoint.KeyspaceGroup{
 			ID:        id,
-			UserKind:  endpoint.UserKind(rand.Intn(int(endpoint.UserKindCount))).String(),
+			UserKind:  endpoint.UserKind(rand.IntN(int(endpoint.UserKindCount))).String(),
 			Keyspaces: []uint32{id},
 		})
 		keyspaces = append(keyspaces, id)

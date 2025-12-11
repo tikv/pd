@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"sort"
 	"strconv"
@@ -2526,7 +2526,7 @@ func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
 	}
 	// It doesn't matter what keyspace SetGlobalGCBarrier API is called on.
 	getCli := func() gc.GCStatesClient {
-		return clients[rand.Intn(len(clients))]
+		return clients[rand.IntN(len(clients))]
 	}
 
 	b, err := getCli().SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)

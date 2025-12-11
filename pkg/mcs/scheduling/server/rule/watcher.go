@@ -94,10 +94,12 @@ func NewWatcher(
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
+		rw.Close()
 		return nil, err
 	}
 	err = rw.initializeRegionLabelWatcher()
 	if err != nil {
+		rw.Close()
 		return nil, err
 	}
 	return rw, nil

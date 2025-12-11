@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 	"sort"
 	"strconv"
@@ -751,13 +751,12 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 				endID = numberOfKeyspaceGroupsToAdd
 			}
 
-			randomGen := rand.New(rand.NewSource(time.Now().UnixNano()))
 			for j := startID; j < endID; j++ {
 				assignToMe := false
 				// Assign the keyspace group to this host/pod with the given probability,
 				// and the keyspace group manager only loads the keyspace groups with id
 				// less than len(mgr.ams).
-				if j < len(mgr.allocators) && randomGen.Intn(100) < probabilityAssignToMe {
+				if j < len(mgr.allocators) && rand.IntN(100) < probabilityAssignToMe {
 					assignToMe = true
 					mux.Lock()
 					expectedGroupIDs = append(expectedGroupIDs, uint32(j))

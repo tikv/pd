@@ -16,7 +16,7 @@ package statistics
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
 	"sync"
 	"testing"
@@ -229,7 +229,7 @@ func pickFollower(region *core.RegionInfo) (index int, peer *metapb.Peer) {
 			continue
 		}
 		dst = index
-		if rand.Intn(2) == 0 {
+		if rand.IntN(2) == 0 {
 			break
 		}
 	}
@@ -276,7 +276,7 @@ func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, i
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
 	}
 
-	leader := meta.Peers[rand.Intn(3)]
+	leader := meta.Peers[rand.IntN(3)]
 
 	switch kind {
 	case utils.Read:
