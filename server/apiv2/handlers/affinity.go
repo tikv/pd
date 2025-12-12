@@ -31,11 +31,10 @@ import (
 func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
 	router.Use(middlewares.BootstrapChecker(), middlewares.AffinitySchedulingEnabledChecker())
-	router.POST("", CreateAffinityGroups)
+	router.POST("", PostAffinityGroups)
 	router.PATCH("", BatchModifyAffinityGroups)
 	router.PUT("/:group_id", UpdateAffinityGroupPeers)
 	router.DELETE("/:group_id", DeleteAffinityGroup)
-	router.POST("/batch-delete", BatchDeleteAffinityGroups)
 	router.GET("", GetAllAffinityGroups)
 	router.GET("/:group_id", GetAffinityGroup)
 }
@@ -98,16 +97,31 @@ type UpdateAffinityGroupPeersRequest struct {
 
 // --- Handlers ---
 
-// CreateAffinityGroups automatically creates and configures affinity groups.
+// PostAffinityGroups handles POST requests for affinity groups.
 // @Tags     affinity-groups
-// @Summary  Automatically create and configure affinity groups based on key ranges.
-// @Param    body  body  CreateAffinityGroupsRequest  true  "Parameters to auto-create affinity groups"
+// @Summary  Create or delete affinity groups.
+// @Description Create affinity groups (default), or delete multiple groups if ?delete query parameter is present. When delete parameter is absent, expects CreateAffinityGroupsRequest in body. When delete parameter is present, expects BatchDeleteAffinityGroupsRequest in body.
+// @Param    delete  query  string  false  "If present, triggers batch deletion instead of creation"
+// @Param    body    body    object  true   "Request body (type depends on delete parameter)"
 // @Produce  json
-// @Success  200  {object}  CreateAffinityGroupsResponse
+// @Success  200  {object}  AffinityGroupsResponse  "Response for create or delete operation"
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /affinity-groups [post]
-func CreateAffinityGroups(c *gin.Context) {
+func PostAffinityGroups(c *gin.Context) {
+	// Check if this is a delete operation via ?delete query parameter
+	// Use POST /?delete to delete multiple objects
+	// Ref: https://docs.aws.amazon.com/AmazonS3/latest/userguide/delete-multiple-objects.html
+	if _, hasDelete := c.GetQuery("delete"); hasDelete {
+		deleteAffinityGroups(c)
+		return
+	}
+	// Default: create operation
+	createAffinityGroups(c)
+}
+
+// createAffinityGroups automatically creates and configures affinity groups.
+func createAffinityGroups(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
 	if err != nil {
@@ -181,17 +195,8 @@ func CreateAffinityGroups(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, resp)
 }
 
-// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
-// @Tags     affinity-groups
-// @Summary  Delete multiple affinity groups in batch.
-// @Description force=false: missing IDs return error; force=true: missing IDs are ignored, existing groups are deleted.
-// @Param    body  body  BatchDeleteAffinityGroupsRequest  true  "Batch delete request with group ids and force flag"
-// @Produce  json
-// @Success  200  {object}  map[string]any  "Delete result with success and error lists"
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups/batch-delete [post]
-func BatchDeleteAffinityGroups(c *gin.Context) {
+// deleteAffinityGroups deletes multiple affinity groups in batch.
+func deleteAffinityGroups(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
 	if err != nil {

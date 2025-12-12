@@ -1333,9 +1333,11 @@ func (c *client) BatchDeleteAffinityGroups(ctx context.Context, groupIDs []strin
 	if err != nil {
 		return errors.Trace(err)
 	}
+	// Use POST with ?delete query parameter for batch deletion
+	url := AffinityGroups + "?delete"
 	return c.request(ctx, newRequestInfo().
 		WithName("BatchDeleteAffinityGroups").
-		WithURI(AffinityGroupBatchDelete).
+		WithURI(url).
 		WithMethod(http.MethodPost).
 		WithBody(reqJSON))
 }

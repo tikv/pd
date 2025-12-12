@@ -261,7 +261,7 @@ func doDeleteAffinityGroup(re *require.Assertions, serverAddr, groupID string, f
 func mustBatchDeleteAffinityGroups(re *require.Assertions, serverAddr string, req *handlers.BatchDeleteAffinityGroupsRequest) {
 	data, err := json.Marshal(req)
 	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr, "batch-delete"), data, testutil.StatusOK(re))
+	err = testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr, "?delete"), data, testutil.StatusOK(re))
 	re.NoError(err)
 }
 
@@ -269,7 +269,7 @@ func mustBatchDeleteAffinityGroups(re *require.Assertions, serverAddr string, re
 func doBatchDeleteAffinityGroups(re *require.Assertions, serverAddr string, req *handlers.BatchDeleteAffinityGroupsRequest) (int, string) {
 	data, err := json.Marshal(req)
 	re.NoError(err)
-	resp, err := tests.TestDialClient.Post(getAffinityGroupURL(serverAddr, "batch-delete"), "application/json", bytes.NewReader(data))
+	resp, err := tests.TestDialClient.Post(getAffinityGroupURL(serverAddr, "?delete"), "application/json", bytes.NewReader(data))
 	re.NoError(err)
 	defer resp.Body.Close()
 	var errorMsg string
