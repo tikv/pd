@@ -1681,6 +1681,49 @@ func TestAffinityCheckerPreserveLearners(t *testing.T) {
 	re.Equal("affinity-move-region", op.Desc())
 	// The operator should have steps that preserve the learner on store 4
 	re.Positive(op.Len())
+
+	// Verify that learner on store 4 is preserved (not removed)
+	verifyLearnersPreserved(re, op, []uint64{4})
+}
+
+// verifyLearnersPreserved checks that the operator does not remove or modify any learner peers.
+// It uses type assertions to check specific step types rather than string matching for better robustness.
+func verifyLearnersPreserved(re *require.Assertions, op *operator.Operator, learnerStores []uint64) {
+	learnerStoreSet := make(map[uint64]bool)
+	for _, store := range learnerStores {
+		learnerStoreSet[store] = true
+	}
+
+	// Check that no step removes or modifies any of the learner stores
+	for i := 0; i < op.Len(); i++ {
+		step := op.Step(i)
+		re.False(func() bool {
+			// Use type assertions to check specific operations
+			switch s := step.(type) {
+			case operator.RemovePeer:
+				// Check if removing a learner peer
+				return learnerStoreSet[s.FromStore]
+			case operator.PromoteLearner:
+				// Check if promoting a learner to voter (this changes the learner)
+				return learnerStoreSet[s.ToStore]
+			case operator.ChangePeerV2Enter:
+				// Check PromoteLearners in joint consensus enter
+				for _, pl := range s.PromoteLearners {
+					if learnerStoreSet[pl.ToStore] {
+						return true
+					}
+				}
+			case operator.ChangePeerV2Leave:
+				// Check PromoteLearners in joint consensus leave
+				for _, pl := range s.PromoteLearners {
+					if learnerStoreSet[pl.ToStore] {
+						return true
+					}
+				}
+			}
+			return false
+		}())
+	}
 }
 
 // TestAffinityCheckerPreserveLearnersWithPeerChange tests learner preservation when peers change.
@@ -1743,6 +1786,9 @@ func TestAffinityCheckerPreserveLearnersWithPeerChange(t *testing.T) {
 	op := ops[0]
 	re.Equal("affinity-move-region", op.Desc())
 	re.Positive(op.Len())
+
+	// Verify that learner on store 5 is preserved (not removed)
+	verifyLearnersPreserved(re, op, []uint64{5})
 }
 
 // TestAffinityCheckerMultipleLearners tests preserving multiple learner peers.
@@ -1809,6 +1855,9 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	op := ops[0]
 	re.Equal("affinity-move-region", op.Desc())
 	re.Positive(op.Len())
+
+	// Verify that both learners on stores 4 and 5 are preserved (not removed)
+	verifyLearnersPreserved(re, op, []uint64{4, 5})
 }
 
 // TestAffinityCheckerLearnerVoterConflict tests that when a learner peer conflicts with affinity voter,
