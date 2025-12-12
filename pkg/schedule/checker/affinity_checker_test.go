@@ -1695,10 +1695,9 @@ func verifyLearnersPreserved(re *require.Assertions, op *operator.Operator, lear
 	}
 
 	// Check that no step removes or modifies any of the learner stores
-	for i := 0; i < op.Len(); i++ {
+	for i := range op.Len() {
 		step := op.Step(i)
 		re.False(func() bool {
-			// Use type assertions to check specific operations
 			switch s := step.(type) {
 			case operator.RemovePeer:
 				// Check if removing a learner peer
