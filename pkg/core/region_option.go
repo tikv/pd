@@ -384,12 +384,13 @@ func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 	}
 }
 
-// WithLeaderStore sets the voter peer on leaderStoreID as the leader.
+// WithLeaderStore sets the peer on leaderStoreID as the leader.
 func WithLeaderStore(leaderStoreID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		for _, p := range region.GetPeers() {
-			if p.GetStoreId() == leaderStoreID {
+			if !IsLearner(p) && p.GetStoreId() == leaderStoreID {
 				region.leader = p
+				return
 			}
 		}
 	}
