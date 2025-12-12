@@ -122,7 +122,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter}
+	affinityFilter := filter.NewAffinityFilter(cluster)
+	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, affinityFilter}
 	switch cluster.(type) {
 	case *rangeCluster:
 		// allow empty region to be scheduled in range cluster

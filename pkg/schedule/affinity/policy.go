@@ -37,6 +37,7 @@ const (
 
 // storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
 // which are split into three groups separated by degradedBoundary.
+// Roughly, larger values indicate a more severe degree of unavailability.
 type storeCondition int
 
 const (
@@ -51,7 +52,8 @@ const (
 
 	// All values greater than degradedBoundary will trigger groupExpired.
 	storeDown
-	storeRemovingOrRemoved
+	storeRemoving
+	storeRemoved
 )
 
 func (c storeCondition) String() string {
@@ -68,8 +70,10 @@ func (c storeCondition) String() string {
 		return "low-space"
 	case storeDown:
 		return "down"
-	case storeRemovingOrRemoved:
-		return "removing-or-removed"
+	case storeRemoving:
+		return "removing"
+	case storeRemoved:
+		return "removed"
 	default:
 		return "unknown"
 	}
@@ -95,25 +99,27 @@ func (c storeCondition) affectsLeaderOnly() bool {
 	}
 }
 
-// GetNewAvailability uses the given unavailableStores to compute a new groupAvailability.
-// Note that this function does not update runtimeGroupInfo.
-func (g *runtimeGroupInfo) GetNewAvailability(unavailableStores map[uint64]storeCondition) groupAvailability {
-	maxCondition := storeAvailable
-	for _, storeID := range g.VoterStoreIDs {
-		if condition, ok := unavailableStores[storeID]; ok && (!condition.affectsLeaderOnly() || storeID == g.LeaderStoreID) {
-			if maxCondition == storeAvailable || condition > maxCondition {
-				maxCondition = condition
+func calcGroupAvailability(
+	unavailableStores map[uint64]storeCondition,
+	leaderStoreID uint64,
+	voterStoreIDs []uint64,
+) groupAvailability {
+	worstCondition := storeAvailable
+	for _, storeID := range voterStoreIDs {
+		if condition, ok := unavailableStores[storeID]; ok && (!condition.affectsLeaderOnly() || storeID == leaderStoreID) {
+			if worstCondition == storeAvailable || condition > worstCondition {
+				worstCondition = condition
 			}
 		}
 	}
-	return maxCondition.groupAvailability()
+	return worstCondition.groupAvailability()
 }
 
 // ObserveAvailableRegion observes available Region and collects information to update the Peer distribution within the Group.
 func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupState) {
 	// Use the peer distribution of the first observed available Region as the result.
 	// In the future, we may want to use a more sophisticated strategy rather than first-win.
-	if group == nil || group.AffinitySchedulingEnabled {
+	if group == nil || group.AffinitySchedulingAllowed {
 		return
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -141,19 +147,19 @@ func (m *Manager) startAvailabilityCheckLoop() {
 				log.Info("affinity manager availability check loop stopped")
 				return
 			case <-ticker.C:
-				m.checkStoresAvailability()
+				m.checkGroupsAvailability()
 			}
 		}
 	}()
 	log.Info("affinity manager availability check loop started", zap.Duration("interval", interval))
 }
 
-// checkStoresAvailability checks the availability status of stores and invalidates groups with unavailable stores.
-func (m *Manager) checkStoresAvailability() {
+// checkGroupsAvailability checks the condition of stores and invalidates groups with unavailable stores.
+func (m *Manager) checkGroupsAvailability() {
 	if !m.IsAvailable() {
 		return
 	}
-	unavailableStores := m.generateUnavailableStores()
+	unavailableStores := m.collectUnavailableStores()
 	isUnavailableStoresChanged, groupAvailabilityChanges := m.getGroupAvailabilityChanges(unavailableStores)
 	if isUnavailableStoresChanged {
 		m.setGroupAvailabilityChanges(unavailableStores, groupAvailabilityChanges)
@@ -172,15 +178,17 @@ func (m *Manager) collectMetrics() {
 	affinityRegionCount.Set(float64(m.affinityRegionCount))
 }
 
-func (m *Manager) generateUnavailableStores() map[uint64]storeCondition {
+func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 	unavailableStores := make(map[uint64]storeCondition)
 	stores := m.storeSetInformer.GetStores()
 	lowSpaceRatio := m.conf.GetLowSpaceRatio()
 	for _, store := range stores {
 		switch {
 		// First the conditions that will mark the group as expired
-		case store.IsRemoved() || store.IsPhysicallyDestroyed() || store.IsRemoving():
-			unavailableStores[store.GetID()] = storeRemovingOrRemoved
+		case store.IsRemoved() || store.IsPhysicallyDestroyed():
+			unavailableStores[store.GetID()] = storeRemoved
+		case store.IsRemoving():
+			unavailableStores[store.GetID()] = storeRemoving
 		case store.IsUnhealthy():
 			unavailableStores[store.GetID()] = storeDown
 
@@ -216,8 +224,17 @@ func (m *Manager) getGroupAvailabilityChanges(unavailableStores map[uint64]store
 	// Analyze which Groups have changed availability
 	// Collect log messages to print after releasing lock
 	for _, groupInfo := range m.groups {
-		newAvailability := groupInfo.GetNewAvailability(unavailableStores)
-		if newAvailability != groupInfo.GetAvailability() {
+		availability := groupInfo.GetAvailability()
+
+		// A Group in the expired status cannot be restored.
+		if availability == groupExpired {
+			unavailableGroupCount++
+			continue
+		}
+
+		// Only Groups in the available or degraded status can be changed automatically.
+		newAvailability := calcGroupAvailability(unavailableStores, groupInfo.LeaderStoreID, groupInfo.VoterStoreIDs)
+		if availability != newAvailability {
 			groupAvailabilityChanges[groupInfo.ID] = newAvailability
 		}
 		if newAvailability == groupAvailable {

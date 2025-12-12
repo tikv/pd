@@ -301,6 +301,7 @@ var (
 	hotSchedulerNoRegionCounter             = hotRegionCounterWithEvent("no_region")
 	hotSchedulerUnhealthyReplicaCounter     = hotRegionCounterWithEvent("unhealthy_replica")
 	hotSchedulerAbnormalReplicaCounter      = hotRegionCounterWithEvent("abnormal_replica")
+	hotSchedulerIgnoredAffinity             = hotRegionCounterWithEvent("ignored_affinity")
 	hotSchedulerCreateOperatorFailedCounter = hotRegionCounterWithEvent("create_operator_failed")
 	hotSchedulerNewOperatorCounter          = hotRegionCounterWithEvent("new_operator")
 	hotSchedulerSnapshotSenderLimitCounter  = hotRegionCounterWithEvent("snapshot_sender_limit")
