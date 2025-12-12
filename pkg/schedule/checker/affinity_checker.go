@@ -20,7 +20,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -212,15 +211,6 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		}
 	}
 
-	// Build target peers map with same roles
-	peers := make(map[uint64]*metapb.Peer)
-	for storeID, role := range roles {
-		peers[storeID] = &metapb.Peer{
-			StoreId: storeID,
-			Role:    role.MetaPeerRole(),
-		}
-	}
-
 	// Skip building if target leader store currently disallows leader in (e.g., evict-leader / reject-leader).
 	if targetLeader := c.cluster.GetStore(group.LeaderStoreID); targetLeader != nil {
 		if !targetLeader.AllowLeaderTransferIn() || c.conf.CheckLabelProperty(config.RejectLeader, targetLeader.GetLabels()) {
@@ -236,7 +226,8 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		kind |= operator.OpLeader
 	}
 
-	op, err := operator.CreateMoveRegionOperatorWithPeers("affinity-move-region", c.cluster, region, kind, peers, roles)
+	// Create operator with the target roles configuration
+	op, err := operator.CreateMoveRegionOperator("affinity-move-region", c.cluster, region, kind, roles)
 	if err != nil {
 		log.Warn("create affinity move region operator failed",
 			zap.Uint64("region-id", region.GetID()),
