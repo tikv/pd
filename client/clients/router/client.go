@@ -457,12 +457,11 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 			}
 			return false
 		})
-	} else {
+	} else if c.routerConCtxMgr.Size() > 0 {
 		// GC all the router service stream connections.
-		if c.routerConCtxMgr.Size() > 0 {
-			log.Info("[router] release all router service stream connection")
-			c.routerConCtxMgr.ReleaseAll()
-		}
+		log.Info("[router] release all router service stream connection")
+		c.routerConCtxMgr.ReleaseAll()
+
 	}
 }
 

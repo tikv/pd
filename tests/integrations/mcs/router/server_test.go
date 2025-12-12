@@ -146,7 +146,7 @@ func (suite *serverTestSuite) TestStoreAPI() {
 	testutil.Eventually(re, func() bool {
 		store, err := cli.GetStore(suite.ctx, store1)
 		if err != nil {
-			return true
+			return false
 		}
 		re.Equal(store1, store.GetId())
 		return true
