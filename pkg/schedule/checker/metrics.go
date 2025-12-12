@@ -85,6 +85,7 @@ const (
 	mergeChecker      = "merge_checker"
 	replicaChecker    = "replica_checker"
 	splitChecker      = "split_checker"
+	affinityChecker   = "affinity_checker"
 )
 
 const (
@@ -125,6 +126,7 @@ func newCheckerControllerMetrics() *checkerControllerMetrics {
 		learnerChecker,
 		replicaChecker,
 		mergeChecker,
+		affinityChecker,
 	}
 
 	m := &checkerControllerMetrics{
@@ -240,4 +242,30 @@ var (
 
 	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")
 	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitChecker, "paused")
+
+	affinityCheckerCounter                        = checkerCounter.WithLabelValues(affinityChecker, "check")
+	affinityCheckerPausedCounter                  = checkerCounter.WithLabelValues(affinityChecker, "paused")
+	affinityCheckerRegionNoLeaderCounter          = checkerCounter.WithLabelValues(affinityChecker, "region-no-leader")
+	affinityCheckerGroupSchedulingDisabledCounter = checkerCounter.WithLabelValues(affinityChecker, "group-scheduling-disabled")
+	affinityCheckerNewOpCounter                   = checkerCounter.WithLabelValues(affinityChecker, "new-operator")
+	affinityCheckerCreateOpFailedCounter          = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
+	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
+	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
+	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
+
+	// Affinity merge checker metrics
+	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")
+	affinityMergeCheckerDisabledCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-disabled")
+	affinityMergeCheckerGlobalDisabledCounter       = checkerCounter.WithLabelValues(affinityChecker, "merge-global-disabled")
+	affinityMergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(affinityChecker, "merge-no-need")
+	affinityMergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-no-target")
+	affinityMergeCheckerTargetTooBigCounter         = checkerCounter.WithLabelValues(affinityChecker, "merge-target-too-big")
+	affinityMergeCheckerNewOpCounter                = checkerCounter.WithLabelValues(affinityChecker, "merge-new-operator")
+	affinityMergeCheckerAdjNotExistCounter          = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-not-exist")
+	affinityMergeCheckerAdjDifferentGroupCounter    = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-different-group")
+	affinityMergeCheckerAdjNotAffinityCounter       = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-not-affinity")
+	affinityMergeCheckerAdjDisallowMergeCounter     = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-disallow-merge")
+	affinityMergeCheckerAdjAbnormalPeerStoreCounter = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-abnormal-peerstore")
+	affinityMergeCheckerAdjUnhealthyCounter         = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-unhealthy")
+	affinityMergeCheckerAdjAbnormalReplicaCounter   = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-abnormal-replica")
 )
