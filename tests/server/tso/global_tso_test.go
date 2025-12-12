@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build tso_full_test || tso_function_test
-// +build tso_full_test tso_function_test
 
 package tso_test
 
