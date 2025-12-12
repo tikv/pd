@@ -6,6 +6,54 @@ error = '''
 KMS error
 '''
 
+<<<<<<< HEAD
+=======
+["PD:affinity:ErrAffinityGroupConflict"]
+error = '''
+affinity group %s cannot appear in both add and remove operations in the same request
+'''
+
+["PD:affinity:ErrAffinityGroupContent"]
+error = '''
+invalid affinity group content, %s
+'''
+
+["PD:affinity:ErrAffinityGroupExist"]
+error = '''
+affinity group %s already exists
+'''
+
+["PD:affinity:ErrAffinityGroupNotFound"]
+error = '''
+affinity group %s not found
+'''
+
+["PD:affinity:ErrAffinityInternal"]
+error = '''
+affinity internal error
+'''
+
+["PD:affinity:ErrEmptyRequest"]
+error = '''
+%s
+'''
+
+["PD:affinity:ErrInvalidGroupID"]
+error = '''
+invalid group id %s: should contain only letters (a-z, A-Z), numbers (0-9), hyphens (-) and underscores (_), and be 1-64 characters long
+'''
+
+["PD:affinity:ErrInvalidKeyFormat"]
+error = '''
+invalid hex %s key '%s' for group '%s'
+'''
+
+["PD:affinity:ErrInvalidLabelRuleFormat"]
+error = '''
+invalid label rule data format %s
+'''
+
+>>>>>>> 09f1b5d39d (api: add affinity groups api and client support (#10041))
 ["PD:apiutil:ErrOptionNotExist"]
 error = '''
 the option %s does not exist

@@ -56,6 +56,12 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	root.Use(middlewares.Redirector())
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
+<<<<<<< HEAD
 	handlers.RegisterMicroService(root)
+=======
+	handlers.RegisterMicroservice(root)
+	handlers.RegisterMaintenance(root)
+	handlers.RegisterAffinity(root)
+>>>>>>> 09f1b5d39d (api: add affinity groups api and client support (#10041))
 	return router, group, nil
 }
