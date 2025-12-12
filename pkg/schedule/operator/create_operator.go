@@ -117,6 +117,13 @@ func CreateMoveRegionOperator(desc string, ci sche.SharedCluster, region *core.R
 	return builder.Build(kind)
 }
 
+// CreateMoveRegionOperatorWithPeers creates an operator that moves a region using pre-built peers and roles.
+// This is useful when the caller has already constructed the target peer configuration.
+func CreateMoveRegionOperatorWithPeers(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
+	builder := NewBuilder(desc, ci, region).SetPeers(peers).SetExpectedRoles(roles)
+	return builder.Build(kind)
+}
+
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
 func CreateMovePeerOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).

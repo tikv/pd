@@ -1811,50 +1811,6 @@ func TestAffinityCheckerMultipleLearners(t *testing.T) {
 	re.Positive(op.Len())
 }
 
-// TestAffinityCheckerWithWitnessPeers tests that regions with witness peers are skipped.
-func TestAffinityCheckerWithWitnessPeers(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := newAffinityTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.AddRegionStore(1, 10)
-	tc.AddRegionStore(2, 10)
-	tc.AddRegionStore(3, 10)
-
-	// Create region with witness peer
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	region := tc.GetRegion(1)
-
-	// Make peer on store 3 a witness
-	peers := region.GetMeta().GetPeers()
-	for _, peer := range peers {
-		if peer.GetStoreId() == 3 {
-			peer.IsWitness = true
-			break
-		}
-	}
-	region = region.Clone(core.SetPeers(peers))
-	tc.PutRegion(region)
-
-	affinityManager := tc.GetAffinityManager()
-	checker := NewAffinityChecker(tc, opt)
-
-	// Create affinity group
-	group := &affinity.Group{
-		ID:            "test_group",
-		LeaderStoreID: 2,
-		VoterStoreIDs: []uint64{1, 2, 3},
-	}
-	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
-	re.NoError(err)
-
-	// Check should return nil for regions with witness peers
-	ops := checker.Check(region)
-	re.Nil(ops)
-}
-
 // TestAffinityCheckerLearnerVoterConflict tests that when a learner peer conflicts with affinity voter,
 // the checker returns nil and logs the conflict.
 func TestAffinityCheckerLearnerVoterConflict(t *testing.T) {

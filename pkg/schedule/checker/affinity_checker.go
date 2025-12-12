@@ -88,10 +88,6 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		affinityCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
-	if filter.HasWitnessPeers(region) {
-		affinityCheckerWitnessPeerCounter.Inc()
-		return nil
-	}
 
 	// Get the affinity group for this region
 	group, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
@@ -225,13 +221,6 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		}
 	}
 
-	// Use Builder to create the operator with preserved learners
-	builder := operator.NewBuilder(
-		"affinity-move-region",
-		c.cluster,
-		region,
-	).SetPeers(peers).SetExpectedRoles(roles)
-
 	// Skip building if target leader store currently disallows leader in (e.g., evict-leader / reject-leader).
 	if targetLeader := c.cluster.GetStore(group.LeaderStoreID); targetLeader != nil {
 		if !targetLeader.AllowLeaderTransferIn() || c.conf.CheckLabelProperty(config.RejectLeader, targetLeader.GetLabels()) {
@@ -247,7 +236,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 		kind |= operator.OpLeader
 	}
 
-	op, err := builder.Build(kind)
+	op, err := operator.CreateMoveRegionOperatorWithPeers("affinity-move-region", c.cluster, region, kind, peers, roles)
 	if err != nil {
 		log.Warn("create affinity move region operator failed",
 			zap.Uint64("region-id", region.GetID()),
@@ -403,6 +392,13 @@ func (c *AffinityChecker) allowAffinityMerge(region, adjacent *core.RegionInfo) 
 	return true
 }
 
+// Presence flags for tracking store locations
+const (
+	inSource = 1 << 0 // 0b01: if only in source
+	inTarget = 1 << 1 // 0b10: if only in target
+	// inBoth = inSource | inTarget = 0b11: store exists in both
+)
+
 // cloneRegionWithReplacePeerStores clones the Region and updates its voters and leader to the target stores.
 // If the number of voters does not match or the leader is not among the target voters,
 // it returns nil to indicate failure. Source and target placement must not contain duplicate store IDs respectively.
@@ -417,32 +413,29 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 		return nil
 	}
 
-	// presence records whether a storeID exists in the source and/or target:
-	//   - 1(0b01) if only in source
-	//   - 2(0b10) if only in target
-	//   - 3(0b11) if in both
+	// presences records whether a storeID exists in the source and/or target
 	presences := make(map[uint64]int, len(sourceVoters)+len(voterStoreIDs))
 	for _, voter := range sourceVoters {
-		presences[voter.GetStoreId()] |= 1
+		presences[voter.GetStoreId()] |= inSource
 	}
 	for _, voterStoreID := range voterStoreIDs {
-		presences[voterStoreID] |= 2
+		presences[voterStoreID] |= inTarget
 	}
 
-	sourceOnly := make([]uint64, 0, len(sourceVoters))
-	targetOnly := make([]uint64, 0, len(voterStoreIDs))
+	storesToRemove := make([]uint64, 0, len(sourceVoters))
+	storesToAdd := make([]uint64, 0, len(voterStoreIDs))
 	for storeID, presence := range presences {
 		switch presence {
-		case 1:
-			sourceOnly = append(sourceOnly, storeID)
-		case 2:
-			targetOnly = append(targetOnly, storeID)
+		case inSource:
+			storesToRemove = append(storesToRemove, storeID)
+		case inTarget:
+			storesToAdd = append(storesToAdd, storeID)
 		}
 	}
 
-	options := make([]core.RegionCreateOption, 0, len(sourceOnly)+1)
-	for i, sourceStoreID := range sourceOnly {
-		options = append(options, core.WithReplacePeerStore(sourceStoreID, targetOnly[i]))
+	options := make([]core.RegionCreateOption, 0, len(storesToRemove)+1)
+	for i, removeStoreID := range storesToRemove {
+		options = append(options, core.WithReplacePeerStore(removeStoreID, storesToAdd[i]))
 	}
 	options = append(options, core.WithLeaderStore(leaderStoreID))
 

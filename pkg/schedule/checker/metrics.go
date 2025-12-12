@@ -251,7 +251,6 @@ var (
 	affinityCheckerCreateOpFailedCounter          = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
 	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
 	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
-	affinityCheckerWitnessPeerCounter             = checkerCounter.WithLabelValues(affinityChecker, "witness-peer")
 	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
 
 	// Affinity merge checker metrics
