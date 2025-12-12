@@ -30,7 +30,7 @@ import (
 // RegisterAffinity registers affinity group related handlers to router paths.
 func RegisterAffinity(r *gin.RouterGroup) {
 	router := r.Group("affinity-groups")
-	router.Use(middlewares.BootstrapChecker(), middlewares.AffinitySchedulingEnabledChecker())
+	router.Use(middlewares.BootstrapChecker())
 	router.POST("", PostAffinityGroups)
 	router.PATCH("", BatchModifyAffinityGroups)
 	router.PUT("/:group_id", UpdateAffinityGroupPeers)
