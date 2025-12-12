@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build !with_plugin
-// +build !with_plugin
 
 package api
 
