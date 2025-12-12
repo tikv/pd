@@ -173,7 +173,6 @@ func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusOK
 }
 
-
 // SnapshotSenderFilter filer the region who's leader store reaches the limit.
 type SnapshotSenderFilter struct {
 	senders map[uint64]struct{}
