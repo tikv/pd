@@ -441,7 +441,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityRemoveOnlyPatch() {
 	})
 }
 
-func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySuccess() {
+func (suite *affinityHandlerTestSuite) TestAffinityBatchModifySameGroupInAddAndRemove() {
 	suite.env.RunTest(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()

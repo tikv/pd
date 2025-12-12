@@ -231,7 +231,7 @@ func deleteAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, map[string]any{
+	c.IndentedJSON(http.StatusOK, map[string]any{
 		"deleted": req.IDs,
 	})
 }
@@ -389,7 +389,12 @@ func DeleteAffinityGroup(c *gin.Context) {
 	force := queryParams.Force
 
 	if !manager.IsGroupExist(groupID) {
-		c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
+		if !force {
+			c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrAffinityGroupNotFound.GenWithStackByArgs(groupID).Error())
+			return
+		}
+		// If force is true and group does not exist, succeed silently
+		c.JSON(http.StatusOK, "Affinity group deleted successfully.")
 		return
 	}
 
@@ -408,7 +413,7 @@ func DeleteAffinityGroup(c *gin.Context) {
 // @Tags     affinity-groups
 // @Summary  List all affinity groups.
 // @Produce  json
-// @Success  200  {object}  GetAllAffinityGroupsResponse
+// @Success  200  {object}  AffinityGroupsResponse
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /affinity-groups [get]
 func GetAllAffinityGroups(c *gin.Context) {

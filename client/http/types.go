@@ -718,7 +718,6 @@ type CreateAffinityGroupInput struct {
 // CreateAffinityGroupsRequest defines the body for the POST request to create affinity groups.
 type CreateAffinityGroupsRequest struct {
 	AffinityGroups map[string]CreateAffinityGroupInput `json:"affinity_groups"`
-	TableGroup     string                              `json:"table_group,omitempty"`
 }
 
 // AffinityGroup defines an affinity group.
