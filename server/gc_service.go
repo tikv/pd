@@ -34,210 +34,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-<<<<<<< HEAD
 // GetGCSafePointV2 return gc safe point for the given keyspace.
 func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
-=======
-// UpdateGCSafePoint implements gRPC PDServer.
-//
-// Deprecated: Use AdvanceGCSafePoint instead. Note that it's only for use of GC internal.
-//
-//nolint:staticcheck
-func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (resp *pdpb.UpdateGCSafePointResponse, errRet error) {
-	log.Warn("deprecated API UpdateGCSafePoint is called", zap.Uint64("req-safe-point", request.GetSafePoint()))
-	defer func() {
-		if errRet != nil {
-			log.Error("deprecated API UpdateGCSafePoint encountered error", zap.Uint64("req-safe-point", request.GetSafePoint()), zap.Error(errRet))
-		} else {
-			log.Warn("deprecated API UpdateGCSafePoint returned", zap.Uint64("req-safe-point", request.GetSafePoint()), zap.Uint64("resp-new-safe-point", resp.GetNewSafePoint()))
-		}
-	}()
-
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateGCSafePointResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.UpdateGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
-	}
-
-	newSafePoint := request.GetSafePoint()
-	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(constant.NullKeyspaceID, newSafePoint)
-	if err != nil {
-		return nil, err
-	}
-
-	if newSafePoint > oldSafePoint {
-		log.Info("updated gc safe point",
-			zap.Uint64("safe-point", newSafePoint))
-	} else if newSafePoint < oldSafePoint {
-		log.Warn("trying to update gc safe point",
-			zap.Uint64("old-safe-point", oldSafePoint),
-			zap.Uint64("new-safe-point", newSafePoint))
-		newSafePoint = oldSafePoint
-	}
-
-	return &pdpb.UpdateGCSafePointResponse{
-		Header:       grpcutil.WrapHeader(),
-		NewSafePoint: newSafePoint,
-	}, nil
-}
-
-// GetGCSafePoint implements gRPC PDServer.
-//
-// Deprecated: Use GetGCState instead.
-//
-//nolint:staticcheck
-func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (resp *pdpb.GetGCSafePointResponse, errRet error) {
-	log.Warn("deprecated API GetGCSafePoint is called")
-	defer func() {
-		if errRet != nil {
-			log.Error("deprecated API GetGCSafePoint encountered error", zap.Error(errRet))
-		} else {
-			log.Warn("deprecated API GetGCSafePoint returned", zap.Uint64("resp-safe-point", resp.GetSafePoint()))
-		}
-	}()
-
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.GetGCSafePointResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
-	}
-
-	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pdpb.GetGCSafePointResponse{
-		Header:    grpcutil.WrapHeader(),
-		SafePoint: safePoint,
-	}, nil
-}
-
-// UpdateServiceGCSafePoint update the safepoint for specific service
-//
-// Deprecated: Use SetGCBarrier instead.
-//
-//nolint:staticcheck
-func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (resp *pdpb.UpdateServiceGCSafePointResponse, errRet error) {
-	log.Warn("deprecated API UpdateServiceGCSafePoint is called",
-		zap.String("req-service-id", string(request.GetServiceId())),
-		zap.Int64("req-ttl", request.GetTTL()),
-		zap.Uint64("req-safe-point", request.GetSafePoint()))
-	defer func() {
-		if errRet != nil {
-			log.Error("deprecated API UpdateServiceGCSafePoint encountered error",
-				zap.String("req-service-id", string(request.GetServiceId())),
-				zap.Int64("req-ttl", request.GetTTL()),
-				zap.Uint64("req-safe-point", request.GetSafePoint()),
-				zap.Error(errRet))
-		} else {
-			log.Warn("deprecated API UpdateServiceGCSafePoint returned",
-				zap.String("req-service-id", string(request.GetServiceId())),
-				zap.Int64("req-ttl", request.GetTTL()),
-				zap.Uint64("req-safe-point", request.GetSafePoint()),
-				zap.String("resp-service-id", string(resp.GetServiceId())),
-				zap.Int64("resp-ttl", resp.GetTTL()),
-				zap.Uint64("resp-min-safe-point", resp.GetMinSafePoint()))
-		}
-	}()
-
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateServiceGCSafePointResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.UpdateServiceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
-	}
-	nowTSO, err := s.getGlobalTSO(ctx)
-	if err != nil {
-		return nil, err
-	}
-	now, _ := tsoutil.ParseTimestamp(nowTSO)
-	serviceID := string(request.ServiceId)
-	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), now)
-	if err != nil {
-		return nil, err
-	}
-	if updated {
-		log.Info("update service GC safe point",
-			zap.String("service-id", serviceID),
-			zap.Int64("expire-at", now.Unix()+request.GetTTL()),
-			zap.Uint64("safepoint", request.GetSafePoint()))
-	}
-	return &pdpb.UpdateServiceGCSafePointResponse{
-		Header:       grpcutil.WrapHeader(),
-		ServiceId:    []byte(min.ServiceID),
-		TTL:          min.ExpiredAt - now.Unix(),
-		MinSafePoint: min.SafePoint,
-	}, nil
-}
-
-// GetGCSafePointV2 return gc safe point for the given keyspace.
-//
-// Deprecated: Use GetGCState instead
-//
-//nolint:staticcheck
-func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (resp *pdpb.GetGCSafePointV2Response, errRet error) {
-	log.Warn("deprecated API GetGCSafePointV2 is called", zap.Uint32("keyspace-id", request.GetKeyspaceId()))
-	defer func() {
-		if errRet != nil {
-			log.Error("deprecated API GetGCSafePointV2 encountered error", zap.Uint32("keyspace-id", request.GetKeyspaceId()), zap.Error(errRet))
-		} else {
-			log.Warn("deprecated API GetGCSafePointV2 returned", zap.Uint32("keyspace-id", request.GetKeyspaceId()), zap.Uint64("resp-safe-point", resp.GetSafePoint()))
-		}
-	}()
-
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
->>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).GetGCSafePointV2(ctx, request)
 	}
@@ -262,31 +60,7 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 }
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
-<<<<<<< HEAD
 func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
-=======
-//
-// Deprecated: Use AdvanceGCSafePoint instead. Note that it's only for use of GC internal.
-//
-//nolint:staticcheck
-func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (resp *pdpb.UpdateGCSafePointV2Response, errRet error) {
-	log.Warn("deprecated API UpdateGCSafePointV2 is called", zap.Uint32("keyspace-id", request.GetKeyspaceId()), zap.Uint64("req-safe-point", request.GetSafePoint()))
-	defer func() {
-		if errRet != nil {
-			log.Error("deprecated API UpdateGCSafePointV2 encountered error", zap.Uint32("keyspace-id", request.GetKeyspaceId()), zap.Uint64("req-safe-point", request.GetSafePoint()), zap.Error(errRet))
-		} else {
-			log.Warn("deprecated API UpdateGCSafePointV2 returned", zap.Uint32("keyspace-id", request.GetKeyspaceId()), zap.Uint64("req-safe-point", request.GetSafePoint()), zap.Uint64("resp-new-safe-point", resp.GetNewSafePoint()))
-		}
-	}()
-
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
->>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePointV2(ctx, request)
 	}
@@ -323,47 +97,7 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 }
 
 // UpdateServiceSafePointV2 update service safe point for the given keyspace.
-<<<<<<< HEAD
 func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
-=======
-//
-// Deprecated: Use SetGCBarrier instead.
-//
-//nolint:staticcheck
-func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (resp *pdpb.UpdateServiceSafePointV2Response, errRet error) {
-	log.Warn("deprecated API UpdateServiceSafePointV2 is called",
-		zap.Uint32("keyspace-id", request.GetKeyspaceId()),
-		zap.String("req-service-id", string(request.GetServiceId())),
-		zap.Int64("req-ttl", request.GetTtl()),
-		zap.Uint64("req-safe-point", request.GetSafePoint()))
-	defer func() {
-		if errRet != nil {
-			log.Error("deprecated API UpdateServiceSafePointV2 encountered error",
-				zap.Uint32("keyspace-id", request.GetKeyspaceId()),
-				zap.String("req-service-id", string(request.GetServiceId())),
-				zap.Int64("req-ttl", request.GetTtl()),
-				zap.Uint64("req-safe-point", request.GetSafePoint()),
-				zap.Error(errRet))
-		} else {
-			log.Warn("deprecated API UpdateServiceSafePointV2 returned",
-				zap.Uint32("keyspace-id", request.GetKeyspaceId()),
-				zap.String("req-service-id", string(request.GetServiceId())),
-				zap.Int64("req-ttl", request.GetTtl()),
-				zap.Uint64("req-safe-point", request.GetSafePoint()),
-				zap.String("resp-service-id", string(resp.GetServiceId())),
-				zap.Int64("resp-ttl", resp.GetTtl()),
-				zap.Uint64("resp-min-safe-point", resp.GetMinSafePoint()))
-		}
-	}()
-
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
->>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).UpdateServiceSafePointV2(ctx, request)
 	}
@@ -407,7 +141,6 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 }
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
-<<<<<<< HEAD
 func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request, stream pdpb.PD_WatchGCSafePointV2Server) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
@@ -462,39 +195,6 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 
 // GetAllGCSafePointV2 return all gc safe point v2.
 func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (*pdpb.GetAllGCSafePointV2Response, error) {
-=======
-//
-// Deprecated: Poll GetAllKeyspacesGCStates instead.
-//
-//nolint:staticcheck
-func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.PD_WatchGCSafePointV2Server) error {
-	log.Error("removed API WatchGCSafePointV2 is called")
-	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
-}
-
-// GetAllGCSafePointV2 return all gc safe point v2.
-//
-// Deprecated: Use GetAllKeyspacesGCStates instead.
-//
-//nolint:staticcheck
-func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (resp *pdpb.GetAllGCSafePointV2Response, errRet error) {
-	log.Warn("deprecated API GetAllGCSafePointV2 is called")
-	defer func() {
-		if errRet != nil {
-			log.Error("deprecated API GetAllGCSafePointV2 encountered error", zap.Error(errRet))
-		} else {
-			log.Warn("deprecated API GetAllGCSafePointV2 returned", zap.Stringers("resp-safe-point", resp.GetGcSafePoints()), zap.Int64("resp-revision", resp.GetRevision()))
-		}
-	}()
-
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
->>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).GetAllGCSafePointV2(ctx, request)
 	}

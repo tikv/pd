@@ -522,15 +522,7 @@ func (u *Controller) changeStage(stage stage) {
 		} else {
 			ids := make([]string, 0, len(u.failedStores))
 			for store := range u.failedStores {
-<<<<<<< HEAD
-				count += 1
-				stores += fmt.Sprintf("%d", store)
-				if count != len(u.failedStores) {
-					stores += ", "
-				}
-=======
 				ids = append(ids, strconv.FormatUint(store, 10))
->>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 			}
 			output.Details = append(output.Details, fmt.Sprintf("Failed stores %s", strings.Join(ids, ", ")))
 		}
@@ -598,18 +590,9 @@ func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
 	for storeID, plan := range u.storeRecoveryPlans {
 		forceLeaders := plan.GetForceLeader()
 		if forceLeaders != nil {
-<<<<<<< HEAD
-			regions := ""
-			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
-				regions += fmt.Sprintf("%d", regionID)
-				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
-					regions += ", "
-				}
-=======
 			ids := make([]string, 0, len(forceLeaders.GetEnterForceLeaders()))
 			for _, regionID := range forceLeaders.GetEnterForceLeaders() {
 				ids = append(ids, strconv.FormatUint(regionID, 10))
->>>>>>> 27c2705800 (go: update Go version to 1.25.3 (#9900))
 			}
 			outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", strings.Join(ids, ", "))}
 		}
