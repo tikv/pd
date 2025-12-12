@@ -138,7 +138,7 @@ func createAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	changes := make([]affinity.GroupKeyRanges, 0, len(req.AffinityGroups))
+	groups := make([]affinity.GroupKeyRanges, 0, len(req.AffinityGroups))
 	for groupID, input := range req.AffinityGroups {
 		if err := affinity.ValidateGroupID(groupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -164,7 +164,7 @@ func createAffinityGroups(c *gin.Context) {
 			keyRanges = append(keyRanges, kr.toKeyutilKeyRange())
 		}
 
-		changes = append(changes, affinity.GroupKeyRanges{
+		groups = append(groups, affinity.GroupKeyRanges{
 			GroupID:   groupID,
 			KeyRanges: keyRanges,
 		})
@@ -172,12 +172,8 @@ func createAffinityGroups(c *gin.Context) {
 
 	// Create affinity groups with their key ranges
 	// The manager will handle storage persistence, label creation, and in-memory updates atomically
-	if err := manager.CreateAffinityGroups(changes); err != nil {
-		if errs.ErrAffinityGroupContent.Equal(err) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-			return
-		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+	err = manager.CreateAffinityGroups(groups)
+	if handleAffinityError(c, err) {
 		return
 	}
 
@@ -185,12 +181,12 @@ func createAffinityGroups(c *gin.Context) {
 	resp := AffinityGroupsResponse{
 		AffinityGroups: make(map[string]*affinity.GroupState, len(req.AffinityGroups)),
 	}
-	for _, change := range changes {
-		state := manager.GetAffinityGroupState(change.GroupID)
+	for _, group := range groups {
+		state := manager.GetAffinityGroupState(group.GroupID)
 		if state == nil {
 			state = &affinity.GroupState{}
 		}
-		resp.AffinityGroups[change.GroupID] = state
+		resp.AffinityGroups[group.GroupID] = state
 	}
 	c.IndentedJSON(http.StatusOK, resp)
 }

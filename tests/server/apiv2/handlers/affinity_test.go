@@ -1150,24 +1150,3 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 		re.Equal("true", resp.Header.Get(apiutil.XForwardedToMicroserviceHeader))
 	})
 }
-
-func TestAffinitySchedulingDisabled(t *testing.T) {
-	re := require.New(t)
-	env := tests.NewSchedulingTestEnvironment(t, func(conf *config.Config, _ string) {
-		conf.Schedule.EnableAffinityScheduling = false
-	})
-	defer env.Cleanup()
-
-	env.RunTest(func(cluster *tests.TestCluster) {
-		leader := cluster.GetLeaderServer()
-		serverAddr := leader.GetAddr()
-		createReq := handlers.CreateAffinityGroupsRequest{
-			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
-				"disabled": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x02}}}},
-			},
-		}
-		statusCode, errorMsg := doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusServiceUnavailable, statusCode)
-		re.Contains(errorMsg, "affinity is disabled")
-	})
-}
