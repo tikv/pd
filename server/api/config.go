@@ -158,11 +158,14 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	extraInfos := make([]string, 0)
 	for k, v := range conf {
 		if s := strings.Split(k, "."); len(s) > 1 {
-			if err := h.updateConfig(cfg, k, v); err != nil {
+			if extraInfo, err := h.updateConfig(cfg, k, v); err != nil {
 				h.rd.JSON(w, http.StatusBadRequest, err.Error())
 				return
+			} else if len(extraInfo) > 0 {
+				extraInfos = append(extraInfos, extraInfo)
 			}
 			continue
 		}
@@ -171,43 +174,46 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
 		}
-		if err := h.updateConfig(cfg, key, v); err != nil {
+		if extraInfo, err := h.updateConfig(cfg, key, v); err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
+		} else if len(extraInfo) > 0 {
+			extraInfos = append(extraInfos, extraInfo)
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The config is updated.")
+	extraInfos = append([]string{"The config is updated."}, extraInfos...)
+	h.rd.JSON(w, http.StatusOK, strings.Join(extraInfos, " "))
 }
 
-func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) error {
+func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) (string, error) {
 	kp := strings.Split(key, ".")
 	switch kp[0] {
 	case "schedule":
 		if h.svr.IsTTLConfigExist(key) {
-			return errors.Errorf("need to clean up TTL first for %s", key)
+			return "", errors.Errorf("need to clean up TTL first for %s", key)
 		}
-		return h.updateSchedule(cfg, kp[len(kp)-1], value)
+		return "", h.updateSchedule(cfg, kp[len(kp)-1], value)
 	case "replication":
-		return h.updateReplication(cfg, kp[len(kp)-1], value)
+		return "", h.updateReplication(cfg, kp[len(kp)-1], value)
 	case "replication-mode":
 		if len(kp) < 2 {
-			return errors.Errorf("cannot update config prefix %s", kp[0])
+			return "", errors.Errorf("cannot update config prefix %s", kp[0])
 		}
-		return h.updateReplicationModeConfig(cfg, kp[1:], value)
+		return "", h.updateReplicationModeConfig(cfg, kp[1:], value)
 	case "pd-server":
-		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
+		return "", h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
 	case "log":
-		return h.updateLogLevel(kp, value)
+		return "", h.updateLogLevel(kp, value)
 	case "cluster-version":
-		return h.updateClusterVersion(value)
+		return "", h.updateClusterVersion(value)
 	case "label-property": // TODO: support changing label-property
 	case "keyspace":
-		return h.updateKeyspaceConfig(cfg, kp[len(kp)-1], value)
+		return "", h.updateKeyspaceConfig(cfg, kp[len(kp)-1], value)
 	case "micro-service":
 		return h.updateMicroserviceConfig(cfg, kp[len(kp)-1], value)
 	}
-	return errors.Errorf("config prefix %s not found", kp[0])
+	return "", errors.Errorf("config prefix %s not found", kp[0])
 }
 
 func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, value any) error {
@@ -226,20 +232,23 @@ func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, va
 	return err
 }
 
-func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string, value any) error {
+func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string, value any) (string, error) {
 	updated, found, err := jsonutil.AddKeyValue(&config.Microservice, key, value)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if !found {
-		return errors.Errorf("config item %s not found", key)
+		return "", errors.Errorf("config item %s not found", key)
 	}
 
 	if updated {
 		err = h.svr.SetMicroserviceConfig(config.Microservice)
+		if err == nil && key == "enable-resource-manager-fallback" {
+			return "`enable-resource-manager-fallback` should take effect after reboot", nil
+		}
 	}
-	return err
+	return "", err
 }
 
 func (h *confHandler) updateSchedule(config *config.Config, key string, value any) error {
