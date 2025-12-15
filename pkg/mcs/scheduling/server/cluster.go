@@ -413,10 +413,6 @@ func (c *Cluster) updateScheduler() {
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
 			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
-			// Check if the scheduler should be kept:
-			// 1. The scheduler type exists in the latest config
-			// 2. The scheduler is not disabled (Disable=false)
-			// If the scheduler is disabled in config (even if it exists), it should be removed.
 			shouldKeep := slice.AnyOf(latestSchedulersConfig, func(i int) bool {
 				return latestSchedulersConfig[i].Type == oldType && !latestSchedulersConfig[i].Disable
 			})
