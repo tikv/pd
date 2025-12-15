@@ -490,6 +490,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 					zap.Error(labelErr))
 				return
 			}
+			// Attach only non-empty label rules to avoid marking the group as having ranges when it does not.
 			if len(gkr.KeyRanges) > 0 {
 				// Pass the rangeCount directly instead of letting updateGroupLabelRuleLocked calculate it
 				// because labelRule.Data might be []any (from watcher) instead of []*labeler.KeyRangeRule
@@ -553,6 +554,7 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	m.Lock()
 	defer m.Unlock()
 
+	// Only buffer non-empty rules
 	if _, exists := m.groups[groupID]; !exists && len(gkr.KeyRanges) > 0 {
 		// Store LabelRule information in the buffer when it is synchronized before the group.
 		m.labelRuleBuffer[groupID] = labelRule
@@ -561,6 +563,7 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	// Once group created, the buffer must be deleted.
 	delete(m.labelRuleBuffer, groupID)
 
+	// Keep cache in sync: store when ranges exist, clear when they do not.
 	if len(gkr.KeyRanges) > 0 {
 		m.keyRanges[groupID] = gkr
 	} else {

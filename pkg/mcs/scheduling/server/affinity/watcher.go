@@ -121,9 +121,6 @@ func (w *Watcher) initializeGroupWatcher() error {
 func (w *Watcher) initializeAffinityLabelWatcher() error {
 	// Note: labelWatcher does not need preEventsFn/postEventsFn locking
 	// because the sync methods will handle locking internally
-	preEventsFn := func([]*clientv3.Event) error {
-		return nil
-	}
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -144,18 +141,14 @@ func (w *Watcher) initializeAffinityLabelWatcher() error {
 		return nil
 	}
 
-	postEventsFn := func([]*clientv3.Event) error {
-		return nil
-	}
-
 	w.labelWatcher = etcdutil.NewLoopWatcher(
 		w.ctx, &w.wg,
 		w.etcdClient,
 		"scheduling-affinity-label-watcher",
 		strings.TrimSuffix(keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), "/"), // Filter: only process affinity group label rules
-		preEventsFn,
+		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
-		postEventsFn,
+		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
 	w.labelWatcher.StartWatchLoop()
