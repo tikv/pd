@@ -162,6 +162,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceWitnessSchedulerCommand())
 	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
 	c.AddCommand(NewEvictStoppingStoreSchedulerCommand())
+	c.AddCommand(NewBalanceRangeSchedulerCommand())
 	return c
 }
 
@@ -363,6 +364,18 @@ func NewSplitBucketSchedulerCommand() *cobra.Command {
 	return cmd
 }
 
+// NewBalanceRangeSchedulerCommand returns a command to add a balance-range-scheduler.
+func NewBalanceRangeSchedulerCommand() *cobra.Command {
+	// todo: add deprecated warning if sql support
+	c := &cobra.Command{
+		Use:   "balance-range-scheduler [--format=raw|encode|hex] <engine> <rule> <alias> <start_key> <end_key>",
+		Short: "add a scheduler to balance region for given range",
+		Run:   addSchedulerForBalanceRangeCommandFunc,
+	}
+	c.Flags().String("format", "hex", "the key format")
+	return c
+}
+
 // NewGrantHotRegionSchedulerCommand returns a command to add a grant-hot-region-scheduler.
 func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
@@ -392,6 +405,33 @@ func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
 		Run:   addSchedulerCommandFunc,
 	}
 	return c
+}
+
+func addSchedulerForBalanceRangeCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 5 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	startKey, err := parseKey(cmd.Flags(), args[3])
+	if err != nil {
+		cmd.Println("Error: ", err)
+		return
+	}
+	endKey, err := parseKey(cmd.Flags(), args[4])
+	if err != nil {
+		cmd.Println("Error: ", err)
+		return
+	}
+
+	input := make(map[string]any)
+	input["name"] = cmd.Name()
+	input["engine"] = args[0]
+	input["rule"] = args[1]
+	input["alias"] = args[2]
+	input["start-key"] = url.QueryEscape(startKey)
+	input["end-key"] = url.QueryEscape(endKey)
+
+	postJSON(cmd, schedulersPrefix, input)
 }
 
 // NewSlowTrendEvictLeaderSchedulerCommand returns a command to add a evict-slow-trend-scheduler.
@@ -534,6 +574,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigEvictStoppingStoreCommand(),
 		newConfigShuffleHotRegionSchedulerCommand(),
 		newConfigEvictSlowTrendCommand(),
+		newConfigBalanceRangeCommand(),
 	)
 	return c
 }
@@ -593,6 +634,26 @@ func newConfigHotRegionCommand() *cobra.Command {
 	}, &cobra.Command{
 		Use:   "show",
 		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+
+	return c
+}
+
+func newConfigBalanceRangeCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-range-scheduler",
+		Short: "balance-range-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "show the config item",
 		Run:   listSchedulerConfigCommandFunc,
 	}, &cobra.Command{
 		Use:   "set <key> <value>",
