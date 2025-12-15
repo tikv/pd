@@ -129,18 +129,28 @@ func (s *storeStatistics) observe(store *core.StoreInfo) {
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
+	var engine string
+	if !store.IsTiFlash() {
+		engine = core.EngineTiKV
+	} else {
+		engine = core.EngineTiFlash
+	}
 	storeStatusStats := s.observeStoreStatus(store)
 	for statusType, value := range storeStatusStats {
-		clusterStatusGauge.WithLabelValues(statusType, id).Set(value)
+		clusterStatusGauge.WithLabelValues(statusType, engine, id).Set(value)
+	}
+	// skip tombstone store avoid to overwrite metrics
+	if store.GetNodeState() == metapb.NodeState_Removed {
+		return
 	}
 
 	// Store stats.
-	clusterStatusGauge.WithLabelValues(clusterStatusStorageSize, id).Set(float64(store.StorageSize()))
-	clusterStatusGauge.WithLabelValues(clusterStatusStorageCapacity, id).Set(float64(store.GetCapacity()))
-	clusterStatusGauge.WithLabelValues(clusterStatusRegionCount, id).Set(float64(store.GetRegionCount()))
-	clusterStatusGauge.WithLabelValues(clusterStatusLeaderCount, id).Set(float64(store.GetLeaderCount()))
-	clusterStatusGauge.WithLabelValues(clusterStatusWitnessCount, id).Set(float64(store.GetWitnessCount()))
-	clusterStatusGauge.WithLabelValues(clusterStatusLearnerCount, id).Set(float64(store.GetLearnerCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageSize, engine, id).Set(float64(store.StorageSize()))
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageCapacity, engine, id).Set(float64(store.GetCapacity()))
+	clusterStatusGauge.WithLabelValues(clusterStatusRegionCount, engine, id).Set(float64(store.GetRegionCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLeaderCount, engine, id).Set(float64(store.GetLeaderCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusWitnessCount, engine, id).Set(float64(store.GetWitnessCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLearnerCount, engine, id).Set(float64(store.GetLearnerCount()))
 	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
 	if ok {
 		cap := limit.GetCap()
@@ -206,7 +216,6 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 
 func (s *storeStatistics) collect() {
 	placementStatusGauge.Reset()
-
 	// Current scheduling configurations of the cluster
 	configs := make(map[string]float64)
 	configs["leader-schedule-limit"] = float64(s.opt.GetLeaderScheduleLimit())

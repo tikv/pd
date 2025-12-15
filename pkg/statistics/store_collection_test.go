@@ -71,7 +71,6 @@ func TestStoreStatistics(t *testing.T) {
 		ObserveHotStat(store, storesStats)
 	}
 	stats := storeStats.stats
-
 	re.Len(stats.LabelCounter["zone:z1"], 2)
 	re.Equal([]uint64{1, 2}, stats.LabelCounter["zone:z1"])
 	re.Len(stats.LabelCounter["zone:z2"], 2)
