@@ -51,6 +51,21 @@ const (
 	clusterStatusStorageCapacity = "storage_capacity"
 )
 
+var storeStatuses = []string{
+	clusterStatusStoreUpCount,
+	clusterStatusStoreDisconnectedCount,
+	clusterStatusStoreSlowCount,
+	clusterStatusStoreDownCount,
+	clusterStatusStoreUnhealthCount,
+	clusterStatusStoreOfflineCount,
+	clusterStatusStoreTombstoneCount,
+	clusterStatusStoreLowSpaceCount,
+	clusterStatusStorePreparingCount,
+	clusterStatusStoreServingCount,
+	clusterStatusStoreRemovingCount,
+	clusterStatusStoreRemovedCount,
+}
+
 type storeStatistics struct {
 	opt          config.ConfProvider
 	LabelCounter map[string][]uint64
