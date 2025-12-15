@@ -15,16 +15,14 @@
 package command
 
 import (
-	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"github.com/pingcap/errors"
 
-	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 )
 
@@ -33,29 +31,18 @@ func NewAffinityCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "affinity",
 		Short:             "affinity group commands",
-		Long:              `Manage affinity groups by manually specifying group IDs and key ranges.`,
+		Long:              `Manage affinity groups for a single table by table ID and optional partition ID.`,
 		PersistentPreRunE: requirePDClient,
 	}
-	cmd.PersistentFlags().String("group-id", "", "affinity group ID")
+	cmd.PersistentFlags().Uint64("table-id", 0, "table ID for the affinity group")
+	cmd.PersistentFlags().Uint64("partition-id", 0, "partition ID for partitioned tables")
 
 	cmd.AddCommand(
-		newAffinityCreateCommand(),
 		newAffinityShowCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
 		newAffinityListCommand(),
 	)
-	return cmd
-}
-
-func newAffinityCreateCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "create an affinity group with manual key ranges",
-		Run:   affinityCreateCommandFunc,
-	}
-	cmd.Flags().StringArray("range", nil, "key range in format start:end; repeat to add multiple ranges; use ':' for entire key space")
-	cmd.Flags().String("format", "hex", "the key format (raw|encode|hex)")
 	return cmd
 }
 
@@ -96,28 +83,6 @@ func newAffinityListCommand() *cobra.Command {
 		Run:   affinityListCommandFunc,
 	}
 	return cmd
-}
-
-func affinityCreateCommandFunc(cmd *cobra.Command, _ []string) {
-	groupID, err := getGroupID(cmd)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	ranges, err := loadKeyRanges(cmd)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-
-	resp, err := PDCli.CreateAffinityGroups(cmd.Context(), map[string][]pd.AffinityGroupKeyRange{
-		groupID: ranges,
-	})
-	if err != nil {
-		cmd.Printf("Failed to create affinity group: %v\n", err)
-		return
-	}
-	jsonPrint(cmd, resp)
 }
 
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
@@ -192,67 +157,24 @@ func affinityListCommandFunc(cmd *cobra.Command, _ []string) {
 }
 
 func getGroupID(cmd *cobra.Command) (string, error) {
-	groupID, _ := cmd.Flags().GetString("group-id")
-	if groupID == "" {
-		return "", errors.New("--group-id is required")
+	tableID, _ := cmd.Flags().GetUint64("table-id")
+	if tableID == 0 {
+		return "", errors.New("--table-id is required")
 	}
+	partitionID, _ := cmd.Flags().GetUint64("partition-id")
+	groupID := FormatGroupID(tableID, partitionID)
 	if err := affinity.ValidateGroupID(groupID); err != nil {
 		return "", err
 	}
 	return groupID, nil
 }
 
-func loadKeyRanges(cmd *cobra.Command) ([]pd.AffinityGroupKeyRange, error) {
-	specs, _ := cmd.Flags().GetStringArray("range")
-	if len(specs) == 0 {
-		return nil, errors.New("--range is required")
+// FormatGroupID builds the affinity group ID from table/partition IDs following TiDB convention.
+func FormatGroupID(tableID, partitionID uint64) string {
+	if partitionID > 0 {
+		return fmt.Sprintf("_tidb_pt_%d_p%d", tableID, partitionID)
 	}
-	ranges := make([]pd.AffinityGroupKeyRange, 0, len(specs))
-	for _, spec := range specs {
-		kr, err := parseRangeSpec(cmd.Flags(), spec)
-		if err != nil {
-			return nil, err
-		}
-		ranges = append(ranges, kr)
-	}
-	return ranges, nil
-}
-
-func parseRangeSpec(flags *pflag.FlagSet, spec string) (pd.AffinityGroupKeyRange, error) {
-	parts := strings.SplitN(strings.TrimSpace(spec), ":", 2)
-	if len(parts) != 2 {
-		return pd.AffinityGroupKeyRange{}, errors.New("invalid range format, expected start:end")
-	}
-	start, err := parseKey(flags, parts[0])
-	if err != nil {
-		return pd.AffinityGroupKeyRange{}, errors.Wrap(err, "failed to parse start key")
-	}
-	end, err := parseKey(flags, parts[1])
-	if err != nil {
-		return pd.AffinityGroupKeyRange{}, errors.Wrap(err, "failed to parse end key")
-	}
-	kr := pd.AffinityGroupKeyRange{
-		StartKey: []byte(start),
-		EndKey:   []byte(end),
-	}
-	if err := validateKeyRange(kr.StartKey, kr.EndKey); err != nil {
-		return pd.AffinityGroupKeyRange{}, err
-	}
-	return kr, nil
-}
-
-// validateKeyRange mirrors the server-side validation logic to catch errors early.
-func validateKeyRange(startKey, endKey []byte) error {
-	if len(startKey) == 0 && len(endKey) == 0 {
-		return nil
-	}
-	if len(startKey) == 0 || len(endKey) == 0 {
-		return errors.New("key range must have both start_key and end_key, or both empty for entire key space")
-	}
-	if bytes.Compare(startKey, endKey) >= 0 {
-		return errors.New("start_key must be less than end_key")
-	}
-	return nil
+	return fmt.Sprintf("_tidb_t_%d", tableID)
 }
 
 func parseUint64List(input string) ([]uint64, error) {
