@@ -47,11 +47,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "status",
 			Help:      "Status of the cluster.",
-<<<<<<< HEAD
-		}, []string{"type"})
-=======
 		}, []string{"type", "engine", "store"})
->>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
 
 	placementStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

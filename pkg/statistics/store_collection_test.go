@@ -71,23 +71,7 @@ func TestStoreStatistics(t *testing.T) {
 		ObserveHotStat(store, storesStats)
 	}
 	stats := storeStats.stats
-
-<<<<<<< HEAD
-	re.Equal(6, stats.Up)
-	re.Equal(7, stats.Preparing)
-	re.Equal(0, stats.Serving)
-	re.Equal(1, stats.Removing)
-	re.Equal(1, stats.Removed)
-	re.Equal(1, stats.Down)
-	re.Equal(1, stats.Offline)
-	re.Equal(0, stats.RegionCount)
-	re.Equal(0, stats.WitnessCount)
-	re.Equal(0, stats.Unhealthy)
-	re.Equal(0, stats.Disconnect)
-	re.Equal(1, stats.Tombstone)
-	re.Equal(1, stats.LowSpace)
-=======
->>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
+	
 	re.Len(stats.LabelCounter["zone:z1"], 2)
 	re.Equal([]uint64{1, 2}, stats.LabelCounter["zone:z1"])
 	re.Len(stats.LabelCounter["zone:z2"], 2)
