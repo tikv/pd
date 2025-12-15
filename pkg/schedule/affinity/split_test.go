@@ -49,7 +49,7 @@ func TestAllowSplit(t *testing.T) {
 	// Enable affinity scheduling
 	conf := mockconfig.NewTestOptions()
 	cfg := conf.GetScheduleConfig().Clone()
-	cfg.EnableAffinityScheduling = true
+	cfg.AffinityScheduleLimit = 4 // Enable affinity scheduling
 	conf.SetScheduleConfig(cfg)
 
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
@@ -92,16 +92,16 @@ func TestAllowSplit(t *testing.T) {
 	re.True(manager.AllowSplit(largeRegion, pdpb.SplitReason_ADMIN))
 
 	// Case 3: small affinity region will be split when affinity is disabled
-	oldEnabled := conf.IsAffinitySchedulingEnabled()
-	conf.SetEnableAffinityScheduling(false)
+	oldLimit := conf.GetAffinityScheduleLimit()
+	conf.SetAffinityScheduleLimit(0)
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_LOAD))
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
-	conf.SetEnableAffinityScheduling(true)
+	conf.SetAffinityScheduleLimit(8)
 	re.False(manager.AllowSplit(smallRegion, pdpb.SplitReason_SIZE))
 	re.False(manager.AllowSplit(smallRegion, pdpb.SplitReason_LOAD))
 	re.True(manager.AllowSplit(smallRegion, pdpb.SplitReason_ADMIN))
-	conf.SetEnableAffinityScheduling(oldEnabled)
+	conf.SetAffinityScheduleLimit(oldLimit)
 
 	// Case 4: small affinity region will be split when affinity group expired
 	manager.ExpireAffinityGroup(groupID)

@@ -360,26 +360,14 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	if c.conf.IsAffinitySchedulingEnabled() {
+	// Check affinity schedule limit and affinityManager
+	if c.conf.GetAffinityScheduleLimit() > 0 && c.affinityChecker.affinityManager != nil {
 		if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
-			ops := c.affinityChecker.Check(region)
-			if len(ops) > 0 {
-				opKind := ops[0].Kind()
-				if (opKind & operator.OpMerge) == 0 {
-					// affinity move peer schedule
-					if opController.OperatorCount(operator.OpRegion) < c.conf.GetRegionScheduleLimit() {
-						return ops
-					}
-					operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpRegion)
-					c.pendingProcessedRegions.Put(region.GetID(), nil)
-				} else {
-					// affinity merge schedule
-					if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
-						return ops
-					}
-					operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpMerge)
-				}
+			if opController.OperatorCount(operator.OpAffinity) < c.conf.GetAffinityScheduleLimit() {
+				// It makes sure that two affinity merge operators can be added successfully altogether.
+				return c.affinityChecker.Check(region)
 			}
+			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
 			return nil
 		}); len(ops) > 0 {
 			return ops

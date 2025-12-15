@@ -139,7 +139,6 @@ func TestAffinitySelect(t *testing.T) {
 
 	opt := mockconfig.NewTestOptions()
 	cfg := opt.GetScheduleConfig().Clone()
-	cfg.EnableAffinityScheduling = true
 	opt.SetScheduleConfig(cfg)
 
 	cluster := mockcluster.NewCluster(ctx, opt)

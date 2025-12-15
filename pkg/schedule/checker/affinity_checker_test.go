@@ -41,7 +41,7 @@ import (
 func newAffinityTestOptions() *config.PersistOptions {
 	opt := mockconfig.NewTestOptions()
 	cfg := opt.GetScheduleConfig().Clone()
-	cfg.EnableAffinityScheduling = true
+	cfg.AffinityScheduleLimit = 4 // Set affinity schedule limit to enable affinity scheduling
 	opt.SetScheduleConfig(cfg)
 	return opt
 }

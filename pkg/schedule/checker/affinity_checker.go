@@ -64,9 +64,6 @@ func (*AffinityChecker) Name() string {
 
 // Check verifies a region's replicas according to affinity group constraints, creating an Operator if needed.
 func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
-	if c.affinityManager == nil {
-		return nil
-	}
 	affinityCheckerCounter.Inc()
 
 	if c.IsPaused() {
@@ -221,7 +218,7 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	}
 
 	// Determine operator kind based on whether leader needs to change
-	kind := operator.OpAffinity | operator.OpRegion
+	kind := operator.OpAffinity
 	if currentLeaderStoreID != group.LeaderStoreID {
 		kind |= operator.OpLeader
 	}
@@ -252,7 +249,7 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 		affinityMergeCheckerDisabledCounter.Inc()
 		return nil
 	}
-	if c.conf.GetMaxMergeRegionSize() == 0 {
+	if c.conf.GetMaxMergeRegionSize() == 0 || c.conf.GetMergeScheduleLimit() == 0 {
 		affinityMergeCheckerGlobalDisabledCounter.Inc()
 		return nil
 	}
@@ -296,7 +293,7 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 		logutil.ZapRedactStringer("to", core.RegionToHexMeta(target.GetMeta())),
 		zap.String("affinity-group", group.ID))
 
-	ops, err := operator.CreateMergeRegionOperator("affinity-merge-region", c.cluster, region, target, operator.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator("affinity-merge-region", c.cluster, region, target, operator.OpAffinity)
 	if err != nil {
 		log.Warn("create affinity merge region operator failed", errs.ZapError(err))
 		return nil
@@ -428,7 +425,7 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 	for i, removeStoreID := range storesToRemove {
 		options = append(options, core.WithReplacePeerStore(removeStoreID, storesToAdd[i]))
 	}
-	options = append(options, core.WithLeaderStore(leaderStoreID))
+	options = append(options, core.WithReplaceLeaderStore(leaderStoreID))
 
 	return region.Clone(options...)
 }
