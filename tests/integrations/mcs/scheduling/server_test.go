@@ -428,6 +428,51 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 	re.ElementsMatch(evictStoreIDs, expected)
 }
 
+func (suite *serverTestSuite) TestRemoveScheduler() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+
+	// Check the default schedulers exist.
+	defaultSchedulerNames := []string{
+		types.BalanceLeaderScheduler.String(),
+		types.BalanceRegionScheduler.String(),
+		types.BalanceHotRegionScheduler.String(),
+		types.EvictSlowStoreScheduler.String(),
+	}
+	checkSchedulerExist := func(name string, shouldExist bool) {
+		testutil.Eventually(re, func() bool {
+			exist := schedulersController.GetScheduler(name) != nil
+			return exist == shouldExist
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
+		checkSchedulerExist(name, true)
+	}
+
+	// Disable evict-slow-store-scheduler by calling DELETE API.
+	// For the scheduling cluster, when a default scheduler is marked as disabled in config,
+	// the updateScheduler goroutine will detect this and remove the scheduler from the controller.
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String())
+
+	// Wait and verify the scheduler is removed from the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), false)
+
+	// Re-enable the scheduler by calling ADD API.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String(), nil)
+
+	// Verify the scheduler exists again in the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
+}
+
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
