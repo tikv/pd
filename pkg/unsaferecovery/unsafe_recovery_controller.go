@@ -264,22 +264,26 @@ func (u *Controller) getReportStatus() StageOutput {
 	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	if u.numStoresReported != len(u.storeReports) {
 		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d)", u.numStoresReported, len(u.storeReports))
-		var reported, unreported, undispatched string
+		var (
+			reportedIDs     []string
+			unreportedIDs   []string
+			undispatchedIDs []string
+		)
 		for storeID, report := range u.storeReports {
-			str := strconv.FormatUint(storeID, 10) + ", "
+			s := strconv.FormatUint(storeID, 10)
 			if report == nil {
 				if _, requested := u.storePlanExpires[storeID]; !requested {
-					undispatched += str
+					undispatchedIDs = append(undispatchedIDs, s)
 				} else {
-					unreported += str
+					unreportedIDs = append(unreportedIDs, s)
 				}
 			} else {
-				reported += str
+				reportedIDs = append(reportedIDs, s)
 			}
 		}
-		status.Details = append(status.Details, "Stores that have not dispatched plan: "+strings.Trim(undispatched, ", "))
-		status.Details = append(status.Details, "Stores that have reported to PD: "+strings.Trim(reported, ", "))
-		status.Details = append(status.Details, "Stores that have not reported to PD: "+strings.Trim(unreported, ", "))
+		status.Details = append(status.Details, "Stores that have not dispatched plan: "+strings.Join(undispatchedIDs, ", "))
+		status.Details = append(status.Details, "Stores that have reported to PD: "+strings.Join(reportedIDs, ", "))
+		status.Details = append(status.Details, "Stores that have not reported to PD: "+strings.Join(unreportedIDs, ", "))
 	} else {
 		status.Info = fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports))
 	}
@@ -516,16 +520,11 @@ func (u *Controller) changeStage(stage stage) {
 		if u.autoDetect {
 			output.Details = append(output.Details, "auto detect mode with no specified Failed stores")
 		} else {
-			stores := ""
-			count := 0
+			ids := make([]string, 0, len(u.failedStores))
 			for store := range u.failedStores {
-				count += 1
-				stores += fmt.Sprintf("%d", store)
-				if count != len(u.failedStores) {
-					stores += ", "
-				}
+				ids = append(ids, strconv.FormatUint(store, 10))
 			}
-			output.Details = append(output.Details, fmt.Sprintf("Failed stores %s", stores))
+			output.Details = append(output.Details, fmt.Sprintf("Failed stores %s", strings.Join(ids, ", ")))
 		}
 
 	case TombstoneTiFlashLearner:
@@ -591,14 +590,11 @@ func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
 	for storeID, plan := range u.storeRecoveryPlans {
 		forceLeaders := plan.GetForceLeader()
 		if forceLeaders != nil {
-			regions := ""
-			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
-				regions += fmt.Sprintf("%d", regionID)
-				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
-					regions += ", "
-				}
+			ids := make([]string, 0, len(forceLeaders.GetEnterForceLeaders()))
+			for _, regionID := range forceLeaders.GetEnterForceLeaders() {
+				ids = append(ids, strconv.FormatUint(regionID, 10))
 			}
-			outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", regions)}
+			outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", strings.Join(ids, ", "))}
 		}
 	}
 	return outputs
@@ -612,11 +608,11 @@ func (u *Controller) getDemoteFailedVoterPlanDigest() map[string][]string {
 		}
 		output := []string{}
 		for _, demote := range plan.GetDemotes() {
-			peers := ""
+			var peerParts []string
 			for _, peer := range demote.GetFailedVoters() {
-				peers += fmt.Sprintf("{ %v}, ", peer) // the extra space is intentional
+				peerParts = append(peerParts, fmt.Sprintf("{ %v}", peer)) // the extra space is intentional
 			}
-			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), strings.Trim(peers, ", ")))
+			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), strings.Join(peerParts, ", ")))
 		}
 		for _, tombstone := range plan.GetTombstones() {
 			output = append(output, fmt.Sprintf("tombstone the peer of region %d", tombstone))
@@ -663,25 +659,25 @@ func (u *Controller) getCreateEmptyRegionPlanDigest() map[string][]string {
 func (u *Controller) getAffectedTableDigest() []string {
 	var details []string
 	if len(u.affectedMetaRegions) != 0 {
-		regions := ""
+		regionParts := make([]string, 0, len(u.affectedMetaRegions))
 		for r := range u.affectedMetaRegions {
-			regions += fmt.Sprintf("%d, ", r)
+			regionParts = append(regionParts, strconv.FormatUint(r, 10))
 		}
-		details = append(details, "affected meta regions: "+strings.Trim(regions, ", "))
+		details = append(details, "affected meta regions: "+strings.Join(regionParts, ", "))
 	}
 	if len(u.AffectedTableIDs) != 0 {
-		tables := ""
+		tableParts := make([]string, 0, len(u.AffectedTableIDs))
 		for t := range u.AffectedTableIDs {
-			tables += fmt.Sprintf("%d, ", t)
+			tableParts = append(tableParts, strconv.FormatInt(t, 10))
 		}
-		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
+		details = append(details, "affected table ids: "+strings.Join(tableParts, ", "))
 	}
 	if len(u.newlyCreatedRegions) != 0 {
-		regions := ""
+		newRegionParts := make([]string, 0, len(u.newlyCreatedRegions))
 		for r := range u.newlyCreatedRegions {
-			regions += fmt.Sprintf("%d, ", r)
+			newRegionParts = append(newRegionParts, strconv.FormatUint(r, 10))
 		}
-		details = append(details, "newly created empty regions: "+strings.Trim(regions, ", "))
+		details = append(details, "newly created empty regions: "+strings.Join(newRegionParts, ", "))
 	} else {
 		details = append(details, "no newly created empty regions")
 	}
