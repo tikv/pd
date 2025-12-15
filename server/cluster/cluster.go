@@ -2170,6 +2170,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
+	statistics.DeleteClusterStatusMetrics(store)
 	c.core.DeleteStore(store)
 	return nil
 }
