@@ -127,7 +127,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
-		return c.MergeCheck(region, group)
+		return c.mergeCheck(region, group)
 	}
 
 	// Create operator to adjust region according to affinity group
@@ -240,12 +240,12 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 	return op
 }
 
-// MergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
+// mergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
 // It follows similar logic to merge_checker but with affinity-specific constraints:
 // - Does NOT skip recently split or recently started regions
 // - Does NOT skip hot spots regions
 // - Only merges regions within the same affinity group
-func (c *AffinityChecker) MergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
+func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
 	maxAffinityMergeRegionSize := c.conf.GetMaxAffinityMergeRegionSize()
 
 	if maxAffinityMergeRegionSize == 0 {

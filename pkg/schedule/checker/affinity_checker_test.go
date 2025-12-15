@@ -650,7 +650,7 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	// MergeCheck should create merge operator
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.NotNil(ops)
 	re.Len(ops, 2) // Merge operation creates 2 operators
 	re.Contains(ops[0].Desc(), "merge")
@@ -734,7 +734,7 @@ func TestAffinityMergeCheckNoTarget(t *testing.T) {
 	// MergeCheck should return nil (no adjacent regions)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops)
 }
 
@@ -794,7 +794,7 @@ func TestAffinityMergeCheckDifferentGroups(t *testing.T) {
 	// MergeCheck should return nil (different groups)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops)
 }
 
@@ -847,7 +847,7 @@ func TestAffinityMergeCheckRegionTooLarge(t *testing.T) {
 	// MergeCheck should return nil (region1 is too large)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops)
 }
 
@@ -900,7 +900,7 @@ func TestAffinityMergeCheckAdjacentNotAffinity(t *testing.T) {
 	// MergeCheck should return nil (region2 is not affinity-compliant due to wrong leader)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops)
 }
 
@@ -937,7 +937,7 @@ func TestAffinityMergeCheckNotAffinityRegion(t *testing.T) {
 	// MergeCheck should return nil (region doesn't satisfy affinity requirements)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops)
 }
 
@@ -988,7 +988,7 @@ func TestAffinityMergeCheckUnhealthyRegion(t *testing.T) {
 	// MergeCheck should return nil (region is unhealthy)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops)
 }
 
@@ -1049,7 +1049,7 @@ func TestAffinityMergeCheckBothDirections(t *testing.T) {
 	// When one-way merge is disabled, it should prefer next but can also merge with prev
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region2)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region2, groupState)
+	ops := checker.mergeCheck(region2, groupState)
 	re.NotNil(ops) // Should merge with one of the adjacent regions
 }
 
@@ -1099,7 +1099,7 @@ func TestAffinityMergeCheckTargetTooBig(t *testing.T) {
 	// MergeCheck should return nil because the combined size (70) exceeds the limit (60)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops, "Merged size exceeds MaxAffinityMergeRegionSize")
 }
 
@@ -1148,7 +1148,7 @@ func TestAffinityMergeCheckRespectsAffinityLimit(t *testing.T) {
 
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops, "Merge should be blocked by the stricter affinity merge limit")
 }
 
@@ -1206,7 +1206,7 @@ func TestAffinityMergeCheckDisabledByZeroConfig(t *testing.T) {
 
 			groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 			re.NotNil(groupState)
-			ops := checker.MergeCheck(region1, groupState)
+			ops := checker.mergeCheck(region1, groupState)
 			re.Nil(ops)
 		})
 	}
@@ -1270,7 +1270,7 @@ func TestAffinityMergeCheckAdjacentUnhealthy(t *testing.T) {
 	// MergeCheck should return nil (Adjacent region is unhealthy)
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops, "Should not merge into an unhealthy adjacent region")
 }
 
@@ -2110,7 +2110,7 @@ func TestAffinityMergeCheckPeerStoreMismatch(t *testing.T) {
 	// MergeCheck should return nil because peer stores don't match
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops, "Should not merge when peer stores don't match")
 }
 
@@ -2161,7 +2161,7 @@ func TestAffinityMergeCheckAdjacentAbnormalReplica(t *testing.T) {
 	// MergeCheck should return nil because adjacent region has abnormal replica count
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops, "Should not merge when adjacent region has abnormal replica count")
 }
 
@@ -2223,7 +2223,7 @@ func TestAffinityMergeCheckPlacementSplitKeys(t *testing.T) {
 	// MergeCheck should return nil because placement rules require split at key "b"
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops, "Should not merge when placement rules require split")
 }
 
@@ -2283,7 +2283,7 @@ func TestAffinityMergeCheckLabelerSplitKeys(t *testing.T) {
 	// MergeCheck should return nil because region labeler requires split at key "b"
 	groupState, _ := affinityManager.GetRegionAffinityGroupState(region1)
 	re.NotNil(groupState)
-	ops := checker.MergeCheck(region1, groupState)
+	ops := checker.mergeCheck(region1, groupState)
 	re.Nil(ops, "Should not merge when region labeler requires split")
 }
 
