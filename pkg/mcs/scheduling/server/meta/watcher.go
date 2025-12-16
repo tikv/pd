@@ -98,6 +98,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 		origin := w.basicCluster.GetStore(storeID)
 		if origin != nil {
+			statistics.DeleteClusterStatusMetrics(origin)
 			w.basicCluster.DeleteStore(origin)
 			log.Info("delete store meta", zap.Uint64("store-id", storeID))
 		}

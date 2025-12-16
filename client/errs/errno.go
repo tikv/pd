@@ -56,11 +56,13 @@ var (
 	ErrClientGetServingEndpoint       = errors.Normalize("get serving endpoint failed", errors.RFCCodeText("PD:client:ErrClientGetServingEndpoint"))
 	ErrClientFindGroupByKeyspaceID    = errors.Normalize("can't find keyspace group by keyspace id", errors.RFCCodeText("PD:client:ErrClientFindGroupByKeyspaceID"))
 	ErrClientWatchGCSafePointV2Stream = errors.Normalize("watch gc safe point v2 stream failed", errors.RFCCodeText("PD:client:ErrClientWatchGCSafePointV2Stream"))
+	ErrCircuitBreakerOpen             = errors.Normalize("circuit breaker is open", errors.RFCCodeText("PD:client:ErrCircuitBreakerOpen"))
 )
 
 // grpcutil errors
 var (
 	ErrSecurityConfig = errors.Normalize("security config error: %s", errors.RFCCodeText("PD:grpcutil:ErrSecurityConfig"))
+	ErrTLSConfig      = errors.Normalize("TLS config error", errors.RFCCodeText("PD:grpcutil:ErrTLSConfig"))
 )
 
 // The third-party project error.
@@ -73,11 +75,6 @@ var (
 var (
 	ErrGRPCDial      = errors.Normalize("dial error", errors.RFCCodeText("PD:grpc:ErrGRPCDial"))
 	ErrCloseGRPCConn = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
-)
-
-// etcd errors
-var (
-	ErrEtcdTLSConfig = errors.Normalize("etcd TLS config error", errors.RFCCodeText("PD:etcd:ErrEtcdTLSConfig"))
 )
 
 // crypto

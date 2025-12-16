@@ -652,7 +652,7 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 	return nil
 }
 
-func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) error {
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence, job *balanceRangeSchedulerJob) error {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	// todo: if supports to balance region size, it needs to change here.
 	var kind constant.ScheduleKind

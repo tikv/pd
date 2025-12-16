@@ -56,7 +56,7 @@ type OpStep interface {
 	ConfVerChanged(region *core.RegionInfo) uint64
 	IsFinish(region *core.RegionInfo) bool
 	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error
-	Influence(opInfluence OpInfluence, region *core.RegionInfo)
+	Influence(opInfluence *OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
 	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation
 }
@@ -111,7 +111,7 @@ func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.Sh
 }
 
 // Influence calculates the store difference that current step makes.
-func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (tl TransferLeader) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(tl.FromStore)
 	to := opInfluence.GetStoreInfluence(tl.ToStore)
 
@@ -177,7 +177,7 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step makes.
-func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (ap AddPeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	regionSize := region.GetApproximateSize()
@@ -260,7 +260,7 @@ func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.Sha
 }
 
 // Influence calculates the store difference that current step makes.
-func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (bw BecomeWitness) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(bw.StoreID)
 
 	regionSize := region.GetApproximateSize()
@@ -322,7 +322,7 @@ func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.
 }
 
 // Influence calculates the store difference that current step makes.
-func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (bn BecomeNonWitness) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(bn.StoreID)
 
 	regionSize := region.GetApproximateSize()
@@ -411,7 +411,7 @@ func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config conf
 }
 
 // Influence calculates the store difference that current step makes.
-func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (bsw BatchSwitchWitness) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	for _, w := range bsw.ToWitnesses {
 		w.Influence(opInfluence, region)
 	}
@@ -497,7 +497,7 @@ func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.Shared
 }
 
 // Influence calculates the store difference that current step makes.
-func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (al AddLearner) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 	regionSize := region.GetApproximateSize()
 	if al.IsWitness {
@@ -574,7 +574,7 @@ func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedCo
 }
 
 // Influence calculates the store difference that current step makes.
-func (PromoteLearner) Influence(OpInfluence, *core.RegionInfo) {}
+func (PromoteLearner) Influence(*OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (PromoteLearner) Timeout(regionSize int64) time.Duration {
@@ -625,7 +625,7 @@ func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfig
 }
 
 // Influence calculates the store difference that current step makes.
-func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (rp RemovePeer) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
 	regionSize := region.GetStorePeerApproximateSize(rp.FromStore)
@@ -696,7 +696,7 @@ func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvid
 }
 
 // Influence calculates the store difference that current step makes.
-func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (mr MergeRegion) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
 		for _, peer := range region.GetPeers() {
 			o := opInfluence.GetStoreInfluence(peer.GetStoreId())
@@ -748,7 +748,7 @@ func (sr SplitRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step makes.
-func (SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (SplitRegion) Influence(opInfluence *OpInfluence, region *core.RegionInfo) {
 	for _, peer := range region.GetPeers() {
 		inf := opInfluence.GetStoreInfluence(peer.GetStoreId())
 		inf.RegionCount++
@@ -932,7 +932,7 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.Shar
 }
 
 // Influence calculates the store difference that current step makes.
-func (ChangePeerV2Enter) Influence(OpInfluence, *core.RegionInfo) {}
+func (ChangePeerV2Enter) Influence(*OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (cpe ChangePeerV2Enter) Timeout(regionSize int64) time.Duration {
@@ -1072,7 +1072,7 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.Shar
 }
 
 // Influence calculates the store difference that current step makes.
-func (ChangePeerV2Leave) Influence(OpInfluence, *core.RegionInfo) {}
+func (ChangePeerV2Leave) Influence(*OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (cpl ChangePeerV2Leave) Timeout(regionSize int64) time.Duration {

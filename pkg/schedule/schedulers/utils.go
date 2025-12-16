@@ -48,7 +48,7 @@ type solver struct {
 	*plan.BalanceSchedulerPlan
 	sche.SchedulerCluster
 	kind              constant.ScheduleKind
-	opInfluence       operator.OpInfluence
+	opInfluence       *operator.OpInfluence
 	tolerantSizeRatio float64
 	tolerantSource    int64
 	fit               *placement.RegionFit
@@ -57,7 +57,7 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence) *solver {
 	return &solver{
 		BalanceSchedulerPlan: basePlan,
 		SchedulerCluster:     cluster,
