@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -47,13 +48,27 @@ func (s *resourceGroupProxyServer) getResourceManagerDelegateClient(ctx context.
 	return resource_manager.NewResourceManagerClient(client), nil
 }
 
+func (s *resourceGroupProxyServer) closeClient(ctx context.Context) {
+	forwardedHost, ok := s.GetServicePrimaryAddr(ctx, constant.ResourceManagerServiceName)
+	if !ok || forwardedHost == "" {
+		log.Warn("resource manager service address is not found when closing delegate client")
+		return
+	}
+	s.closeDelegateClient(forwardedHost)
+}
+
 // ListResourceGroups implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) ListResourceGroups(ctx context.Context, req *resource_manager.ListResourceGroupsRequest) (*resource_manager.ListResourceGroupsResponse, error) {
 	client, err := s.getResourceManagerDelegateClient(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return client.ListResourceGroups(ctx, req)
+	if resp, err := client.ListResourceGroups(ctx, req); err != nil {
+		s.closeClient(ctx)
+		return nil, err
+	} else {
+		return resp, nil
+	}
 }
 
 // GetResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -62,7 +77,12 @@ func (s *resourceGroupProxyServer) GetResourceGroup(ctx context.Context, req *re
 	if err != nil {
 		return nil, err
 	}
-	return client.GetResourceGroup(ctx, req)
+	if resp, err := client.GetResourceGroup(ctx, req); err != nil {
+		s.closeClient(ctx)
+		return nil, err
+	} else {
+		return resp, nil
+	}
 }
 
 // AddResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -71,7 +91,12 @@ func (s *resourceGroupProxyServer) AddResourceGroup(ctx context.Context, req *re
 	if err != nil {
 		return nil, err
 	}
-	return client.AddResourceGroup(ctx, req)
+	if resp, err := client.AddResourceGroup(ctx, req); err != nil {
+		s.closeClient(ctx)
+		return nil, err
+	} else {
+		return resp, nil
+	}
 }
 
 // ModifyResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -80,7 +105,12 @@ func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	return client.ModifyResourceGroup(ctx, req)
+	if resp, err := client.ModifyResourceGroup(ctx, req); err != nil {
+		s.closeClient(ctx)
+		return nil, err
+	} else {
+		return resp, nil
+	}
 }
 
 // DeleteResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -89,7 +119,12 @@ func (s *resourceGroupProxyServer) DeleteResourceGroup(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	return client.DeleteResourceGroup(ctx, req)
+	if resp, err := client.DeleteResourceGroup(ctx, req); err != nil {
+		s.closeClient(ctx)
+		return nil, err
+	} else {
+		return resp, nil
+	}
 }
 
 // AcquireTokenBuckets implements the resource_manager.ResourceManagerServer interface.
@@ -100,12 +135,16 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 	}
 	delegateStream, err := delegateClient.AcquireTokenBuckets(stream.Context())
 	if err != nil {
+		s.closeClient(stream.Context())
 		return err
 	}
 
 	errCh := make(chan error, 1)
 	var reportOnce sync.Once
 	reportErr := func(err error) {
+		if err != nil {
+			s.closeClient(stream.Context())
+		}
 		reportOnce.Do(func() {
 			errCh <- err
 		})
