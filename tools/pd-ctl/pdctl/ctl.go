@@ -76,7 +76,6 @@ func GetRootCmd() *cobra.Command {
 		command.NewResourceManagerCommand(),
 		command.NewMaintenanceCommand(),
 		command.NewMicroServicesCommand(),
-		command.NewAffinityCommand(),
 	)
 
 	return rootCmd
