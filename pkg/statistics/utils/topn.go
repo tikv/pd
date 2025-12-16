@@ -68,6 +68,13 @@ func (tn *TopN) GetTopNMin(k int) TopNItem {
 	return tn.topns[k].getTopNMin()
 }
 
+// GetTopNMax returns the max item in top N of the `k`th dimension.
+func (tn *TopN) GetTopNMax(k int) TopNItem {
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
+	return tn.topns[k].getTopNMax()
+}
+
 // GetAllTopN returns the top N items of the `k`th dimension.
 func (tn *TopN) GetAllTopN(k int) []TopNItem {
 	tn.rw.RLock()
@@ -147,6 +154,10 @@ func newSingleTopN(k, n int) *singleTopN {
 
 func (stn *singleTopN) getTopNMin() TopNItem {
 	return stn.topn.Top()
+}
+
+func (stn *singleTopN) getTopNMax() TopNItem {
+	return stn.topn.Bottom()
 }
 
 func (stn *singleTopN) getAllTopN() []TopNItem {
@@ -282,6 +293,28 @@ func (hp *indexedHeap) Top() TopNItem {
 		return nil
 	}
 	return hp.items[0]
+}
+
+// Bottom returns the bottom (opposite of top) item in the heap.
+// Note: This assumes the heap is a non-reversed min-heap (rev == false); in that case,
+// the maximum item resides in the bottom half of the underlying array representation.
+func (hp *indexedHeap) Bottom() TopNItem {
+	switch {
+	case hp.Len() <= 0:
+		return nil
+	case hp.Len() == 1:
+		return hp.items[0]
+	default:
+		// Only check the tail half where max elements reside in a min heap
+		start := hp.Len() / 2
+		maxItem := hp.items[start]
+		for _, item := range hp.items[start+1:] {
+			if maxItem.Less(hp.k, item) {
+				maxItem = item
+			}
+		}
+		return maxItem
+	}
 }
 
 // Get returns item with the given ID.

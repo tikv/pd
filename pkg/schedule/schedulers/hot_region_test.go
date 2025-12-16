@@ -1893,8 +1893,8 @@ func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, 
 		}
 	}
 	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
-	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.GetThresholds(utils.Write, items[0].StoreID)[0])
-	// Threshold of store 1,2,3 is 409.6 units.KiB and others are 1 units.KiB
+	re.Equal(float64(rate), tc.GetThresholds(utils.Write, items[0].StoreID)[0])
+	// Threshold of store 1,2,3 is 512 units.KiB and others are 1 units.KiB
 	// Make the hot threshold of some store is high and the others are low
 	rate = 10 * units.KiB
 	tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3, 4}, 1)
