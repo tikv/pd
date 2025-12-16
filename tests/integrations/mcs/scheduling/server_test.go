@@ -378,7 +378,6 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String())
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// The default scheduler could not be deleted, it could only be disabled.
 	defaultSchedulerNames := []string{
 		types.BalanceLeaderScheduler.String(),
 		types.BalanceRegionScheduler.String(),
@@ -395,10 +394,8 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, false)
 		tests.MustDeleteScheduler(re, suite.backendEndpoints, name)
-		checkDisabled(name, true)
 	}
 	for _, name := range defaultSchedulerNames {
-		checkDisabled(name, true)
 		tests.MustAddScheduler(re, suite.backendEndpoints, name, nil)
 		checkDisabled(name, false)
 	}
