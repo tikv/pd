@@ -175,7 +175,9 @@ func (c *innerClient) disableRouterServiceClient() {
 func (c *innerClient) enableRouterServiceClient() {
 	c.Lock()
 	defer c.Unlock()
-	c.routerSvcDiscovery.Init()
+	if err := c.routerSvcDiscovery.Init(); err != nil {
+		log.Warn("[pd] failed to initialize router service discovery", zap.Error(err))
+	}
 }
 
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
@@ -291,6 +293,7 @@ func (c *innerClient) close() {
 		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
 		c.tokenDispatcher.dispatcherCancel()
 	}
+	log.Info("[pd] close client successfully")
 }
 
 func (c *innerClient) setup() error {
@@ -334,6 +337,8 @@ func (c *innerClient) getServiceClient(ctx context.Context, options *opt.GetRegi
 	if serviceClient != nil && serviceClient.GetClientConn() != nil && serviceClient.Available() {
 		return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
 	}
+	// Fallback to the leader client.
+	isRouterClient = false
 	serviceClient = c.serviceDiscovery.GetServiceClient()
 	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx, false

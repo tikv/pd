@@ -438,7 +438,7 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 			cctx, cancel := context.WithCancel(ctx)
 			stream, err := routerpb.NewRouterClient(conn).QueryRegion(cctx)
 			if err != nil {
-				log.Error("[router] failed to create the router service stream connection", errs.ZapError(err))
+				log.Warn("[router] failed to create the router service stream connection", errs.ZapError(err))
 			}
 			// Store the stream connection context if it is successfully created.
 			if stream != nil {
@@ -461,7 +461,6 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 		// GC all the router service stream connections.
 		log.Info("[router] release all router service stream connection")
 		c.routerConCtxMgr.ReleaseAll()
-
 	}
 }
 

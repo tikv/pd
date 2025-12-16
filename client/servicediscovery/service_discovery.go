@@ -398,6 +398,13 @@ func (c *serviceBalancer) get() (ret ServiceClient) {
 	return
 }
 
+func (c *serviceBalancer) clean() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = nil
+	c.totalNode = 0
+}
+
 // UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
 type UpdateKeyspaceIDFunc func() error
 

@@ -33,6 +33,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -172,6 +174,8 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 			MinTime: 5 * time.Second,
 		}),
 	)
+	hs := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, hs)
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)

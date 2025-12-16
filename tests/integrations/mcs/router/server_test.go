@@ -139,26 +139,39 @@ func (suite *serverTestSuite) TestStoreAPI() {
 	re.Error(err)
 	defer cli.Close()
 
-	// test router store apis
-	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
-
-	// wait the router service watch the store info
-	testutil.Eventually(re, func() bool {
-		store, err := cli.GetStore(suite.ctx, store1)
-		if err != nil {
-			return false
+	checkStore := func() {
+		// test router store apis
+		re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
+		// wait the router service watch the store info
+		testutil.Eventually(re, func() bool {
+			store, err := cli.GetStore(suite.ctx, store1)
+			if err != nil {
+				return false
+			}
+			re.Equal(store1, store.GetId())
+			return true
+		})
+		ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
+		defer func() {
+			cancel()
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, false))
+				_, err = cli.GetStore(suite.ctx, store1)
+				re.Error(err)
+				return
+			default:
+				stores, err := cli.GetAllStores(suite.ctx)
+				re.NoError(err)
+				re.Len(stores, 2)
+			}
 		}
-		re.Equal(store1, store.GetId())
-		return true
-	})
-
-	stores, err := cli.GetAllStores(suite.ctx)
-	re.NoError(err)
-	re.Len(stores, 2)
-
-	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, false))
-	_, err = cli.GetStore(suite.ctx, store1)
-	re.Error(err)
+	}
+	checkStore()
+	// enable router client and check store api again
+	checkStore()
 }
 
 func (suite *serverTestSuite) TestRegionAPI() {
@@ -168,26 +181,22 @@ func (suite *serverTestSuite) TestRegionAPI() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/customTimeout"))
 	}()
 	// make sure pd server can't support region grpc request
-	pdcli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
+	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
-	_, err = pdcli.GetRegionByID(suite.ctx, 1)
+	_, err = cli.GetRegionByID(suite.ctx, 1)
 	re.Error(err)
-	pdcli.Close()
+	defer func() {
+		cli.Close()
+	}()
 
 	// test region apis
-	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
-		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableRouterServiceHandler(true))
-	re.NoError(err)
+	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
 	suite.checkRegionAPI(cli)
-	cli.Close()
 
 	// test region apis with router client enabled
-	cli2, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
-		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableRouterServiceHandler(true), opt.WithEnableRouterClient(true))
-	re.NoError(err)
-	suite.checkRegionAPI(cli2)
-	cli2.Close()
+	re.NoError(cli.UpdateOption(opt.EnableRouterClient, true))
+	suite.checkRegionAPI(cli)
 }
 
 func (suite *serverTestSuite) checkRegionAPI(cli pd.Client) {
@@ -196,9 +205,16 @@ func (suite *serverTestSuite) checkRegionAPI(cli pd.Client) {
 	// get region by id
 	allowEnableRouterOpt := opt.WithAllowRouterServiceHandle()
 	regionID := uint64(1)
-	r1, err := cli.GetRegionByID(suite.ctx, regionID, allowEnableRouterOpt)
-	re.NoError(err)
-	re.Equal(regionID, r1.Meta.Id)
+	var r1 *router.Region
+	var err error
+	testutil.Eventually(re, func() bool {
+		r1, err = cli.GetRegionByID(suite.ctx, regionID, allowEnableRouterOpt)
+		if err != nil {
+			return false
+		}
+		re.Equal(regionID, r1.Meta.Id)
+		return true
+	})
 
 	// get region by key
 	r2, err := cli.GetRegion(suite.ctx, r1.Meta.GetStartKey(), allowEnableRouterOpt)

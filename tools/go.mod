@@ -12,7 +12,7 @@ require (
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.1
-	github.com/docker/go-units v0.5.0
+	github.com/docker/go-units v0.4.0
 	github.com/gin-contrib/cors v1.6.0
 	github.com/gin-contrib/gzip v0.0.1
 	github.com/gin-contrib/pprof v1.4.0

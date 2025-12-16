@@ -39,7 +39,8 @@ import (
 )
 
 const (
-	servicePathFormat = "/ms/%d/router/registry/" // "/ms/{cluster_id}/router/registry/"
+	// "/ms/{cluster_id}/router/registry/"
+	servicePathFormat = "/ms/%d/router/registry/"
 )
 
 var _ ServiceDiscovery = (*routerServiceDiscovery)(nil)
@@ -64,9 +65,10 @@ type routerServiceDiscovery struct {
 
 	checkMembershipCh chan struct{}
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	parentCtx context.Context
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 
 	// Client option.
 	option *opt.Option
@@ -108,6 +110,8 @@ func (r *routerServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientCo
 // ScheduleCheckMemberChanged schedules a check for member changes.
 func (r *routerServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
+	case <-r.parentCtx.Done():
+		log.Info("[router service] service discovery is shutting down")
 	case r.checkMembershipCh <- struct{}{}:
 	default:
 	}
@@ -132,12 +136,10 @@ func NewRouterServiceDiscovery(
 	ctx context.Context, metaCli metastorage.Client, serviceDiscovery ServiceDiscovery,
 	tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
-	ctx, cancel := context.WithCancel(ctx)
 	balancer := newServiceBalancer(emptyErrorFn)
 	c := &routerServiceDiscovery{
-		ctx:               ctx,
+		parentCtx:         ctx,
 		ServiceDiscovery:  serviceDiscovery,
-		cancel:            cancel,
 		metaCli:           metaCli,
 		tlsCfg:            tlsCfg,
 		option:            option,
@@ -149,7 +151,7 @@ func NewRouterServiceDiscovery(
 	// will be discovered later.
 	c.defaultDiscoveryKey = fmt.Sprintf(servicePathFormat, c.GetClusterID())
 
-	log.Info("created router service discovery",
+	log.Info("[router service] created router service discovery",
 		zap.Uint64("cluster-id", c.GetClusterID()),
 		zap.Uint32("keyspace-id", c.GetKeyspaceID()),
 		zap.String("default-discovery-key", c.defaultDiscoveryKey))
@@ -158,13 +160,13 @@ func NewRouterServiceDiscovery(
 
 // Init initialize the concrete client underlying
 func (r *routerServiceDiscovery) Init() error {
-	log.Info("initializing router service discovery",
+	log.Info("[router service] initializing router service discovery",
 		zap.Int("max-retry-times", r.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
+	r.ctx, r.cancel = context.WithCancel(r.parentCtx)
 	if err := r.CheckMemberChanged(); err != nil {
-		r.cancel()
-		log.Warn("failed to initialize router service discovery", zap.Error(err))
-		return err
+		// Initial check failed, log and continue to run the background loop.
+		log.Warn("[router service] failed to initialize router service discovery", zap.Error(err))
 	}
 	r.wg.Add(2)
 	go r.startCheckMemberLoop()
@@ -203,7 +205,8 @@ func (r *routerServiceDiscovery) updateNodes(urls []string) {
 				if client.(*serviceClient).GetClientConn() == nil {
 					conn, err := r.GetOrCreateGRPCConn(url)
 					if err != nil || conn == nil {
-						log.Warn("[pd] failed to connect follower", zap.String("follower", url), errs.ZapError(err))
+						log.Warn("[router service] failed to connect router service",
+							zap.String("new-url", newURL), errs.ZapError(err))
 						continue
 					}
 					node := newPDServiceClient(url, r.GetServingURL(), conn, false)
@@ -211,11 +214,12 @@ func (r *routerServiceDiscovery) updateNodes(urls []string) {
 				}
 			} else {
 				conn, err := r.GetOrCreateGRPCConn(url)
-				follower := newPDServiceClient(url, r.GetServingURL(), conn, false)
 				if err != nil || conn == nil {
-					log.Warn("[pd] failed to connect follower", zap.String("follower", url), errs.ZapError(err))
+					log.Warn("[router service] failed to connect follower",
+						zap.String("url", url), errs.ZapError(err))
 				}
-				r.nodes.LoadOrStore(url, follower)
+				nodeClient := newPDServiceClient(url, r.GetServingURL(), conn, false)
+				r.nodes.LoadOrStore(url, nodeClient)
 			}
 		}
 	}
@@ -224,6 +228,9 @@ func (r *routerServiceDiscovery) updateNodes(urls []string) {
 		clients = append(clients, value.(*serviceClient))
 		return true
 	})
+	log.Info("[router service] updating nodes succeeded",
+		zap.Strings("urls", urls),
+		zap.Int("clients-length", len(clients)))
 	r.balancer.set(clients)
 }
 
@@ -261,7 +268,7 @@ func (r *routerServiceDiscovery) startCheckMemberLoop() {
 		// so that we can speed up the process of router service discovery when failover happens on the
 		// router service side and also ensures it won't call updateMember too frequently during normal time.
 		if err := r.CheckMemberChanged(); err != nil {
-			log.Error("[router service] failed to update member", errs.ZapError(err))
+			log.Warn("[router service] failed to update member", errs.ZapError(err))
 		}
 	}
 }
@@ -287,19 +294,23 @@ func innerRetry(
 
 // Close releases all resources
 func (r *routerServiceDiscovery) Close() {
-	log.Info("closing router service discovery")
-	r.cancel()
-	r.wg.Wait()
+	log.Info("[router service] closing router service discovery")
+	if r.cancel != nil {
+		r.cancel()
+	}
 
 	r.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
-			log.Error("[router service] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+			log.Warn("[router service] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
 		r.clientConns.Delete(key)
 		return true
 	})
-
-	log.Info("router service discovery is closed")
+	r.sortedUrls.Store([]string{})
+	r.balancer.clean()
+	r.nodes.Clear()
+	r.wg.Wait()
+	log.Info("[router service] is closed")
 }
 
 // getMSMembers returns all the members of the specified service name.
@@ -315,7 +326,8 @@ func getMSMembers(ctx context.Context, serviceKey string, client metastorage.Cli
 	for _, kv := range resp.GetKvs() {
 		var entry ServiceRegistryEntry
 		if err = entry.Deserialize(kv.Value); err != nil {
-			log.Error("try to deserialize service registry entry failed", zap.String("key", string(kv.Key)), zap.Error(err))
+			log.Warn("[router service] try to deserialize service registry entry failed",
+				zap.String("key", string(kv.Key)), zap.Error(err))
 			continue
 		}
 		ret = append(ret, entry.ServiceAddr)
@@ -335,20 +347,10 @@ type ServiceRegistryEntry struct {
 	StartTimestamp int64  `json:"start-timestamp"`
 }
 
-// Serialize this service registry entry
-func (e *ServiceRegistryEntry) Serialize() (serializedValue string, err error) {
-	data, err := json.Marshal(e)
-	if err != nil {
-		log.Error("json marshal the service registry entry failed", zap.Error(err))
-		return "", err
-	}
-	return string(data), nil
-}
-
 // Deserialize the data to this service registry entry
 func (e *ServiceRegistryEntry) Deserialize(data []byte) error {
 	if err := json.Unmarshal(data, e); err != nil {
-		log.Error("json unmarshal the service registry entry failed", zap.Error(err))
+		log.Warn("[router service] json unmarshal the service registry entry failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -366,6 +368,7 @@ func (r *routerServiceDiscovery) nodeHealthCheckLoop() {
 	for {
 		select {
 		case <-r.ctx.Done():
+			log.Info("[router service] exit health check member loop")
 			return
 		case <-ticker.C:
 			r.checkNodeHealth(nodeCheckLoopCtx)
