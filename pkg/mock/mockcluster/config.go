@@ -32,6 +32,11 @@ func (mc *Cluster) SetMaxMergeRegionKeys(v int) {
 	mc.updateScheduleConfig(func(s *sc.ScheduleConfig) { s.MaxMergeRegionKeys = uint64(v) })
 }
 
+// SetMaxAffinityMergeRegionSize updates the MaxAffinityMergeRegionSize configuration.
+func (mc *Cluster) SetMaxAffinityMergeRegionSize(v int) {
+	mc.updateScheduleConfig(func(s *sc.ScheduleConfig) { s.MaxAffinityMergeRegionSize = uint64(v) })
+}
+
 // SetSplitMergeInterval updates the SplitMergeInterval configuration.
 func (mc *Cluster) SetSplitMergeInterval(v time.Duration) {
 	mc.updateScheduleConfig(func(s *sc.ScheduleConfig) { s.SplitMergeInterval = typeutil.NewDuration(v) })

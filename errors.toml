@@ -6,11 +6,6 @@ error = '''
 KMS error
 '''
 
-["PD:affinity:ErrAffinityDisabled"]
-error = '''
-affinity is disabled
-'''
-
 ["PD:affinity:ErrAffinityGroupConflict"]
 error = '''
 affinity group %s cannot appear in both add and remove operations in the same request
@@ -29,6 +24,11 @@ affinity group %s already exists
 ["PD:affinity:ErrAffinityGroupNotFound"]
 error = '''
 affinity group %s not found
+'''
+
+["PD:affinity:ErrAffinityInternal"]
+error = '''
+affinity internal error
 '''
 
 ["PD:affinity:ErrEmptyRequest"]

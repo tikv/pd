@@ -460,12 +460,12 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.Empty(ops)
 
 	kye := keyutil.NewKeyRange("a", "g")
-	suite.tc.Append([]keyutil.KeyRange{kye})
+	suite.tc.KeyRangeManager.Append([]keyutil.KeyRange{kye})
 	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
-	suite.tc.Delete([]keyutil.KeyRange{kye})
+	suite.tc.KeyRangeManager.Delete([]keyutil.KeyRange{kye})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {

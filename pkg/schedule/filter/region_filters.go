@@ -18,6 +18,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -172,6 +173,16 @@ func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusOK
 }
 
+// HasWitnessPeers checks if the region has witness peers.
+func HasWitnessPeers(region *core.RegionInfo) bool {
+	for _, peer := range region.GetPeers() {
+		if peer.GetIsWitness() {
+			return true
+		}
+	}
+	return false
+}
+
 // SnapshotSenderFilter filer the region who's leader store reaches the limit.
 type SnapshotSenderFilter struct {
 	senders map[uint64]struct{}
@@ -196,4 +207,26 @@ func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
 		return statusOK
 	}
 	return statusRegionLeaderSendSnapshotThrottled
+}
+
+type affinityFilter struct {
+	affinityManager *affinity.Manager
+}
+
+// NewAffinityFilter creates a RegionFilter that filters all affinity regions.
+func NewAffinityFilter(cluster sche.SharedCluster) RegionFilter {
+	return &affinityFilter{
+		affinityManager: cluster.GetAffinityManager(),
+	}
+}
+
+// Select implements the RegionFilter interface.
+func (f *affinityFilter) Select(region *core.RegionInfo) *plan.Status {
+	if f.affinityManager != nil {
+		group, _ := f.affinityManager.GetRegionAffinityGroupState(region)
+		if group != nil && !group.RegularSchedulingAllowed {
+			return statusRegionAffinity
+		}
+	}
+	return statusOK
 }
