@@ -78,7 +78,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
 	cluster, err := tests.NewTestCluster(suite.ctx, 2, func(conf *config.Config, _ string) {
-		conf.Schedule.EnableAffinityScheduling = true
+		conf.Schedule.AffinityScheduleLimit = 4
 	})
 	re.NoError(err)
 
