@@ -549,9 +549,9 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
 		_ = oc.removeOperatorWithoutBury(op)
-		_ = op.Cancel(Unknown)
+		_ = op.Cancel(StartFailed)
 		oc.buryOperator(op)
-		log.Error("adding operator with unexpected status",
+		log.Warn("adding operator with unexpected status",
 			zap.Uint64("region-id", regionID),
 			zap.String("status", OpStatusToString(op.Status())),
 			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
