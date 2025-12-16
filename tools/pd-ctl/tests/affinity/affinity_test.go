@@ -99,10 +99,10 @@ func TestAffinityCommands(t *testing.T) {
 	re.ElementsMatch([]uint64{1, 2}, state.VoterStoreIDs)
 
 	// delete the normal table group
+	cmd = ctl.GetRootCmd() // reset cmd to clean args
 	out := tests.MustExec(re, cmd, []string{
 		"-u", pdAddr, "config", "affinity", "delete",
 		"--table-id", strconv.FormatUint(tableID, 10),
-		"--partition-id", "0",
 	}, nil)
 	re.Contains(out, tableGroup)
 
