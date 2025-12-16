@@ -512,6 +512,9 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	}
 	longestDelayDuration := time.Duration(0)
 	for _, res := range reservations {
+		if res == nil {
+			continue
+		}
 		if !res.reserved {
 			cancel()
 			if res.err != nil {
