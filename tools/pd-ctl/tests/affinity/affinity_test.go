@@ -67,22 +67,21 @@ func TestAffinityCommands(t *testing.T) {
 
 	// list should return both groups with the expected IDs.
 	groups := make(map[string]*pd.AffinityGroupState)
-	tests.MustExec(re, cmd, []string{"-u", pdAddr, "affinity", "list"}, &groups)
+	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "list"}, &groups)
 	re.Contains(groups, tableGroup)
 	re.Contains(groups, partitionGroup)
 
 	// show table group
 	var state pd.AffinityGroupState
 	tests.MustExec(re, cmd, []string{
-		"-u", pdAddr, "affinity", "show",
+		"-u", pdAddr, "config", "affinity", "show",
 		"--table-id", strconv.FormatUint(tableID, 10),
-		"--partition-id", "0",
 	}, &state)
 	re.Equal(tableGroup, state.ID)
 
 	// show partitioned table group
 	tests.MustExec(re, cmd, []string{
-		"-u", pdAddr, "affinity", "show",
+		"-u", pdAddr, "config", "affinity", "show",
 		"--table-id", strconv.FormatUint(tableID, 10),
 		"--partition-id", strconv.FormatUint(partitionID, 10),
 	}, &state)
@@ -90,7 +89,7 @@ func TestAffinityCommands(t *testing.T) {
 
 	// update peers for the partitioned table
 	tests.MustExec(re, cmd, []string{
-		"-u", pdAddr, "affinity", "update",
+		"-u", pdAddr, "config", "affinity", "update",
 		"--table-id", strconv.FormatUint(tableID, 10),
 		"--partition-id", strconv.FormatUint(partitionID, 10),
 		"--leader", "1",
@@ -101,7 +100,7 @@ func TestAffinityCommands(t *testing.T) {
 
 	// delete the normal table group
 	out := tests.MustExec(re, cmd, []string{
-		"-u", pdAddr, "affinity", "delete",
+		"-u", pdAddr, "config", "affinity", "delete",
 		"--table-id", strconv.FormatUint(tableID, 10),
 		"--partition-id", "0",
 	}, nil)
@@ -109,7 +108,7 @@ func TestAffinityCommands(t *testing.T) {
 
 	// ensure only the partition group remains.
 	groups = make(map[string]*pd.AffinityGroupState)
-	tests.MustExec(re, cmd, []string{"-u", pdAddr, "affinity", "list"}, &groups)
+	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "list"}, &groups)
 	re.NotContains(groups, tableGroup)
 	re.Contains(groups, partitionGroup)
 }
