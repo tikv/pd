@@ -384,6 +384,18 @@ func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 	}
 }
 
+// WithReplaceLeaderStore sets the peer on leaderStoreID as the leader.
+func WithReplaceLeaderStore(leaderStoreID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if !IsLearner(p) && p.GetStoreId() == leaderStoreID {
+				region.leader = p
+				return
+			}
+		}
+	}
+}
+
 // WithInterval sets the interval
 func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 	return func(region *RegionInfo) {

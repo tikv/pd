@@ -41,7 +41,7 @@ func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) b
 		return true
 	}
 
-	if !m.conf.IsAffinitySchedulingEnabled() {
+	if m.conf.GetAffinityScheduleLimit() == 0 {
 		return true
 	}
 

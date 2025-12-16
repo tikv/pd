@@ -49,7 +49,7 @@ func TestAffinityHandlerTestSuite(t *testing.T) {
 
 func (suite *affinityHandlerTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
-		conf.Schedule.EnableAffinityScheduling = true
+		conf.Schedule.AffinityScheduleLimit = 4
 	})
 }
 
