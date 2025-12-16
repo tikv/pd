@@ -65,9 +65,9 @@ func TestAffinityCommands(t *testing.T) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	// list should return both groups with the expected IDs.
+	// show should return both groups with the expected IDs.
 	groups := make(map[string]*pd.AffinityGroupState)
-	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "list"}, &groups)
+	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "show"}, &groups)
 	re.Contains(groups, tableGroup)
 	re.Contains(groups, partitionGroup)
 
@@ -108,7 +108,8 @@ func TestAffinityCommands(t *testing.T) {
 
 	// ensure only the partition group remains.
 	groups = make(map[string]*pd.AffinityGroupState)
-	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "list"}, &groups)
+	cmd = ctl.GetRootCmd() // reset cmd to clean args
+	tests.MustExec(re, cmd, []string{"-u", pdAddr, "config", "affinity", "show"}, &groups)
 	re.NotContains(groups, tableGroup)
 	re.Contains(groups, partitionGroup)
 }
