@@ -107,7 +107,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		if exist {
 			handler, err := h.GetSchedulerConfigHandler()
 			if err == nil && handler != nil {
-				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
+				r.URL.Path = path.Join("/pd", server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
 				r.Method = http.MethodPut
 				data, err := json.Marshal(input)
 				if err != nil {
