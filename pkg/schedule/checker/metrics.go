@@ -56,8 +56,69 @@ const (
 	mergeChecker      = "merge_checker"
 	replicaChecker    = "replica_checker"
 	splitChecker      = "split_checker"
+	affinityChecker   = "affinity_checker"
 )
 
+<<<<<<< HEAD
+=======
+const (
+	// patrol phases
+	phaseWaitForChannel = "wait_for_channel"
+	phaseCheckPriority  = "check_priority"
+	phaseCheckPending   = "check_pending"
+	phaseScanRegions    = "scan_regions"
+	phaseUpdateLabel    = "update_label_stats"
+)
+
+// checkerControllerMetrics contains pre-created Prometheus metrics for the checker controller.
+// It follows the best practice of pre-compiling metrics with labels to avoid runtime overhead.
+type checkerControllerMetrics struct {
+	// Pre-created histograms for patrol phases. Key is the phase name.
+	patrolPhaseHistograms map[string]prometheus.Observer
+	// Pre-created histograms for checkers. Key is the checker name.
+	checkRegionHistograms map[string]prometheus.Observer
+	// Gauge for patrol region channel size.
+	patrolRegionChannelSize prometheus.Gauge
+}
+
+// newCheckerControllerMetrics creates and initializes a new checkerControllerMetrics instance.
+func newCheckerControllerMetrics() *checkerControllerMetrics {
+	patrolPhases := []string{
+		phaseWaitForChannel,
+		phaseCheckPriority,
+		phaseCheckPending,
+		phaseScanRegions,
+		phaseUpdateLabel,
+	}
+
+	// when adding a new checker, remember to add it here for metrics
+	checkerTypes := []string{
+		jointStateChecker,
+		splitChecker,
+		ruleChecker,
+		learnerChecker,
+		replicaChecker,
+		mergeChecker,
+		affinityChecker,
+	}
+
+	m := &checkerControllerMetrics{
+		patrolPhaseHistograms:   make(map[string]prometheus.Observer, len(patrolPhases)),
+		checkRegionHistograms:   make(map[string]prometheus.Observer, len(checkerTypes)),
+		patrolRegionChannelSize: patrolRegionChannelSize, // Use the gauge defined at package-level
+	}
+
+	for _, phase := range patrolPhases {
+		m.patrolPhaseHistograms[phase] = patrolPhaseDuration.WithLabelValues(phase)
+	}
+
+	for _, checker := range checkerTypes {
+		m.checkRegionHistograms[checker] = checkRegionDuration.WithLabelValues(checker)
+	}
+	return m
+}
+
+>>>>>>> fdc1cdf234 (schedule: add affinity checker (#10040))
 func ruleCheckerCounterWithEvent(event string) prometheus.Counter {
 	return checkerCounter.WithLabelValues(ruleChecker, event)
 }
@@ -155,4 +216,30 @@ var (
 
 	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")
 	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitChecker, "paused")
+
+	affinityCheckerCounter                        = checkerCounter.WithLabelValues(affinityChecker, "check")
+	affinityCheckerPausedCounter                  = checkerCounter.WithLabelValues(affinityChecker, "paused")
+	affinityCheckerRegionNoLeaderCounter          = checkerCounter.WithLabelValues(affinityChecker, "region-no-leader")
+	affinityCheckerGroupSchedulingDisabledCounter = checkerCounter.WithLabelValues(affinityChecker, "group-scheduling-disabled")
+	affinityCheckerNewOpCounter                   = checkerCounter.WithLabelValues(affinityChecker, "new-operator")
+	affinityCheckerCreateOpFailedCounter          = checkerCounter.WithLabelValues(affinityChecker, "create-operator-failed")
+	affinityCheckerUnhealthyRegionCounter         = checkerCounter.WithLabelValues(affinityChecker, "unhealthy-region")
+	affinityCheckerAbnormalReplicaCounter         = checkerCounter.WithLabelValues(affinityChecker, "abnormal-replica")
+	affinityCheckerLearnerPeerConflictCounter     = checkerCounter.WithLabelValues(affinityChecker, "learner-peer-conflict")
+
+	// Affinity merge checker metrics
+	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")
+	affinityMergeCheckerDisabledCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-disabled")
+	affinityMergeCheckerGlobalDisabledCounter       = checkerCounter.WithLabelValues(affinityChecker, "merge-global-disabled")
+	affinityMergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(affinityChecker, "merge-no-need")
+	affinityMergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-no-target")
+	affinityMergeCheckerTargetTooBigCounter         = checkerCounter.WithLabelValues(affinityChecker, "merge-target-too-big")
+	affinityMergeCheckerNewOpCounter                = checkerCounter.WithLabelValues(affinityChecker, "merge-new-operator")
+	affinityMergeCheckerAdjNotExistCounter          = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-not-exist")
+	affinityMergeCheckerAdjDifferentGroupCounter    = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-different-group")
+	affinityMergeCheckerAdjNotAffinityCounter       = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-not-affinity")
+	affinityMergeCheckerAdjDisallowMergeCounter     = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-disallow-merge")
+	affinityMergeCheckerAdjAbnormalPeerStoreCounter = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-abnormal-peerstore")
+	affinityMergeCheckerAdjUnhealthyCounter         = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-unhealthy")
+	affinityMergeCheckerAdjAbnormalReplicaCounter   = checkerCounter.WithLabelValues(affinityChecker, "merge-adj-abnormal-replica")
 )

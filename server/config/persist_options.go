@@ -193,6 +193,21 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+<<<<<<< HEAD
+=======
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistOptions) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLNumberOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
+}
+
+// SetAffinityScheduleLimit sets the limit for affinity schedule.
+func (o *PersistOptions) SetAffinityScheduleLimit(limit uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.AffinityScheduleLimit = limit
+	o.SetScheduleConfig(v)
+}
+
+>>>>>>> fdc1cdf234 (schedule: add affinity checker (#10040))
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()

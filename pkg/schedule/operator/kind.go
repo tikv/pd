@@ -49,6 +49,8 @@ const (
 	OpWitnessLeader
 	// Include witness transfer.
 	OpWitness
+	// Initiated by affinity checker.
+	OpAffinity
 	opMax
 )
 
@@ -63,6 +65,7 @@ var flagToName = map[OpKind]string{
 	OpRange:         "range",
 	OpWitness:       "witness",
 	OpWitnessLeader: "witness-leader",
+	OpAffinity:      "affinity",
 }
 
 var nameToFlag = map[string]OpKind{
@@ -75,6 +78,7 @@ var nameToFlag = map[string]OpKind{
 	"merge":          OpMerge,
 	"range":          OpRange,
 	"witness-leader": OpWitnessLeader,
+	"affinity":       OpAffinity,
 }
 
 func (k OpKind) String() string {

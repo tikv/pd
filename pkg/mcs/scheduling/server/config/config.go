@@ -340,6 +340,14 @@ func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+<<<<<<< HEAD
+=======
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistConfig) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
+}
+
+>>>>>>> fdc1cdf234 (schedule: add affinity checker (#10040))
 // GetLowSpaceRatio returns the low space ratio.
 func (o *PersistConfig) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio

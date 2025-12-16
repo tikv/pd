@@ -76,7 +76,13 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
+<<<<<<< HEAD
 	cluster, err := tests.NewTestCluster(suite.ctx, 2)
+=======
+	cluster, err := tests.NewTestCluster(suite.ctx, 2, func(conf *config.Config, _ string) {
+		conf.Schedule.AffinityScheduleLimit = 4
+	})
+>>>>>>> fdc1cdf234 (schedule: add affinity checker (#10040))
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()

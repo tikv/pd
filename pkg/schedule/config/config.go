@@ -41,6 +41,7 @@ const (
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
+	defaultAffinityScheduleLimit  = 0 // default to disable
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.7
@@ -103,6 +104,7 @@ const (
 	ReplicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
 	MergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	HotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
+	AffinityScheduleLimitKey       = "schedule.affinity-schedule-limit"
 	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	EnableLocationReplacement      = "schedule.enable-location-replacement"
 	DefaultAddPeer                 = "default-add-peer"
@@ -203,6 +205,8 @@ type ScheduleConfig struct {
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
 	// HotRegionScheduleLimit is the max coexist hot region schedules.
 	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
+	// AffinityScheduleLimit is the max coexist affinity schedules.
+	AffinityScheduleLimit uint64 `toml:"affinity-schedule-limit" json:"affinity-schedule-limit"`
 	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
@@ -312,6 +316,15 @@ type ScheduleConfig struct {
 
 	// PatrolRegionWorkerCount is the number of workers to patrol region.
 	PatrolRegionWorkerCount int `toml:"patrol-region-worker-count" json:"patrol-region-worker-count"`
+<<<<<<< HEAD
+=======
+
+	// If the size of region is smaller than MaxAffinityMergeRegionSize,
+	// and it is affinity, it will try to merge with adjacent regions.
+	// To avoid introducing a new configuration parameter, we derive the maximum number of keys
+	// from the maximum size using the global size-to-keys ratio.
+	MaxAffinityMergeRegionSize uint64 `toml:"max-affinity-merge-region-size" json:"max-affinity-merge-region-size"`
+>>>>>>> fdc1cdf234 (schedule: add affinity checker (#10040))
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -364,6 +377,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("hot-region-schedule-limit") {
 		configutil.AdjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
+	}
+	if !meta.IsDefined("affinity-schedule-limit") {
+		configutil.AdjustUint64(&c.AffinityScheduleLimit, defaultAffinityScheduleLimit)
 	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
 		configutil.AdjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)

@@ -35,6 +35,8 @@ const (
 	RuleChecker CheckerSchedulerType = "rule-checker"
 	// SplitChecker is the name for split checker.
 	SplitChecker CheckerSchedulerType = "split-checker"
+	// AffinityChecker is the name for affinity checker.
+	AffinityChecker CheckerSchedulerType = "affinity-checker"
 
 	// BalanceLeaderScheduler is balance leader scheduler name.
 	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"
