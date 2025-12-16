@@ -41,7 +41,6 @@ func NewAffinityCommand() *cobra.Command {
 		newAffinityShowCommand(),
 		newAffinityDeleteCommand(),
 		newAffinityUpdatePeersCommand(),
-		newAffinityListCommand(),
 	)
 	return cmd
 }
@@ -49,7 +48,7 @@ func NewAffinityCommand() *cobra.Command {
 func newAffinityShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show",
-		Short: "show affinity group state for the target ID",
+		Short: "show affinity group state (all groups if no --table-id is specified)",
 		Run:   affinityShowCommandFunc,
 	}
 	return cmd
@@ -76,16 +75,21 @@ func newAffinityUpdatePeersCommand() *cobra.Command {
 	return cmd
 }
 
-func newAffinityListCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "list affinity groups",
-		Run:   affinityListCommandFunc,
-	}
-	return cmd
-}
-
 func affinityShowCommandFunc(cmd *cobra.Command, _ []string) {
+	tableID, _ := cmd.Flags().GetUint64("table-id")
+
+	// If no table-id is provided, show all affinity groups
+	if tableID == 0 {
+		groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
+		if err != nil {
+			cmd.Printf("Failed to get affinity groups: %v\n", err)
+			return
+		}
+		jsonPrint(cmd, groups)
+		return
+	}
+
+	// Otherwise, show the specific affinity group
 	groupID, err := getGroupID(cmd)
 	if err != nil {
 		cmd.Println(err)
@@ -145,15 +149,6 @@ func affinityUpdatePeersCommandFunc(cmd *cobra.Command, _ []string) {
 		return
 	}
 	jsonPrint(cmd, state)
-}
-
-func affinityListCommandFunc(cmd *cobra.Command, _ []string) {
-	groups, err := PDCli.GetAllAffinityGroups(cmd.Context())
-	if err != nil {
-		cmd.Printf("Failed to get affinity groups: %v\n", err)
-		return
-	}
-	jsonPrint(cmd, groups)
 }
 
 func getGroupID(cmd *cobra.Command) (string, error) {
