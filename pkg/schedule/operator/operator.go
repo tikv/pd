@@ -65,6 +65,8 @@ var (
 	ExceedWaitLimit CancelReasonType = "exceed wait limit"
 	// RelatedMergeRegion is the cancel reason when the operator is cancelled by related merge region.
 	RelatedMergeRegion CancelReasonType = "related merge region"
+	// StartFailed is the cancel reason when the operator fails to start.
+	StartFailed CancelReasonType = "start failed"
 	// Unknown is the cancel reason when the operator is cancelled by an unknown reason.
 	Unknown CancelReasonType = "unknown"
 )
