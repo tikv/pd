@@ -53,6 +53,7 @@ var (
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("skip", "operator-existed")
 )
 
 const (
@@ -272,7 +273,9 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 	if op := r.opController.GetOperator(region.GetID()); op != nil {
-
+		scatterOperatorExistedCounter.Inc()
+		log.Info("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
+		return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
 	}
 
 	if region.GetLeader() == nil {
