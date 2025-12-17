@@ -27,16 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-<<<<<<< HEAD
-=======
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/multierr"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
->>>>>>> 29ead019cd (add failed_regions_id for scatter regions response (#9167))
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -2170,39 +2160,6 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 		}
 		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 	}
-<<<<<<< HEAD
-=======
-}
-
-func convertScatterResponse(resp *schedulingpb.ScatterRegionsResponse) *pdpb.ScatterRegionResponse {
-	return &pdpb.ScatterRegionResponse{
-		Header:             convertHeader(resp.GetHeader()),
-		FinishedPercentage: resp.GetFinishedPercentage(),
-		FailedRegionsId:    resp.GetFailedRegionsId(),
-	}
-}
-
-func convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOperatorResponse {
-	return &pdpb.GetOperatorResponse{
-		Header:   convertHeader(resp.GetHeader()),
-		RegionId: resp.GetRegionId(),
-		Desc:     resp.GetDesc(),
-		Kind:     resp.GetKind(),
-		Status:   resp.GetStatus(),
-	}
-}
-
-func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
-	return &pdpb.AskBatchSplitResponse{
-		Header: convertHeader(resp.GetHeader()),
-		Ids:    resp.GetIds(),
-	}
-}
-
-// SyncMaxTS implements gRPC PDServer.
-// Deprecated.
-func (*GrpcServer) SyncMaxTS(_ context.Context, _ *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
->>>>>>> 29ead019cd (add failed_regions_id for scatter regions response (#9167))
 	return &pdpb.SyncMaxTSResponse{
 		Header:    s.header(),
 		SyncedDcs: syncedDCs,
@@ -2851,29 +2808,3 @@ func currentFunction() string {
 	s := strings.Split(runtime.FuncForPC(counter).Name(), ".")
 	return s[len(s)-1]
 }
-<<<<<<< HEAD
-=======
-
-func (s *GrpcServer) rateLimitCheck() (done ratelimit.DoneFunc, err error) {
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := getCaller(2)
-		limiter := s.GetGRPCRateLimiter()
-		if done, err = limiter.Allow(fName); err == nil {
-			return
-		}
-		err = errs.ErrGRPCRateLimitExceeded(err)
-		return
-	}
-	return
-}
-
-// SetGlobalGCBarrier implements gRPC PDServer.
-func (*GrpcServer) SetGlobalGCBarrier(context.Context, *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "SetGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
-}
-
-// DeleteGlobalGCBarrier implements gRPC PDServer.
-func (*GrpcServer) DeleteGlobalGCBarrier(context.Context, *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "DeleteGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
-}
->>>>>>> 29ead019cd (add failed_regions_id for scatter regions response (#9167))
