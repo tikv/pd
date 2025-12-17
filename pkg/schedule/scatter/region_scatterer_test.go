@@ -839,11 +839,11 @@ func TestRemoveStoreLimit(t *testing.T) {
 	// same group
 	region := tc.GetRegion(2)
 	o, err := scatterer.Scatter(region, "", true)
-	re.Nil(err)
+	re.NoError(err)
 	re.Nil(o)
 
 	// different group
 	o, err = scatterer.Scatter(region, "test", true)
-	re.NotNil(err)
+	re.Error(err)
 	re.Nil(o)
 }
