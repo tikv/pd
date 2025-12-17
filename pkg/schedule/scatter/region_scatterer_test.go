@@ -844,6 +844,6 @@ func TestRemoveStoreLimit(t *testing.T) {
 
 	// different group
 	o, err = scatterer.Scatter(region, "test", true)
-	re.Error(err)
+	re.NotNil(err)
 	re.Nil(o)
 }
