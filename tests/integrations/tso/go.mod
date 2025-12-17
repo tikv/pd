@@ -3,7 +3,6 @@ module github.com/tikv/pd/tests/integrations/tso
 go 1.21
 
 replace (
-	github.com/pingcap/kvproto => github.com/bufferflies/kvproto v0.0.0-20251217043104-215155b21b2d
 	github.com/tikv/pd => ../../../
 	github.com/tikv/pd/client => ../../../client
 	github.com/tikv/pd/tests/integrations/mcs => ../mcs
@@ -13,7 +12,7 @@ replace (
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250604104108-d780eebb4f38
+	github.com/pingcap/kvproto v0.0.0-20251217070556-007154d367a2
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
