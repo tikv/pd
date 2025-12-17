@@ -230,7 +230,6 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re := suite.Require()
 	leaderServer := suite.pdLeader.GetServer()
 	conf := leaderServer.GetMicroserviceConfig().Clone()
-	// Change back to the default value.
 	conf.EnableSchedulingFallback = true
 	err := leaderServer.SetMicroserviceConfig(*conf)
 	re.NoError(err)
@@ -288,6 +287,12 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 
 func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	re := suite.Require()
+	// After Enable scheduling service fallback, the PD will scheduling.
+	leaderServer := suite.pdLeader.GetServer()
+	conf := leaderServer.GetMicroserviceConfig().Clone()
+	conf.EnableSchedulingFallback = true
+	err := leaderServer.SetMicroserviceConfig(*conf)
+	re.NoError(err)
 
 	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
@@ -295,11 +300,10 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
-	leaderServer := suite.pdLeader.GetServer()
 	// After Disabling scheduling service fallback, the PD will stop scheduling.
-	conf := leaderServer.GetMicroserviceConfig().Clone()
+	conf = leaderServer.GetMicroserviceConfig().Clone()
 	conf.EnableSchedulingFallback = false
-	err := leaderServer.SetMicroserviceConfig(*conf)
+	err = leaderServer.SetMicroserviceConfig(*conf)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
