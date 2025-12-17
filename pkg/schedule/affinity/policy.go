@@ -38,13 +38,15 @@ const (
 // storeCondition is an enum for store conditions. Valid values are the store-prefixed enum constants,
 // which are split into three groups separated by degradedBoundary.
 // Roughly, larger values indicate a more severe degree of unavailability.
+// This follows the leaderTarget and regionTarget logic in StoreStateFilter.anyConditionMatch.
 type storeCondition int
 
 const (
 	storeAvailable storeCondition = iota
 
 	// All values greater than storeAvailable and less than degradedBoundary will trigger groupDegraded.
-	storeEvictLeader
+	storeEvicted
+	storeBusy
 	storeDisconnected
 	storePreparing
 	storeLowSpace
@@ -60,8 +62,10 @@ func (c storeCondition) String() string {
 	switch c {
 	case storeAvailable:
 		return "available"
-	case storeEvictLeader:
+	case storeEvicted:
 		return "evicted"
+	case storeBusy:
+		return "busy"
 	case storeDisconnected:
 		return "disconnected"
 	case storePreparing:
@@ -92,7 +96,7 @@ func (c storeCondition) groupAvailability() groupAvailability {
 
 func (c storeCondition) affectsLeaderOnly() bool {
 	switch c {
-	case storeEvictLeader:
+	case storeEvicted, storeBusy:
 		return true
 	default:
 		return false
@@ -193,8 +197,11 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 			unavailableStores[store.GetID()] = storeDown
 
 		// Then the conditions that will mark the group as degraded
-		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()):
-			unavailableStores[store.GetID()] = storeEvictLeader
+		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) ||
+			store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend():
+			unavailableStores[store.GetID()] = storeEvicted
+		case store.IsBusy():
+			unavailableStores[store.GetID()] = storeBusy
 		case store.IsDisconnected():
 			unavailableStores[store.GetID()] = storeDisconnected
 		case store.IsLowSpace(lowSpaceRatio):

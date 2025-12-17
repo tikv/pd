@@ -16,6 +16,8 @@ package affinity
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"testing"
 	"time"
 
@@ -24,10 +26,89 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage"
 )
+
+func TestStoreCondition(t *testing.T) {
+	re := require.New(t)
+	re.Equal(groupDegraded, storeEvicted.groupAvailability())
+	re.Equal(groupDegraded, storeBusy.groupAvailability())
+	re.Equal(groupDegraded, storeDisconnected.groupAvailability())
+	re.Equal(groupDegraded, storePreparing.groupAvailability())
+	re.Equal(groupDegraded, storeLowSpace.groupAvailability())
+	re.Equal(groupExpired, storeDown.groupAvailability())
+	re.Equal(groupExpired, storeRemoving.groupAvailability())
+	re.Equal(groupExpired, storeRemoved.groupAvailability())
+
+	re.True(storeEvicted.affectsLeaderOnly())
+	re.True(storeBusy.affectsLeaderOnly())
+	re.False(storeDisconnected.affectsLeaderOnly())
+	re.False(storeDown.affectsLeaderOnly())
+}
+
+func TestCollectUnavailableStores(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	memoryStorage := storage.NewStorageWithMemoryBackend()
+	storeInfos := core.NewStoresInfo()
+	conf := mockconfig.NewTestOptions()
+	conf.SetLabelProperty("reject-leader", "reject", "leader")
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, memoryStorage, time.Second*5)
+	re.NoError(err)
+	manager, err := NewManager(ctx, memoryStorage, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+
+	stores := make([]*core.StoreInfo, 11)
+	for i := range stores {
+		stores[i] = core.NewStoreInfo(&metapb.Store{
+			Id:        uint64(i),
+			Address:   fmt.Sprintf("s%d", i),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+		}, core.SetLastHeartbeatTS(time.Now()))
+	}
+	// stores[0]: storeAvailable
+	// stores[1..5]: storeEvicted
+	stores[1] = stores[1].Clone(core.PauseLeaderTransfer(constant.In))
+	stores[2] = stores[2].Clone(core.SetStoreLabels([]*metapb.StoreLabel{{Key: "reject", Value: "leader"}}))
+	stores[3] = stores[3].Clone(core.SlowStoreEvicted())
+	stores[4] = stores[4].Clone(core.StoppingStoreEvicted())
+	stores[5] = stores[5].Clone(core.SlowTrendEvicted())
+	// stores[6]: storeDisconnected
+	stores[6] = stores[6].Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Minute)))
+	// stores[7]: storePreparing
+	stores[7] = stores[7].Clone(core.SetNodeState(metapb.NodeState_Preparing))
+	// stores[8]: storeDown
+	stores[8] = stores[8].Clone(core.SetLastHeartbeatTS(time.Now().Add(-2 * time.Hour)))
+	// stores[9]: storeRemoving
+	stores[9] = stores[9].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
+	// stores[12]: storeRemoved
+	stores[10] = stores[10].Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+
+	for _, store := range stores {
+		storeInfos.PutStore(store)
+	}
+
+	actual := manager.collectUnavailableStores()
+	expected := map[uint64]storeCondition{
+		1:  storeEvicted,
+		2:  storeEvicted,
+		3:  storeEvicted,
+		4:  storeEvicted,
+		5:  storeEvicted,
+		6:  storeDisconnected,
+		7:  storePreparing,
+		8:  storeDown,
+		9:  storeRemoving,
+		10: storeRemoved,
+	}
+	re.True(maps.Equal(expected, actual))
+}
 
 func TestObserveAvailableRegion(t *testing.T) {
 	re := require.New(t)
@@ -339,7 +420,7 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 	re.NoError(err)
 
 	// evict-leader on leader -> degraded
-	unavailable := map[uint64]storeCondition{1: storeEvictLeader}
+	unavailable := map[uint64]storeCondition{1: storeEvicted}
 	changed, changes := manager.getGroupAvailabilityChanges(unavailable)
 	re.True(changed)
 	manager.setGroupAvailabilityChanges(unavailable, changes)
@@ -347,7 +428,7 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 	re.Equal(groupDegraded, groupInfo.GetAvailability())
 
 	// evict-leader only on follower should not change availability
-	unavailable = map[uint64]storeCondition{2: storeEvictLeader}
+	unavailable = map[uint64]storeCondition{2: storeEvicted}
 	changed, changes = manager.getGroupAvailabilityChanges(unavailable)
 	re.True(changed)
 	manager.setGroupAvailabilityChanges(unavailable, changes)
