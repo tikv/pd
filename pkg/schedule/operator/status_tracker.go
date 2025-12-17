@@ -149,7 +149,15 @@ func (o *Operator) SetAdditionalInfo(key string, value string) {
 	o.additionalInfos.value[key] = value
 }
 
-// GetAdditionalInfo returns additional info with key.
+// GetAdditionalInfoAndExist returns additional info with key.
+func (o *Operator) GetAdditionalInfoAndExist(key string) (string, bool) {
+	o.additionalInfos.RLock()
+	defer o.additionalInfos.RUnlock()
+	val, exist := o.additionalInfos.value[key]
+	return val, exist
+}
+
+// GetAdditionalInfo returns additional info value with key.
 func (o *Operator) GetAdditionalInfo(key string) string {
 	o.additionalInfos.RLock()
 	defer o.additionalInfos.RUnlock()
