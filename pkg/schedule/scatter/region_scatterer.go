@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,12 +54,15 @@ var (
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
+	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("skip", "other-existed")
 )
 
 const (
 	maxSleepDuration     = time.Minute
 	initialSleepDuration = 100 * time.Millisecond
 	maxRetryLimit        = 30
+	scatterOperatorDes   = "scatter-region"
 )
 
 type selectedStores struct {
@@ -272,6 +276,24 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 
+	if op := r.opController.GetOperator(region.GetID()); op != nil {
+		val, ok := op.AdditionalInfos["group"]
+		// If the existing operator is created by the same group scatterer, just skip creating a new one.
+		if strings.Contains(op.Desc(), scatterOperatorDes) && ok && val == group {
+			scatterOperatorRunningCounter.Inc()
+			log.Debug("scatter operator is running, just think it success", zap.Uint64("region-id", region.GetID()))
+			return nil, nil
+		}
+		scatterOperatorExistedCounter.Inc()
+		log.Debug("operator exist, but it does not met requirement",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Bool("additional-info-exist", ok),
+			zap.String("additional-info-group", val),
+			zap.String("operator-des", op.Desc()),
+		)
+		return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
+	}
+
 	if region.GetLeader() == nil {
 		scatterSkipNoLeaderCounter.Inc()
 		log.Warn("region no leader during scatter", zap.Uint64("region-id", region.GetID()))
@@ -377,7 +399,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		return nil, nil
 	}
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
+	op, err := operator.CreateScatterRegionOperator(scatterOperatorDes, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		for _, peer := range region.GetPeers() {

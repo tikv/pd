@@ -836,4 +836,14 @@ func TestRemoveStoreLimit(t *testing.T) {
 			re.True(oc.AddOperator(op))
 		}
 	}
+	// same group
+	region := tc.GetRegion(2)
+	o, err := scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.Nil(o)
+
+	// different group
+	o, err = scatterer.Scatter(region, "test", true)
+	re.Error(err)
+	re.Nil(o)
 }

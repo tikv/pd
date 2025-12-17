@@ -10,9 +10,9 @@ replace (
 // reset grpc and protobuf deps in order to import client and server at the same time
 
 require (
-	github.com/docker/go-units v0.4.0
-	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230920042517-db656f45023b
+	github.com/docker/go-units v0.5.0
+	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
+	github.com/pingcap/kvproto v0.0.0-20251217070556-007154d367a2
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
