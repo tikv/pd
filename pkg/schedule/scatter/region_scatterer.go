@@ -283,16 +283,17 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		log.Warn("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
-	// Check if region is in an affinity group that doesn't allow regular scheduling
-	if !r.affinityFilter.Select(region).IsOK() {
-		scatterSkipAffinityCounter.Inc()
-		return nil, errors.Errorf("region %d is in affinity group", region.GetID())
-	}
 
 	if region.GetLeader() == nil {
 		scatterSkipNoLeaderCounter.Inc()
 		log.Warn("region no leader during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
+	}
+
+	// Check if region is in an affinity group that doesn't allow regular scheduling
+	if !r.affinityFilter.Select(region).IsOK() {
+		scatterSkipAffinityCounter.Inc()
+		return nil, errors.Errorf("region %d is in affinity group", region.GetID())
 	}
 
 	if r.cluster.IsRegionHot(region) {

@@ -107,7 +107,7 @@ func TestAffinityCheckerInvalidCache(t *testing.T) {
 	checker.Check(region1)
 	group := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(group)
-	re.Equal(2, group.RegionCount)
+	re.Equal(1, group.RegionCount)
 	re.Equal(1, group.AffinityRegionCount)
 
 	// Merge Region 1 and 2 before Region 2 is checked

@@ -196,21 +196,30 @@ func TestRegionCountStaleCache(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
-	_, isAffinity := manager.GetRegionAffinityGroupState(region)
+
+	// test skipSaveCache = true
+	_, isAffinity := manager.GetRegionAffinityGroupState(region, true /* skipSaveCache */)
 	re.True(isAffinity)
 	groupInfo := getGroupForTest(re, manager, "g")
+	re.Zero(groupInfo.AffinityRegionCount)
+	re.Empty(groupInfo.Regions)
+
+	// test skipSaveCache = false
+	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo = getGroupForTest(re, manager, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 
-	// test InvalidCacheForMissingRegions
+	// test InvalidCacheForMissingRegion
 	regionInfos := core.NewRegionsInfo()
 	regionInfos.PutRegion(region)
-	manager.InvalidCacheForMissingRegions(regionInfos, region)
+	manager.InvalidCacheForMissingRegion(regionInfos, region)
 	groupInfo = getGroupForTest(re, manager, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 	regionInfos.RemoveRegion(region)
-	manager.InvalidCacheForMissingRegions(regionInfos, region)
+	manager.InvalidCacheForMissingRegion(regionInfos, region)
 	groupInfo = getGroupForTest(re, manager, "g")
 	re.Zero(groupInfo.AffinityRegionCount)
 	re.Empty(groupInfo.Regions)

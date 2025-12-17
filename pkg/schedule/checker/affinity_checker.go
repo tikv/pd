@@ -122,7 +122,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	c.affinityManager.InvalidCacheForMissingRegions(c.cluster, region)
+	c.affinityManager.InvalidCacheForMissingRegion(c.cluster, region)
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {
@@ -279,8 +279,6 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 		}
 	}
 
-	c.affinityManager.InvalidCacheForMissingRegions(c.cluster, prev, next)
-
 	if target == nil {
 		affinityMergeCheckerNoTargetCounter.Inc()
 		return nil
@@ -316,7 +314,7 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 	}
 
 	// Check if adjacent region belongs to the same affinity group
-	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent)
+	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent, true /* skipSaveCache */)
 	if adjacentGroup == nil || adjacentGroup.ID != group.ID {
 		// Adjacent region is not in the same affinity group
 		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
