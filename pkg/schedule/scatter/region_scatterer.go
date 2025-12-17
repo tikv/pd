@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ var (
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("success", "scatter-operator-running")
 	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("skip", "operator-existed")
 )
 
@@ -60,6 +62,7 @@ const (
 	maxSleepDuration     = time.Minute
 	initialSleepDuration = 100 * time.Millisecond
 	maxRetryLimit        = 30
+	scatterOperatorDes   = "scatter-region"
 )
 
 type selectedStores struct {
@@ -274,9 +277,17 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 	}
 
 	if op := r.opController.GetOperator(region.GetID()); op != nil {
-		scatterOperatorExistedCounter.Inc()
-		log.Info("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
-		return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
+		val, ok := op.AdditionalInfos["group"]
+		// If the existing operator is created by the same group scatterer, just skip creating a new one.
+		if strings.Contains(op.Desc(), scatterOperatorDes) && ok && val == group {
+			scatterOperatorRunningCounter.Inc()
+			log.Info("scatter operator is running, just think it success", zap.Uint64("region-id", region.GetID()))
+			return nil, nil
+		} else {
+			scatterOperatorExistedCounter.Inc()
+			log.Info("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
+			return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
+		}
 	}
 
 	if region.GetLeader() == nil {
@@ -316,9 +327,9 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		}
 	}
 
-	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))                  // StoreID -> Peer
-	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // selected StoreID set
-	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))                    // StoreID allowed to become Leader
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers())) // StoreID -> Peer
+	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))  // selected StoreID set
+	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))   // StoreID allowed to become Leader
 	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
 		filterLen := len(context.filterFuncs) + 2
 		filters := make([]filter.Filter, filterLen)
@@ -384,7 +395,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		return nil, nil
 	}
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
+	op, err := operator.CreateScatterRegionOperator(scatterOperatorDes, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		for _, peer := range region.GetPeers() {
