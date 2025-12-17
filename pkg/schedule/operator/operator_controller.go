@@ -303,13 +303,13 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 		op := ops[i]
 		desc := op.Desc()
 		isMerge := false
-		if op.Kind()&OpMerge != 0 {
+		if op.HasRelatedMergeRegion() {
 			if i+1 >= len(ops) {
 				// should not be here forever
 				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
 				return added
 			}
-			if ops[i+1].Kind()&OpMerge == 0 {
+			if !ops[i+1].HasRelatedMergeRegion() {
 				log.Error("merge operator should be paired", zap.String("desc",
 					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
 				return added
@@ -498,7 +498,7 @@ func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, Canc
 	// But to be cautions, it only takes effect on merge-region currently.
 	// If the version of epoch is changed, the region has been splitted or merged, and the key range has been changed.
 	// The changing for conf_version of epoch doesn't modify the region key range, skip it.
-	if (op.Kind()&OpMerge != 0) && region.GetRegionEpoch().GetVersion() > op.RegionEpoch().GetVersion() {
+	if op.HasRelatedMergeRegion() && region.GetRegionEpoch().GetVersion() > op.RegionEpoch().GetVersion() {
 		operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 		return nil, EpochNotMatch
 	}
@@ -640,7 +640,7 @@ func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
-		if op.Kind()&OpMerge != 0 {
+		if op.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(op)
 		}
 		removed = append(removed, op)
@@ -674,7 +674,7 @@ func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
-		if op.Kind()&OpMerge != 0 {
+		if op.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(op)
 		}
 		return true

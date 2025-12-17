@@ -71,7 +71,7 @@ func (b *randBuckets) PutOperator(op *Operator) {
 func (b *randBuckets) PutMergeOperators(ops []*Operator) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(ops) != 2 && (ops[0].Kind()&OpMerge == 0 || ops[1].Kind()&OpMerge == 0) {
+	if len(ops) != 2 || (!ops[0].HasRelatedMergeRegion() || !ops[1].HasRelatedMergeRegion()) {
 		return
 	}
 	priority := ops[0].GetPriorityLevel()
@@ -112,8 +112,8 @@ func (b *randBuckets) GetOperator() []*Operator {
 		if r >= sum && r < sum+proportion {
 			var res []*Operator
 			res = append(res, bucket.ops[0])
-			// Merge operation has two operators, and thus it should be handled specifically.
-			if bucket.ops[0].Kind()&OpMerge != 0 {
+			// Merge operation (OpMerge and OpAffinity) has two operators, and thus it should be handled specifically.
+			if bucket.ops[0].HasRelatedMergeRegion() {
 				res = append(res, bucket.ops[1])
 				bucket.ops = bucket.ops[2:]
 			} else {

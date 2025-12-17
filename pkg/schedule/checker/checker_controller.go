@@ -276,7 +276,7 @@ func (c *Controller) checkPriorityRegions() {
 		}
 		ops := c.CheckRegion(region)
 		// it should skip if region needs to merge
-		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+		if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
 			continue
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
