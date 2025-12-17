@@ -78,6 +78,49 @@ func deleteAffinityGroupForTest(manager *affinity.Manager, groupID string, force
 	return manager.DeleteAffinityGroups([]string{groupID}, force)
 }
 
+func TestAffinityCheckerInvalidCache(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := newAffinityTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+	tc.AddRegionStore(4, 10)
+
+	affinityManager := tc.GetAffinityManager()
+	checker := NewAffinityChecker(tc, opt)
+
+	// Create affinity group
+	err := createAffinityGroupForTest(affinityManager, &affinity.Group{ID: "test_group"}, []byte(""), []byte(""))
+	re.NoError(err)
+
+	tc.AddLeaderRegion(100, 1, 2, 3)
+	tc.AddLeaderRegion(101, 4, 2, 3)
+	region1 := tc.GetRegion(100)
+	region2 := tc.GetRegion(101)
+	regionMerge := region1.Clone(core.WithEndKey(region2.GetEndKey()), core.WithIncVersion(), core.WithIncConfVer())
+
+	// Check Region 1 first
+	checker.Check(region1)
+	group := affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(group)
+	re.Equal(2, group.RegionCount)
+	re.Equal(1, group.AffinityRegionCount)
+
+	// Merge Region 1 and 2 before Region 2 is checked
+	tc.PutRegion(regionMerge)
+
+	// In this case, checking Region 2 will not increase the counter.
+	checker.Check(region2)
+	group = affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(group)
+	re.Equal(1, group.RegionCount)
+	re.Equal(1, group.AffinityRegionCount)
+}
+
 func TestAffinityCheckerTransferLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
