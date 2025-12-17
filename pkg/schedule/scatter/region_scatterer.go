@@ -281,11 +281,11 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		// If the existing operator is created by the same group scatterer, just skip creating a new one.
 		if strings.Contains(op.Desc(), scatterOperatorDes) && ok && val == group {
 			scatterOperatorRunningCounter.Inc()
-			log.Info("scatter operator is running, just think it success", zap.Uint64("region-id", region.GetID()))
+			log.Debug("scatter operator is running, just think it success", zap.Uint64("region-id", region.GetID()))
 			return nil, nil
 		} else {
 			scatterOperatorExistedCounter.Inc()
-			log.Info("scatter operator exist, but it does not met requirement",
+			log.Debug("scatter operator exist, but it does not met requirement",
 				zap.Uint64("region-id", region.GetID()),
 				zap.Bool("additional-info-exist", ok),
 				zap.String("additional-info-group", val),
