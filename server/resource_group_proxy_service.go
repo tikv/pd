@@ -63,12 +63,12 @@ func (s *resourceGroupProxyServer) ListResourceGroups(ctx context.Context, req *
 	if err != nil {
 		return nil, err
 	}
-	if resp, err := client.ListResourceGroups(ctx, req); err != nil {
+	resp, err := client.ListResourceGroups(ctx, req)
+	if err != nil {
 		s.closeClient(ctx)
 		return nil, err
-	} else {
-		return resp, nil
 	}
+	return resp, nil
 }
 
 // GetResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -77,12 +77,12 @@ func (s *resourceGroupProxyServer) GetResourceGroup(ctx context.Context, req *re
 	if err != nil {
 		return nil, err
 	}
-	if resp, err := client.GetResourceGroup(ctx, req); err != nil {
+	resp, err := client.GetResourceGroup(ctx, req)
+	if err != nil {
 		s.closeClient(ctx)
 		return nil, err
-	} else {
-		return resp, nil
 	}
+	return resp, nil
 }
 
 // AddResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -91,12 +91,12 @@ func (s *resourceGroupProxyServer) AddResourceGroup(ctx context.Context, req *re
 	if err != nil {
 		return nil, err
 	}
-	if resp, err := client.AddResourceGroup(ctx, req); err != nil {
+	resp, err := client.AddResourceGroup(ctx, req)
+	if err != nil {
 		s.closeClient(ctx)
 		return nil, err
-	} else {
-		return resp, nil
 	}
+	return resp, nil
 }
 
 // ModifyResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -105,12 +105,12 @@ func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	if resp, err := client.ModifyResourceGroup(ctx, req); err != nil {
+	resp, err := client.ModifyResourceGroup(ctx, req)
+	if err != nil {
 		s.closeClient(ctx)
 		return nil, err
-	} else {
-		return resp, nil
 	}
+	return resp, nil
 }
 
 // DeleteResourceGroup implements the resource_manager.ResourceManagerServer interface.
@@ -119,12 +119,12 @@ func (s *resourceGroupProxyServer) DeleteResourceGroup(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	if resp, err := client.DeleteResourceGroup(ctx, req); err != nil {
+	resp, err := client.DeleteResourceGroup(ctx, req)
+	if err != nil {
 		s.closeClient(ctx)
 		return nil, err
-	} else {
-		return resp, nil
 	}
+	return resp, nil
 }
 
 // AcquireTokenBuckets implements the resource_manager.ResourceManagerServer interface.
