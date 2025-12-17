@@ -378,11 +378,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		re.Equal(uint64(0), group.LeaderStoreID)
 
 		// Add a store to the cluster.
-		err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
 			Header: testutil.NewRequestHeader(leader.GetClusterID()),
 			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
-		}, &pdpb.StoreHeartbeatResponse{})
-		re.NoError(err)
+		})
 
 		// Fake a healthy region that matches store 1.
 		region := core.NewRegionInfo(
@@ -536,11 +535,10 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Make sure the default store is healthy so UpdateAffinityGroupPeers reaches the
 		// "group not found" branch instead of failing on store availability.
-		err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
 			Header: testutil.NewRequestHeader(leader.GetClusterID()),
 			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
-		}, &pdpb.StoreHeartbeatResponse{})
-		re.NoError(err)
+		})
 
 		// Update peers for non-existent group.
 		updateReq := handlers.UpdateAffinityGroupPeersRequest{
