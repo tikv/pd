@@ -285,7 +285,12 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 			return nil, nil
 		} else {
 			scatterOperatorExistedCounter.Inc()
-			log.Info("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
+			log.Info("scatter operator exist, but it does not met requirement",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Bool("additional-info-exist", ok),
+				zap.String("additional-info-group", val),
+				zap.String("operator-des", op.Desc()),
+			)
 			return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
 		}
 	}
