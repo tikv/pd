@@ -654,6 +654,8 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	re.NotNil(ops)
 	re.Len(ops, 2) // Merge operation creates 2 operators
 	re.Contains(ops[0].Desc(), "merge")
+	re.Zero(ops[0].Kind() & operator.OpMerge) // Not merge operator
+	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
 }
 
 // TestAffinityCheckerMergePath ensures affinity merge path is triggered from Check when region is already in affinity.

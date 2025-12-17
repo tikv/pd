@@ -70,7 +70,7 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 	for j := range 100 {
 		// adds operators
 		desc := descs[j%3]
-		op := NewTestOperator(uint64(1), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OpStep{
+		op1 := NewTestOperator(uint64(1), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OpStep{
 			MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,
@@ -84,9 +84,8 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 				IsPassive: false,
 			},
 		}...)
-		op.SetDesc(desc)
-		rb.PutOperator(op)
-		op = NewTestOperator(uint64(2), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OpStep{
+		op1.SetDesc(desc)
+		op2 := NewTestOperator(uint64(2), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OpStep{
 			MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,
@@ -100,14 +99,17 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 				IsPassive: true,
 			},
 		}...)
-		op.SetDesc(desc)
-		rb.PutOperator(op)
-		op = NewTestOperator(uint64(3), &metapb.RegionEpoch{}, OpRegion, []OpStep{
+		op2.SetDesc(desc)
+		// Set RelatedMergeRegion to make them a pair
+		op1.Sync(op2)
+		rb.PutMergeOperators([]*Operator{op1, op2})
+
+		op3 := NewTestOperator(uint64(3), &metapb.RegionEpoch{}, OpRegion, []OpStep{
 			RemovePeer{FromStore: uint64(3)},
 		}...)
-		op.SetDesc("testOperatorHigh")
-		op.SetPriorityLevel(constant.High)
-		rb.PutOperator(op)
+		op3.SetDesc("testOperatorHigh")
+		op3.SetPriorityLevel(constant.High)
+		rb.PutOperator(op3)
 
 		for range 2 {
 			op := rb.GetOperator()
@@ -115,4 +117,117 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 		}
 		re.Nil(rb.GetOperator())
 	}
+}
+
+func TestPutMergeOperators(t *testing.T) {
+	re := require.New(t)
+	rb := newRandBuckets()
+
+	// Helper function to create merge operators
+	createMergeOps := func(sourceID, targetID uint64, kind OpKind) []*Operator {
+		op1 := NewTestOperator(sourceID, &metapb.RegionEpoch{}, kind, []OpStep{
+			MergeRegion{
+				FromRegion: &metapb.Region{
+					Id:          sourceID,
+					StartKey:    []byte{},
+					EndKey:      []byte{},
+					RegionEpoch: &metapb.RegionEpoch{},
+				},
+				ToRegion: &metapb.Region{
+					Id:          targetID,
+					StartKey:    []byte{},
+					EndKey:      []byte{},
+					RegionEpoch: &metapb.RegionEpoch{},
+				},
+				IsPassive: false,
+			},
+		}...)
+		op2 := NewTestOperator(targetID, &metapb.RegionEpoch{}, kind, []OpStep{
+			MergeRegion{
+				FromRegion: &metapb.Region{
+					Id:          sourceID,
+					StartKey:    []byte{},
+					EndKey:      []byte{},
+					RegionEpoch: &metapb.RegionEpoch{},
+				},
+				ToRegion: &metapb.Region{
+					Id:          targetID,
+					StartKey:    []byte{},
+					EndKey:      []byte{},
+					RegionEpoch: &metapb.RegionEpoch{},
+				},
+				IsPassive: true,
+			},
+		}...)
+		// Set RelatedMergeRegion to make them a pair
+		op1.Sync(op2)
+		return []*Operator{op1, op2}
+	}
+
+	// Test 1: PutMergeOperators with OpMerge
+	opMergeOps := createMergeOps(1, 2, OpMerge)
+	rb.PutMergeOperators(opMergeOps)
+
+	// Test 2: PutMergeOperators with OpAffinity
+	opAffinityOps := createMergeOps(3, 4, OpAffinity)
+	rb.PutMergeOperators(opAffinityOps)
+
+	// Verify both have RelatedMergeRegion set
+	re.True(opMergeOps[0].HasRelatedMergeRegion())
+	re.True(opMergeOps[1].HasRelatedMergeRegion())
+	re.True(opAffinityOps[0].HasRelatedMergeRegion())
+	re.True(opAffinityOps[1].HasRelatedMergeRegion())
+
+	// Test 3: GetOperator should return both operators for OpMerge
+	ops := rb.GetOperator()
+	re.NotNil(ops)
+	re.Len(ops, 2, "OpMerge should return 2 operators")
+	re.True(ops[0].HasRelatedMergeRegion())
+	re.True(ops[1].HasRelatedMergeRegion())
+
+	// Test 4: GetOperator should return both operators for OpAffinity
+	ops = rb.GetOperator()
+	re.NotNil(ops)
+	re.Len(ops, 2, "OpAffinity merge should return 2 operators")
+	re.True(ops[0].HasRelatedMergeRegion())
+	re.True(ops[1].HasRelatedMergeRegion())
+
+	// Test 5: Queue should be empty now
+	ops = rb.GetOperator()
+	re.Nil(ops)
+
+	// Test 6: PutMergeOperators should reject operators without RelatedMergeRegion
+	invalidOps := []*Operator{
+		NewTestOperator(5, &metapb.RegionEpoch{}, OpRegion, []OpStep{RemovePeer{FromStore: 1}}...),
+		NewTestOperator(6, &metapb.RegionEpoch{}, OpRegion, []OpStep{RemovePeer{FromStore: 2}}...),
+	}
+	rb.PutMergeOperators(invalidOps)
+	ops = rb.GetOperator()
+	re.Nil(ops, "Invalid operators should not be added")
+
+	// Test 7: Mixed scenario - add regular operator and merge operators
+	regularOp := NewTestOperator(7, &metapb.RegionEpoch{}, OpRegion, []OpStep{RemovePeer{FromStore: 3}}...)
+	rb.PutOperator(regularOp)
+
+	mixedMergeOps := createMergeOps(8, 9, OpAffinity)
+	rb.PutMergeOperators(mixedMergeOps)
+
+	// Should be able to get both types
+	for range 2 {
+		ops = rb.GetOperator()
+		re.NotNil(ops)
+		if len(ops) == 1 {
+			// Regular operator
+			re.False(ops[0].HasRelatedMergeRegion())
+		} else {
+			// Merge operators
+			re.Len(ops, 2)
+			re.True(ops[0].HasRelatedMergeRegion())
+			re.True(ops[1].HasRelatedMergeRegion())
+		}
+	}
+
+	// Queue should be empty
+	ops = rb.GetOperator()
+	re.Nil(ops)
 }

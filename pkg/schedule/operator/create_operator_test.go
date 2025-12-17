@@ -293,7 +293,7 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 	for _, testCase := range testCases {
 		source := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.sourcePeers}, testCase.sourcePeers[0])
 		target := core.NewRegionInfo(&metapb.Region{Id: 86, Peers: testCase.targetPeers}, testCase.targetPeers[0])
-		ops, err := CreateMergeRegionOperator("test", suite.cluster, source, target, 0)
+		ops, err := CreateMergeRegionOperator("test", suite.cluster, source, target, OpMerge)
 		if testCase.expectedError {
 			re.Error(err)
 			continue
