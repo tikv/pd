@@ -34,6 +34,7 @@ func NewMicroServicesCommand() *cobra.Command {
 	}
 	m.AddCommand(newMSTsoCommand())
 	m.AddCommand(newMSSchedulerCommand())
+	m.AddCommand(newMSRouterCommand())
 	return m
 }
 
@@ -65,6 +66,19 @@ func newMSSchedulerCommand() *cobra.Command {
 		Short: "show the scheduling primary member status",
 		Run:   getPrimaryCommandFunc,
 	})
+	c.AddCommand(&cobra.Command{
+		Use:   "members",
+		Short: "show the scheduling members status",
+		Run:   getMembersCommandFunc,
+	})
+	return c
+}
+
+func newMSRouterCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "scheduling <members>",
+		Short: "scheduling microservice commands",
+	}
 	c.AddCommand(&cobra.Command{
 		Use:   "members",
 		Short: "show the scheduling members status",

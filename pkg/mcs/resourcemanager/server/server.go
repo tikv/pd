@@ -26,7 +26,6 @@ import (
 	"syscall"
 	"time"
 
-	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -423,7 +422,6 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	versioninfo.Log(serviceName)
 	log.Info("resource manager config", zap.Reflect("config", cfg))
 
-	grpcprometheus.EnableHandlingTimeHistogram()
 	ctx, cancel := context.WithCancel(context.Background())
 	metricutil.Push(ctx, &cfg.Metric)
 
