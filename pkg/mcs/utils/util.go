@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -172,11 +172,11 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime: 5 * time.Second,
 		}),
-		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor),
-		grpc.StreamInterceptor(grpc_prometheus.StreamServerInterceptor),
+		grpc.UnaryInterceptor(grpcprometheus.UnaryServerInterceptor),
+		grpc.StreamInterceptor(grpcprometheus.StreamServerInterceptor),
 	)
-	grpc_prometheus.Register(grpcServer)
-	grpc_prometheus.EnableHandlingTimeHistogram()
+	grpcprometheus.Register(grpcServer)
+	grpcprometheus.EnableHandlingTimeHistogram()
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
