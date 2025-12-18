@@ -443,7 +443,7 @@ func TestAffinityAvailabilityCheckWithUnhealthyStores(t *testing.T) {
 		region := tc.GetRegion(1)
 		groupInfo = affinityManager.GetAffinityGroupState("test_group")
 		affinityManager.ObserveAvailableRegion(region, groupInfo)
-		_, isAffinity := affinityManager.GetRegionAffinityGroupState(region)
+		_, isAffinity := affinityManager.GetAndCacheRegionAffinityGroupState(region)
 		return isAffinity
 	})
 

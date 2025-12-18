@@ -45,7 +45,7 @@ const (
 	storeAvailable storeCondition = iota
 
 	// All values greater than storeAvailable and less than degradedBoundary will trigger groupDegraded.
-	storeEvicted
+	storeLeaderEvicted
 	storeBusy
 	storeDisconnected
 	storePreparing
@@ -62,7 +62,7 @@ func (c storeCondition) String() string {
 	switch c {
 	case storeAvailable:
 		return "available"
-	case storeEvicted:
+	case storeLeaderEvicted:
 		return "evicted"
 	case storeBusy:
 		return "busy"
@@ -96,7 +96,7 @@ func (c storeCondition) groupAvailability() groupAvailability {
 
 func (c storeCondition) affectsLeaderOnly() bool {
 	switch c {
-	case storeEvicted, storeBusy:
+	case storeLeaderEvicted, storeBusy:
 		return true
 	default:
 		return false
@@ -199,7 +199,7 @@ func (m *Manager) collectUnavailableStores() map[uint64]storeCondition {
 		// Then the conditions that will mark the group as degraded
 		case !store.AllowLeaderTransferIn() || m.conf.CheckLabelProperty(config.RejectLeader, store.GetLabels()) ||
 			store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend():
-			unavailableStores[store.GetID()] = storeEvicted
+			unavailableStores[store.GetID()] = storeLeaderEvicted
 		case store.IsBusy():
 			unavailableStores[store.GetID()] = storeBusy
 		case store.IsDisconnected():

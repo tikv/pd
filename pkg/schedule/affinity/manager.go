@@ -362,8 +362,19 @@ func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) 
 }
 
 // GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
-// If skipSaveCache is not set to true, InvalidCache must be called at the appropriate time to prevent stale cache entries.
-func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo, skipSaveCache ...bool) (group *GroupState, isAffinity bool) {
+// This is a read-only operation that does not modify cache and we use this for temporary check
+func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo) (group *GroupState, isAffinity bool) {
+	return m.getRegionAffinityGroupState(region, false)
+}
+
+// GetAndCacheRegionAffinityGroupState returns the affinity group state and saves it to cache.
+// The caller must call InvalidCache() when the region is deleted or merged.
+// Currently only used by AffinityChecker.Check.
+func (m *Manager) GetAndCacheRegionAffinityGroupState(region *core.RegionInfo) (group *GroupState, isAffinity bool) {
+	return m.getRegionAffinityGroupState(region, true)
+}
+
+func (m *Manager) getRegionAffinityGroupState(region *core.RegionInfo, saveCache bool) (group *GroupState, isAffinity bool) {
 	if region == nil || !m.IsAvailable() {
 		return nil, false
 	}
@@ -381,7 +392,7 @@ func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo, skipSaveC
 			affinityVer: group.affinityVer,
 			isAffinity:  group.isRegionAffinity(region),
 		}
-		if len(skipSaveCache) == 0 || !skipSaveCache[0] {
+		if saveCache {
 			m.saveCache(cache)
 		}
 	}

@@ -50,7 +50,7 @@ func (m *Manager) AllowSplit(region *core.RegionInfo, reason pdpb.SplitReason) b
 		return true
 	}
 
-	group, _ := m.GetRegionAffinityGroupState(region, true /* skipSaveCache */)
+	group, _ := m.GetRegionAffinityGroupState(region)
 	if group != nil && !group.RegularSchedulingAllowed {
 		maxSize := (configSize + affinityRegionSizeBufferMB) * affinityRegionSizeMultiplier
 		maxKeys := maxSize * config.RegionSizeToKeysRatio

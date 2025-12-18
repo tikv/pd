@@ -86,7 +86,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// Get the affinity group for this region
-	group, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
+	group, isAffinity := c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	if group == nil {
 		// Region doesn't belong to any affinity group
 		return nil
@@ -115,7 +115,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// Recheck after refetching.
 	if needRefetch {
 		c.affinityManager.ObserveAvailableRegion(region, group)
-		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
+		group, isAffinity = c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	}
 
 	// A Region may no longer exist in the RegionTree due to a merge.
@@ -320,7 +320,7 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 	}
 
 	// Check if adjacent region belongs to the same affinity group
-	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent, true /* skipSaveCache */)
+	adjacentGroup, isAffinity := c.affinityManager.GetRegionAffinityGroupState(adjacent)
 	if adjacentGroup == nil || adjacentGroup.ID != group.ID {
 		// Adjacent region is not in the same affinity group
 		affinityMergeCheckerAdjDifferentGroupCounter.Inc()
