@@ -51,6 +51,10 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
+var (
+	histogramOnce sync.Once
+)
+
 // PromHandler is a handler to get prometheus metrics.
 func PromHandler() gin.HandlerFunc {
 	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
@@ -175,8 +179,11 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 		grpc.UnaryInterceptor(grpcprometheus.UnaryServerInterceptor),
 		grpc.StreamInterceptor(grpcprometheus.StreamServerInterceptor),
 	)
-	grpcprometheus.Register(grpcServer)
-	grpcprometheus.EnableHandlingTimeHistogram()
+	histogramOnce.Do(func() {
+		grpcprometheus.Register(grpcServer)
+		grpcprometheus.EnableHandlingTimeHistogram()
+	})
+
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
