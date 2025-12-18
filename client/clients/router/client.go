@@ -180,9 +180,10 @@ type Cli struct {
 	// updateConnectionCh is used to trigger the connection update actively.
 	updateConnectionCh chan struct{}
 
-	routerSvcDiscovery sd.ServiceDiscovery
-	// routerConCtxMgr is used to store the context of the router service stream connection.
-	routerConCtxMgr *cctx.Manager[routerpb.Router_QueryRegionClient]
+	// mcsDiscovery is the service discovery for the router mcs service.
+	mcsDiscovery sd.ServiceDiscovery
+	// mcsConCtxMgr is used to store the context of the router service stream connection.
+	mcsConCtxMgr *cctx.Manager[routerpb.Router_QueryRegionClient]
 	// bo is the backoffer for the router client.
 	bo *retry.Backoffer
 
@@ -206,8 +207,8 @@ func NewClient(
 		option:             option,
 		conCtxMgr:          cctx.NewManager[pdpb.PD_QueryRegionClient](),
 		updateConnectionCh: make(chan struct{}, 1),
-		routerConCtxMgr:    cctx.NewManager[routerpb.Router_QueryRegionClient](),
-		routerSvcDiscovery: routerSvcDiscovery,
+		mcsConCtxMgr:       cctx.NewManager[routerpb.Router_QueryRegionClient](),
+		mcsDiscovery:       routerSvcDiscovery,
 		bo: retry.InitialBackoffer(
 			sd.UpdateMemberBackOffBaseTime,
 			sd.UpdateMemberMaxBackoffTime,
@@ -230,9 +231,7 @@ func NewClient(
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
 	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
-	if c.routerSvcDiscovery != nil {
-		c.routerSvcDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
-	}
+	c.mcsDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
 
 	c.wg.Add(2)
 	go c.connectionDaemon()
@@ -369,7 +368,7 @@ func (c *Cli) getAllClientConns() map[string]*grpc.ClientConn {
 
 func (c *Cli) getAllRouterClientConns() map[string]*grpc.ClientConn {
 	conns := make(map[string]*grpc.ClientConn)
-	c.routerSvcDiscovery.GetClientConns().Range(func(key, value any) bool {
+	c.mcsDiscovery.GetClientConns().Range(func(key, value any) bool {
 		url, ok := key.(string)
 		if !ok || len(url) == 0 {
 			return true
@@ -431,7 +430,7 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 		}
 		// Add the missing router service stream connections.
 		for url, conn := range conns {
-			if c.routerConCtxMgr.Exist(url) {
+			if c.mcsConCtxMgr.Exist(url) {
 				log.Debug("[router] the router service remains unchanged", zap.String("url", url))
 				continue
 			}
@@ -442,7 +441,7 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 			}
 			// Store the stream connection context if it is successfully created.
 			if stream != nil {
-				c.routerConCtxMgr.Store(cctx, cancel, url, stream)
+				c.mcsConCtxMgr.Store(cctx, cancel, url, stream)
 				log.Info("[router] successfully established the router service stream connection", zap.String("url", url))
 			} else {
 				log.Warn("[router] failed to create the router service stream connection")
@@ -450,17 +449,17 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 			}
 		}
 		// Remove the stale follower router stream connections.
-		c.routerConCtxMgr.GC(func(url string) bool {
+		c.mcsConCtxMgr.GC(func(url string) bool {
 			if _, ok := conns[url]; !ok {
 				log.Info("[router] release the stale router service stream connection", zap.String("url", url))
 				return true
 			}
 			return false
 		})
-	} else if c.routerConCtxMgr.Size() > 0 {
+	} else if c.mcsConCtxMgr.Size() > 0 {
 		// GC all the router service stream connections.
 		log.Info("[router] release all router service stream connection")
-		c.routerConCtxMgr.ReleaseAll()
+		c.mcsConCtxMgr.ReleaseAll()
 	}
 }
 
@@ -646,7 +645,7 @@ func (c *Cli) dispatcherToPD(ctx context.Context) (processFn, string, bool) {
 	select {
 	case <-connectionCtx.Ctx.Done():
 		log.Info("[router] router stream connection is canceled", zap.String("stream-url", connectionCtx.StreamURL))
-		c.routerConCtxMgr.Release(connectionCtx.StreamURL)
+		c.mcsConCtxMgr.Release(connectionCtx.StreamURL)
 		return nil, "", true
 	default:
 	}
@@ -659,7 +658,7 @@ type processFn func() error
 
 // dispatcherToRouterService returns the stream function, stream url and need retry again
 func (c *Cli) dispatcherToRouterService(ctx context.Context) (processFn, string) {
-	allowRouterServiceHandle := c.option.GetEnableRouterServiceHandler() && c.routerConCtxMgr.Size() > 0
+	allowRouterServiceHandle := c.option.GetEnableRouterServiceHandler() && c.mcsConCtxMgr.Size() > 0
 	if allowRouterServiceHandle {
 		// We need to ensure all requests in a same batch allow to be handled by the router service.
 		c.batchController.IterCollectedRequests(func(req *Request) bool {
@@ -670,11 +669,11 @@ func (c *Cli) dispatcherToRouterService(ctx context.Context) (processFn, string)
 			return true
 		})
 	}
-	allowRouterServiceHandle = allowRouterServiceHandle && c.option.GetEnableRouterServiceHandler() && c.routerConCtxMgr.Size() > 0
+	allowRouterServiceHandle = allowRouterServiceHandle && c.option.GetEnableRouterServiceHandler() && c.mcsConCtxMgr.Size() > 0
 	if !allowRouterServiceHandle {
 		return nil, ""
 	}
-	connectionCtx := c.routerConCtxMgr.RandomlyPick()
+	connectionCtx := c.mcsConCtxMgr.RandomlyPick()
 	if connectionCtx == nil {
 		log.Info("[router] router service stream connection is not ready")
 		c.updateRouterServiceConnection(ctx)
@@ -684,7 +683,7 @@ func (c *Cli) dispatcherToRouterService(ctx context.Context) (processFn, string)
 	select {
 	case <-streamCtx.Done():
 		log.Info("[router] router service stream connection is canceled", zap.String("stream-url", streamURL))
-		c.routerConCtxMgr.Release(streamURL)
+		c.mcsConCtxMgr.Release(streamURL)
 		return nil, ""
 	default:
 	}
@@ -879,7 +878,7 @@ func (c *Cli) handleProcessRequestError(
 	// Delete the stream connection context.
 	c.conCtxMgr.Release(streamURL)
 	if c.option.GetEnableRouterServiceHandler() {
-		c.routerConCtxMgr.Release(streamURL)
+		c.mcsConCtxMgr.Release(streamURL)
 	}
 
 	if errs.IsLeaderChange(err) {
@@ -896,7 +895,7 @@ func (c *Cli) handleProcessRequestError(
 		// For other errors, we can just schedule a member change check asynchronously.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		if c.option.GetEnableRouterServiceHandler() {
-			c.routerSvcDiscovery.ScheduleCheckMemberChanged()
+			c.mcsDiscovery.ScheduleCheckMemberChanged()
 		}
 	}
 

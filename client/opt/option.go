@@ -55,7 +55,7 @@ const (
 	// It is stored as bool.
 	EnableRouterClient
 
-	// EnableRouterServiceHandler is the router service handle region requestion option.
+	// EnableRouterServiceHandler is the router service handle region requestions option.
 	EnableRouterServiceHandler
 
 	dynamicOptionCount
