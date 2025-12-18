@@ -312,10 +312,11 @@ func TestLabelerRuleTTL(t *testing.T) {
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
 	// rule2 should be exist since `GetRegionLabels` won't clear it physically.
-	checkRuleInMemoryAndStoage(re, labeler, "rule2", true)
+	checkRuleInMemoryAndStorage(re, labeler, "rule2", true)
 	re.Nil(labeler.GetLabelRule("rule2"))
 	// rule2 should be physically clear.
-	checkRuleInMemoryAndStoage(re, labeler, "rule2", false)
+	labeler.checkAndClearExpiredLabels()
+	checkRuleInMemoryAndStorage(re, labeler, "rule2", false)
 
 	re.Equal("", labeler.GetRegionLabel(region, "k2"))
 
@@ -323,7 +324,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 	re.NotNil(labeler.GetLabelRule("rule1"))
 }
 
-func checkRuleInMemoryAndStoage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
+func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
 	re.Equal(exist, labeler.labelRules[ruleID] != nil)
 	existInStorage := false
 	labeler.storage.LoadRegionRules(func(k, v string) {
