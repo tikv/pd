@@ -211,21 +211,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 
-	// test InvalidCacheForMissingRegion
-	regionInfos := core.NewRegionsInfo()
-	regionInfos.PutRegion(region)
-	manager.InvalidCacheForMissingRegion(regionInfos, region)
-	groupInfo = getGroupForTest(re, manager, "g")
-	re.Equal(1, groupInfo.AffinityRegionCount)
-	re.Len(groupInfo.Regions, 1)
-	regionInfos.RemoveRegion(region)
-	manager.InvalidCacheForMissingRegion(regionInfos, region)
-	groupInfo = getGroupForTest(re, manager, "g")
-	re.Zero(groupInfo.AffinityRegionCount)
-	re.Empty(groupInfo.Regions)
-
 	// Change peers, which bumps AffinityVer and invalidates affinity for the cached region.
-	_, _ = manager.GetRegionAffinityGroupState(region)
 	_, err = manager.UpdateAffinityGroupPeers("g", 4, []uint64{4, 5, 6})
 	re.NoError(err)
 	group2 := manager.GetAffinityGroupState("g")

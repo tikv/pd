@@ -117,12 +117,18 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		c.affinityManager.ObserveAvailableRegion(region, group)
 		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
 	}
+
+	// A Region may no longer exist in the RegionTree due to a merge.
+	// In this case, clear the cache in affinity manager for that Region and skip processing it.
+	if c.cluster.GetRegion(region.GetID()) == nil {
+		c.affinityManager.InvalidCache(region.GetID())
+		return nil
+	}
+
 	if group == nil || !group.AffinitySchedulingAllowed {
 		affinityCheckerGroupSchedulingDisabledCounter.Inc()
 		return nil
 	}
-
-	c.affinityManager.InvalidCacheForMissingRegion(c.cluster, region)
 
 	// For a Region already in affinity, try to merge it with neighboring affinity Regions.
 	if isAffinity {

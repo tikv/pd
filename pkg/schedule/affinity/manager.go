@@ -351,16 +351,6 @@ func (m *Manager) InvalidCache(regionID uint64) {
 	m.deleteCacheLocked(regionID)
 }
 
-// InvalidCacheForMissingRegion invalidates the Region cache if regionSetInformer can no longer find the Region.
-// When calling InvalidCacheForMissingRegion, the Region is likely to hit the cache, so no extra existence check is needed.
-func (m *Manager) InvalidCacheForMissingRegion(regionSetInformer core.RegionSetInformer, region *core.RegionInfo) {
-	if regionSetInformer.GetRegion(region.GetID()) == nil {
-		m.Lock()
-		defer m.Unlock()
-		m.deleteCacheLocked(region.GetID())
-	}
-}
-
 func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) {
 	m.RLock()
 	defer m.RUnlock()
@@ -372,7 +362,7 @@ func (m *Manager) getCache(region *core.RegionInfo) (*regionCache, *GroupState) 
 }
 
 // GetRegionAffinityGroupState returns the affinity group state and isAffinity for a region.
-// If skipSaveCache is not set to true, InvalidCacheForMissingRegion must be called at the appropriate time to prevent stale cache entries.
+// If skipSaveCache is not set to true, InvalidCache must be called at the appropriate time to prevent stale cache entries.
 func (m *Manager) GetRegionAffinityGroupState(region *core.RegionInfo, skipSaveCache ...bool) (group *GroupState, isAffinity bool) {
 	if region == nil || !m.IsAvailable() {
 		return nil, false
