@@ -196,6 +196,7 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 	}()
 
 	go func() {
+		defer logutil.LogPanic()
 		wg.Wait()
 		reportErr(nil)
 	}()
