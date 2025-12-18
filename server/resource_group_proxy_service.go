@@ -150,7 +150,7 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 		})
 	}
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
 	// client -> server
 	go func() {
@@ -175,31 +175,24 @@ func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.R
 	}()
 
 	// server -> client
-	go func() {
-		defer logutil.LogPanic()
-		defer wg.Done()
-		for {
-			out, err := delegateStream.Recv()
-			if err != nil {
-				if err == io.EOF {
-					// The server has finished sending messages.
-					break
-				}
-				reportErr(err)
-				return
+	for {
+		out, err := delegateStream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				// The server has finished sending messages.
+				break
 			}
-			if err := stream.Send(out); err != nil {
-				reportErr(err)
-				return
-			}
+			reportErr(err)
+			break
 		}
-	}()
+		if err := stream.Send(out); err != nil {
+			reportErr(err)
+			break
+		}
+	}
 
-	go func() {
-		defer logutil.LogPanic()
-		wg.Wait()
-		reportErr(nil)
-	}()
+	wg.Wait()
+	reportErr(nil)
 
 	return <-errCh
 }
