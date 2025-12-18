@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/gctuner"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
@@ -65,6 +66,9 @@ type Watcher struct {
 	// schedulersController is used to trigger the scheduler's config reloading.
 	// Store as `*schedulers.Controller`.
 	schedulersController atomic.Value
+
+	// gcChecker is used to check and update the GCTuner configuration.
+	gcChecker *gctuner.GCTunerChecker
 }
 
 type persistedConfig struct {
@@ -72,6 +76,7 @@ type persistedConfig struct {
 	Schedule       sc.ScheduleConfig    `json:"schedule"`
 	Replication    sc.ReplicationConfig `json:"replication"`
 	Store          sc.StoreConfig       `json:"store"`
+	PDServerCfg    sc.PDServerCfg       `json:"pd-server"`
 }
 
 // NewWatcher creates a new watcher to watch the config meta change from PD.
@@ -90,6 +95,7 @@ func NewWatcher(
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
 		storage:                   storage,
+		gcChecker:                 gctuner.NewGCTunerChecker(),
 	}
 	err := cw.initializeConfigWatcher()
 	if err != nil {
@@ -136,6 +142,10 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
+		cw.SetPDServerCfg(&cfg.PDServerCfg)
+		serverCfg := cw.GetPDServerCfg()
+		cw.gcChecker.SetGCTunerCfg(gctuner.NewGCTunerCfg(serverCfg.EnableGOGCTuner, serverCfg.GCTunerThreshold,
+			serverCfg.ServerMemoryLimit, serverCfg.ServerMemoryLimitGCTrigger))
 		return nil
 	}
 	deleteFn := func(*mvccpb.KeyValue) error {
