@@ -86,7 +86,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// Get the affinity group for this region
-	group, isAffinity := c.affinityManager.GetRegionAffinityGroupState(region)
+	group, isAffinity := c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	if group == nil {
 		// Region doesn't belong to any affinity group
 		return nil
@@ -115,8 +115,16 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// Recheck after refetching.
 	if needRefetch {
 		c.affinityManager.ObserveAvailableRegion(region, group)
-		group, isAffinity = c.affinityManager.GetRegionAffinityGroupState(region)
+		group, isAffinity = c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	}
+
+	// A Region may no longer exist in the RegionTree due to a merge.
+	// In this case, clear the cache in affinity manager for that Region and skip processing it.
+	if c.cluster.GetRegion(region.GetID()) == nil {
+		c.affinityManager.InvalidCache(region.GetID())
+		return nil
+	}
+
 	if group == nil || !group.AffinitySchedulingAllowed {
 		affinityCheckerGroupSchedulingDisabledCounter.Inc()
 		return nil

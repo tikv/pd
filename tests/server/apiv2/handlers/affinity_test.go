@@ -403,9 +403,9 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 			if group == nil {
 				return false
 			}
-			// we need to call ObserveAvailableRegion and GetRegionAffinityGroupState to update the group
+			// we need to call ObserveAvailableRegion and GetAndCacheRegionAffinityGroupState to update the group
 			manager.ObserveAvailableRegion(region, group)
-			state, _ = manager.GetRegionAffinityGroupState(region)
+			state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
 			return state != nil && state.Phase == affinity.PhaseStable
 		})
 		re.Equal(region.GetLeader().GetStoreId(), state.LeaderStoreID)
