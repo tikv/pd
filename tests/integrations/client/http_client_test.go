@@ -1243,8 +1243,8 @@ func (suite *httpClientTestSuite) TestGetSiblingsRegions() {
 	re.NoError(err)
 	ops := oc.GetOperators()
 	re.Len(ops, 2)
-	re.NotZero(ops[0].Kind() & operator.OpMerge)
-	re.NotZero(ops[1].Kind() & operator.OpMerge)
+	re.NotZero(ops[0].Kind() & operator.OpAdmin)
+	re.NotZero(ops[1].Kind() & operator.OpAdmin)
 }
 
 func (suite *httpClientTestSuite) TestAffinityGroups() {
