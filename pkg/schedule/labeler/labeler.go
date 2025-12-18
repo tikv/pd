@@ -289,7 +289,7 @@ func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	l.Lock()
 	defer l.Unlock()
 	if _, ok := l.labelRules[id]; !ok {
-		return nil
+		return errs.ErrRegionRuleNotFound.FastGenByArgs(id)
 	}
 	delete(l.labelRules, id)
 	l.BuildRangeListLocked()
