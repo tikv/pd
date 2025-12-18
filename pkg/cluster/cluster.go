@@ -68,8 +68,16 @@ func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo)
 		if c.GetRegionStats() != nil {
 			c.GetRegionStats().ClearDefunctRegion(item.GetID())
 		}
+<<<<<<< HEAD
 		c.GetLabelStats().MarkDefunctRegion(item.GetID())
 		c.GetRuleManager().InvalidCache(item.GetID())
+=======
+		if affinityManager != nil {
+			affinityManager.InvalidCache(id)
+		}
+		labelStats.MarkDefunctRegion(id)
+		ruleManager.InvalidCache(id)
+>>>>>>> b53de7a81a (affinity: add scatter filter, add more evict check and avoid statistic miss (#10080))
 	}
 }
 

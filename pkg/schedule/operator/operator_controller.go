@@ -510,6 +510,7 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 
+<<<<<<< HEAD
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
 	if oldi, ok := oc.operators.Load(regionID); ok {
@@ -517,6 +518,39 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		_ = oc.removeOperatorInner(old)
 		_ = old.Replace()
 		oc.buryOperator(old)
+=======
+	old, loaded := oc.operators.LoadOrStore(regionID, op)
+	if loaded {
+		// If there is an old operator and it has lower priority, replace it
+		oldOp := old.(*Operator)
+		if !isHigherPriorityOperator(op, oldOp) {
+			log.Debug("operator already exists with higher or equal priority",
+				zap.Uint64("region-id", regionID),
+				zap.Reflect("old", oldOp),
+				zap.Reflect("new", op))
+			_ = op.Cancel(AlreadyExist)
+			oc.buryOperator(op)
+			operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
+			return false
+		}
+		// replace old operator
+		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
+			_ = op.Cancel()
+			oc.buryOperator(op)
+			log.Debug("operator changed during replace, skip this add",
+				zap.Uint64("region-id", regionID),
+				zap.Reflect("old", oldOp),
+				zap.Reflect("new", op))
+			return false
+		}
+		oc.counts.dec(oldOp.SchedulerKind())
+		oc.ack(oldOp)
+		if oldOp.HasRelatedMergeRegion() {
+			oc.removeRelatedMergeOperator(oldOp)
+		}
+		_ = oldOp.Replace()
+		oc.buryOperator(oldOp)
+>>>>>>> b53de7a81a (affinity: add scatter filter, add more evict check and avoid statistic miss (#10080))
 	}
 
 	if !op.Start() {
