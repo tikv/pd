@@ -33,9 +33,11 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -857,4 +859,55 @@ func TestRemoveStoreLimit(t *testing.T) {
 			re.True(oc.AddOperator(op))
 		}
 	}
+}
+
+func TestScatterWithAffinity(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	// Add stores 1~5.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+
+	// Add region 1 with leader on store 1
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+
+	// Create affinity manager and group
+	affinityManager := tc.GetAffinityManager()
+	re.NotNil(affinityManager)
+
+	// Create an affinity group for region 1
+	// When LeaderStoreID and VoterStoreIDs are set and the group is available (not expired),
+	// RegularSchedulingAllowed will be false
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+
+	keyRanges := []affinity.GroupKeyRanges{{
+		GroupID: group.ID,
+		KeyRanges: []keyutil.KeyRange{{
+			StartKey: []byte(""),
+			EndKey:   []byte(""),
+		}},
+	}}
+	err := affinityManager.CreateAffinityGroups(keyRanges)
+	re.NoError(err)
+	_, err = affinityManager.UpdateAffinityGroupPeers(group.ID, group.LeaderStoreID, group.VoterStoreIDs)
+	re.NoError(err)
+
+	// Test scatter with affinity (RegularSchedulingAllowed=false) - should fail
+	region := tc.GetRegion(1)
+	op, err := scatterer.Scatter(region, "", true)
+	re.Error(err)
+	re.Nil(op)
+	re.Contains(err.Error(), "affinity group")
 }

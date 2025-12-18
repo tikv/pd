@@ -196,9 +196,18 @@ func TestRegionCountStaleCache(t *testing.T) {
 	_, err = manager.UpdateAffinityGroupPeers("g", 1, []uint64{1, 2, 3})
 	re.NoError(err)
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
+
+	// test GetRegionAffinityGroupState (read-only, no cache)
 	_, isAffinity := manager.GetRegionAffinityGroupState(region)
 	re.True(isAffinity)
 	groupInfo := getGroupForTest(re, manager, "g")
+	re.Zero(groupInfo.AffinityRegionCount)
+	re.Empty(groupInfo.Regions)
+
+	// test GetAndCacheRegionAffinityGroupState (saves cache)
+	_, isAffinity = manager.GetAndCacheRegionAffinityGroupState(region)
+	re.True(isAffinity)
+	groupInfo = getGroupForTest(re, manager, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
 	re.Len(groupInfo.Regions, 1)
 
@@ -212,7 +221,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 
 	// Remove key ranges, which bumps AffinityVer and invalidates affinity for the cached region.
 	region = generateRegionForTest(200, []uint64{4, 5, 6}, ranges[0])
-	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	_, isAffinity = manager.GetAndCacheRegionAffinityGroupState(region)
 	re.True(isAffinity)
 	groupInfo = getGroupForTest(re, manager, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
@@ -223,7 +232,7 @@ func TestRegionCountStaleCache(t *testing.T) {
 	re.Empty(groupInfo.Regions)
 
 	// Add key ranges, which bumps AffinityVer and invalidates affinity for the cached region.
-	_, isAffinity = manager.GetRegionAffinityGroupState(region)
+	_, isAffinity = manager.GetAndCacheRegionAffinityGroupState(region)
 	re.True(isAffinity)
 	groupInfo = getGroupForTest(re, manager, "g")
 	re.Equal(1, groupInfo.AffinityRegionCount)
@@ -262,9 +271,9 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	region2 := generateRegionForTest(200, []uint64{1, 2, 3}, ranges[0])
 
 	// Trigger cache population
-	_, isAffinity1 := manager.GetRegionAffinityGroupState(region1)
+	_, isAffinity1 := manager.GetAndCacheRegionAffinityGroupState(region1)
 	re.True(isAffinity1)
-	_, isAffinity2 := manager.GetRegionAffinityGroupState(region2)
+	_, isAffinity2 := manager.GetAndCacheRegionAffinityGroupState(region2)
 	re.True(isAffinity2)
 
 	// Verify regions are in cache
@@ -324,7 +333,7 @@ func TestAvailabilityChangeRegionCount(t *testing.T) {
 
 	// Add regions to cache
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
-	_, isAffinity := manager.GetRegionAffinityGroupState(region)
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
 	re.True(isAffinity)
 
 	// Verify region is cached
@@ -384,7 +393,7 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 
 	// Add region
 	region := generateRegionForTest(100, []uint64{1, 2, 3}, ranges[0])
-	_, isAffinity := manager.GetRegionAffinityGroupState(region)
+	_, isAffinity := manager.GetAndCacheRegionAffinityGroupState(region)
 	re.True(isAffinity)
 
 	// Verify region is in cache

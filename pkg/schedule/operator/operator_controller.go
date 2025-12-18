@@ -538,7 +538,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		}
 		oc.counts.dec(oldOp.SchedulerKind())
 		oc.ack(oldOp)
-		if oldOp.Kind()&OpMerge != 0 {
+		if oldOp.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(oldOp)
 		}
 		_ = oldOp.Replace()
