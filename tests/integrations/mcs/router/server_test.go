@@ -100,12 +100,13 @@ func (suite *serverTestSuite) TestBasic() {
 	lines := strings.Split(string(body), "\n")
 	var grpcMetrics []string
 	for _, line := range lines {
-		if strings.Contains(line, "grpc_server_handling_seconds_count") {
+		if strings.Contains(line, "grpc_server_handled_total") {
 			grpcMetrics = append(grpcMetrics, line)
 		}
 	}
-	re.NotEmpty(grpcMetrics)
 	re.NoError(resp.Body.Close())
+	re.NotEmpty(grpcMetrics)
+
 	// stop router server and ensure it can not serve requests
 	tc.Close()
 	testutil.Eventually(re, func() bool {
