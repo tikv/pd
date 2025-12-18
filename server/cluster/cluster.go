@@ -568,17 +568,17 @@ func (c *RaftCluster) startGCTuner() {
 	tick := time.NewTicker(gcTunerCheckCfgInterval)
 	defer tick.Stop()
 	cfg := c.opt.GetPDServerConfig()
-	tunerCfg := gctuner.NewGCTunerCfg(cfg.EnableGOGCTuner, cfg.GCTunerThreshold, cfg.ServerMemoryLimit, cfg.ServerMemoryLimitGCTrigger)
-	gctunerChecker := gctuner.NewGCTunerChecker()
-	gctunerChecker.SetGCTunerCfg(tunerCfg)
+	tunerCfg := gctuner.NewCfg(cfg.EnableGOGCTuner, cfg.GCTunerThreshold, cfg.ServerMemoryLimit, cfg.ServerMemoryLimitGCTrigger)
+	gctunerChecker := gctuner.NewChecker()
+	gctunerChecker.SetCfg(tunerCfg)
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("gc tuner is stopped")
 			return
 		case <-tick.C:
-			tunerCfg := gctuner.NewGCTunerCfg(cfg.EnableGOGCTuner, cfg.GCTunerThreshold, cfg.ServerMemoryLimit, cfg.ServerMemoryLimitGCTrigger)
-			gctunerChecker.SetGCTunerCfg(tunerCfg)
+			tunerCfg := gctuner.NewCfg(cfg.EnableGOGCTuner, cfg.GCTunerThreshold, cfg.ServerMemoryLimit, cfg.ServerMemoryLimitGCTrigger)
+			gctunerChecker.SetCfg(tunerCfg)
 		}
 	}
 }

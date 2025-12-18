@@ -193,8 +193,8 @@ func calcGCPercent(inuse, threshold uint64) uint32 {
 	return gcPercent
 }
 
-// GCTunerCfg is the configuration for the GCTuner.
-type GCTunerCfg struct {
+// Cfg is the configuration for the GCTuner.
+type Cfg struct {
 	EnableGOGCTuner            bool
 	GCTunerThreshold           float64
 	ServerMemoryLimit          float64
@@ -205,9 +205,9 @@ type GCTunerCfg struct {
 	ThresholdBytes             uint64
 }
 
-// NewGCTunerCfg creates a new GCTunerCfg with default configuration.
-func NewGCTunerCfg(enableGOGCTuner bool, gcTunerThreshold float64, serverMemoryLimit float64, serverMemoryLimitGCTrigger float64) *GCTunerCfg {
-	return &GCTunerCfg{
+// NewCfg creates a new cfg with the given configuration.
+func NewCfg(enableGOGCTuner bool, gcTunerThreshold float64, serverMemoryLimit float64, serverMemoryLimitGCTrigger float64) *Cfg {
+	return &Cfg{
 		EnableGOGCTuner:            enableGOGCTuner,
 		GCTunerThreshold:           gcTunerThreshold,
 		ServerMemoryLimit:          serverMemoryLimit,
@@ -215,27 +215,28 @@ func NewGCTunerCfg(enableGOGCTuner bool, gcTunerThreshold float64, serverMemoryL
 	}
 }
 
-// GCTunerChecker is the checker for the GCTuner.
-type GCTunerChecker struct {
-	cfg *GCTunerCfg
+// Checker is the checker for the GCTuner.
+type Checker struct {
+	cfg *Cfg
 }
 
-// NewGCTunerChecker creates a new GCTunerChecker with default configuration.
-func NewGCTunerChecker() *GCTunerChecker {
-	cfg := NewGCTunerCfg(false, 0, 0, 0)
-	return &GCTunerChecker{cfg: cfg}
+// NewChecker creates a new GCTunerChecker with default configuration.
+func NewChecker() *Checker {
+	cfg := NewCfg(false, 0, 0, 0)
+	return &Checker{cfg: cfg}
 }
 
-func (g *GCTunerChecker) SetGCTunerCfg(cfg *GCTunerCfg) {
+// SetCfg sets the configuration for the GCTuner.
+func (g *Checker) SetCfg(cfg *Cfg) {
 	totalMem, err := memory.MemTotal()
 	if err != nil {
 		log.Warn("fail to get total memory", zap.Error(err))
 		return
 	}
 	log.Info("memory info", zap.Uint64("total-mem", totalMem))
-	if cfg.EnableGOGCTuner != g.cfg.EnableGOGCTuner || cfg.GCTunerThreshold != g.cfg.GCTunerThreshold {
-		cfg.EnableGOGCTuner = g.cfg.EnableGOGCTuner
-		cfg.GCTunerThreshold = g.cfg.GCTunerThreshold
+	if g.cfg.EnableGOGCTuner != cfg.EnableGOGCTuner || g.cfg.GCTunerThreshold != cfg.GCTunerThreshold {
+		g.cfg.EnableGOGCTuner = cfg.EnableGOGCTuner
+		g.cfg.GCTunerThreshold = cfg.GCTunerThreshold
 		g.updateGCTuner()
 	}
 
@@ -255,7 +256,7 @@ func (g *GCTunerChecker) SetGCTunerCfg(cfg *GCTunerCfg) {
 	}
 }
 
-func (g *GCTunerChecker) updateGCTuner() {
+func (g *Checker) updateGCTuner() {
 	Tuning(g.cfg.ThresholdBytes)
 	EnableGOGCTuner.Store(g.cfg.EnableGOGCTuner)
 	log.Info("update gc tuner",
@@ -263,7 +264,7 @@ func (g *GCTunerChecker) updateGCTuner() {
 		zap.Uint64("gc-threshold-bytes", g.cfg.ThresholdBytes))
 }
 
-func (g *GCTunerChecker) updateGCMemLimit() {
+func (g *Checker) updateGCMemLimit() {
 	memory.ServerMemoryLimit.Store(g.cfg.MemoryLimitBytes)
 	GlobalMemoryLimitTuner.SetPercentage(g.cfg.MemoryLimitGCTriggerRatio)
 	GlobalMemoryLimitTuner.UpdateMemoryLimit()

@@ -68,7 +68,7 @@ type Watcher struct {
 	schedulersController atomic.Value
 
 	// gcChecker is used to check and update the GCTuner configuration.
-	gcChecker *gctuner.GCTunerChecker
+	gcChecker *gctuner.Checker
 }
 
 type persistedConfig struct {
@@ -95,7 +95,7 @@ func NewWatcher(
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
 		storage:                   storage,
-		gcChecker:                 gctuner.NewGCTunerChecker(),
+		gcChecker:                 gctuner.NewChecker(),
 	}
 	err := cw.initializeConfigWatcher()
 	if err != nil {
@@ -144,7 +144,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetStoreConfig(&cfg.Store)
 		cw.SetPDServerCfg(&cfg.PDServerCfg)
 		serverCfg := cw.GetPDServerCfg()
-		cw.gcChecker.SetGCTunerCfg(gctuner.NewGCTunerCfg(serverCfg.EnableGOGCTuner, serverCfg.GCTunerThreshold,
+		cw.gcChecker.SetCfg(gctuner.NewCfg(serverCfg.EnableGOGCTuner, serverCfg.GCTunerThreshold,
 			serverCfg.ServerMemoryLimit, serverCfg.ServerMemoryLimitGCTrigger))
 		return nil
 	}
