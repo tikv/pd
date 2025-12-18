@@ -85,11 +85,14 @@ func (suite *serverTestSuite) TestBasic() {
 		return tc.IsReady()
 	})
 	url := tc.GetAdvertiseListenAddr() + "/status"
-	_, err = http.DefaultClient.Get(url)
+	resp, err := http.DefaultClient.Get(url)
+	defer re.NoError(resp.Body.Close())
+	re.Equal(http.StatusOK, resp.StatusCode)
 	re.NoError(err)
 
 	url = tc.GetAdvertiseListenAddr() + "/metrics"
-	resp, err := http.DefaultClient.Get(url)
+	resp, err = http.DefaultClient.Get(url)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	re.NoError(err)
 	re.NotNil(resp)
 	body, err := io.ReadAll(resp.Body)
@@ -101,8 +104,8 @@ func (suite *serverTestSuite) TestBasic() {
 			grpcMetrics = append(grpcMetrics, line)
 		}
 	}
-	re.True(len(grpcMetrics) > 0)
-
+	re.NotEmpty(grpcMetrics)
+	re.NoError(resp.Body.Close())
 	// stop router server and ensure it can not serve requests
 	tc.Close()
 	testutil.Eventually(re, func() bool {
