@@ -63,7 +63,7 @@ func (c storeCondition) String() string {
 	case storeAvailable:
 		return "available"
 	case storeLeaderEvicted:
-		return "evicted"
+		return "leader-evicted"
 	case storeBusy:
 		return "busy"
 	case storeDisconnected:

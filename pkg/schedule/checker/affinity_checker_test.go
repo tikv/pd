@@ -151,6 +151,7 @@ func TestAffinityCheckerTransferLeader(t *testing.T) {
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
+	re.Equal(operator.OpAffinity, ops[0].SchedulerKind()) // Not OpLeader
 }
 
 func TestAffinityCheckerMovePeer(t *testing.T) {
@@ -184,6 +185,7 @@ func TestAffinityCheckerMovePeer(t *testing.T) {
 	re.Len(ops, 1)
 	re.Equal("affinity-move-region", ops[0].Desc())
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
+	re.Equal(operator.OpAffinity, ops[0].SchedulerKind()) // Not OpRegion
 }
 
 func TestAffinityCheckerPaused(t *testing.T) {
@@ -699,6 +701,9 @@ func TestAffinityMergeCheckBasic(t *testing.T) {
 	re.Contains(ops[0].Desc(), "merge")
 	re.Zero(ops[0].Kind() & operator.OpMerge) // Not merge operator
 	re.Equal(operator.OpAffinity, ops[0].Kind()&operator.OpAffinity)
+	re.Equal(operator.OpAffinity, ops[0].SchedulerKind())
+	re.Equal(operator.OpAffinity, ops[1].Kind()&operator.OpAffinity)
+	re.Equal(operator.OpAffinity, ops[1].SchedulerKind())
 }
 
 // TestAffinityCheckerMergePath ensures affinity merge path is triggered from Check when region is already in affinity.
