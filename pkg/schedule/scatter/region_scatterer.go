@@ -45,8 +45,10 @@ import (
 const regionScatterName = "region-scatter"
 
 var (
-	gcInterval = time.Minute
-	gcTTL      = time.Minute * 3
+	gcInterval            = time.Minute
+	gcTTL                 = time.Minute * 3
+	operatorPriorityLevel = constant.High
+
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	scatterSkipEmptyRegionCounter   = scatterCounter.WithLabelValues("skip", "empty-region")
 	scatterSkipNoRegionCounter      = scatterCounter.WithLabelValues("skip", "no-region")
@@ -157,7 +159,7 @@ type engineContext struct {
 
 func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineContext {
 	filterFuncs = append(filterFuncs, func() filter.Filter {
-		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true, OperatorLevel: constant.High}
+		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true, OperatorLevel: operatorPriorityLevel}
 	})
 	return engineContext{
 		filterFuncs:    filterFuncs,
@@ -285,7 +287,10 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 
-	if op := r.opController.GetOperator(region.GetID()); op != nil {
+	// Check if there is any existing operator for the region.
+	// if the exist operator level is higher than scatter operator level, give up to create new scatter operator new.
+	// otherwise, create new scatter operator to replace the existing one.
+	if op := r.opController.GetOperator(region.GetID()); op != nil && op.GetPriorityLevel() >= operatorPriorityLevel {
 		val, exist := op.GetAdditionalInfoAndExist("group")
 		// If the existing operator is created by the same group scatterer, just skip creating a new one.
 		if strings.Contains(op.Desc(), scatterOperatorDesc) && exist && val == group {
@@ -340,9 +345,9 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		}
 	}
 
-	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))                  // StoreID -> Peer
-	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // selected StoreID set
-	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))                    // StoreID allowed to become Leader
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers())) // StoreID -> Peer
+	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))  // selected StoreID set
+	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))   // StoreID allowed to become Leader
 	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
 		filterLen := len(context.filterFuncs) + 2
 		filters := make([]filter.Filter, filterLen)
@@ -423,7 +428,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		op.SetAdditionalInfo("group", group)
 		op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
-		op.SetPriorityLevel(constant.High)
+		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
 }

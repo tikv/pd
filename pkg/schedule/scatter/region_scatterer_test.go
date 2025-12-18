@@ -17,6 +17,7 @@ package scatter
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/pkg/core/constant"
 	"math"
 	"strconv"
 	"sync"
@@ -850,7 +851,7 @@ func TestRemoveStoreLimit(t *testing.T) {
 
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 
-	for i := uint64(1); i <= 5; i++ {
+	for i := uint64(1); i <= 4; i++ {
 		region := tc.GetRegion(i)
 		if op, err := scatterer.Scatter(region, "", true); op != nil {
 			re.NoError(err)
@@ -869,4 +870,13 @@ func TestRemoveStoreLimit(t *testing.T) {
 	op, err = scatterer.Scatter(region, "test", true)
 	re.Error(err)
 	re.Nil(op)
+
+	// exist lower operator
+	region = tc.GetRegion(5)
+	op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
+	op.SetPriorityLevel(constant.Low)
+	re.True(oc.AddOperator(op))
+	op, err = scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.NotNil(op)
 }
