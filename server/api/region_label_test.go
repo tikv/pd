@@ -16,11 +16,8 @@ package api
 
 import (
 	"encoding/json"
-<<<<<<< HEAD:server/api/region_label_test.go
 	"fmt"
-=======
 	"net/http"
->>>>>>> f222df1782 (labeler: fix deleting non-existing label rule should return 404 (#10090)):tests/server/api/region_label_test.go
 	"net/url"
 	"sort"
 	"testing"
@@ -111,7 +108,7 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	re.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
 
-	err = testutil.CheckDelete(tests.TestDialClient, urlPrefix+"/rule/no-exist", testutil.Status(re, http.StatusNotFound))
+	err = tu.CheckDelete(testDialClient, suite.urlPrefix+"rule/no-exist", tu.Status(re, http.StatusNotFound))
 	re.NoError(err)
 }
 
