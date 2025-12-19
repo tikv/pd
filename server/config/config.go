@@ -251,8 +251,9 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback  = true
-	defaultEnableTSODynamicSwitching = false
+	defaultEnableSchedulingFallback      = true
+	defaultEnableTSODynamicSwitching     = false
+	defaultEnableResourceManagerFallback = true
 )
 
 var (
@@ -829,6 +830,10 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type MicroserviceConfig struct {
 	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	// If EnableResourceManagerFallback is false, resource manager service only
+	// works when api service is healthy. Please make sure api service is highly
+	// available before disabling this option.
+	EnableResourceManagerFallback bool `toml:"enable-resource-manager-fallback" json:"enable-resource-manager-fallback,string"`
 }
 
 func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
@@ -837,6 +842,9 @@ func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("enable-tso-dynamic-switching") {
 		c.EnableTSODynamicSwitching = defaultEnableTSODynamicSwitching
+	}
+	if !meta.IsDefined("enable-resource-manager-fallback") {
+		c.EnableResourceManagerFallback = defaultEnableResourceManagerFallback
 	}
 }
 
@@ -854,6 +862,11 @@ func (c *MicroserviceConfig) IsSchedulingFallbackEnabled() bool {
 // IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
 func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 	return c.EnableTSODynamicSwitching
+}
+
+// IsResourceManagerFallbackEnabled returns whether to enable resource manager service fallback to api service.
+func (c *MicroserviceConfig) IsResourceManagerFallbackEnabled() bool {
+	return c.EnableResourceManagerFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.

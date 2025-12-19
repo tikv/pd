@@ -46,6 +46,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
@@ -229,11 +230,12 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry                 *registry.ServiceRegistry
-	isKeyspaceGroupEnabled   bool
-	servicePrimaryMap        sync.Map /* Store as map[string]string */
-	tsoPrimaryWatcher        *etcdutil.LoopWatcher
-	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+	registry                      *registry.ServiceRegistry
+	isKeyspaceGroupEnabled        bool
+	servicePrimaryMap             sync.Map /* Store as map[string]string */
+	tsoPrimaryWatcher             *etcdutil.LoopWatcher
+	schedulingPrimaryWatcher      *etcdutil.LoopWatcher
+	resourceManagerPrimaryWatcher *etcdutil.LoopWatcher
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -301,9 +303,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
+	runResourceManager := cfg.Microservice.IsResourceManagerFallbackEnabled()
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
-	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
-	// Register the microservices REST path.
+	if runResourceManager {
+		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	}
+	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
@@ -311,7 +316,11 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		// Register the microservices GRPC service.
+		if !runResourceManager {
+			// resource manager proxy
+			resource_manager.RegisterResourceManagerServer(gs, &resourceGroupProxyServer{GrpcServer: grpcServer})
+		}
+		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
 		s.grpcServer = gs
 	}
@@ -663,6 +672,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	if s.IsKeyspaceGroupEnabled() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
+		s.initResourceManagerPrimaryWatcher()
 	}
 }
 
@@ -2055,6 +2065,15 @@ func (s *Server) initSchedulingPrimaryWatcher() {
 	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
+}
+
+func (s *Server) initResourceManagerPrimaryWatcher() {
+	serviceName := mcs.ResourceManagerServiceName
+	primaryKey := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: serviceName,
+	})
+	s.resourceManagerPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
+	s.resourceManagerPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string) *etcdutil.LoopWatcher {

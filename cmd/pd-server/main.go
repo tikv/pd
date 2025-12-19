@@ -29,6 +29,7 @@ import (
 
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	rm_redirector "github.com/tikv/pd/pkg/mcs/resourcemanager/redirector"
 	resource_manager "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	router "github.com/tikv/pd/pkg/mcs/router/server"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
@@ -281,6 +282,10 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+	if len(services) > 0 && !cfg.Microservice.IsResourceManagerFallbackEnabled() {
+		// redirect http requests for resource manager in API mode
+		serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
+	}
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
