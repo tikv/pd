@@ -211,7 +211,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 
 func (suite *memberTestSuite) TestTransferPrimary() {
 	re := suite.Require()
-	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
+	supportedServices := []string{"tso", "scheduling"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -219,8 +219,6 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
-		case "resource_manager":
-			nodes = suite.resourceManagerNodes
 		}
 
 		// Test resign primary by random
@@ -292,7 +290,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 
 func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 	re := suite.Require()
-	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
+	supportedServices := []string{"tso", "scheduling"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -300,8 +298,6 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
-		case "resource_manager":
-			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -349,7 +345,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
+	supportedServices := []string{"tso", "scheduling"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -357,8 +353,6 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
-		case "resource_manager":
-			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -407,7 +401,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling" /* TODO: "resource_manager"*/}
+	supportedServices := []string{"tso", "scheduling"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -415,8 +409,6 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
-		case "resource_manager":
-			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
