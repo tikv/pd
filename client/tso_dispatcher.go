@@ -77,7 +77,7 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
-		log.Error("[tso] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
+		log.Warn("[tso] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		return err
 	}
