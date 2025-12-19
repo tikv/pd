@@ -527,7 +527,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Duplicate creation should fail.
 		statusCode, _ = doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
+		re.Equal(http.StatusConflict, statusCode)
 
 		// Get non-existent group.
 		statusCode, _ = doGetAffinityGroup(re, serverAddr, "nope")
@@ -599,7 +599,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 
 		// Try to create the same group again, should get clear error message.
 		statusCode, errorMsg := doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
+		re.Equal(http.StatusConflict, statusCode)
 
 		// Verify error message is not empty and contains useful information.
 		re.NotEmpty(errorMsg, "Error message should not be empty")

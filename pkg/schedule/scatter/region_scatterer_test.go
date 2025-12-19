@@ -883,10 +883,10 @@ func TestScatterWithAffinity(t *testing.T) {
 	_, err = affinityManager.UpdateAffinityGroupPeers(group.ID, group.LeaderStoreID, group.VoterStoreIDs)
 	re.NoError(err)
 
-	// Test scatter with affinity (RegularSchedulingAllowed=false) - should fail
+	// Test scatter with affinity (RegularSchedulingAllowed=false)
+	// Should return (nil, nil) to prevent client from retrying
 	region := tc.GetRegion(1)
 	op, err := scatterer.Scatter(region, "", true)
-	re.Error(err)
+	re.NoError(err)
 	re.Nil(op)
-	re.Contains(err.Error(), "affinity group")
 }

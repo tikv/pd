@@ -475,6 +475,19 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
 			expect: OpLeader,
 		},
+		{
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpLeader),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpMerge|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpAffinity|OpRegion),
+			expect: OpAdmin,
+		},
 	}
 	for _, v := range testData {
 		re.Equal(v.expect, v.op.SchedulerKind())

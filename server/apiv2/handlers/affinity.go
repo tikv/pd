@@ -145,7 +145,7 @@ func createAffinityGroups(c *gin.Context) {
 			return
 		}
 		if manager.IsGroupExist(groupID) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrAffinityGroupExist.GenWithStackByArgs(groupID).Error())
+			c.AbortWithStatusJSON(http.StatusConflict, errs.ErrAffinityGroupExist.GenWithStackByArgs(groupID).Error())
 			return
 		}
 		if len(input.Ranges) == 0 {
@@ -467,9 +467,13 @@ func handleAffinityError(c *gin.Context, err error) bool {
 	case errs.ErrAffinityGroupContent.Equal(err),
 		errs.ErrInvalidGroupID.Equal(err),
 		errs.ErrEmptyRequest.Equal(err),
-		errs.ErrAffinityGroupConflict.Equal(err):
+		errs.ErrAffinityGroupConflict.Equal(err),
+		errs.ErrInvalidKeyFormat.Equal(err):
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+	case errs.ErrAffinityGroupExist.Equal(err):
+		c.AbortWithStatusJSON(http.StatusConflict, err.Error())
 	default:
+		// such as ErrAffinityInternal
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 	}
 	return true
