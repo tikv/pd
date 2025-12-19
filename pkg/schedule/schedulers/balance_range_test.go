@@ -95,18 +95,18 @@ func TestPlacementRule(t *testing.T) {
 	}
 
 	// only store-1 can match the leader rule
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 
 	// all store can match the rules
 	job.Rule = core.PeerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 
 	// only store-1 can match the learner rule
 	job.Rule = core.LearnerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 }
 
@@ -171,7 +171,7 @@ func TestPrepareBalanceRange(t *testing.T) {
 		Rule:   core.LeaderScatter,
 		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 	re.Len(sc.scoreMap, 3)
@@ -287,7 +287,7 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(100+i), strconv.Itoa(100+i+1),
 			1, uint64(follower1), uint64(follower2))
 	}
-	// case1: store 1 has 100 peers, the others has 50 peer, it suited for the location label setting.
+	// case1: store 1 has 100 peers, the others has 50 peer, it is suited for the location label setting.
 	re.False(scheduler.IsScheduleAllowed(tc))
 	op, _ := scheduler.Schedule(tc, true)
 	re.Empty(op)

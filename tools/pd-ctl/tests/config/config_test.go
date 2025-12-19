@@ -175,6 +175,12 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.Equal(20*10000, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
 	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
+	// set max-affinity-merge-region-size to 1000MB
+	args = []string{"-u", pdAddr, "config", "set", "max-affinity-merge-region-size", "1000"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(1000, int(svr.GetScheduleConfig().GetMaxAffinityMergeRegionSize()))
+
 	// set store limit v2
 	args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
 	_, err = tests.ExecuteCommand(cmd, args...)

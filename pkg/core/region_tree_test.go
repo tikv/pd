@@ -16,7 +16,7 @@ package core
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -447,7 +447,7 @@ func (m *mockRegionTreeData) clearTree() *mockRegionTreeData {
 
 func (m *mockRegionTreeData) shuffleItems() *mockRegionTreeData {
 	for i := 0; i < len(m.items); i++ {
-		j := rand.Intn(i + 1)
+		j := rand.IntN(i + 1)
 		m.items[i], m.items[j] = m.items[j], m.items[i]
 	}
 	return m
@@ -487,8 +487,8 @@ func BenchmarkRegionTreeRandomOverlapsInsert(b *testing.B) {
 	var items []*RegionInfo
 	for range MaxCount {
 		var startKey, endKey int
-		key1 := rand.Intn(MaxCount)
-		key2 := rand.Intn(MaxCount)
+		key1 := rand.IntN(MaxCount)
+		key2 := rand.IntN(MaxCount)
 		if key1 < key2 {
 			startKey = key1
 			endKey = key2

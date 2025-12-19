@@ -85,7 +85,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	ctx, cancel := context.WithCancel(parentCtx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
-	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,
@@ -275,6 +275,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
+		select {
+		case <-c.ctx.Done():
+			log.Info("InitSchedulers context cancelled",
+				zap.String("stage", "creating schedulers with independent configuration"),
+				zap.Int("index", i), zap.Int("total", len(scheduleNames)))
+			return
+		default:
+		}
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
 		var cfg sc.SchedulerConfig
@@ -316,6 +324,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	// The old way to create the scheduler.
 	k := 0
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
+		select {
+		case <-c.ctx.Done():
+			log.Info("InitSchedulers context cancelled",
+				zap.String("stage", "creating schedulers with old configuration"),
+				zap.Int("index", k), zap.Int("total", len(scheduleCfg.Schedulers)))
+			return
+		default:
+		}
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++

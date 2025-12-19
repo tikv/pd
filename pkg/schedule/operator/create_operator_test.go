@@ -62,6 +62,14 @@ func (suite *createOperatorTestSuite) SetupTest() {
 	suite.cluster.AddLabelsStore(8, 0, map[string]string{"zone": "z2", "host": "h1"})
 	suite.cluster.AddLabelsStore(9, 0, map[string]string{"zone": "z2", "host": "h2"})
 	suite.cluster.AddLabelsStore(10, 0, map[string]string{"zone": "z3", "host": "h1", "noleader": "true"})
+	// Add stores with different leader counts for testing ByCount tie-breaker.
+	suite.cluster.AddLeaderStore(11, 100) // 100 leaders
+	suite.cluster.AddLeaderStore(12, 50)  // 50 leaders
+	suite.cluster.AddLeaderStore(13, 10)  // 10 leaders
+	// Add stores with same leader count but different leader sizes for testing BySize tie-breaker.
+	suite.cluster.AddLeaderStore(14, 50, 10000) // 50 leaders, 10000 MiB
+	suite.cluster.AddLeaderStore(15, 50, 5000)  // 50 leaders, 5000 MiB
+	suite.cluster.AddLeaderStore(16, 50, 1000)  // 50 leaders, 1000 MiB
 }
 
 func (suite *createOperatorTestSuite) TearDownTest() {
@@ -144,7 +152,7 @@ func (suite *createOperatorTestSuite) TestCreateSplitRegionOperator() {
 			EndKey:   testCase.endKey,
 			Peers:    testCase.originPeers,
 		}, testCase.originPeers[0])
-		op, err := CreateSplitRegionOperator("test", region, 0, testCase.policy, testCase.keys)
+		op, err := CreateSplitRegionOperator("test", region, OpSplit, testCase.policy, testCase.keys)
 		if testCase.expectedError {
 			re.Error(err)
 			continue
@@ -295,7 +303,7 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 	for _, testCase := range testCases {
 		source := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.sourcePeers}, testCase.sourcePeers[0])
 		target := core.NewRegionInfo(&metapb.Region{Id: 86, Peers: testCase.targetPeers}, testCase.targetPeers[0])
-		ops, err := CreateMergeRegionOperator("test", suite.cluster, source, target, 0)
+		ops, err := CreateMergeRegionOperator("test", suite.cluster, source, target, OpMerge)
 		if testCase.expectedError {
 			re.Error(err)
 			continue
@@ -580,6 +588,44 @@ func (suite *createOperatorTestSuite) TestCreateLeaveJointStateOperator() {
 				ChangePeerV2Leave{
 					PromoteLearners: []PromoteLearner{{ToStore: 4}},
 					DemoteVoters:    []DemoteVoter{{ToStore: 1}, {ToStore: 3}},
+				},
+			},
+		},
+		// Test leader score tie-breaker: when multiple stores are indistinguishable
+		// by preference functions, choose the store with lower leader count.
+		// Store 11 has 100 leaders, store 12 has 50, store 13 has 10.
+		// Should transfer to store 13 (lowest leader count).
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 11, StoreId: 11, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 12, StoreId: 12, Role: metapb.PeerRole_Voter},
+				{Id: 13, StoreId: 13, Role: metapb.PeerRole_Voter},
+			},
+			kind: OpLeader,
+			steps: []OpStep{
+				TransferLeader{FromStore: 11, ToStore: 13},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{},
+					DemoteVoters:    []DemoteVoter{{ToStore: 11}},
+				},
+			},
+		},
+		// Test leader size tie-breaker: when leader counts are equal,
+		// choose the store with lower leader size.
+		// Store 14 has 50 leaders (10000 MiB), store 15 has 50 leaders (5000 MiB), store 16 has 50 leaders (1000 MiB).
+		// Should transfer to store 16 (lowest leader size).
+		{
+			originPeers: []*metapb.Peer{
+				{Id: 14, StoreId: 14, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 15, StoreId: 15, Role: metapb.PeerRole_Voter},
+				{Id: 16, StoreId: 16, Role: metapb.PeerRole_Voter},
+			},
+			kind: OpLeader,
+			steps: []OpStep{
+				TransferLeader{FromStore: 14, ToStore: 16},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{},
+					DemoteVoters:    []DemoteVoter{{ToStore: 14}},
 				},
 			},
 		},

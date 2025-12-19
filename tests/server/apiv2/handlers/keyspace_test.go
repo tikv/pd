@@ -15,8 +15,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"testing"
 
@@ -222,4 +225,58 @@ func checkUpdateRequest(re *require.Assertions, request *handlers.UpdateConfigPa
 		}
 	}
 	re.Equal(expected, newConfig)
+}
+
+// TestKeyspaceErrorMessage verifies that BindJSON errors return clear error messages.
+func (suite *keyspaceTestSuite) TestKeyspaceErrorMessage() {
+	re := suite.Require()
+
+	// Test CreateKeyspace with invalid JSON
+	resp, err := tests.TestDialClient.Post(
+		suite.server.GetAddr()+keyspacesPrefix,
+		"application/json",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	var errorMsg string
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test UpdateKeyspaceConfig with invalid JSON
+	httpReq, err := http.NewRequest(
+		http.MethodPatch,
+		suite.server.GetAddr()+keyspacesPrefix+"/test/config",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test UpdateKeyspaceState with invalid JSON
+	httpReq, err = http.NewRequest(
+		http.MethodPut,
+		suite.server.GetAddr()+keyspacesPrefix+"/test/state",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
 }

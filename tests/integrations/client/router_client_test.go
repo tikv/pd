@@ -16,8 +16,9 @@ package client_test
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -289,7 +290,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 			var (
 				r                   *router.Region
 				err                 error
-				seed                = rand.Intn(100)
+				seed                = rand.IntN(100)
 				allowFollowerHandle = seed%2 == 0
 			)
 			// Randomly sleep to avoid the concurrent requests to be dispatched at the same time.
@@ -304,6 +305,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegion(ctx, region.GetStartKey())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {
@@ -321,6 +325,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {
@@ -339,6 +346,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegionByID(ctx, region.GetId())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {

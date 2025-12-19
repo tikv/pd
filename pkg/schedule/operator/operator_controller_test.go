@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -75,20 +76,20 @@ func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 	oc.SetOperator(op)
 	re.True(op.Start())
 	influence := NewOpInfluence()
-	AddOpInfluence(op, *influence, bc)
+	AddOpInfluence(op, influence, bc)
 	re.Equal(int64(-96), influence.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is same even if the region size changed.
 	region = region.Clone(core.SetApproximateSize(100))
 	tc.PutRegion(region)
 	influence1 := NewOpInfluence()
-	AddOpInfluence(op, *influence1, bc)
+	AddOpInfluence(op, influence1, bc)
 	re.Equal(int64(-96), influence1.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is valid even if the region is removed.
 	tc.RemoveRegion(region)
 	influence2 := NewOpInfluence()
-	AddOpInfluence(op, *influence2, bc)
+	AddOpInfluence(op, influence2, bc)
 	re.Equal(int64(-96), influence2.GetStoreInfluence(2).RegionSize)
 }
 
@@ -748,7 +749,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	op := NewTestOperator(1, epoch, OpRegion, steps...)
 	re.True(controller.AddOperator(op))
 
-	check := func(influence OpInfluence, id uint64, expect *StoreInfluence) {
+	check := func(influence *OpInfluence, id uint64, expect *StoreInfluence) {
 		si := influence.GetStoreInfluence(id)
 		re.Equal(si.LeaderCount, expect.LeaderCount)
 		re.Equal(si.LeaderSize, expect.LeaderSize)
@@ -1074,4 +1075,124 @@ func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 		}(uint64(i))
 	}
 	wg.Wait()
+}
+
+// TestMergeOperatorsSynchronousCancellation tests that when one merge operator is cancelled,
+// its related merge operator is also cancelled synchronously.
+// This applies to both OpMerge and OpAffinity merge operators.
+// It also verifies AddWaitingOperator and checkOperatorLightly work correctly for both types.
+func (suite *operatorControllerTestSuite) TestMergeOperatorsSynchronousCancellation() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+
+	// Add stores
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	testCases := []struct {
+		name               string
+		desc               string
+		kind               OpKind
+		source             *core.RegionInfo
+		target             *core.RegionInfo
+		verifyOpMergeCount bool
+	}{
+		{
+			name:               "OpMerge operators",
+			desc:               "merge-region",
+			kind:               OpMerge,
+			source:             suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			target:             suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			verifyOpMergeCount: false, // OpMerge operators count towards OpMerge
+		},
+		{
+			name:               "OpAffinity merge operators",
+			desc:               "affinity-merge-region",
+			kind:               OpAffinity,
+			source:             suite.newRegionInfo(201, "2a", "2b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			target:             suite.newRegionInfo(202, "2b", "2c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			verifyOpMergeCount: true, // OpAffinity operators should NOT count towards OpMerge
+		},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			cluster.PutRegion(tc.source)
+			cluster.PutRegion(tc.target)
+
+			// Test 1: Verify checkOperatorLightly works for merge operators
+			ops1, err := CreateMergeRegionOperator(tc.desc, cluster, tc.source, tc.target, tc.kind)
+			re.NoError(err)
+			re.Len(ops1, 2)
+
+			// checkOperatorLightly should succeed initially
+			r, reason := controller.checkOperatorLightly(ops1[0])
+			re.Empty(reason)
+			re.Equal(tc.source, r)
+
+			// Change region epoch version, checkOperatorLightly should fail with EpochNotMatch
+			tc.source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+			cluster.PutRegion(tc.source)
+			r, reason = controller.checkOperatorLightly(ops1[0])
+			re.Nil(r)
+			re.Equal(EpochNotMatch, reason)
+
+			// Reset epoch for next tests
+			tc.source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+			cluster.PutRegion(tc.source)
+
+			// Test 2: Verify AddWaitingOperator recognizes merge operators as paired
+			ops2, err := CreateMergeRegionOperator(tc.desc, cluster, tc.source, tc.target, tc.kind)
+			re.NoError(err)
+			re.Len(ops2, 2)
+
+			// Both operators should have RelatedMergeRegion set
+			re.NotEmpty(ops2[0].GetAdditionalInfo(string(RelatedMergeRegion)))
+			re.NotEmpty(ops2[1].GetAdditionalInfo(string(RelatedMergeRegion)))
+
+			// AddWaitingOperator should recognize them as paired and count as 2
+			added := controller.AddWaitingOperator(ops2...)
+			re.Equal(2, added)
+
+			// Promote to running operators
+			controller.PromoteWaitingOperator()
+			controller.PromoteWaitingOperator()
+
+			// Verify both operators are added
+			op1 := controller.GetOperator(tc.source.GetID())
+			re.NotNil(op1)
+			op2 := controller.GetOperator(tc.target.GetID())
+			re.NotNil(op2)
+
+			// Test 3: Verify synchronous cancellation
+			// Verify RelatedMergeRegion is set
+			re.Equal(strconv.FormatUint(tc.target.GetID(), 10), op1.GetAdditionalInfo(string(RelatedMergeRegion)))
+			re.Equal(strconv.FormatUint(tc.source.GetID(), 10), op2.GetAdditionalInfo(string(RelatedMergeRegion)))
+
+			// Verify operator kind
+			re.Equal(tc.kind, op1.Kind())
+			re.Equal(tc.kind, op2.Kind())
+
+			// Remove one operator
+			removed := controller.RemoveOperator(op1)
+			re.True(removed)
+
+			// Verify both operators are removed (synchronous cancellation)
+			re.Nil(controller.GetOperator(tc.source.GetID()))
+			re.Nil(controller.GetOperator(tc.target.GetID()))
+
+			// Verify both operators are cancelled
+			re.Equal(CANCELED, op1.Status())
+			re.Equal(CANCELED, op2.Status())
+
+			// For OpAffinity, verify operator count is correct (should not count as OpMerge)
+			if tc.verifyOpMergeCount {
+				re.Equal(uint64(0), controller.OperatorCount(OpMerge))
+			}
+		})
+	}
 }

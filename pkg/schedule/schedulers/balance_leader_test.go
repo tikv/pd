@@ -17,7 +17,7 @@ package schedulers
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
 	"testing"
 
@@ -460,12 +460,12 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.Empty(ops)
 
 	kye := keyutil.NewKeyRange("a", "g")
-	suite.tc.Append([]keyutil.KeyRange{kye})
+	suite.tc.KeyRangeManager.Append([]keyutil.KeyRange{kye})
 	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
-	suite.tc.Delete([]keyutil.KeyRange{kye})
+	suite.tc.KeyRangeManager.Delete([]keyutil.KeyRange{kye})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
@@ -641,7 +641,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
+		leader := rand.IntN(4) % 3
 		regionInfo := core.NewRegionInfo(
 			meta,
 			meta.Peers[leader],
@@ -688,7 +688,7 @@ func BenchmarkCandidateStores(b *testing.B) {
 	defer cancel()
 
 	for id := uint64(1); id < uint64(10000); id++ {
-		leaderCount := int(rand.Int31n(10000))
+		leaderCount := int(rand.Int32N(10000))
 		tc.AddLeaderStore(id, leaderCount)
 	}
 	b.ResetTimer()
@@ -708,9 +708,9 @@ func updateAndResortStoresInCandidateStores(tc *mockcluster.Cluster) {
 	for id, store := range stores {
 		offsets := cs.binarySearchStores(store)
 		if id%2 == 1 {
-			deltaMap[store.GetID()] = int64(rand.Int31n(10000))
+			deltaMap[store.GetID()] = int64(rand.Int32N(10000))
 		} else {
-			deltaMap[store.GetID()] = int64(-rand.Int31n(10000))
+			deltaMap[store.GetID()] = int64(-rand.Int32N(10000))
 		}
 		cs.resortStoreWithPos(offsets[0])
 	}

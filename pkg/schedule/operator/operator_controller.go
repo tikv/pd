@@ -253,7 +253,7 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 	var reason CancelReasonType
 	r, reason = oc.checkOperatorLightly(op)
 	if len(reason) != 0 {
-		_ = oc.removeOperatorInner(op)
+		_ = oc.removeOperatorWithoutBury(op)
 		if op.Cancel(reason) {
 			log.Warn("remove operator because region disappeared",
 				zap.Uint64("region-id", op.RegionID()),
@@ -303,13 +303,13 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 		op := ops[i]
 		desc := op.Desc()
 		isMerge := false
-		if op.Kind()&OpMerge != 0 {
+		if op.HasRelatedMergeRegion() {
 			if i+1 >= len(ops) {
 				// should not be here forever
 				log.Error("orphan merge operators found", zap.String("desc", desc), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("orphan operator found")))
 				return added
 			}
-			if ops[i+1].Kind()&OpMerge == 0 {
+			if !ops[i+1].HasRelatedMergeRegion() {
 				log.Error("merge operator should be paired", zap.String("desc",
 					ops[i+1].Desc()), errs.ZapError(errs.ErrMergeOperator.FastGenByArgs("operator should be paired")))
 				return added
@@ -498,7 +498,7 @@ func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, Canc
 	// But to be cautions, it only takes effect on merge-region currently.
 	// If the version of epoch is changed, the region has been splitted or merged, and the key range has been changed.
 	// The changing for conf_version of epoch doesn't modify the region key range, skip it.
-	if (op.Kind()&OpMerge != 0) && region.GetRegionEpoch().GetVersion() > op.RegionEpoch().GetVersion() {
+	if op.HasRelatedMergeRegion() && region.GetRegionEpoch().GetVersion() > op.RegionEpoch().GetVersion() {
 		operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 		return nil, EpochNotMatch
 	}
@@ -512,17 +512,46 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
 
-	// If there is an old operator, replace it. The priority should be checked
-	// already.
-	if oldi, ok := oc.operators.Load(regionID); ok {
-		old := oldi.(*Operator)
-		_ = oc.removeOperatorInner(old)
-		_ = old.Replace()
-		oc.buryOperator(old)
+	old, loaded := oc.operators.LoadOrStore(regionID, op)
+	if loaded {
+		// If there is an old operator and it has lower priority, replace it
+		oldOp := old.(*Operator)
+		if !isHigherPriorityOperator(op, oldOp) {
+			log.Debug("operator already exists with higher or equal priority",
+				zap.Uint64("region-id", regionID),
+				zap.Reflect("old", oldOp),
+				zap.Reflect("new", op))
+			_ = op.Cancel(AlreadyExist)
+			oc.buryOperator(op)
+			operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
+			return false
+		}
+		// replace old operator
+		if !oc.operators.CompareAndSwap(regionID, oldOp, op) {
+			_ = op.Cancel()
+			oc.buryOperator(op)
+			log.Debug("operator changed during replace, skip this add",
+				zap.Uint64("region-id", regionID),
+				zap.Reflect("old", oldOp),
+				zap.Reflect("new", op))
+			return false
+		}
+		oc.counts.dec(oldOp.SchedulerKind())
+		oc.ack(oldOp)
+		if oldOp.HasRelatedMergeRegion() {
+			oc.removeRelatedMergeOperator(oldOp)
+		}
+		_ = oldOp.Replace()
+		oc.buryOperator(oldOp)
 	}
 
+	oc.counts.inc(op.SchedulerKind())
+	// Now start the operator after successfully adding it to the map
 	if !op.Start() {
-		log.Error("adding operator with unexpected status",
+		_ = oc.removeOperatorWithoutBury(op)
+		_ = op.Cancel(StartFailed)
+		oc.buryOperator(op)
+		log.Warn("adding operator with unexpected status",
 			zap.Uint64("region-id", regionID),
 			zap.String("status", OpStatusToString(op.Status())),
 			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
@@ -533,17 +562,6 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		return false
 	}
 
-	old, loaded := oc.operators.LoadOrStore(regionID, op)
-	if loaded {
-		log.Debug("operator already exists",
-			zap.Uint64("region-id", regionID),
-			zap.Reflect("old", old.(*Operator)),
-			zap.Reflect("new", op))
-		operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
-		return false
-	}
-
-	oc.counts.inc(op.SchedulerKind())
 	log.Info("add operator",
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
@@ -598,7 +616,7 @@ func (oc *Controller) ack(op *Operator) {
 
 // RemoveOperators removes all operators from the running operators.
 func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
-	removed := oc.removeOperatorsInner()
+	removed := oc.removeOperatorsWithoutBury()
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
@@ -614,7 +632,7 @@ func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
 	}
 }
 
-func (oc *Controller) removeOperatorsInner() []*Operator {
+func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
 	var removed []*Operator
 	oc.operators.Range(func(regionID, value any) bool {
 		op := value.(*Operator)
@@ -622,7 +640,7 @@ func (oc *Controller) removeOperatorsInner() []*Operator {
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
-		if op.Kind()&OpMerge != 0 {
+		if op.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(op)
 		}
 		removed = append(removed, op)
@@ -633,7 +651,7 @@ func (oc *Controller) removeOperatorsInner() []*Operator {
 
 // RemoveOperator removes an operator from the running operators.
 func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) bool {
-	removed := oc.removeOperatorInner(op)
+	removed := oc.removeOperatorWithoutBury(op)
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
@@ -651,17 +669,12 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 }
 
 func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
-	return oc.removeOperatorInner(op)
-}
-
-func (oc *Controller) removeOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
-	if cur, ok := oc.operators.Load(regionID); ok && cur.(*Operator) == op {
-		oc.operators.Delete(regionID)
+	if oc.operators.CompareAndDelete(regionID, op) {
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
-		if op.Kind()&OpMerge != 0 {
+		if op.HasRelatedMergeRegion() {
 			oc.removeRelatedMergeOperator(op)
 		}
 		return true
@@ -677,7 +690,7 @@ func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 	}
 	relatedOp := relatedOpi.(*Operator)
 	if relatedOp != nil && relatedOp.Status() != CANCELED {
-		oc.removeOperatorInner(relatedOp)
+		oc.removeOperatorWithoutBury(relatedOp)
 		relatedOp.Cancel(RelatedMergeRegion)
 		oc.buryOperator(relatedOp)
 	}
@@ -861,8 +874,8 @@ func (oc *Controller) OperatorCount(kind OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInfluenceOption) OpInfluence {
-	influence := OpInfluence{
+func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInfluenceOption) *OpInfluence {
+	influence := &OpInfluence{
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
 	oc.operators.Range(
@@ -885,7 +898,7 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInflue
 }
 
 // GetFastOpInfluence get fast finish operator influence
-func (oc *Controller) GetFastOpInfluence(cluster *core.BasicCluster, influence OpInfluence) {
+func (oc *Controller) GetFastOpInfluence(cluster *core.BasicCluster, influence *OpInfluence) {
 	for _, id := range oc.fastOperators.GetAllID() {
 		value, ok := oc.fastOperators.Get(id)
 		if !ok {
@@ -906,14 +919,14 @@ func (oc *Controller) CleanAllOpRecords() {
 }
 
 // AddOpInfluence add operator influence for cluster
-func AddOpInfluence(op *Operator, influence OpInfluence, cluster *core.BasicCluster) {
+func AddOpInfluence(op *Operator, influence *OpInfluence, cluster *core.BasicCluster) {
 	region := cluster.GetRegion(op.RegionID())
 	op.TotalInfluence(influence, region)
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*Operator, cluster *core.BasicCluster) OpInfluence {
-	influence := *NewOpInfluence()
+func NewTotalOpInfluence(operators []*Operator, cluster *core.BasicCluster) *OpInfluence {
+	influence := NewOpInfluence()
 
 	for _, op := range operators {
 		AddOpInfluence(op, influence, cluster)

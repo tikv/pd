@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 
@@ -66,16 +69,30 @@ type keyspaceGroupSvcDiscovery struct {
 	secondaryURLs []string
 	// urls are the primary/secondary serving URL
 	urls []string
+
+	// modRevision is used to avoid updating stale info, it is provided by etcd watcher on the server side and increases
+	// monotonically.
+	// If the tso response mod revision is less than the client mod revision, it means that the keyspace group information of
+	// the request tso server is stale, we should ignore the update and try to another tso service.
+	modRevision atomic.Uint64
+}
+
+func (k *keyspaceGroupSvcDiscovery) getModRevision() uint64 {
+	return k.modRevision.Load()
 }
 
 func (k *keyspaceGroupSvcDiscovery) update(
 	keyspaceGroup *tsopb.KeyspaceGroup,
 	newPrimaryURL string,
 	secondaryURLs, urls []string,
-) (oldPrimaryURL string, primarySwitched, secondaryChanged bool) {
+	modRevision uint64,
+) (oldPrimaryURL string, primarySwitched, success bool) {
 	k.Lock()
 	defer k.Unlock()
-
+	if k.getModRevision() > modRevision {
+		return "", false, false
+	}
+	success = true
 	// If the new primary URL is empty, we don't switch the primary URL.
 	oldPrimaryURL = k.primaryURL
 	if len(newPrimaryURL) > 0 {
@@ -85,11 +102,11 @@ func (k *keyspaceGroupSvcDiscovery) update(
 
 	if !reflect.DeepEqual(k.secondaryURLs, secondaryURLs) {
 		k.secondaryURLs = secondaryURLs
-		secondaryChanged = true
 	}
 
 	k.group = keyspaceGroup
 	k.urls = urls
+	k.modRevision.Store(modRevision)
 	return
 }
 
@@ -110,6 +127,7 @@ type tsoServiceDiscovery struct {
 	serviceDiscovery ServiceDiscovery
 	clusterID        uint64
 	keyspaceID       atomic.Uint32
+	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
 	// the default keyspace group
@@ -142,7 +160,7 @@ type tsoServiceDiscovery struct {
 // NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func NewTSOServiceDiscovery(
 	ctx context.Context, metacli metastorage.Client, serviceDiscovery ServiceDiscovery,
-	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
+	keyspaceID uint32, keyspaceMeta *keyspacepb.KeyspaceMeta, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -151,6 +169,7 @@ func NewTSOServiceDiscovery(
 		metacli:           metacli,
 		serviceDiscovery:  serviceDiscovery,
 		clusterID:         serviceDiscovery.GetClusterID(),
+		keyspaceMeta:      keyspaceMeta,
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
@@ -160,6 +179,7 @@ func NewTSOServiceDiscovery(
 		primaryURL:    "",
 		secondaryURLs: make([]string, 0),
 		urls:          make([]string, 0),
+		modRevision:   atomic.Uint64{},
 	}
 	c.tsoServerDiscovery = &tsoServerDiscovery{urls: make([]string, 0)}
 	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
@@ -169,6 +189,7 @@ func NewTSOServiceDiscovery(
 	log.Info("created tso service discovery",
 		zap.Uint64("cluster-id", c.clusterID),
 		zap.Uint32("keyspace-id", keyspaceID),
+		zap.Any("keyspace-meta", keyspaceMeta),
 		zap.String("default-discovery-key", c.defaultDiscoveryKey))
 
 	return c
@@ -402,6 +423,79 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 	return nil
 }
 
+// hasKeyspaceGroupIDConfig checks if the keyspace has been assigned a keyspace group
+// by checking if tso_keyspace_group_id is present in its config and not equal to 0.
+// Returns the keyspace group ID and true if the keyspace has tso_keyspace_group_id configured
+// with a non-zero value (should block fallback), false otherwise.
+// If keyspaceMeta is nil (not passed from upper layer), returns (0, false).
+// If the configured value is 0 (default group), returns (0, false) to allow fallback.
+func (c *tsoServiceDiscovery) hasKeyspaceGroupIDConfig() (uint32, bool) {
+	if c.keyspaceMeta == nil || c.keyspaceMeta.Config == nil {
+		return 0, false
+	}
+
+	groupIDStr, exists := c.keyspaceMeta.Config[constants.TSOKeyspaceGroupIDKey]
+	if !exists {
+		return 0, false
+	}
+
+	groupID, parseErr := strconv.ParseUint(groupIDStr, 10, 32)
+	if parseErr != nil {
+		// If parsing fails, treat it as not configured, allow fallback
+		return 0, false
+	}
+
+	groupIDUint32 := uint32(groupID)
+
+	// If the keyspace group ID is 0 (default group), return false to allow fallback
+	if groupIDUint32 == constants.DefaultKeyspaceGroupID {
+		return 0, false
+	}
+
+	// The keyspace has been assigned to a non-default keyspace group
+	return groupIDUint32, true
+}
+
+// checkAndHandleFallbackInMicroserviceMode checks if fallback is allowed when TSO server is unavailable
+// in microservice mode. Returns an error if fallback is not allowed, nil otherwise.
+// Only keyspaces with tso_keyspace_group_id in their config should not fallback.
+// This is to support backward compatibility for keyspaces that have not been assigned
+// to any keyspace group yet (they should still use the default group 0).
+// If the keyspace meta has tso_keyspace_group_id configured as 0, fallback to group 0 is allowed.
+func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceID uint32) error {
+	srvDiscovery := c.serviceDiscovery.(*serviceDiscovery)
+	clusterInfo, err := srvDiscovery.getClusterInfo(
+		c.ctx, c.serviceDiscovery.GetServingURL(), srvDiscovery.option.Timeout)
+	if err != nil {
+		log.Warn("[tso] failed to get cluster info to check service mode",
+			zap.Uint32("keyspace-id", keyspaceID),
+			errs.ZapError(err))
+		return err
+	}
+
+	// If we are in API_SVC_MODE (microservice mode), check if fallback is allowed
+	if len(clusterInfo.ServiceModes) > 0 && clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
+		// Check if the keyspace has been assigned a keyspace group
+		// Only keyspaces with tso_keyspace_group_id configured (and not equal to 0) should not fallback
+		groupID, shouldBlockFallback := c.hasKeyspaceGroupIDConfig()
+		if shouldBlockFallback {
+			// This keyspace has been assigned to a non-default keyspace group, don't fallback
+			log.Warn("[tso] in microservice mode but no TSO server available - cannot fallback to group 0",
+				zap.Uint32("keyspace-id", keyspaceID),
+				zap.Uint32("keyspace-group-id", groupID),
+				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
+			return errors.New("no TSO microservice available in microservice mode")
+		}
+		// Keyspace doesn't have tso_keyspace_group_id config or it's configured as 0, allow fallback
+		log.Info("[tso] keyspace has no tso_keyspace_group_id config or configured as 0, allowing fallback to group 0",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.Any("keyspace-meta", c.keyspaceMeta),
+			zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
+	}
+
+	return nil
+}
+
 func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving URL of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
@@ -413,21 +507,32 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
+	var modRevision uint64
+	curModRevision := c.keyspaceGroupSD.getModRevision()
 	if len(tsoServerURL) > 0 {
-		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout)
+		keyspaceGroup, modRevision, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getModRevision())
 		if err != nil {
 			log.Error("[tso] failed to find the keyspace group",
 				zap.Uint32("keyspace-id-in-request", keyspaceID),
 				zap.String("tso-server-url", tsoServerURL),
+				zap.Uint64("response-mod-revision", modRevision),
+				zap.Uint64("current-mod-revision", curModRevision),
 				errs.ZapError(err))
 			return err
 		}
 	} else {
-		// There is no error but no tso server URL found, which means
-		// the server side hasn't been upgraded to the version that
-		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
-		// we fall back to the old way of discovering the tso primary URL
-		// from etcd directly.
+		// When service mode is API (microservice) and the keyspace already belongs to a specific
+		// keyspace group (has tso_keyspace_group_id configured), we must not fall back to the
+		// legacy default group even if all microservice endpoints are unavailable.
+		// checkAndHandleFallbackInMicroserviceMode inspects this and returns error when fallback
+		// is forbidden.
+		if err := c.checkAndHandleFallbackInMicroserviceMode(keyspaceID); err != nil {
+			return err
+		}
+
+		// For keyspaces without tso_keyspace_group_id (null or default keyspace) running against older PD
+		// that do not fill GetClusterInfoResponse.TsoUrls, fall back to the legacy discovery path that
+		// looks up the primary in etcd for backward compatibility.
 		c.printFallbackLogOnce.Do(func() {
 			log.Warn("[tso] no tso server URL found,"+
 				" fallback to the legacy path to discover from etcd directly",
@@ -435,6 +540,15 @@ func (c *tsoServiceDiscovery) updateMember() error {
 				zap.String("tso-server-url", tsoServerURL),
 				zap.String("discovery-key", c.defaultDiscoveryKey))
 		})
+
+		// Inject a failpoint to verify that in TSO MCS mode, we should NOT reach discoverWithLegacyPath
+		// This failpoint is used in tests to ensure proper code path execution
+		failpoint.Inject("assertNotReachLegacyPath", func(val failpoint.Value) {
+			if shouldPanic, ok := val.(bool); ok && shouldPanic {
+				panic("BUG: In TSO MCS mode, should not fallback to discoverWithLegacyPath when TSO server is temporarily unavailable")
+			}
+		})
+
 		urls, err := c.discoverWithLegacyPath()
 		if err != nil {
 			return err
@@ -488,8 +602,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
-	oldPrimary, primarySwitched, _ :=
-		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls)
+	oldPrimary, primarySwitched, success :=
+		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls, modRevision)
+	if !success {
+		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("modRevision", modRevision))
+		return errors.Errorf("keyspace group modRevision is stale, current modRevision: %d, new modRevision: %d", c.keyspaceGroupSD.getModRevision(), modRevision)
+	}
 	if primarySwitched {
 		log.Info("[tso] updated keyspace group service discovery info",
 			zap.Uint32("keyspace-id-in-request", keyspaceID),
@@ -505,15 +623,14 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	if len(primaryURL) == 0 {
 		return errors.New("no primary URL found")
 	}
-
 	return nil
 }
 
 // Query the keyspace group info from the tso server by the keyspace ID. The server side will return
 // the info of the keyspace group to which this keyspace belongs.
 func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
-	keyspaceID uint32, tsoSrvURL string, timeout time.Duration,
-) (*tsopb.KeyspaceGroup, error) {
+	keyspaceID uint32, tsoSrvURL string, timeout time.Duration, modRevision uint64,
+) (*tsopb.KeyspaceGroup, uint64, error) {
 	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
 		keyspaceToCheck, ok := val.(int)
 		if ok && keyspaceID == uint32(keyspaceToCheck) {
@@ -525,7 +642,7 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 
 	cc, err := c.GetOrCreateGRPCConn(tsoSrvURL)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	resp, err := tsopb.NewTSOClient(cc).FindGroupByKeyspaceID(
@@ -535,25 +652,31 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 				KeyspaceId:      keyspaceID,
 				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
 			},
-			KeyspaceId: keyspaceID,
+			KeyspaceId:  keyspaceID,
+			ModRevision: modRevision,
 		})
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			err, cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 	if resp.GetHeader().GetError() != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 	if resp.KeyspaceGroup == nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			"no keyspace group found", cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.ModRevision < modRevision {
+		attachErr := errors.Errorf("error:%s target:%s response mod revision:%d current mod revision:%d",
+			"response mod revision less than the given mod revision", cc.Target(), resp.ModRevision, modRevision)
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 
-	return resp.KeyspaceGroup, nil
+	return resp.KeyspaceGroup, resp.GetModRevision(), nil
 }
 
 func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
@@ -578,7 +701,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 
 	if len(urls) == 0 {
 		// There is no error but no tso server url found, which means
-		// the server side hasn't been upgraded to the version that
+		// the server side hasn't been upgraded to the mod revision that
 		// processes and returns GetClusterInfoResponse.TsoUrls. Return here
 		// and handle the fallback logic outside of this function.
 		return "", nil

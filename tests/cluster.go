@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	ks "github.com/tikv/pd/pkg/keyspace/constant"
+	rm_redirector "github.com/tikv/pd/pkg/mcs/resourcemanager/redirector"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -113,6 +114,9 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+	if !cfg.Microservice.IsResourceManagerFallbackEnabled() {
+		serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
+	}
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		return nil, err
@@ -506,6 +510,13 @@ type TestCluster struct {
 // and so on, which determined by the number of servers you set.
 type ConfigOption func(conf *config.Config, serverName string)
 
+// WithGCTuner set WithGCTuner for tests
+func WithGCTuner(enabled bool) ConfigOption {
+	return func(conf *config.Config, _ string) {
+		conf.PDServerCfg.EnableGOGCTuner = enabled
+	}
+}
+
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	return createTestCluster(ctx, initialServerCount, nil, opts...)
@@ -521,7 +532,8 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
 	for _, cfg := range config.InitialServers {
-		serverConf, err := cfg.Generate(opts...)
+		allOpts := append([]ConfigOption{WithGCTuner(false)}, opts...)
+		serverConf, err := cfg.Generate(allOpts...)
 		if err != nil {
 			return nil, err
 		}
