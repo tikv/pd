@@ -233,6 +233,9 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 	if retryLimit > maxRetryLimit {
 		retryLimit = maxRetryLimit
 	}
+	// opsCount represents the number of regions successfully processed (not necessarily
+	// with operators created). This includes regions skipped due to affinity or already
+	// in ideal distribution.
 	opsCount := 0
 	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
@@ -287,6 +290,22 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
 	}
 
+<<<<<<< HEAD
+=======
+	// Check if region is in an affinity group that doesn't allow regular scheduling.
+	// Unlike hot regions or regions without leaders (which are temporary states),
+	// affinity is a configured persistent state. Returning nil error prevents the
+	// client from retrying, as retrying won't change the affinity configuration.
+	// Note: Returning (nil, nil) means:
+	//   - The region will not be retried in scatterRegions loop
+	//   - opsCount will still increment (representing "successfully processed", not "operator created")
+	//   - The region won't appear in the failures map (client considers it successful)
+	if !r.affinityFilter.Select(region).IsOK() {
+		scatterSkipAffinityCounter.Inc()
+		return nil, nil
+	}
+
+>>>>>>> f94f6d0ecc (affinity, operator: fix affinity operator count (#10091))
 	if r.cluster.IsRegionHot(region) {
 		scatterSkipHotRegionCounter.Inc()
 		log.Warn("region too hot during scatter", zap.Uint64("region-id", region.GetID()))

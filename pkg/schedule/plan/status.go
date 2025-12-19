@@ -136,6 +136,7 @@ var statusText = map[StatusCode]string{
 	StatusRegionNotReplicated: "RegionNotReplicated",
 	StatusRegionNotMatchRule:  "RegionNotMatchRule",
 	StatusRegionNoLeader:      "RegionNoLeader",
+	StatusRegionAffinity:      "RegionAffinity",
 
 	// non-filter
 	StatusNoTargetRegion:    "NoTargetRegion",
