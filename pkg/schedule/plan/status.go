@@ -94,6 +94,8 @@ const (
 	StatusRegionLabelReject
 	// StatusRegionSendSnapshotThrottled represents the plan conflicts with send snapshot.
 	StatusRegionSendSnapshotThrottled
+	// StatusRegionAffinity indicates that the Region is in an affinity state and therefore should not be scheduled.
+	StatusRegionAffinity
 )
 
 const (
@@ -136,6 +138,7 @@ var statusText = map[StatusCode]string{
 	StatusRegionNotReplicated: "RegionNotReplicated",
 	StatusRegionNotMatchRule:  "RegionNotMatchRule",
 	StatusRegionNoLeader:      "RegionNoLeader",
+	StatusRegionAffinity:      "RegionAffinity",
 
 	// non-filter
 	StatusNoTargetRegion:    "NoTargetRegion",

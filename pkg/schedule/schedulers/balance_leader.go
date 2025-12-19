@@ -437,7 +437,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	}
 
 	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
-		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
 		balanceLeaderNoLeaderRegionCounter.Inc()
@@ -490,7 +490,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	}
 
 	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
-		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.targetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()

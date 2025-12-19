@@ -193,6 +193,18 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistOptions) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLNumberOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
+}
+
+// SetAffinityScheduleLimit sets the limit for affinity schedule.
+func (o *PersistOptions) SetAffinityScheduleLimit(limit uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.AffinityScheduleLimit = limit
+	o.SetScheduleConfig(v)
+}
+
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
@@ -271,6 +283,11 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLNumberOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
 }
 
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+func (o *PersistOptions) GetMaxAffinityMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
+}
+
 // GetMaxMergeRegionKeys returns the max number of keys.
 // It returns size * 10000 if the key of max-merge-region-Keys doesn't exist.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
@@ -337,6 +354,13 @@ func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()
 	v.MaxMergeRegionSize = maxMergeRegionSize
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxAffinityMergeRegionSize sets the max affinity merge region size.
+func (o *PersistOptions) SetMaxAffinityMergeRegionSize(maxAffinityMergeRegionSize uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxAffinityMergeRegionSize = maxAffinityMergeRegionSize
 	o.SetScheduleConfig(v)
 }
 

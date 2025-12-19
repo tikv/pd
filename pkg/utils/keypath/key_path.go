@@ -41,7 +41,9 @@ const (
 	RuleGroupPath = "rule_group"
 	// RegionLabelPath is the path to save the region label.
 	RegionLabelPath = "region_label"
-	replicationPath = "replication_mode"
+	// AffinityGroupPath is the path to save the affinity groups.
+	AffinityGroupPath = "affinity_groups"
+	replicationPath   = "replication_mode"
 	// CustomSchedulerConfigPath is the path to save the scheduler config.
 	CustomSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
@@ -458,4 +460,17 @@ func ServicePath(serviceName string) string {
 // TSOPath returns the path to store TSO addresses.
 func TSOPath() string {
 	return ServicePath("tso")
+}
+
+// AffinityGroupIDPath returns the path to save a specific affinity group object.
+// Its format is: "/pd/{cluster_id}/affinity_groups/{group_id}"
+func AffinityGroupIDPath(groupID string) string {
+	return path.Join(AffinityGroupPath, groupID)
+}
+
+// AffinityGroupsPathPrefix returns the path prefix for all affinity groups.
+// Its format is: "/pd/{cluster_id}/affinity_groups/"
+// This is used for loading all groups via a range read.
+func AffinityGroupsPathPrefix() string {
+	return path.Join(PDRootPath(), AffinityGroupPath)
 }

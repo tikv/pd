@@ -25,6 +25,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestRegionPendingFilter(t *testing.T) {
@@ -126,4 +128,60 @@ func TestRegionWitnessFilter(t *testing.T) {
 		{StoreId: 3, Id: 3, IsWitness: true},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 	re.Equal(filter.Select(region), statusOK)
+}
+
+func TestAffinitySelect(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	cfg := opt.GetScheduleConfig().Clone()
+	cfg.AffinityScheduleLimit = 4
+	opt.SetScheduleConfig(cfg)
+
+	cluster := mockcluster.NewCluster(ctx, opt)
+	for i := 1; i <= 3; i++ {
+		cluster.AddRegionStore(uint64(i), 1)
+	}
+	filter := NewAffinityFilter(cluster)
+
+	groupID := "g1"
+	createAffinityGroup(re, cluster, groupID, "a", "z")
+	defer func() {
+		err := cluster.GetAffinityManager().DeleteAffinityGroups([]string{groupID}, true)
+		re.NoError(err)
+	}()
+
+	affinityRegion := newRegionWithPeers(1, "b", "y", []uint64{1, 2, 3})
+	re.Equal(statusRegionAffinity, filter.Select(affinityRegion))
+
+	nonAffinityRegion := newRegionWithPeers(2, "za", "zz", []uint64{1, 2, 3})
+	re.Equal(statusOK, filter.Select(nonAffinityRegion))
+}
+
+func createAffinityGroup(re *require.Assertions, cluster *mockcluster.Cluster, groupID string, startKey, endKey string) {
+	manager := cluster.GetAffinityManager()
+	re.NoError(manager.CreateAffinityGroups([]affinity.GroupKeyRanges{{
+		GroupID: groupID,
+		KeyRanges: []keyutil.KeyRange{{
+			StartKey: []byte(startKey),
+			EndKey:   []byte(endKey),
+		}},
+	}}))
+	_, err := manager.UpdateAffinityGroupPeers(groupID, 1, []uint64{1, 2, 3})
+	re.NoError(err)
+}
+
+func newRegionWithPeers(id uint64, startKey, endKey string, peers []uint64, opts ...core.RegionCreateOption) *core.RegionInfo {
+	metaPeers := make([]*metapb.Peer, len(peers))
+	for i, storeID := range peers {
+		metaPeers[i] = &metapb.Peer{Id: id*10 + uint64(i), StoreId: storeID}
+	}
+	return core.NewRegionInfo(&metapb.Region{
+		Id:       id,
+		StartKey: []byte(startKey),
+		EndKey:   []byte(endKey),
+		Peers:    metaPeers,
+	}, metaPeers[0], opts...)
 }

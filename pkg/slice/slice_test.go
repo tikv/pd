@@ -94,3 +94,11 @@ func TestSliceRemove(t *testing.T) {
 	is = slice.Remove(is, 1)
 	re.Equal([]int64{}, is)
 }
+
+func TestSliceHasDupInSorted(t *testing.T) {
+	re := require.New(t)
+	re.False(slice.HasDupInSorted([]string{"a", "b", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "a", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "b", "b"}))
+	re.False(slice.HasDupInSorted([]string(nil)))
+}

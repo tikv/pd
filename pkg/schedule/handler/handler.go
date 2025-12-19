@@ -606,7 +606,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return errs.ErrRegionNotAdjacent
 	}
 
-	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c, region, target, operator.OpAdmin|operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return err
