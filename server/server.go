@@ -92,6 +92,7 @@ import (
 	"github.com/tikv/pd/server/config"
 
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/router/server/apis/v1"          // init router API group
 	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 )
 
