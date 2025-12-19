@@ -29,29 +29,31 @@ import (
 const (
 	unknown   = "unknown"
 	labelType = "label"
+
+	clusterStatusStoreUpCount           = "store_up_count"
+	clusterStatusStoreDisconnectedCount = "store_disconnected_count"
+	clusterStatusStoreSlowCount         = "store_slow_count"
+	clusterStatusStoreDownCount         = "store_down_count"
+	clusterStatusStoreUnhealthCount     = "store_unhealth_count"
+	clusterStatusStoreOfflineCount      = "store_offline_count"
+	clusterStatusStoreTombstoneCount    = "store_tombstone_count"
+	clusterStatusStoreLowSpaceCount     = "store_low_space_count"
+	clusterStatusStorePreparingCount    = "store_preparing_count"
+	clusterStatusStoreServingCount      = "store_serving_count"
+	clusterStatusStoreRemovingCount     = "store_removing_count"
+	clusterStatusStoreRemovedCount      = "store_removed_count"
+
+	clusterStatusRegionCount     = "region_count"
+	clusterStatusLeaderCount     = "leader_count"
+	clusterStatusWitnessCount    = "witness_count"
+	clusterStatusLearnerCount    = "learner_count"
+	clusterStatusStorageSize     = "storage_size"
+	clusterStatusStorageCapacity = "storage_capacity"
 )
 
 type storeStatistics struct {
-	opt             config.ConfProvider
-	Up              int
-	Disconnect      int
-	Unhealthy       int
-	Down            int
-	Offline         int
-	Tombstone       int
-	LowSpace        int
-	Slow            int
-	StorageSize     uint64
-	StorageCapacity uint64
-	RegionCount     int
-	LeaderCount     int
-	LearnerCount    int
-	WitnessCount    int
-	LabelCounter    map[string]int
-	Preparing       int
-	Serving         int
-	Removing        int
-	Removed         int
+	opt          config.ConfProvider
+	LabelCounter map[string]int
 }
 
 func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
@@ -59,6 +61,58 @@ func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 		opt:          opt,
 		LabelCounter: make(map[string]int),
 	}
+}
+
+func (s *storeStatistics) observeStoreStatus(store *core.StoreInfo) map[string]float64 {
+	result := map[string]float64{
+		clusterStatusStoreUpCount:           0,
+		clusterStatusStoreDisconnectedCount: 0,
+		clusterStatusStoreSlowCount:         0,
+		clusterStatusStoreDownCount:         0,
+		clusterStatusStoreUnhealthCount:     0,
+		clusterStatusStoreOfflineCount:      0,
+		clusterStatusStoreTombstoneCount:    0,
+		clusterStatusStoreLowSpaceCount:     0,
+		clusterStatusStorePreparingCount:    0,
+		clusterStatusStoreServingCount:      0,
+		clusterStatusStoreRemovingCount:     0,
+		clusterStatusStoreRemovedCount:      0,
+	}
+
+	// Store state.
+	isDown := false
+	switch store.GetNodeState() {
+	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
+		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
+			isDown = true
+			result[clusterStatusStoreDownCount]++
+		} else if store.IsUnhealthy() {
+			result[clusterStatusStoreUnhealthCount]++
+		} else if store.IsDisconnected() {
+			result[clusterStatusStoreDisconnectedCount]++
+		} else if store.IsSlow() {
+			result[clusterStatusStoreSlowCount]++
+		} else {
+			result[clusterStatusStoreUpCount]++
+		}
+		if store.IsPreparing() {
+			result[clusterStatusStorePreparingCount]++
+		} else {
+			result[clusterStatusStoreServingCount]++
+		}
+	case metapb.NodeState_Removing:
+		result[clusterStatusStoreOfflineCount]++
+		result[clusterStatusStoreRemovingCount]++
+	case metapb.NodeState_Removed:
+		result[clusterStatusStoreTombstoneCount]++
+		result[clusterStatusStoreRemovedCount]++
+		return result
+	}
+
+	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
+		result[clusterStatusStoreLowSpaceCount]++
+	}
+	return result
 }
 
 func (s *storeStatistics) Observe(store *core.StoreInfo) {
@@ -75,47 +129,18 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
-	// Store state.
-	isDown := false
-	switch store.GetNodeState() {
-	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
-		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
-			isDown = true
-			s.Down++
-		} else if store.IsUnhealthy() {
-			s.Unhealthy++
-		} else if store.IsDisconnected() {
-			s.Disconnect++
-		} else if store.IsSlow() {
-			s.Slow++
-		} else {
-			s.Up++
-		}
-		if store.IsPreparing() {
-			s.Preparing++
-		} else {
-			s.Serving++
-		}
-	case metapb.NodeState_Removing:
-		s.Offline++
-		s.Removing++
-	case metapb.NodeState_Removed:
-		s.Tombstone++
-		s.Removed++
-		return
-	}
-
-	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
-		s.LowSpace++
+	storeStatusStats := s.observeStoreStatus(store)
+	for statusType, value := range storeStatusStats {
+		clusterStatusGauge.WithLabelValues(statusType, id).Set(value)
 	}
 
 	// Store stats.
-	s.StorageSize += store.StorageSize()
-	s.StorageCapacity += store.GetCapacity()
-	s.RegionCount += store.GetRegionCount()
-	s.LeaderCount += store.GetLeaderCount()
-	s.WitnessCount += store.GetWitnessCount()
-	s.LearnerCount += store.GetLearnerCount()
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageSize, id).Set(float64(store.StorageSize()))
+	clusterStatusGauge.WithLabelValues(clusterStatusStorageCapacity, id).Set(float64(store.GetCapacity()))
+	clusterStatusGauge.WithLabelValues(clusterStatusRegionCount, id).Set(float64(store.GetRegionCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLeaderCount, id).Set(float64(store.GetLeaderCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusWitnessCount, id).Set(float64(store.GetWitnessCount()))
+	clusterStatusGauge.WithLabelValues(clusterStatusLearnerCount, id).Set(float64(store.GetLearnerCount()))
 	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
 	if ok {
 		cap := limit.GetCap()
@@ -180,30 +205,6 @@ func (s *storeStatistics) ObserveHotStat(store *core.StoreInfo, stats *StoresSta
 
 func (s *storeStatistics) Collect() {
 	placementStatusGauge.Reset()
-
-	metrics := make(map[string]float64)
-	metrics["store_up_count"] = float64(s.Up)
-	metrics["store_disconnected_count"] = float64(s.Disconnect)
-	metrics["store_down_count"] = float64(s.Down)
-	metrics["store_unhealth_count"] = float64(s.Unhealthy)
-	metrics["store_offline_count"] = float64(s.Offline)
-	metrics["store_tombstone_count"] = float64(s.Tombstone)
-	metrics["store_low_space_count"] = float64(s.LowSpace)
-	metrics["store_slow_count"] = float64(s.Slow)
-	metrics["store_preparing_count"] = float64(s.Preparing)
-	metrics["store_serving_count"] = float64(s.Serving)
-	metrics["store_removing_count"] = float64(s.Removing)
-	metrics["store_removed_count"] = float64(s.Removed)
-	metrics["region_count"] = float64(s.RegionCount)
-	metrics["leader_count"] = float64(s.LeaderCount)
-	metrics["witness_count"] = float64(s.WitnessCount)
-	metrics["learner_count"] = float64(s.LearnerCount)
-	metrics["storage_size"] = float64(s.StorageSize)
-	metrics["storage_capacity"] = float64(s.StorageCapacity)
-
-	for typ, value := range metrics {
-		clusterStatusGauge.WithLabelValues(typ).Set(value)
-	}
 
 	// Current scheduling configurations of the cluster
 	configs := make(map[string]float64)
@@ -290,6 +291,7 @@ func ResetStoreStatistics(storeAddress string, id string) {
 	for _, m := range metrics {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
 	}
+	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 }
 
 type storeStatisticsMap struct {
@@ -322,4 +324,5 @@ func Reset() {
 	storeStatusGauge.Reset()
 	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()
+	clusterStatusGauge.Reset()
 }

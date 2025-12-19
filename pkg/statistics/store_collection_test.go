@@ -72,19 +72,6 @@ func TestStoreStatistics(t *testing.T) {
 	}
 	stats := storeStats.stats
 
-	re.Equal(6, stats.Up)
-	re.Equal(7, stats.Preparing)
-	re.Equal(0, stats.Serving)
-	re.Equal(1, stats.Removing)
-	re.Equal(1, stats.Removed)
-	re.Equal(1, stats.Down)
-	re.Equal(1, stats.Offline)
-	re.Equal(0, stats.RegionCount)
-	re.Equal(0, stats.WitnessCount)
-	re.Equal(0, stats.Unhealthy)
-	re.Equal(0, stats.Disconnect)
-	re.Equal(1, stats.Tombstone)
-	re.Equal(1, stats.LowSpace)
 	re.Equal(2, stats.LabelCounter["zone:z1"])
 	re.Equal(2, stats.LabelCounter["zone:z2"])
 	re.Equal(2, stats.LabelCounter["zone:z3"])
