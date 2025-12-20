@@ -316,7 +316,20 @@ func trySend(notifier chan struct{}) {
 func (c *Cluster) updateScheduler() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
+	defer func() {
+		failpoint.Inject("addInflightSchduleConfigChange", func() {
+			configProvider := c.GetSchedulerConfig()
+			originalConfig := configProvider.GetScheduleConfig()
+			log.Info("Original schedule config", zap.Reflect("config", originalConfig))
 
+			newConfig := originalConfig.Clone()
+			// modify one config for test
+			newConfig.LeaderScheduleLimit = originalConfig.LeaderScheduleLimit + 1
+
+			configProvider.SetScheduleConfig(newConfig)
+			log.Info("Successfully updated schedule config")
+		})
+	}()
 	// Make sure the coordinator has initialized all the existing schedulers.
 	c.waitSchedulersInitialized()
 	// Establish a notifier to listen the schedulers updating.
@@ -324,6 +337,14 @@ func (c *Cluster) updateScheduler() {
 	// Make sure the check will be triggered once later.
 	trySend(notifier)
 	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
+	// Clean up the notifier when the function exits
+	defer func() {
+		// Clear the notifier reference in persistConfig first
+		c.persistConfig.SetSchedulersUpdatingNotifier(nil)
+		// Then close the notifier channel
+		close(notifier)
+		log.Info("Schedulers updating notifier has been cleaned up")
+	}()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 

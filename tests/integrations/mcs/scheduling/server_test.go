@@ -175,6 +175,49 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	})
 }
 
+func (suite *serverTestSuite) TestPrimarySwitchWithInflightConfigChange() {
+	re := suite.Require()
+	// 1. create new cluster
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	primaryA := tc.GetPrimaryServer()
+	expectedSchedulerCount := len(types.DefaultSchedulers)
+
+	// 2. change primary from A to B
+	oldPrimaryAddrA := primaryA.GetAddr()
+	primaryA.GetParticipant().Resign()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/addInflightSchduleConfigChange",
+		`return(true)`))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/addInflightSchduleConfigChange"))
+
+	tc.WaitForPrimaryServing(re)
+	primaryB := tc.GetPrimaryServer()
+	newPrimaryAddrB := primaryB.GetAddr()
+	re.NotEqual(oldPrimaryAddrA, newPrimaryAddrB)
+	testutil.Eventually(re, func() bool {
+		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
+		return ok && newPrimaryAddrB == watchedAddr &&
+			len(primaryB.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
+	})
+
+	// 3. change primary from B to A
+	oldPrimaryAddrB := primaryB.GetAddr()
+	primaryB.GetParticipant().Resign()
+	tc.WaitForPrimaryServing(re)
+	primaryA = tc.GetPrimaryServer()
+	newPrimaryAddrA := primaryA.GetAddr()
+	re.NotEqual(oldPrimaryAddrB, newPrimaryAddrA)
+	testutil.Eventually(re, func() bool {
+		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
+		return ok && newPrimaryAddrA == watchedAddr &&
+			len(primaryA.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
+	})
+}
+
 func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
