@@ -479,9 +479,13 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -560,11 +564,15 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 
 	// First create a region via region heartbeat
 	heartbeatStream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = heartbeatStream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -599,6 +607,9 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 	// Now test ReportBuckets forwarding with multiple requests
 	bucketStream, err := grpcPDClient.ReportBuckets(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = bucketStream.CloseSend()
+	}()
 
 	// Send multiple bucket reports to test streaming
 	for version := uint64(1); version <= 3; version++ {
@@ -679,7 +690,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	conf.MaxReplicas = 1
 	err = leaderServer.SetReplicationConfig(*conf)
 	re.NoError(err)
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
 			context.Background(), &pdpb.PutStoreRequest{
@@ -698,6 +710,9 @@ func (suite *serverTestSuite) TestStoreLimit() {
 
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	for i := uint64(2); i <= 10; i++ {
 		peers := []*metapb.Peer{{Id: i, StoreId: 1}}
 		if len(peers) == 0 {
@@ -932,9 +947,13 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	}
 
 	// Send enough regions to satisfy the prepare checker in the initial cluster
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
@@ -1149,9 +1168,13 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1226,9 +1249,13 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1369,9 +1396,13 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1495,9 +1526,13 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	}
 
 	// Create a region via region heartbeat
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},

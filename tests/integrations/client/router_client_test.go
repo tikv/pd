@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -56,6 +57,7 @@ type routerClientSuite struct {
 	cluster         *tests.TestCluster
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
+	conn            *grpc.ClientConn
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 	reportBucket    pdpb.PD_ReportBucketsClient
 
@@ -73,7 +75,7 @@ func (suite *routerClientSuite) SetupSuite() {
 
 	re.NotEmpty(suite.cluster.WaitLeader())
 	leader := suite.cluster.GetLeaderServer()
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, leader.GetAddr())
+	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
 	suite.client = setupCli(suite.ctx, re, endpoints,
 		opt.WithEnableRouterClient(suite.routerClientEnabled),
 		opt.WithEnableFollowerHandle(true))
@@ -90,6 +92,11 @@ func (suite *routerClientSuite) SetupSuite() {
 // TearDownSuite cleans up the test cluster and client.
 func (suite *routerClientSuite) TearDownSuite() {
 	suite.client.Close()
+	_ = suite.regionHeartbeat.CloseSend()
+	_ = suite.reportBucket.CloseSend()
+	if suite.conn != nil {
+		_ = suite.conn.Close()
+	}
 	suite.clean()
 	suite.cluster.Destroy()
 }
