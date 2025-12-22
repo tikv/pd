@@ -965,8 +965,6 @@ func TestConcurrentHandleRegion(t *testing.T) {
 			if isReceiver {
 				_, err := stream.Recv()
 				re.NoError(err)
-				err = stream.CloseSend()
-				re.NoError(err)
 				wg.Done()
 			}
 			for {
