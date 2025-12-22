@@ -512,7 +512,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 		if err != nil {
 			return false
 		}
-		defer stream.CloseSend()
+		defer re.NoError(stream.CloseSend())
 		region := &metapb.Region{
 			Id: suite.regionID,
 			RegionEpoch: &metapb.RegionEpoch{
@@ -1098,9 +1098,11 @@ func (suite *clientTestSuiteImpl) setup() {
 
 func (suite *clientTestSuiteImpl) tearDown() {
 	suite.client.Close()
-	suite.regionHeartbeat.CloseSend()
-	suite.reportBucket.CloseSend()
-	suite.conn.Close()
+	_ = suite.regionHeartbeat.CloseSend()
+	_ = suite.reportBucket.CloseSend()
+	if suite.conn != nil {
+		_ = suite.conn.Close()
+	}
 	suite.clean()
 	suite.cleanup()
 }
