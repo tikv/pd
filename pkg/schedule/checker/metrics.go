@@ -171,6 +171,8 @@ var (
 	affinityMergeCheckerCounter                     = checkerCounter.WithLabelValues(affinityChecker, "merge-check")
 	affinityMergeCheckerDisabledCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-disabled")
 	affinityMergeCheckerGlobalDisabledCounter       = checkerCounter.WithLabelValues(affinityChecker, "merge-global-disabled")
+	affinityMergeCheckerSkipStartupCounter          = checkerCounter.WithLabelValues(affinityChecker, "merge-skip-startup")
+	affinityMergeCheckerSkipCachedCounter           = checkerCounter.WithLabelValues(affinityChecker, "merge-skip-cached")
 	affinityMergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(affinityChecker, "merge-no-need")
 	affinityMergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(affinityChecker, "merge-no-target")
 	affinityMergeCheckerTargetTooBigCounter         = checkerCounter.WithLabelValues(affinityChecker, "merge-target-too-big")
