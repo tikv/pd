@@ -512,7 +512,9 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 		if err != nil {
 			return false
 		}
-		defer re.NoError(stream.CloseSend())
+		defer func() {
+			_ = stream.CloseSend()
+		}()
 		region := &metapb.Region{
 			Id: suite.regionID,
 			RegionEpoch: &metapb.RegionEpoch{
