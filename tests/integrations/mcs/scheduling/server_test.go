@@ -341,6 +341,8 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the PD.
@@ -411,8 +413,10 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 		types.BalanceHotRegionScheduler.String(),
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
-		re.NotNil(schedulersController.GetScheduler(name), name)
 		testutil.Eventually(re, func() bool {
+			if schedulersController.GetScheduler(name) == nil {
+				return false
+			}
 			disabled, err := schedulersController.IsSchedulerDisabled(name)
 			re.NoError(err, name)
 			return disabled == shouldDisabled
