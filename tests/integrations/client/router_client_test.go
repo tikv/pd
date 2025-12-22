@@ -92,9 +92,11 @@ func (suite *routerClientSuite) SetupSuite() {
 // TearDownSuite cleans up the test cluster and client.
 func (suite *routerClientSuite) TearDownSuite() {
 	suite.client.Close()
-	suite.regionHeartbeat.CloseSend()
-	suite.reportBucket.CloseSend()
-	suite.conn.Close()
+	_ = suite.regionHeartbeat.CloseSend()
+	_ = suite.reportBucket.CloseSend()
+	if suite.conn != nil {
+		_ = suite.conn.Close()
+	}
 	suite.clean()
 	suite.cluster.Destroy()
 }
