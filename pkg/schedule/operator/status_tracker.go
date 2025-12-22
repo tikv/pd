@@ -159,9 +159,8 @@ func (o *Operator) GetAdditionalInfoAndExist(key string) (string, bool) {
 
 // GetAdditionalInfo returns additional info value with key.
 func (o *Operator) GetAdditionalInfo(key string) string {
-	o.additionalInfos.RLock()
-	defer o.additionalInfos.RUnlock()
-	return o.additionalInfos.value[key]
+	val, _ := o.GetAdditionalInfoAndExist(key)
+	return val
 }
 
 // LogAdditionalInfo returns additional info with string

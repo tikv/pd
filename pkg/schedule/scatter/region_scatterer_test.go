@@ -17,7 +17,6 @@ package scatter
 import (
 	"context"
 	"fmt"
-	"github.com/tikv/pd/pkg/core/constant"
 	"math"
 	"strconv"
 	"sync"
@@ -31,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -851,7 +851,7 @@ func TestRemoveStoreLimit(t *testing.T) {
 
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 
-	for i := uint64(1); i <= 4; i++ {
+	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
 		if op, err := scatterer.Scatter(region, "", true); op != nil {
 			re.NoError(err)
@@ -872,7 +872,11 @@ func TestRemoveStoreLimit(t *testing.T) {
 	re.Nil(op)
 
 	// exist lower operator
-	region = tc.GetRegion(5)
+	regionID := uint64(5)
+	op = oc.GetOperator(regionID)
+	re.NotNil(op)
+	re.True(oc.RemoveOperator(op))
+	region = tc.GetRegion(regionID)
 	op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
 	op.SetPriorityLevel(constant.Low)
 	re.True(oc.AddOperator(op))
