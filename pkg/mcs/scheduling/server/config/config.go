@@ -306,9 +306,9 @@ func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
-// IsAffinitySchedulingEnabled returns if the affinity scheduling is enabled.
-func (o *PersistConfig) IsAffinitySchedulingEnabled() bool {
-	return o.GetScheduleConfig().EnableAffinityScheduling
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistConfig) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
 }
 
 // GetLowSpaceRatio returns the low space ratio.

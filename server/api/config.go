@@ -237,6 +237,9 @@ func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string
 	}
 
 	if updated {
+		if key == "enable-resource-manager-fallback" {
+			return errors.Errorf("cannot update config item %s dynamically", key)
+		}
 		err = h.svr.SetMicroserviceConfig(config.Microservice)
 	}
 	return err

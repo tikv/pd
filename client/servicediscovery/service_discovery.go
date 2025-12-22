@@ -555,7 +555,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 		}
 		err := bo.Exec(ctx, c.updateMember)
 		if err != nil {
-			log.Warn("[pd] failed to update member", zap.Strings("sortedUrls", c.GetServiceURLs()), errs.ZapError(err))
+			log.Warn("[pd] failed to update member", zap.Strings("sorted-urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
 }
@@ -586,7 +586,7 @@ func (c *serviceDiscovery) updateServiceModeLoop() {
 		}
 		if err := c.checkServiceModeChanged(); err != nil {
 			log.Warn("[pd] failed to update service mode",
-				zap.Strings("sortedUrls", c.GetServiceURLs()), errs.ZapError(err))
+				zap.Strings("sorted-urls", c.GetServiceURLs()), errs.ZapError(err))
 			c.ScheduleCheckMemberChanged() // check if the leader changed
 		}
 	}
@@ -971,7 +971,7 @@ func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
 	c.urls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
 	c.callbacks.onMembersChanged()
-	log.Info("[pd] update member sortedUrls", zap.Strings("old-sortedUrls", oldURLs), zap.Strings("new-sortedUrls", urls))
+	log.Info("[pd] update member sortedUrls", zap.Strings("old-sorted-urls", oldURLs), zap.Strings("new-sorted-urls", urls))
 }
 
 func (c *serviceDiscovery) switchLeader(url string) (bool, error) {

@@ -46,6 +46,11 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
+var (
+	syncIndexGauge = regionSyncerStatus.WithLabelValues("sync_index")
+	lastIndexGauge = regionSyncerStatus.WithLabelValues("last_index")
+)
+
 // RegionSyncer is used to sync region info from leader.
 type RegionSyncer struct {
 	wg        sync.WaitGroup
@@ -312,6 +317,7 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 				// reset index
 				s.nextSyncIndex = resp.GetStartIndex()
 			}
+			syncIndexGauge.Set(float64(resp.GetStartIndex()))
 			stats := resp.GetRegionStats()
 			regions := resp.GetRegions()
 			buckets := resp.GetBuckets()
@@ -340,6 +346,7 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 				region = core.NewRegionInfo(r, regionLeader, opts...)
 				bc.PutRegion(region)
 				if err == nil {
+					lastIndexGauge.Set(float64(s.nextSyncIndex))
 					s.nextSyncIndex++
 				}
 			}

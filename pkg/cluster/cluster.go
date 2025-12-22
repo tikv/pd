@@ -75,9 +75,6 @@ func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo)
 		if regionStats != nil {
 			regionStats.ClearDefunctRegion(id)
 		}
-		// TODO: after https://github.com/tikv/pd/pull/10040 merged,
-		// We will update new region stats in AffinityChecker.Check,
-		// AffinityChecker.Check will call GetRegionAffinityGroupState, if region is not in cache, we will add it
 		if affinityManager != nil {
 			affinityManager.InvalidCache(id)
 		}

@@ -40,9 +40,18 @@ var (
 			Name:      "region_request_cnt",
 			Help:      "Counter of region request.",
 		}, []string{"request", "caller_id", "caller_component", "event"})
+
+	regionSyncerStatus = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "region_syncer_status",
+			Help:      "Inner status of the region syncer.",
+		}, []string{"type"})
 )
 
 func init() {
 	prometheus.MustRegister(regionRequestCounter)
 	prometheus.MustRegister(queryRegionDuration)
+	prometheus.MustRegister(regionSyncerStatus)
 }

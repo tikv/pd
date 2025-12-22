@@ -333,6 +333,9 @@ func (c *innerClient) getServiceClient(ctx context.Context, options *opt.GetRegi
 	case options.AllowFollowerHandle && c.option.GetEnableFollowerHandle():
 		mustLeader = false
 		serviceClient = c.serviceDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
+	default:
+		mustLeader = true
+		isRouterClient = false
 	}
 	if serviceClient != nil && serviceClient.GetClientConn() != nil && serviceClient.Available() {
 		return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient

@@ -16,6 +16,9 @@ package router
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,7 +79,6 @@ func (suite *serverTestSuite) SetupSuite() {
 	// make pd client can work
 	_, suite.tsoCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 
-	// init some regions
 	regions := tests.InitRegions(10)
 	for _, region := range regions {
 		re.NoError(suite.cluster.HandleRegionHeartbeat(region))
@@ -133,7 +135,7 @@ func (suite *serverTestSuite) TestStoreAPI() {
 	store1 := uint64(1)
 	// make sure pd server can't support region grpc request
 	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
-		[]string{suite.backendEndpoints}, pd.SecurityOption{})
+		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableFollowerHandle(true))
 	re.NoError(err)
 	_, err = cli.GetStore(suite.ctx, store1)
 	re.Error(err)
@@ -182,7 +184,7 @@ func (suite *serverTestSuite) TestRegionAPI() {
 	}()
 	// make sure pd server can't support region grpc request
 	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
-		[]string{suite.backendEndpoints}, pd.SecurityOption{})
+		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableFollowerHandle(true))
 	re.NoError(err)
 	_, err = cli.GetRegionByID(suite.ctx, 1)
 	re.Error(err)
@@ -268,4 +270,29 @@ func (suite *serverTestSuite) TestBasicSync() {
 		newEpoch := tc.GetBasicCluster().GetRegion(1).GetRegionEpoch()
 		return newEpoch.GetVersion() == newRegion.GetRegionEpoch().GetVersion()
 	})
+
+	// test for http api and metrics
+	url := suite.routerServer.GetAddr() + "/status"
+	resp, err := http.DefaultClient.Get(url)
+	defer re.NoError(resp.Body.Close())
+	re.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+
+	url = suite.routerServer.GetAddr() + "/metrics"
+	resp, err = http.DefaultClient.Get(url)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+	re.NotNil(resp)
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	lines := strings.Split(string(body), "\n")
+	var grpcMetrics []string
+	for _, line := range lines {
+		if strings.Contains(line, "grpc_server_handled_total") {
+			grpcMetrics = append(grpcMetrics, line)
+		}
+	}
+	re.NoError(resp.Body.Close())
+	re.NotEmpty(grpcMetrics)
+
 }
