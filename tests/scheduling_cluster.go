@@ -129,7 +129,9 @@ func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(tc.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	regions := tc.pd.GetLeaderServer().GetRegions()
 	for _, region := range regions {
 		re.NoError(tc.heartbeat(stream, region))
