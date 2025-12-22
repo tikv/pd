@@ -395,6 +395,13 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 		checkDisabled(name, false)
 		tests.MustDeleteScheduler(re, suite.backendEndpoints, name)
 	}
+
+	for _, name := range defaultSchedulerNames {
+		testutil.Eventually(re, func() bool {
+			return schedulersController.GetScheduler(name) == nil
+		})
+	}
+
 	for _, name := range defaultSchedulerNames {
 		tests.MustAddScheduler(re, suite.backendEndpoints, name, nil)
 		checkDisabled(name, false)
