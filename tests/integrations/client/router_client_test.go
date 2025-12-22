@@ -281,7 +281,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 		regions = append(regions, region)
 	}
 
-	const concurrency = 10
+	const concurrency = 1000
 
 	wg.Add(concurrency)
 	for range concurrency {
@@ -305,7 +305,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegion(ctx, region.GetStartKey())
 					}
 					if err != nil {
-						if err != nil && strings.Contains(err.Error(), "region not found") {
+						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
 						re.ErrorContains(err, context.Canceled.Error())
@@ -325,7 +325,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
 					}
 					if err != nil {
-						if err != nil && strings.Contains(err.Error(), "region not found") {
+						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
 						re.ErrorContains(err, context.Canceled.Error())
@@ -346,7 +346,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegionByID(ctx, region.GetId())
 					}
 					if err != nil {
-						if err != nil && strings.Contains(err.Error(), "region not found") {
+						if strings.Contains(err.Error(), "region not found") {
 							return false
 						}
 						re.ErrorContains(err, context.Canceled.Error())

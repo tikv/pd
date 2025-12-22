@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	ks "github.com/tikv/pd/pkg/keyspace/constant"
+	rm_redirector "github.com/tikv/pd/pkg/mcs/resourcemanager/redirector"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -113,6 +114,9 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+	if !cfg.Microservice.IsResourceManagerFallbackEnabled() {
+		serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
+	}
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		return nil, err

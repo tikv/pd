@@ -17,7 +17,6 @@ package servicediscovery
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -28,12 +27,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 )
@@ -119,7 +118,7 @@ func (r *routerServiceDiscovery) ScheduleCheckMemberChanged() {
 
 // CheckMemberChanged checks if there is any membership change among the members of the router service.
 func (r *routerServiceDiscovery) CheckMemberChanged() error {
-	if err := innerRetry(r.ctx, queryRetryMaxTimes, r.updateMember); err != nil {
+	if err := retry.IntervalRetryByDefault(r.ctx, r.updateMember); err != nil {
 		log.Warn("[router service] failed to update member", errs.ZapError(err))
 		return err
 	}
@@ -175,7 +174,7 @@ func (r *routerServiceDiscovery) Init() error {
 }
 
 func (r *routerServiceDiscovery) updateMember() error {
-	urls, err := getMSMembers(r.ctx, r.defaultDiscoveryKey, r.metaCli)
+	urls, err := metastorage.DiscoveryMSAddrs(r.ctx, r.defaultDiscoveryKey, r.metaCli)
 	if err != nil {
 		return err
 	}
@@ -245,7 +244,7 @@ func (r *routerServiceDiscovery) updateURLs(urls []string) {
 	r.sortedUrls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
 	r.callbacks.onMembersChanged()
-	log.Info("[router service] update member sortedUrls", zap.Strings("new-sortedUrls", urls))
+	log.Info("[router service] update member sorted urls", zap.Strings("new-sorted-urls", urls))
 }
 
 func (r *routerServiceDiscovery) startCheckMemberLoop() {
@@ -273,25 +272,6 @@ func (r *routerServiceDiscovery) startCheckMemberLoop() {
 	}
 }
 
-func innerRetry(
-	ctx context.Context, maxRetryTimes int, f func() error,
-) error {
-	var err error
-	ticker := time.NewTicker(queryRetryInterval)
-	defer ticker.Stop()
-	for range maxRetryTimes {
-		if err = f(); err == nil {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return err
-		case <-ticker.C:
-		}
-	}
-	return errors.WithStack(err)
-}
-
 // Close releases all resources
 func (r *routerServiceDiscovery) Close() {
 	log.Info("[router service] closing router service discovery")
@@ -311,49 +291,6 @@ func (r *routerServiceDiscovery) Close() {
 	r.nodes.Clear()
 	r.wg.Wait()
 	log.Info("[router service] is closed")
-}
-
-// getMSMembers returns all the members of the specified service name.
-func getMSMembers(ctx context.Context, serviceKey string, client metastorage.Client) ([]string, error) {
-	resp, err := client.Get(ctx, []byte(serviceKey), opt.WithPrefix())
-	if err != nil {
-		return nil, errs.ErrClientGetMetaStorageClient.Wrap(err).GenWithStackByCause()
-	}
-	if err := resp.GetHeader().GetError(); err != nil {
-		return nil, errs.ErrClientGetProtoClient.Wrap(errors.New(err.GetMessage())).GenWithStackByCause()
-	}
-	ret := make([]string, 0, len(resp.GetKvs()))
-	for _, kv := range resp.GetKvs() {
-		var entry ServiceRegistryEntry
-		if err = entry.Deserialize(kv.Value); err != nil {
-			log.Warn("[router service] try to deserialize service registry entry failed",
-				zap.String("key", string(kv.Key)), zap.Error(err))
-			continue
-		}
-		ret = append(ret, entry.ServiceAddr)
-	}
-	return ret, nil
-}
-
-// ServiceRegistryEntry is the registry entry of a service
-type ServiceRegistryEntry struct {
-	// The specific value will be assigned only if the startup parameter is added.
-	// If not assigned, the default value(service-hostname) will be used.
-	Name           string `json:"name"`
-	ServiceAddr    string `json:"service-addr"`
-	Version        string `json:"version"`
-	GitHash        string `json:"git-hash"`
-	DeployPath     string `json:"deploy-path"`
-	StartTimestamp int64  `json:"start-timestamp"`
-}
-
-// Deserialize the data to this service registry entry
-func (e *ServiceRegistryEntry) Deserialize(data []byte) error {
-	if err := json.Unmarshal(data, e); err != nil {
-		log.Warn("[router service] json unmarshal the service registry entry failed", zap.Error(err))
-		return err
-	}
-	return nil
 }
 
 func (r *routerServiceDiscovery) nodeHealthCheckLoop() {

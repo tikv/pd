@@ -711,20 +711,20 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if routerClient := c.getRouterClient(); routerClient != nil {
 		return routerClient.GetRegion(ctx, key, opts...)
 	}
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	req := &pdpb.GetRegionRequest{
 		Header:      c.requestHeader(),
 		RegionKey:   key,
-		NeedBuckets: options.NeedBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
 	var (
 		resp *pdpb.GetRegionResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, options)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
@@ -764,20 +764,20 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 		return routerClient.GetPrevRegion(ctx, key, opts...)
 	}
 
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	req := &pdpb.GetRegionRequest{
 		Header:      c.requestHeader(),
 		RegionKey:   key,
-		NeedBuckets: options.NeedBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
 	var (
 		resp *pdpb.GetRegionResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, options)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
@@ -815,20 +815,20 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 		return routerClient.GetRegionByID(ctx, regionID, opts...)
 	}
 
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	req := &pdpb.GetRegionByIDRequest{
 		Header:      c.requestHeader(),
 		RegionId:    regionID,
-		NeedBuckets: options.NeedBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
 	var (
 		resp *pdpb.GetRegionResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, options)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}

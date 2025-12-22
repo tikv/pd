@@ -168,3 +168,9 @@ func (o *Operator) LogAdditionalInfo() string {
 	}
 	return ""
 }
+
+// HasRelatedMergeRegion checks if the operator has a related merge region.
+// All merge operators (OpMerge and OpAffinity) have this info set.
+func (o *Operator) HasRelatedMergeRegion() bool {
+	return o.GetAdditionalInfo(string(RelatedMergeRegion)) != ""
+}

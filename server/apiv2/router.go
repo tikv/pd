@@ -59,5 +59,6 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	handlers.RegisterTSOKeyspaceGroup(root)
 	handlers.RegisterMicroservice(root)
 	handlers.RegisterMaintenance(root)
+	handlers.RegisterAffinity(root)
 	return router, group, nil
 }
