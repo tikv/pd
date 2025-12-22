@@ -125,9 +125,11 @@ func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *
 		return tc.pd.GetLeaderServer().GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
 	})
 	// send a heartbeat immediately to make prepare checker pass
-	grpcPDClient := testutil.MustNewGrpcClient(re, tc.pd.GetLeaderServer().GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClientWithConn(re, tc.pd.GetLeaderServer().GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(tc.ctx)
 	re.NoError(err)
+	defer stream.CloseSend()
 	regions := tc.pd.GetLeaderServer().GetRegions()
 	for _, region := range regions {
 		re.NoError(tc.heartbeat(stream, region))
