@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -503,11 +504,15 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	suite.endpoints = runServer(re, cluster)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	defer conn.Close()
 	suite.regionID = regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(suite.ctx)
-		re.NoError(err)
+		stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+		if err != nil {
+			return false
+		}
+		defer stream.CloseSend()
 		region := &metapb.Region{
 			Id: suite.regionID,
 			RegionEpoch: &metapb.RegionEpoch{
@@ -521,9 +526,9 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 			Region: region,
 			Leader: peers[0],
 		}
-		err = regionHeartbeat.Send(req)
+		err = stream.Send(req)
 		re.NoError(err)
-		_, err = regionHeartbeat.Recv()
+		_, err = stream.Recv()
 		return err == nil
 	})
 }
@@ -1040,6 +1045,7 @@ type clientTestSuiteImpl struct {
 	grpcSvr         *server.GrpcServer
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
+	conn            *grpc.ClientConn
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 	reportBucket    pdpb.PD_ReportBucketsClient
 }
@@ -1049,7 +1055,7 @@ func (suite *clientTestSuiteImpl) setup() {
 	re := suite.Require()
 	suite.srv, suite.cleanup, err = tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
 	re.NoError(err)
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
+	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	tests.MustWaitLeader(re, []*server.Server{suite.srv})
@@ -1092,6 +1098,9 @@ func (suite *clientTestSuiteImpl) setup() {
 
 func (suite *clientTestSuiteImpl) tearDown() {
 	suite.client.Close()
+	suite.regionHeartbeat.CloseSend()
+	suite.reportBucket.CloseSend()
+	suite.conn.Close()
 	suite.clean()
 	suite.cleanup()
 }

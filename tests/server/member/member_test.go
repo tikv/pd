@@ -413,9 +413,12 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		default:
 			// We don't need to check the response and error,
 			// just make sure the server will not panic.
-			grpcPDClient := testutil.MustNewGrpcClient(re, addr)
+			grpcPDClient, conn := testutil.MustNewGrpcClient(re, addr)
 			if grpcPDClient != nil {
 				_, _ = grpcPDClient.AllocID(context.Background(), req)
+			}
+			if conn != nil {
+				conn.Close()
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
