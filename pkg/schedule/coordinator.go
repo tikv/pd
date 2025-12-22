@@ -89,7 +89,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 
 	// Set the callback function for recording operator completion
 	opController.SetRecordOpComplete(func(op *operator.Operator) {
-		checkers.GetAffinityChecker().RecordOpComplete(op)
+		checkers.GetAffinityChecker().RecordMergeOpComplete(op)
 	})
 
 	return &Coordinator{
