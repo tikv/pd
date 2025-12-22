@@ -110,7 +110,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		ruleChecker:             NewRuleChecker(ctx, cluster, ruleManager, pendingProcessedRegions),
 		splitChecker:            NewSplitChecker(cluster, ruleManager, cluster.GetRegionLabeler()),
 		mergeChecker:            NewMergeChecker(ctx, cluster, conf),
-		affinityChecker:         NewAffinityChecker(cluster, conf),
+		affinityChecker:         NewAffinityChecker(ctx, cluster, conf),
 		jointStateChecker:       NewJointStateChecker(cluster),
 		priorityInspector:       NewPriorityInspector(cluster, conf),
 		pendingProcessedRegions: pendingProcessedRegions,

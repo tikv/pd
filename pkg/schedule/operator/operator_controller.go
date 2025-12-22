@@ -96,6 +96,9 @@ type Controller struct {
 	// safe for concurrent.
 	opNotifierQueue *concurrentHeapOpQueue
 
+	// recordOpComplete is a callback function called when an operator completes successfully
+	recordOpComplete func(op *Operator)
+
 	// states
 	records   *records // safe for concurrent
 	wop       WaitingOperator
@@ -112,12 +115,19 @@ func NewController(ctx context.Context, cluster *core.BasicCluster, config confi
 		hbStreams:       hbStreams,
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		opNotifierQueue: newConcurrentHeapOpQueue(),
+
+		recordOpComplete: nil, // Will be set by coordinator
 		// states
 		records:   newRecords(ctx),
 		wop:       newRandBuckets(),
 		wopStatus: newWaitingOperatorStatus(),
 		counts:    &opCounter{count: make(map[OpKind]uint64)},
 	}
+}
+
+// SetRecordOpComplete sets the callback function for recording operator completion.
+func (oc *Controller) SetRecordOpComplete(fn func(op *Operator)) {
+	oc.recordOpComplete = fn
 }
 
 // Ctx returns a context which will be canceled once RaftCluster is stopped.
@@ -157,6 +167,9 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
+			}
+			if oc.recordOpComplete != nil {
+				oc.recordOpComplete(op)
 			}
 			if oc.RemoveOperator(op) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-success").Inc()

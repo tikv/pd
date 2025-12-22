@@ -86,6 +86,12 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
 	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
+
+	// Set the callback function for recording operator completion
+	opController.SetRecordOpComplete(func(op *operator.Operator) {
+		checkers.GetAffinityChecker().RecordOpComplete(op)
+	})
+
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,
