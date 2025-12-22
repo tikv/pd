@@ -549,7 +549,9 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -634,7 +636,9 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 	// First create a region via region heartbeat
 	heartbeatStream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(heartbeatStream.CloseSend())
+	defer func() {
+		_ = heartbeatStream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -669,7 +673,9 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 	// Now test ReportBuckets forwarding with multiple requests
 	bucketStream, err := grpcPDClient.ReportBuckets(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(bucketStream.CloseSend())
+	defer func() {
+		_ = bucketStream.CloseSend()
+	}()
 
 	// Send multiple bucket reports to test streaming
 	for version := uint64(1); version <= 3; version++ {
@@ -770,7 +776,9 @@ func (suite *serverTestSuite) TestStoreLimit() {
 
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	for i := uint64(2); i <= 10; i++ {
 		peers := []*metapb.Peer{{Id: i, StoreId: 1}}
 		if len(peers) == 0 {
@@ -1009,7 +1017,9 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
@@ -1228,7 +1238,9 @@ func (suite *serverTestSuite) TestBatchSplit() {
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1307,7 +1319,9 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1452,7 +1466,9 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1580,7 +1596,9 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	defer re.NoError(stream.CloseSend())
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
