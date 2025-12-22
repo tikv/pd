@@ -146,6 +146,12 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
 	expectedSchedulerCount := len(types.DefaultSchedulers)
+	// Wait for the cluster to be ready and set it as prepared
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
@@ -157,6 +163,13 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
+	// Wait for the cluster to be ready
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	// Set the cluster as prepared so that the coordinator can start running schedulers
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
