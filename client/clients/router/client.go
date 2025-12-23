@@ -196,7 +196,7 @@ type Cli struct {
 func NewClient(
 	ctx context.Context,
 	svcDiscovery sd.ServiceDiscovery,
-	routerSvcDiscovery sd.ServiceDiscovery,
+	mcsSvcDiscovery sd.ServiceDiscovery,
 	option *opt.Option,
 ) *Cli {
 	ctx, cancel := context.WithCancel(ctx)
@@ -208,7 +208,7 @@ func NewClient(
 		conCtxMgr:          cctx.NewManager[pdpb.PD_QueryRegionClient](),
 		updateConnectionCh: make(chan struct{}, 1),
 		mcsConCtxMgr:       cctx.NewManager[routerpb.Router_QueryRegionClient](),
-		mcsDiscovery:       routerSvcDiscovery,
+		mcsDiscovery:       mcsSvcDiscovery,
 		bo: retry.InitialBackoffer(
 			sd.UpdateMemberBackOffBaseTime,
 			sd.UpdateMemberMaxBackoffTime,
@@ -366,7 +366,7 @@ func (c *Cli) getAllClientConns() map[string]*grpc.ClientConn {
 	return conns
 }
 
-func (c *Cli) getAllRouterClientConns() map[string]*grpc.ClientConn {
+func (c *Cli) getAllMcsClientConns() map[string]*grpc.ClientConn {
 	conns := make(map[string]*grpc.ClientConn)
 	c.mcsDiscovery.GetClientConns().Range(func(key, value any) bool {
 		url, ok := key.(string)
@@ -404,7 +404,7 @@ func (c *Cli) connectionDaemon() {
 	log.Info("[router] connection daemon is started")
 	for {
 		c.updateConnection(updaterCtx)
-		c.updateRouterServiceConnection(updaterCtx)
+		c.updateMcsServiceConnection(updaterCtx)
 		select {
 		case <-updaterCtx.Done():
 			log.Info("[router] connection daemon is exiting")
@@ -421,8 +421,8 @@ func (c *Cli) connectionDaemon() {
 	}
 }
 
-func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
-	conns := c.getAllRouterClientConns()
+func (c *Cli) updateMcsServiceConnection(ctx context.Context) {
+	conns := c.getAllMcsClientConns()
 	if len(conns) == 0 {
 		log.Warn("[router] no router service node found")
 		return
@@ -455,7 +455,6 @@ func (c *Cli) updateRouterServiceConnection(ctx context.Context) {
 		}
 		return false
 	})
-
 }
 
 // updateConnection is used to get the leader client connection and update the connection context if it does not exist before.
@@ -591,7 +590,7 @@ batchLoop:
 				continue batchLoop
 			default:
 			}
-			fn, streamURL = c.dispatcherToRouterService(ctx)
+			fn, streamURL = c.dispatcherToMcs(ctx)
 			if fn == nil {
 				fn, streamURL, retry = c.dispatcherToPD(ctx)
 			}
@@ -651,8 +650,8 @@ func (c *Cli) dispatcherToPD(ctx context.Context) (processFn, string, bool) {
 
 type processFn func() error
 
-// dispatcherToRouterService returns the stream function, stream url and need retry again
-func (c *Cli) dispatcherToRouterService(ctx context.Context) (processFn, string) {
+// dispatcherToMcs returns the stream function, stream url and need retry again
+func (c *Cli) dispatcherToMcs(ctx context.Context) (processFn, string) {
 	allowRouterServiceHandle := c.mcsConCtxMgr.Size() > 0
 	if allowRouterServiceHandle {
 		// We need to ensure all requests in a same batch allow to be handled by the router service.
@@ -671,7 +670,7 @@ func (c *Cli) dispatcherToRouterService(ctx context.Context) (processFn, string)
 	connectionCtx := c.mcsConCtxMgr.RandomlyPick()
 	if connectionCtx == nil {
 		log.Info("[router] router service stream connection is not ready")
-		c.updateRouterServiceConnection(ctx)
+		c.updateMcsServiceConnection(ctx)
 		return nil, ""
 	}
 	streamCtx, streamURL, stream := connectionCtx.Ctx, connectionCtx.StreamURL, connectionCtx.Stream

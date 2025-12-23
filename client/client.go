@@ -151,11 +151,11 @@ var _ Client = (*client)(nil)
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
 	sync.RWMutex
-	serviceMode        pdpb.ServiceMode
-	tsoClient          *tso.Cli
-	tsoSvcDiscovery    sd.ServiceDiscovery
-	routerClient       *router.Cli
-	routerSvcDiscovery sd.ServiceDiscovery
+	serviceMode     pdpb.ServiceMode
+	tsoClient       *tso.Cli
+	tsoSvcDiscovery sd.ServiceDiscovery
+	routerClient    *router.Cli
+	mcsSvcDiscovery sd.ServiceDiscovery
 }
 
 func (k *serviceModeKeeper) close() {
@@ -164,7 +164,7 @@ func (k *serviceModeKeeper) close() {
 	switch k.serviceMode {
 	case pdpb.ServiceMode_API_SVC_MODE:
 		k.tsoSvcDiscovery.Close()
-		k.routerSvcDiscovery.Close()
+		k.mcsSvcDiscovery.Close()
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		k.tsoClient.Close()
