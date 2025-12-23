@@ -73,20 +73,10 @@ type ServiceRegistryEntry struct {
 	StartTimestamp int64  `json:"start-timestamp"`
 }
 
-// Serialize this service registry entry
-func (e *ServiceRegistryEntry) Serialize() (serializedValue string, err error) {
-	data, err := json.Marshal(e)
-	if err != nil {
-		log.Error("json marshal the service registry entry failed", zap.Error(err))
-		return "", err
-	}
-	return string(data), nil
-}
-
 // Deserialize the data to this service registry entry
 func (e *ServiceRegistryEntry) Deserialize(data []byte) error {
 	if err := json.Unmarshal(data, e); err != nil {
-		log.Error("json unmarshal the service registry entry failed", zap.Error(err))
+		log.Warn("json unmarshal the service registry entry failed", zap.Error(err))
 		return err
 	}
 	return nil
