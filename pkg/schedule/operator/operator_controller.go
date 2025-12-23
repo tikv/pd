@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -96,8 +95,9 @@ type Controller struct {
 	// safe for concurrent.
 	opNotifierQueue *concurrentHeapOpQueue
 
-	// recordOpComplete is a callback function called when an operator completes successfully
-	recordOpComplete func(op *Operator)
+	// successCallbacks are called when an operator completes successfully.
+	// Set during initialization, read-only afterwards (no lock needed).
+	successCallbacks []func(op *Operator)
 
 	// states
 	records   *records // safe for concurrent
@@ -116,7 +116,7 @@ func NewController(ctx context.Context, cluster *core.BasicCluster, config confi
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		opNotifierQueue: newConcurrentHeapOpQueue(),
 
-		recordOpComplete: nil, // Will be set by coordinator
+		successCallbacks: nil, // Will be set by coordinator
 		// states
 		records:   newRecords(ctx),
 		wop:       newRandBuckets(),
@@ -125,9 +125,10 @@ func NewController(ctx context.Context, cluster *core.BasicCluster, config confi
 	}
 }
 
-// SetRecordOpComplete sets the callback function for recording operator completion.
-func (oc *Controller) SetRecordOpComplete(fn func(op *Operator)) {
-	oc.recordOpComplete = fn
+// SetSuccessCallbacks sets callbacks for operator success.
+// Must be called before the controller starts running.
+func (oc *Controller) SetSuccessCallbacks(callbacks ...func(op *Operator)) {
+	oc.successCallbacks = callbacks
 }
 
 // Ctx returns a context which will be canceled once RaftCluster is stopped.
@@ -168,8 +169,10 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
 			}
-			if oc.recordOpComplete != nil {
-				oc.recordOpComplete(op)
+			for _, callback := range oc.successCallbacks {
+				if callback != nil {
+					callback(op)
+				}
 			}
 			if oc.RemoveOperator(op) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
@@ -696,7 +699,10 @@ func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
 }
 
 func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
-	relatedID, _ := strconv.ParseUint(op.GetAdditionalInfo(string(RelatedMergeRegion)), 10, 64)
+	relatedID := op.GetRelatedMergeRegion()
+	if relatedID == 0 {
+		return
+	}
 	relatedOpi, ok := oc.operators.Load(relatedID)
 	if !ok {
 		return

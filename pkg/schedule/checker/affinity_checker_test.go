@@ -2396,7 +2396,7 @@ func storeIDsEq(re *require.Assertions, expectedStoreIDs []uint64, peers []*meta
 }
 
 // TestAffinityMergeCheckWithOperatorController tests the merge cache callback mechanism:
-// This test verifies that when merge operators complete, the RecordMergeOpComplete callback
+// This test verifies that when merge operators complete, the RecordMergeOpSuccess callback
 // properly caches merged region IDs to prevent cascading merges.
 //
 // Note: We cannot simulate actual operator completion in unit tests because merge operators
@@ -2466,7 +2466,7 @@ func TestAffinityMergeCheckWithOperatorController(t *testing.T) {
 
 	// Phase 2: Manually invoke the callback to simulate first merge completion (region1+region2)
 	for _, op := range ops1 {
-		affinityChecker.RecordMergeOpComplete(op)
+		affinityChecker.RecordMergeOpSuccess(op)
 	}
 	re.True(affinityChecker.recentMergeCache.Exists(region1.GetID()),
 		"Region1 should be cached after callback")
