@@ -702,7 +702,9 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 		if op != nil {
-			re.Equal(group, op.GetAdditionalInfo("group"))
+			val, exist := op.GetAdditionalInfo("group")
+			re.True(exist)
+			re.Equal(group, val)
 		}
 	}
 }
