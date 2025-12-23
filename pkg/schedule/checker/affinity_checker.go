@@ -261,7 +261,9 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 // - Only merges regions within the same affinity group
 // - Skips regions that are recently merged
 func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
-	// Skip merge during startup TTL period
+	// Skip merge during startup TTL period (1 minute after leader switch)
+	// After a leader switch, wait for recentMergeTTL before processing affinity merge
+	// to reduce issues caused by cache invalidation after transfer leader
 	if time.Since(c.startTime) < recentMergeTTL {
 		affinityMergeCheckerSkipStartupCounter.Inc()
 		return nil
