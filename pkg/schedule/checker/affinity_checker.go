@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"slices"
-	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -467,12 +466,12 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 	return region.Clone(options...)
 }
 
-// RecordMergeOpComplete is called when an operator completes successfully.
+// RecordMergeOpSuccess is called when an operator completes successfully.
 // It caches merged regions to prevent immediate re-merging.
 //
 // Merge completes quickly (e.g., 21ms) but TiKV needs time to update approximate_size via split-check.
 // During this gap, PD may use stale size data to schedule more merges. This 1-minute cache prevents that.
-func (c *AffinityChecker) RecordMergeOpComplete(op *operator.Operator) {
+func (c *AffinityChecker) RecordMergeOpSuccess(op *operator.Operator) {
 	// if schedule limit is 0, disable schedule, so we don't need to cache it.
 	if c.conf.GetAffinityScheduleLimit() == 0 {
 		return
@@ -481,15 +480,10 @@ func (c *AffinityChecker) RecordMergeOpComplete(op *operator.Operator) {
 	if !op.HasRelatedMergeRegion() {
 		return
 	}
-	relatedIDStr := op.GetAdditionalInfo(string(operator.RelatedMergeRegion))
-	targetRegionID, err := strconv.ParseUint(relatedIDStr, 10, 64)
-	if err != nil {
-		log.Warn("invalid related merge region ID",
-			zap.Uint64("region-id", op.RegionID()),
-			zap.String("related-merge-region", relatedIDStr),
-			errs.ZapError(err))
+	relatedID := op.GetRelatedMergeRegion()
+	if relatedID == 0 {
 		return
 	}
 	c.recentMergeCache.PutWithTTL(op.RegionID(), nil, recentMergeTTL)
-	c.recentMergeCache.PutWithTTL(targetRegionID, nil, recentMergeTTL)
+	c.recentMergeCache.PutWithTTL(relatedID, nil, recentMergeTTL)
 }
