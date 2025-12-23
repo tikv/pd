@@ -86,6 +86,13 @@ func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
 	return pdpb.NewPDClient(conn)
 }
 
+// MustNewGrpcClientWithConn must create a new PD grpc client and return both client and connection.
+func MustNewGrpcClientWithConn(re *require.Assertions, addr string) (pdpb.PDClient, *grpc.ClientConn) {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	re.NoError(err)
+	return pdpb.NewPDClient(conn), conn
+}
+
 // CleanServer is used to clean data directory.
 func CleanServer(dataDir string) {
 	// Clean data directory

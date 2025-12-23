@@ -86,6 +86,16 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
 	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
+
+	// Set the callbacks for operator success
+	opController.SetSuccessCallbacks(
+		func(op *operator.Operator) {
+			if checker := checkers.GetAffinityChecker(); checker != nil {
+				checker.RecordOpSuccess(op)
+			}
+		},
+	)
+
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,
