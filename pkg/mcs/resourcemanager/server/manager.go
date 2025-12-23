@@ -48,6 +48,9 @@ const (
 	metricsAvailableRUInterval = 1 * time.Second
 	defaultCollectIntervalSec  = 20
 	tickPerSecond              = time.Second
+	// resourceGroupStatePersistInterval is the interval to persist resource group running states
+	// (e.g. token bucket state and RU consumption) into storage.
+	resourceGroupStatePersistInterval = 10 * time.Minute
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
@@ -530,7 +533,7 @@ func (m *Manager) GetResourceGroupList(withStats bool) ([]*ResourceGroup, error)
 }
 
 func (m *Manager) persistLoop(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(resourceGroupStatePersistInterval)
 	failpoint.Inject("fastPersist", func() {
 		ticker.Reset(100 * time.Millisecond)
 	})
