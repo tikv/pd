@@ -179,7 +179,8 @@ func (r *routerServiceDiscovery) updateMember() error {
 		return err
 	}
 	if len(urls) == 0 {
-		return errs.ErrClientNoAvailableMember.GenWithStackByArgs()
+		log.Info("[router service] discovery returned no router service endpoints, maybe not deployed yet")
+		return nil
 	}
 	changed := r.nodesChanged(urls)
 	if !changed {
