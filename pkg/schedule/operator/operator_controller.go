@@ -683,7 +683,8 @@ func (oc *Controller) removeOperatorWithoutBury(op *Operator) bool {
 }
 
 func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
-	relatedID, _ := strconv.ParseUint(op.GetAdditionalInfo(string(RelatedMergeRegion)), 10, 64)
+	val, _ := op.GetAdditionalInfo(string(RelatedMergeRegion))
+	relatedID, _ := strconv.ParseUint(val, 10, 64)
 	relatedOpi, ok := oc.operators.Load(relatedID)
 	if !ok {
 		return

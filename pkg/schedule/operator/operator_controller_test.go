@@ -1170,8 +1170,10 @@ func (suite *operatorControllerTestSuite) TestMergeOperatorsSynchronousCancellat
 
 			// Test 3: Verify synchronous cancellation
 			// Verify RelatedMergeRegion is set
-			re.Equal(strconv.FormatUint(tc.target.GetID(), 10), op1.GetAdditionalInfo(string(RelatedMergeRegion)))
-			re.Equal(strconv.FormatUint(tc.source.GetID(), 10), op2.GetAdditionalInfo(string(RelatedMergeRegion)))
+			val, _ := op1.GetAdditionalInfo(string(RelatedMergeRegion))
+			re.Equal(strconv.FormatUint(tc.target.GetID(), 10), val)
+			val, _ = op2.GetAdditionalInfo(string(RelatedMergeRegion))
+			re.Equal(strconv.FormatUint(tc.source.GetID(), 10), val)
 
 			// Verify operator kind
 			re.Equal(tc.kind, op1.Kind())

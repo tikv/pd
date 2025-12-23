@@ -149,18 +149,12 @@ func (o *Operator) SetAdditionalInfo(key string, value string) {
 	o.additionalInfos.value[key] = value
 }
 
-// GetAdditionalInfoAndExist returns additional info with key.
-func (o *Operator) GetAdditionalInfoAndExist(key string) (string, bool) {
+// GetAdditionalInfo returns additional info value with key.
+func (o *Operator) GetAdditionalInfo(key string) (string, bool) {
 	o.additionalInfos.RLock()
 	defer o.additionalInfos.RUnlock()
 	val, exist := o.additionalInfos.value[key]
 	return val, exist
-}
-
-// GetAdditionalInfo returns additional info value with key.
-func (o *Operator) GetAdditionalInfo(key string) string {
-	val, _ := o.GetAdditionalInfoAndExist(key)
-	return val
 }
 
 // LogAdditionalInfo returns additional info with string
@@ -179,5 +173,6 @@ func (o *Operator) LogAdditionalInfo() string {
 // HasRelatedMergeRegion checks if the operator has a related merge region.
 // All merge operators (OpMerge and OpAffinity) have this info set.
 func (o *Operator) HasRelatedMergeRegion() bool {
-	return o.GetAdditionalInfo(string(RelatedMergeRegion)) != ""
+	val, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
+	return exist && val != ""
 }

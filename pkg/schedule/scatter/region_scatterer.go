@@ -291,7 +291,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 	// if the exist operator level is higher than scatter operator level, give up to create new scatter operator new.
 	// otherwise, create new scatter operator to replace the existing one.
 	if op := r.opController.GetOperator(region.GetID()); op != nil && op.GetPriorityLevel() >= operatorPriorityLevel {
-		val, exist := op.GetAdditionalInfoAndExist("group")
+		val, exist := op.GetAdditionalInfo("group")
 		// If the existing operator is created by the same group scatterer, just skip creating a new one.
 		if strings.Contains(op.Desc(), scatterOperatorDesc) && exist && val == group {
 			scatterOperatorRunningCounter.Inc()
