@@ -187,6 +187,10 @@ func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
+<<<<<<< HEAD
+=======
+	grt *groupRUTracker, sl *serviceLimiter,
+>>>>>>> ff5f804f27 (feat(resourcemanager): refactor token bucket slot allocation (#9746))
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
@@ -194,6 +198,14 @@ func (rg *ResourceGroup) RequestRU(
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
+<<<<<<< HEAD
+=======
+	// Inject the group RU tracker into the resource group.
+	if rg.RUSettings.RU.grt == nil {
+		rg.RUSettings.RU.grt = grt
+	}
+	// First, try to get tokens from the resource group.
+>>>>>>> ff5f804f27 (feat(resourcemanager): refactor token bucket slot allocation (#9746))
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
 	if tb == nil {
 		return nil
