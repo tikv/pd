@@ -56,7 +56,7 @@ func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf c
 		cluster:          cluster,
 		affinityManager:  cluster.GetAffinityManager(),
 		conf:             conf,
-		recentMergeCache: cache.NewIDTTL(ctx, recentMergeTTL, recentMergeTTL),
+		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
 		startTime:        time.Now(),
 	}
 }
