@@ -76,18 +76,15 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		c.tlsCfg, c.option)
 
 	// Check if the router service client has been enabled.
-	if c.option.GetEnableRouterServiceHandler() {
-		c.enableRouterServiceClient()
-	}
+	c.enableRouterServiceClient()
 
 	// Check if the router client has been enabled.
 	if c.option.GetEnableRouterClient() {
 		c.enableRouterClient()
 	}
 
-	c.wg.Add(2)
+	c.wg.Add(1)
 	go c.routerClientInitializer()
-	go c.routerServiceClientInitializer()
 
 	return nil
 }
@@ -145,31 +142,6 @@ func (c *innerClient) disableRouterClient() {
 	c.Unlock()
 	// Close the router client after the lock is released.
 	routerClient.Close()
-}
-
-func (c *innerClient) routerServiceClientInitializer() {
-	log.Info("[pd] start router service client initializer")
-	defer c.wg.Done()
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("[pd] exit router service client initializer")
-			return
-		case <-c.option.EnableRouterServiceHandleCh:
-			if c.option.GetEnableRouterServiceHandler() {
-				log.Info("[pd] notified to enable the router service client")
-				c.enableRouterServiceClient()
-			} else {
-				log.Info("[pd] notified to disable the router service client")
-				c.disableRouterServiceClient()
-			}
-		}
-	}
-}
-
-func (c *innerClient) disableRouterServiceClient() {
-	// Close the router client after the lock is released.
-	c.routerSvcDiscovery.Close()
 }
 
 func (c *innerClient) enableRouterServiceClient() {
@@ -319,18 +291,23 @@ func (c *innerClient) setup() error {
 // getServiceClient returns the service client according to the options.
 // It returns the service client, the context built for gRPC target, and a boolean indicating whether it's a router service client.
 // when can't get the client from the router service or follower, it will rollback to the leader client.
-func (c *innerClient) getServiceClient(ctx context.Context, options *opt.GetRegionOp) (sd.ServiceClient, context.Context, bool) {
+func (c *innerClient) getServiceClient(ctx context.Context, regionOp *opt.GetRegionOp, storeOp ...*opt.GetStoreOp) (sd.ServiceClient, context.Context, bool) {
 	var (
 		serviceClient  sd.ServiceClient
 		mustLeader     bool
 		isRouterClient bool
 	)
+	allowRouterServiceHandle := regionOp.AllowRouterServiceHandle
+	if len(storeOp) > 0 {
+		allowRouterServiceHandle = allowRouterServiceHandle || storeOp[0].AllowRouterServiceHandle
+	}
+
 	switch {
-	case c.option.GetEnableRouterServiceHandler() && options.AllowRouterServiceHandle:
+	case allowRouterServiceHandle:
 		isRouterClient = true
 		serviceClient = c.routerSvcDiscovery.GetServiceClient()
 		mustLeader = false
-	case options.AllowFollowerHandle && c.option.GetEnableFollowerHandle():
+	case regionOp.AllowFollowerHandle && c.option.GetEnableFollowerHandle():
 		mustLeader = false
 		serviceClient = c.serviceDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
 	default:

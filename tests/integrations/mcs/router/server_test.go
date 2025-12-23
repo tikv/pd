@@ -142,11 +142,10 @@ func (suite *serverTestSuite) TestStoreAPI() {
 	defer cli.Close()
 
 	checkStore := func() {
-		// test router store apis
-		re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
+		storeOp := opt.WithAllowRouterServiceHandleStoreRequest()
 		// wait the router service watch the store info
 		testutil.Eventually(re, func() bool {
-			store, err := cli.GetStore(suite.ctx, store1)
+			store, err := cli.GetStore(suite.ctx, store1, storeOp)
 			if err != nil {
 				return false
 			}
@@ -160,19 +159,16 @@ func (suite *serverTestSuite) TestStoreAPI() {
 		for {
 			select {
 			case <-ctx.Done():
-				re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, false))
 				_, err = cli.GetStore(suite.ctx, store1)
 				re.Error(err)
 				return
 			default:
-				stores, err := cli.GetAllStores(suite.ctx)
+				stores, err := cli.GetAllStores(suite.ctx, storeOp)
 				re.NoError(err)
 				re.Len(stores, 2)
 			}
 		}
 	}
-	checkStore()
-	// enable router client and check store api again
 	checkStore()
 }
 
@@ -193,7 +189,6 @@ func (suite *serverTestSuite) TestRegionAPI() {
 	}()
 
 	// test region apis
-	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
 	suite.checkRegionAPI(cli)
 
 	// test region apis with router client enabled
