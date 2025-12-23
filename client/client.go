@@ -61,7 +61,7 @@ type RPCClient interface {
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
-	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
+	GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error)
 	// GetAllStores gets all stores from pd.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -476,12 +476,6 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
 		}
 		c.inner.option.SetEnableRouterClient(enable)
-	case opt.EnableRouterServiceHandler:
-		enable, ok := value.(bool)
-		if !ok {
-			return errors.New("[pd] invalid value type for EnableRouterServiceHandler option, it should be bool")
-		}
-		c.inner.option.SetEnableRouterServiceHandler(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -1018,7 +1012,7 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*router.Region {
 }
 
 // GetStore implements the RPCClient interface.
-func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
+func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1036,8 +1030,12 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		resp *pdpb.GetStoreResponse
 		err  error
 	)
+	option := &opt.GetStoreOp{}
+	for _, opt := range opts {
+		opt(option)
+	}
 
-	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{AllowRouterServiceHandle: true})
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
@@ -1067,12 +1065,6 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 
 // GetAllStores implements the RPCClient interface.
 func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) ([]*metapb.Store, error) {
-	// Applies options
-	options := &opt.GetStoreOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1083,15 +1075,20 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.GetAllStoresRequest{
-		Header:                 c.requestHeader(),
-		ExcludeTombstoneStores: options.ExcludeTombstone,
+		Header: c.requestHeader(),
+	}
+
+	// Applies option
+	option := &opt.GetStoreOp{}
+	for _, opt := range opts {
+		opt(option)
 	}
 
 	var (
 		resp *pdpb.GetAllStoresResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{AllowRouterServiceHandle: true})
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
 
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient

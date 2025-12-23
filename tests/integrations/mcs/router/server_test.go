@@ -98,7 +98,9 @@ func (suite *serverTestSuite) SetupSuite() {
 }
 
 func (suite *serverTestSuite) TearDownSuite() {
-	suite.routerCleanup()
+	if suite.routerCleanup != nil {
+		suite.routerCleanup()
+	}
 	suite.tsoCleanup()
 	suite.cluster.Destroy()
 	suite.routerServer.Close()
@@ -118,7 +120,9 @@ func (suite *serverTestSuite) SetupTest() {
 }
 
 func (suite *serverTestSuite) TearDownTest() {
-	suite.routerCleanup()
+	if suite.routerCleanup != nil {
+		suite.routerCleanup()
+	}
 	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop"))
 	testutil.Eventually(suite.Require(), func() bool {
 		return !suite.routerServer.IsReady()
@@ -141,39 +145,60 @@ func (suite *serverTestSuite) TestStoreAPI() {
 	re.Error(err)
 	defer cli.Close()
 
-	checkStore := func() {
-		// test router store apis
-		re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
-		// wait the router service watch the store info
-		testutil.Eventually(re, func() bool {
-			store, err := cli.GetStore(suite.ctx, store1)
-			if err != nil {
-				return false
-			}
-			re.Equal(store1, store.GetId())
-			return true
-		})
-		ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
-		defer func() {
-			cancel()
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, false))
-				_, err = cli.GetStore(suite.ctx, store1)
-				re.Error(err)
-				return
-			default:
-				stores, err := cli.GetAllStores(suite.ctx)
-				re.NoError(err)
-				re.Len(stores, 2)
-			}
+	storeOp := opt.WithAllowRouterServiceHandleStoreRequest()
+	// wait the router service watch the store info
+	testutil.Eventually(re, func() bool {
+		store, err := cli.GetStore(suite.ctx, store1, storeOp)
+		if err != nil {
+			return false
+		}
+		re.Equal(store1, store.GetId())
+		return true
+	})
+	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
+	defer func() {
+		cancel()
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			_, err = cli.GetStore(suite.ctx, store1)
+			re.Error(err)
+			return
+		default:
+			stores, err := cli.GetAllStores(suite.ctx, storeOp)
+			re.NoError(err)
+			re.Len(stores, 2)
 		}
 	}
-	checkStore()
-	// enable router client and check store api again
-	checkStore()
+}
+
+func (suite *serverTestSuite) TestRouterServiceDown() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/customTimeout"))
+	}()
+	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
+		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableFollowerHandle(true))
+	var r1 *router.Region
+	regionID := uint64(1)
+	testutil.Eventually(re, func() bool {
+		r1, err = cli.GetRegionByID(suite.ctx, regionID, opt.WithAllowRouterServiceHandle())
+		if err != nil {
+			return false
+		}
+		re.Equal(regionID, r1.Meta.Id)
+		return true
+	})
+	suite.routerCleanup()
+	testutil.Eventually(suite.Require(), func() bool {
+		return !suite.routerServer.IsReady()
+	})
+	suite.routerCleanup = nil
+
+	_, err = cli.GetRegionByID(suite.ctx, regionID)
+	re.Error(err)
 }
 
 func (suite *serverTestSuite) TestRegionAPI() {
@@ -193,7 +218,6 @@ func (suite *serverTestSuite) TestRegionAPI() {
 	}()
 
 	// test region apis
-	re.NoError(cli.UpdateOption(opt.EnableRouterServiceHandler, true))
 	suite.checkRegionAPI(cli)
 
 	// test region apis with router client enabled
@@ -205,12 +229,12 @@ func (suite *serverTestSuite) checkRegionAPI(cli pd.Client) {
 	re := suite.Require()
 
 	// get region by id
-	allowEnableRouterOpt := opt.WithAllowRouterServiceHandle()
+	allowEnableRouterServiceOpt := opt.WithAllowRouterServiceHandle()
 	regionID := uint64(1)
 	var r1 *router.Region
 	var err error
 	testutil.Eventually(re, func() bool {
-		r1, err = cli.GetRegionByID(suite.ctx, regionID, allowEnableRouterOpt)
+		r1, err = cli.GetRegionByID(suite.ctx, regionID, allowEnableRouterServiceOpt)
 		if err != nil {
 			return false
 		}
@@ -219,16 +243,16 @@ func (suite *serverTestSuite) checkRegionAPI(cli pd.Client) {
 	})
 
 	// get region by key
-	r2, err := cli.GetRegion(suite.ctx, r1.Meta.GetStartKey(), allowEnableRouterOpt)
+	r2, err := cli.GetRegion(suite.ctx, r1.Meta.GetStartKey(), allowEnableRouterServiceOpt)
 	re.NoError(err)
 	re.Equal(regionID, r2.Meta.Id)
 
 	// get prev region by key
-	r3, err := cli.GetPrevRegion(suite.ctx, r1.Meta.GetEndKey(), allowEnableRouterOpt)
+	r3, err := cli.GetPrevRegion(suite.ctx, r1.Meta.GetEndKey(), allowEnableRouterServiceOpt)
 	re.NoError(err)
 	re.Equal(regionID, r3.Meta.Id)
 	// batch scan regions
-	regionsResp, err := cli.BatchScanRegions(suite.ctx, []router.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 0, allowEnableRouterOpt)
+	regionsResp, err := cli.BatchScanRegions(suite.ctx, []router.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 0, allowEnableRouterServiceOpt)
 	re.NoError(err)
 	re.GreaterOrEqual(len(regionsResp), 10)
 }
@@ -294,5 +318,4 @@ func (suite *serverTestSuite) TestBasicSync() {
 	}
 	re.NoError(resp.Body.Close())
 	re.NotEmpty(grpcMetrics)
-
 }
