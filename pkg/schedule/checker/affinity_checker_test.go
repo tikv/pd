@@ -2471,7 +2471,7 @@ func TestAffinityMergeCheckWithOperatorController(t *testing.T) {
 
 	// Phase 2: Manually invoke the callback to simulate first merge completion (region1+region2)
 	for _, op := range ops1 {
-		affinityChecker.RecordMergeOpSuccess(op)
+		affinityChecker.RecordOpSuccess(op)
 	}
 	re.True(affinityChecker.recentMergeCache.Exists(region1.GetID()),
 		"Region1 should be cached after callback")

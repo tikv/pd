@@ -466,12 +466,12 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 	return region.Clone(options...)
 }
 
-// RecordMergeOpSuccess is called when an operator completes successfully.
+// RecordOpSuccess is called when an operator completes successfully.
 // It caches merged regions to prevent immediate re-merging.
 //
 // Merge completes quickly (e.g., 21ms) but TiKV needs time to update approximate_size via split-check.
 // During this gap, PD may use stale size data to schedule more merges. This 1-minute cache prevents that.
-func (c *AffinityChecker) RecordMergeOpSuccess(op *operator.Operator) {
+func (c *AffinityChecker) RecordOpSuccess(op *operator.Operator) {
 	// if schedule limit is 0, disable schedule, so we don't need to cache it.
 	if c.conf.GetAffinityScheduleLimit() == 0 {
 		return
