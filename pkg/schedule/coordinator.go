@@ -90,7 +90,9 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	// Set the callbacks for operator success
 	opController.SetSuccessCallbacks(
 		func(op *operator.Operator) {
-			checkers.GetAffinityChecker().RecordMergeOpSuccess(op)
+			if checker := checkers.GetAffinityChecker(); checker != nil {
+				checker.RecordMergeOpSuccess(op)
+			}
 		},
 	)
 
