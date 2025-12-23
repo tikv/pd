@@ -473,6 +473,10 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 // Merge completes quickly (e.g., 21ms) but TiKV needs time to update approximate_size via split-check.
 // During this gap, PD may use stale size data to schedule more merges. This 1-minute cache prevents that.
 func (c *AffinityChecker) RecordMergeOpComplete(op *operator.Operator) {
+	// if schedule limit is 0, disable schedule, so we don't need to cache it.
+	if c.conf.GetAffinityScheduleLimit() == 0 {
+		return
+	}
 	// Process both merge and affinity merge operators
 	if !op.HasRelatedMergeRegion() {
 		return
