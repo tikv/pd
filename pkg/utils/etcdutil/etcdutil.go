@@ -250,6 +250,7 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 		DialTimeout:          defaultEtcdClientTimeout,
 		TLS:                  tlsConfig,
 		LogConfig:            &lgc,
+		DialOptions:          grpcutil.ClientMetricsDialOptions(),
 		DialKeepAliveTime:    defaultDialKeepAliveTime,
 		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
 	})

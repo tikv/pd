@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -106,6 +107,7 @@ func NewTSOServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
 	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
+	cmd.Flags().Bool("enable-grpc-client-metrics", false, "enable grpc_client_* metrics for outgoing gRPC/etcd requests")
 	return cmd
 }
 
@@ -127,6 +129,7 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
 	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
+	cmd.Flags().Bool("enable-grpc-client-metrics", false, "enable grpc_client_* metrics for outgoing gRPC/etcd requests")
 	return cmd
 }
 
@@ -148,6 +151,7 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
 	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
+	cmd.Flags().Bool("enable-grpc-client-metrics", false, "enable grpc_client_* metrics for outgoing gRPC/etcd requests")
 	return cmd
 }
 
@@ -181,6 +185,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
 	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
+	cmd.Flags().Bool("enable-grpc-client-metrics", false, "enable grpc_client_* metrics for outgoing gRPC/etcd requests")
 }
 
 func createAPIServerWrapper(cmd *cobra.Command, args []string) {
@@ -237,6 +242,9 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
 		log.Fatal("initialize logger error", errs.ZapError(err))
+	}
+	if enableClientMetrics, e := flagSet.GetBool("enable-grpc-client-metrics"); e == nil && enableClientMetrics {
+		grpcutil.EnableGRPCClientMetrics()
 	}
 	// Flushing any buffered log entries
 	defer log.Sync()
