@@ -402,9 +402,9 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 			if group == nil {
 				return false
 			}
-			// we need to call ObserveAvailableRegion and GetRegionAffinityGroupState to update the group
+			// we need to call ObserveAvailableRegion and GetAndCacheRegionAffinityGroupState to update the group
 			manager.ObserveAvailableRegion(region, group)
-			state, _ = manager.GetRegionAffinityGroupState(region)
+			state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
 			return state != nil && state.Phase == affinity.PhaseStable
 		})
 		re.Equal(region.GetLeader().GetStoreId(), state.LeaderStoreID)
@@ -527,7 +527,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Duplicate creation should fail.
 		statusCode, _ = doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
+		re.Equal(http.StatusConflict, statusCode)
 
 		// Get non-existent group.
 		statusCode, _ = doGetAffinityGroup(re, serverAddr, "nope")
@@ -599,7 +599,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 
 		// Try to create the same group again, should get clear error message.
 		statusCode, errorMsg := doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
+		re.Equal(http.StatusConflict, statusCode)
 
 		// Verify error message is not empty and contains useful information.
 		re.NotEmpty(errorMsg, "Error message should not be empty")

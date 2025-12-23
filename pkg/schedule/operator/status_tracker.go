@@ -16,8 +16,14 @@ package operator
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -174,5 +180,30 @@ func (o *Operator) LogAdditionalInfo() string {
 // All merge operators (OpMerge and OpAffinity) have this info set.
 func (o *Operator) HasRelatedMergeRegion() bool {
 	val, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
+	if o == nil {
+		return false
+	}
 	return exist && val != ""
+}
+
+// GetRelatedMergeRegion returns the related merge region ID.
+func (o *Operator) GetRelatedMergeRegion() uint64 {
+	if !o.HasRelatedMergeRegion() {
+		return 0
+	}
+	str, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
+	if !exist {
+		log.Debug("not found related merge region ID")
+		return 0
+	}
+	relatedID, err := strconv.ParseUint(str, 10, 64)
+	if err != nil {
+		log.Warn("invalid related merge region ID",
+			zap.Uint64("region-id", o.RegionID()),
+			zap.String("operator", o.String()),
+			zap.String("related-merge-region", str),
+			errs.ZapError(err))
+		return 0
+	}
+	return relatedID
 }
