@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,8 +45,10 @@ import (
 const regionScatterName = "region-scatter"
 
 var (
-	gcInterval = time.Minute
-	gcTTL      = time.Minute * 3
+	gcInterval            = time.Minute
+	gcTTL                 = time.Minute * 3
+	operatorPriorityLevel = constant.High
+
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	scatterSkipEmptyRegionCounter   = scatterCounter.WithLabelValues("skip", "empty-region")
 	scatterSkipNoRegionCounter      = scatterCounter.WithLabelValues("skip", "no-region")
@@ -56,12 +59,15 @@ var (
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
+	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
 )
 
 const (
 	maxSleepDuration     = time.Minute
 	initialSleepDuration = 100 * time.Millisecond
 	maxRetryLimit        = 30
+	scatterOperatorDesc  = "scatter-region"
 )
 
 type selectedStores struct {
@@ -156,7 +162,7 @@ type engineContext struct {
 
 func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineContext {
 	filterFuncs = append(filterFuncs, func() filter.Filter {
-		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true, OperatorLevel: constant.High}
+		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true, OperatorLevel: operatorPriorityLevel}
 	})
 	return engineContext{
 		filterFuncs:    filterFuncs,
@@ -287,6 +293,28 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 
+	// Check if there is any existing operator for the region.
+	// if the exist operator level is higher than scatter operator level, give up to create new scatter operator new.
+	// otherwise, create new scatter operator to replace the existing one.
+	if op := r.opController.GetOperator(region.GetID()); op != nil && op.GetPriorityLevel() >= operatorPriorityLevel {
+		val, exist := op.GetAdditionalInfo("group")
+		// If the existing operator is created by the same group scatterer, just skip creating a new one.
+		if strings.Contains(op.Desc(), scatterOperatorDesc) && exist && val == group {
+			scatterOperatorRunningCounter.Inc()
+			log.Debug("scatter operator is already running",
+				zap.Uint64("region-id", region.GetID()))
+			return nil, nil
+		}
+		scatterOperatorExistedCounter.Inc()
+		log.Debug("the operator exist, but it does not meet requirement",
+			zap.Uint64("region-id", region.GetID()),
+			zap.String("additional-info-group", val),
+			zap.String("operator-des", op.Desc()),
+			zap.Bool("group-exist", exist),
+		)
+		return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
+	}
+
 	if region.GetLeader() == nil {
 		scatterSkipNoLeaderCounter.Inc()
 		log.Warn("region no leader during scatter", zap.Uint64("region-id", region.GetID()))
@@ -405,7 +433,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		return nil, nil
 	}
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
+	op, err := operator.CreateScatterRegionOperator(scatterOperatorDesc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		for _, peer := range region.GetPeers() {
@@ -420,7 +448,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		op.SetAdditionalInfo("group", group)
 		op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
-		op.SetPriorityLevel(constant.High)
+		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
 }
