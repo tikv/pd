@@ -16,12 +16,15 @@ package checker
 
 import (
 	"bytes"
+	"context"
 	"slices"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -34,21 +37,27 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
+const recentMergeTTL = time.Minute
+
 // AffinityChecker groups regions with affinity labels together by affinity group.
 // It ensures regions adhere to affinity group constraints by creating operators.
 type AffinityChecker struct {
 	PauseController
-	cluster         sche.CheckerCluster
-	affinityManager *affinity.Manager
-	conf            config.CheckerConfigProvider
+	cluster          sche.CheckerCluster
+	affinityManager  *affinity.Manager
+	conf             config.CheckerConfigProvider
+	recentMergeCache *cache.TTLUint64
+	startTime        time.Time
 }
 
 // NewAffinityChecker create an affinity checker.
-func NewAffinityChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
+func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
 	return &AffinityChecker{
-		cluster:         cluster,
-		affinityManager: cluster.GetAffinityManager(),
-		conf:            conf,
+		cluster:          cluster,
+		affinityManager:  cluster.GetAffinityManager(),
+		conf:             conf,
+		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
+		startTime:        time.Now(),
 	}
 }
 
@@ -247,10 +256,25 @@ func (c *AffinityChecker) createAffinityOperator(region *core.RegionInfo, group 
 
 // mergeCheck verifies if a region can be merged with its adjacent regions within the same affinity group.
 // It follows similar logic to merge_checker but with affinity-specific constraints:
-// - Does NOT skip recently split or recently started regions
+// - Does NOT skip recently split regions
 // - Does NOT skip hot spots regions
 // - Only merges regions within the same affinity group
+// - Skips regions that are recently merged
 func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.GroupState) []*operator.Operator {
+	// Skip merge during startup TTL period (1 minute after leader switch)
+	// After a leader switch, wait for recentMergeTTL before processing affinity merge
+	// to reduce issues caused by cache invalidation after transfer leader
+	if time.Since(c.startTime) < recentMergeTTL {
+		affinityMergeCheckerSkipStartupCounter.Inc()
+		return nil
+	}
+
+	// Check if region is in cache
+	if c.recentMergeCache.Exists(region.GetID()) {
+		affinityMergeCheckerSkipCachedCounter.Inc()
+		return nil
+	}
+
 	maxAffinityMergeRegionSize := c.conf.GetMaxAffinityMergeRegionSize()
 
 	if maxAffinityMergeRegionSize == 0 {
@@ -287,6 +311,12 @@ func (c *AffinityChecker) mergeCheck(region *core.RegionInfo, group *affinity.Gr
 
 	if target == nil {
 		affinityMergeCheckerNoTargetCounter.Inc()
+		return nil
+	}
+
+	// Check if target region is in cache
+	if c.recentMergeCache.Exists(target.GetID()) {
+		affinityMergeCheckerSkipCachedCounter.Inc()
 		return nil
 	}
 
@@ -436,4 +466,26 @@ func cloneRegionWithReplacePeerStores(region *core.RegionInfo, leaderStoreID uin
 	options = append(options, core.WithReplaceLeaderStore(leaderStoreID))
 
 	return region.Clone(options...)
+}
+
+// RecordOpSuccess is called when an operator completes successfully.
+// It caches merged regions to prevent immediate re-merging.
+//
+// Merge completes quickly (e.g., 21ms) but TiKV needs time to update approximate_size via split-check.
+// During this gap, PD may use stale size data to schedule more merges. This 1-minute cache prevents that.
+func (c *AffinityChecker) RecordOpSuccess(op *operator.Operator) {
+	// if schedule limit is 0, disable schedule, so we don't need to cache it.
+	if c.conf.GetAffinityScheduleLimit() == 0 {
+		return
+	}
+	// Process both merge and affinity merge operators
+	if !op.HasRelatedMergeRegion() {
+		return
+	}
+	relatedID := op.GetRelatedMergeRegion()
+	if relatedID == 0 {
+		return
+	}
+	c.recentMergeCache.PutWithTTL(op.RegionID(), nil, recentMergeTTL)
+	c.recentMergeCache.PutWithTTL(relatedID, nil, recentMergeTTL)
 }

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -94,6 +93,10 @@ type Controller struct {
 	// safe for concurrent.
 	opNotifierQueue *concurrentHeapOpQueue
 
+	// successCallbacks are called when an operator completes successfully.
+	// Set during initialization, read-only afterwards (no lock needed).
+	successCallbacks []func(op *Operator)
+
 	// states
 	records   *records // safe for concurrent
 	wop       WaitingOperator
@@ -110,12 +113,20 @@ func NewController(ctx context.Context, cluster *core.BasicCluster, config confi
 		hbStreams:       hbStreams,
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		opNotifierQueue: newConcurrentHeapOpQueue(),
+
+		successCallbacks: nil, // Will be set by coordinator
 		// states
 		records:   newRecords(ctx),
 		wop:       newRandBuckets(),
 		wopStatus: newWaitingOperatorStatus(),
 		counts:    &opCounter{count: make(map[OpKind]uint64)},
 	}
+}
+
+// SetSuccessCallbacks sets callbacks for operator success.
+// Must be called before the controller starts running.
+func (oc *Controller) SetSuccessCallbacks(callbacks ...func(op *Operator)) {
+	oc.successCallbacks = callbacks
 }
 
 // Ctx returns a context which will be canceled once RaftCluster is stopped.
@@ -155,6 +166,11 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
+			}
+			for _, callback := range oc.successCallbacks {
+				if callback != nil {
+					callback(op)
+				}
 			}
 			if oc.RemoveOperator(op) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
@@ -668,7 +684,10 @@ func (oc *Controller) removeOperatorInner(op *Operator) bool {
 }
 
 func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
-	relatedID, _ := strconv.ParseUint(op.GetAdditionalInfo(string(RelatedMergeRegion)), 10, 64)
+	relatedID := op.GetRelatedMergeRegion()
+	if relatedID == 0 {
+		return
+	}
 	relatedOpi, ok := oc.operators.Load(relatedID)
 	if !ok {
 		return
