@@ -771,10 +771,6 @@ func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 	return nil
 }
 
-// func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
-// 	return c.processRequestsInner(stream.Send, stream.Recv)
-// }
-
 func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	var (
 		requests     = c.batchController.GetCollectedRequests()
