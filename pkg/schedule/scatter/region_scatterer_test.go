@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -681,7 +682,9 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 		if op != nil {
-			re.Equal(group, op.GetAdditionalInfo("group"))
+			val, exist := op.GetAdditionalInfo("group")
+			re.True(exist)
+			re.Equal(group, val)
 		}
 	}
 }
@@ -838,6 +841,31 @@ func TestRemoveStoreLimit(t *testing.T) {
 			re.True(oc.AddOperator(op))
 		}
 	}
+
+	// same scatter operator should be skipped
+	region := tc.GetRegion(2)
+	op, err := scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.Nil(op)
+
+	// different scatter operator should be added
+	region = tc.GetRegion(3)
+	op, err = scatterer.Scatter(region, "test", true)
+	re.Error(err)
+	re.Nil(op)
+
+	// exist lower operator
+	regionID := uint64(5)
+	op = oc.GetOperator(regionID)
+	re.NotNil(op)
+	re.True(oc.RemoveOperator(op))
+	region = tc.GetRegion(regionID)
+	op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
+	op.SetPriorityLevel(constant.Low)
+	re.True(oc.AddOperator(op))
+	op, err = scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.NotNil(op)
 }
 
 func TestScatterWithAffinity(t *testing.T) {
