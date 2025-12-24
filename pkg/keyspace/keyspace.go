@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -530,48 +531,12 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		return err
 	}
 
-	// Stat waiting for region split.
-	var splitKeys [][]byte
-	for _, regionRange := range keyspaceRule.Data.([]*labeler.KeyRangeRule) {
-		splitKeys = append(splitKeys, regionRange.StartKey, regionRange.EndKey)
-	}
-	tickerInterval := manager.config.GetCheckRegionSplitInterval()
-	ticker := time.NewTicker(tickerInterval)
-	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
-	defer func() {
-		ticker.Stop()
-		timer.Stop()
-	}()
-	for {
-		select {
-		case <-ticker.C:
-			// Reset ticker if it's interval has been changed.
-			newInterval := manager.config.GetCheckRegionSplitInterval()
-			if tickerInterval != newInterval {
-				tickerInterval = newInterval
-				ticker.Reset(newInterval)
-			}
-			regionsInfo := manager.cluster.GetBasicCluster().RegionsInfo
-			totalSplit := 0 // number of split keys that have been split.
-			for _, splitKey := range splitKeys {
-				region := regionsInfo.GetRegionByKey(splitKey)
-				if region != nil && bytes.Equal(region.GetStartKey(), splitKey) {
-					totalSplit++
-				}
-			}
-			if totalSplit == len(splitKeys) {
-				log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
-				return
-			}
-		case <-timer.C:
-			log.Warn("[keyspace] wait region split timeout",
-				zap.Uint32("keyspace-id", id),
-				zap.Error(err),
-			)
-			err = ErrRegionSplitTimeout
-			return
-		}
-	}
+	log.Info("[keyspace] added region label for keyspace",
+		zap.Uint32("keyspace-id", id),
+		logutil.ZapRedactString("label-rule", keyspaceRule.String()),
+		zap.Duration("takes", time.Since(start)),
+	)
+	return
 }
 
 func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
