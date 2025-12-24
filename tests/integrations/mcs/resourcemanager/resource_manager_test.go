@@ -39,7 +39,6 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -64,33 +63,18 @@ type resourceManagerClientTestSuite struct {
 	clean      context.CancelFunc
 	cluster    *tests.TestCluster
 	client     pd.Client
-	clientOpts []opt.ClientOption
 	initGroups []*rmpb.ResourceGroup
 
 	mode      resourceManagerDeployMode
 	rmCleanup func()
 }
 
-func (suite *resourceManagerClientTestSuite) setupPDClient(re *require.Assertions, opts ...opt.ClientOption) pd.Client {
-	allOpts := make([]opt.ClientOption, 0, len(suite.clientOpts)+len(opts))
-	allOpts = append(allOpts, suite.clientOpts...)
-	allOpts = append(allOpts, opts...)
+func (suite *resourceManagerClientTestSuite) setupPDClient(re *require.Assertions) pd.Client {
 	cli, err := pd.NewClientWithContext(suite.ctx,
 		caller.TestComponent,
-		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{}, allOpts...)
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	return cli
-}
-
-func (suite *resourceManagerClientTestSuite) setupClientWithKeyspaceID(
-	ctx context.Context, re *require.Assertions,
-	keyspaceID uint32, endpoints []string,
-	opts ...opt.ClientOption,
-) pd.Client {
-	allOpts := make([]opt.ClientOption, 0, len(suite.clientOpts)+len(opts))
-	allOpts = append(allOpts, suite.clientOpts...)
-	allOpts = append(allOpts, opts...)
-	return utils.SetupClientWithKeyspaceID(ctx, re, keyspaceID, endpoints, allOpts...)
 }
 
 type resourceManagerDeployMode int
@@ -1698,7 +1682,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re := suite.Require()
 	cli := suite.client
 	keyspaceID := uint32(1)
-	clientKeyspace := suite.setupClientWithKeyspaceID(
+	clientKeyspace := utils.SetupClientWithKeyspaceID(
 		suite.ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs())
 	defer clientKeyspace.Close()
 
@@ -1839,7 +1823,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		keyspaceName := fmt.Sprintf("keyspace%d_test", keyspaceID)
 		groupName := fmt.Sprintf("rg_multi_%d", keyspaceID)
 		// Create a specific client for this keyspace
-		client := suite.setupClientWithKeyspaceID(ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs())
+		client := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs())
 		clients[i] = client
 		// Create and save keyspace metadata
 		keyspaceMeta := &keyspacepb.KeyspaceMeta{Id: keyspaceID, Name: keyspaceName}
@@ -1937,7 +1921,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 			clients[keyspace] = suite.client
 			continue
 		}
-		cli := suite.setupClientWithKeyspaceID(
+		cli := utils.SetupClientWithKeyspaceID(
 			suite.ctx, re, keyspace, suite.cluster.GetConfig().GetClientURLs())
 		clients[keyspace] = cli
 	}
@@ -2049,7 +2033,7 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 	re.NoError(err)
 
 	// Create clients for keyspaceA
-	clientA := suite.setupClientWithKeyspaceID(ctx, re, keyspaceA, suite.cluster.GetConfig().GetClientURLs())
+	clientA := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceA, suite.cluster.GetConfig().GetClientURLs())
 	defer clientA.Close()
 
 	// Add a resource group in Keyspace A and check
