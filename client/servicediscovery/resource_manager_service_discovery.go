@@ -39,7 +39,6 @@ const (
 	// resourceManagerSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/primary".
 	resourceManagerSvcDiscoveryFormat = "/ms/%d/" + resourceManagerServiceName + "/primary"
-	serviceURLWatchRetryInterval      = 3 * time.Second
 )
 
 // ResourceManagerDiscovery is used to discover the resource manager service.

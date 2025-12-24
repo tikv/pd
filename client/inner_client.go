@@ -142,31 +142,15 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
 
+	if c.option.UseTSOServerProxy {
+		// If we are using TSO server proxy, we always use PD_SVC_MODE.
+		newMode = pdpb.ServiceMode_PD_SVC_MODE
+	}
 	if newMode == c.serviceMode {
 		return
 	}
-
-	switch newMode {
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
-		log.Warn("[pd] intend to switch to unknown service mode, use PD_SVC_MODE")
-		fallthrough
-	case pdpb.ServiceMode_PD_SVC_MODE:
-		if c.tsoSvcDiscovery != nil || c.tsoClient == nil {
-			c.resetTSOClientLocked(newMode)
-		}
-		if c.resourceManagerDiscovery != nil {
-			c.resetResourceManagerDiscoveryLocked(newMode)
-		}
-	case pdpb.ServiceMode_API_SVC_MODE:
-		// If we are using TSO server proxy, we always use PD_SVC_MODE.
-		if c.tsoSvcDiscovery == nil && !c.option.UseTSOServerProxy {
-			c.resetTSOClientLocked(newMode)
-		}
-		if c.resourceManagerDiscovery == nil {
-			c.resetResourceManagerDiscoveryLocked(newMode)
-		}
-	}
-
+	c.resetTSOClientLocked(newMode)
+	c.resetResourceManagerDiscoveryLocked(newMode)
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed", zap.String("new-mode", newMode.String()))
 }

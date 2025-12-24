@@ -81,6 +81,7 @@ func WithRUStats(op *GetResourceGroupOp) {
 // resourceManagerClient gets the ResourceManager client of current PD leader.
 func (c *innerClient) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
 	if ds := c.getResourceManagerDiscovery(); ds != nil {
+		// If the discovery has not established the connection, using PD server connection.
 		if cc := ds.GetConn(); cc != nil {
 			return rmpb.NewResourceManagerClient(cc), nil
 		}
