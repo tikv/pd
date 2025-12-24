@@ -366,18 +366,18 @@ func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges based on raw flag
-	var ranges []interface{}
+	var ranges []any
 	bound := keyspace.MakeRegionBound(uint32(id))
 	if raw {
-		ranges = []interface{}{
-			map[string]interface{}{
+		ranges = []any{
+			map[string]any{
 				"start_key": hex.EncodeToString(bound.RawLeftBound),
 				"end_key":   hex.EncodeToString(bound.RawRightBound),
 			},
 		}
 	} else {
-		ranges = []interface{}{
-			map[string]interface{}{
+		ranges = []any{
+			map[string]any{
 				"start_key": hex.EncodeToString(bound.TxnLeftBound),
 				"end_key":   hex.EncodeToString(bound.TxnRightBound),
 			},
@@ -421,18 +421,18 @@ func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges based on raw flag
-	var ranges []interface{}
+	var ranges []any
 	bound := keyspace.MakeRegionBound(keyspaceMeta.Id)
 	if raw {
-		ranges = []interface{}{
-			map[string]interface{}{
+		ranges = []any{
+			map[string]any{
 				"start_key": hex.EncodeToString(bound.RawLeftBound),
 				"end_key":   hex.EncodeToString(bound.RawRightBound),
 			},
 		}
 	} else {
-		ranges = []interface{}{
-			map[string]interface{}{
+		ranges = []any{
+			map[string]any{
 				"start_key": hex.EncodeToString(bound.TxnLeftBound),
 				"end_key":   hex.EncodeToString(bound.TxnRightBound),
 			},
