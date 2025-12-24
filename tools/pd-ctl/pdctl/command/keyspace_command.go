@@ -16,14 +16,17 @@ package command
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server/apiv2/handlers"
 )
 
@@ -49,6 +52,7 @@ func NewKeyspaceCommand() *cobra.Command {
 	cmd.AddCommand(newUpdateKeyspaceConfigCommand())
 	cmd.AddCommand(newUpdateKeyspaceStateCommand())
 	cmd.AddCommand(newListKeyspaceCommand())
+	cmd.AddCommand(newShowKeyspaceRangeCommand())
 	return cmd
 }
 
@@ -316,4 +320,130 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(resp)
+}
+
+func newShowKeyspaceRangeCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "range",
+		Short: "show keyspace range information",
+	}
+	rangeByID := &cobra.Command{
+		Use:   "id <keyspace_id>",
+		Short: "show key ranges for the given keyspace id",
+		Run:   showKeyspaceRangeByIDCommandFunc,
+	}
+	rangeByID.Flags().Bool("raw", false, "show raw key range (default: txn key range)")
+
+	rangeByName := &cobra.Command{
+		Use:   "name <keyspace_name>",
+		Short: "show key ranges for the given keyspace name",
+		Run:   showKeyspaceRangeByNameCommandFunc,
+	}
+	rangeByName.Flags().Bool("raw", false, "show raw key range (default: txn key range)")
+
+	r.AddCommand(rangeByID)
+	r.AddCommand(rangeByName)
+	return r
+}
+
+func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+
+	keyspaceID := args[0]
+	id, err := strconv.ParseUint(keyspaceID, 10, 32)
+	if err != nil {
+		cmd.PrintErrln("keyspace id should be a valid number: ", err)
+		return
+	}
+
+	raw, err := cmd.Flags().GetBool("raw")
+	if err != nil {
+		cmd.PrintErrln("Failed to get raw flag: ", err)
+		return
+	}
+
+	// Generate key ranges based on raw flag
+	var ranges []interface{}
+	bound := keyspace.MakeRegionBound(uint32(id))
+	if raw {
+		ranges = []interface{}{
+			map[string]interface{}{
+				"start_key": hex.EncodeToString(bound.RawLeftBound),
+				"end_key":   hex.EncodeToString(bound.RawRightBound),
+			},
+		}
+	} else {
+		ranges = []interface{}{
+			map[string]interface{}{
+				"start_key": hex.EncodeToString(bound.TxnLeftBound),
+				"end_key":   hex.EncodeToString(bound.TxnRightBound),
+			},
+		}
+	}
+
+	output, err := json.MarshalIndent(ranges, "", "  ")
+	if err != nil {
+		cmd.PrintErrln("Failed to marshal key ranges: ", err)
+		return
+	}
+
+	cmd.Println(string(output))
+}
+
+func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+
+	keyspaceName := args[0]
+	// First, get the keyspace metadata to obtain the keyspace ID
+	resp, err := doRequest(cmd, fmt.Sprintf("%s/%s", keyspacePrefix, keyspaceName), http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.PrintErrln("Failed to get the keyspace: ", err)
+		return
+	}
+
+	// Parse the response to extract keyspace ID
+	var keyspaceMeta handlers.KeyspaceMeta
+	if err := json.Unmarshal([]byte(resp), &keyspaceMeta); err != nil {
+		cmd.PrintErrln("Failed to parse keyspace metadata: ", err)
+		return
+	}
+
+	raw, err := cmd.Flags().GetBool("raw")
+	if err != nil {
+		cmd.PrintErrln("Failed to get raw flag: ", err)
+		return
+	}
+
+	// Generate key ranges based on raw flag
+	var ranges []interface{}
+	bound := keyspace.MakeRegionBound(keyspaceMeta.Id)
+	if raw {
+		ranges = []interface{}{
+			map[string]interface{}{
+				"start_key": hex.EncodeToString(bound.RawLeftBound),
+				"end_key":   hex.EncodeToString(bound.RawRightBound),
+			},
+		}
+	} else {
+		ranges = []interface{}{
+			map[string]interface{}{
+				"start_key": hex.EncodeToString(bound.TxnLeftBound),
+				"end_key":   hex.EncodeToString(bound.TxnRightBound),
+			},
+		}
+	}
+
+	output, err := json.MarshalIndent(ranges, "", "  ")
+	if err != nil {
+		cmd.PrintErrln("Failed to marshal key ranges: ", err)
+		return
+	}
+
+	cmd.Println(string(output))
 }

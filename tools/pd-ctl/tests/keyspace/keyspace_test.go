@@ -16,6 +16,7 @@ package keyspace_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -310,4 +311,69 @@ func (suite *keyspaceTestSuite) mustCreateKeyspace(param api.CreateKeyspaceParam
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &meta))
 	return meta
+}
+
+func (suite *keyspaceTestSuite) TestShowKeyspaceRange() {
+	re := suite.Require()
+	// Use the default keyspace which always exists
+	keyspaceID := uint32(0)
+	keyspaceName := constant.DefaultKeyspaceName
+
+	// Test range by ID with default (txn) mode
+	args := []string{"-u", suite.pdAddr, "keyspace", "range", "id", strconv.Itoa(int(keyspaceID))}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	var ranges []map[string]string
+	re.NoError(json.Unmarshal(output, &ranges))
+	re.Len(ranges, 1)
+
+	// Verify txn key range
+	bound := keyspace.MakeRegionBound(keyspaceID)
+	expectedStartKey := hex.EncodeToString(bound.TxnLeftBound)
+	expectedEndKey := hex.EncodeToString(bound.TxnRightBound)
+	re.Equal(expectedStartKey, ranges[0]["start_key"])
+	re.Equal(expectedEndKey, ranges[0]["end_key"])
+
+	// Test range by ID with raw mode
+	args = []string{"-u", suite.pdAddr, "keyspace", "range", "id", strconv.Itoa(int(keyspaceID)), "--raw"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &ranges))
+	re.Len(ranges, 1)
+
+	// Verify raw key range
+	expectedStartKeyRaw := hex.EncodeToString(bound.RawLeftBound)
+	expectedEndKeyRaw := hex.EncodeToString(bound.RawRightBound)
+	re.Equal(expectedStartKeyRaw, ranges[0]["start_key"])
+	re.Equal(expectedEndKeyRaw, ranges[0]["end_key"])
+
+	// Test range by name with default (txn) mode
+	args = []string{"-u", suite.pdAddr, "keyspace", "range", "name", keyspaceName}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &ranges))
+	re.Len(ranges, 1)
+	re.Equal(expectedStartKey, ranges[0]["start_key"])
+	re.Equal(expectedEndKey, ranges[0]["end_key"])
+
+	// Test range by name with raw mode
+	args = []string{"-u", suite.pdAddr, "keyspace", "range", "name", keyspaceName, "--raw"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &ranges))
+	re.Len(ranges, 1)
+	re.Equal(expectedStartKeyRaw, ranges[0]["start_key"])
+	re.Equal(expectedEndKeyRaw, ranges[0]["end_key"])
+
+	// Test error case: invalid keyspace ID
+	args = []string{"-u", suite.pdAddr, "keyspace", "range", "id", "invalid_id"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "should be a valid number")
+
+	// Test error case: non-existent keyspace name
+	args = []string{"-u", suite.pdAddr, "keyspace", "range", "name", "non_existent_keyspace"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Fail")
 }
