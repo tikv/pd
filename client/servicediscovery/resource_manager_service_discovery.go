@@ -112,7 +112,7 @@ func (r *ResourceManagerDiscovery) Init() error {
 func (r *ResourceManagerDiscovery) resetConn(url string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.serviceURL == url {
+	if r.serviceURL == url || url == "" {
 		return
 	}
 	newConn, err := grpcutil.GetClientConn(r.ctx, url, r.tlsCfg, r.option.GRPCDialOptions...)
@@ -134,7 +134,7 @@ func (r *ResourceManagerDiscovery) GetConn() *grpc.ClientConn {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.conn == nil {
-		log.Error("[resource-manager] gRPC connection is not established yet",
+		log.Warn("[resource-manager] gRPC connection is not established yet",
 			zap.String("discovery-key", r.discoveryKey))
 		return nil
 	}
@@ -150,7 +150,7 @@ func (r *ResourceManagerDiscovery) discoverServiceURL() (string, int64, error) {
 		return "", 0, err
 	}
 	if resp == nil || len(resp.Kvs) == 0 {
-		log.Error("[resource-manager] no resource-manager serving endpoint found",
+		log.Warn("[resource-manager] no resource-manager serving endpoint found",
 			zap.String("discovery-key", r.discoveryKey))
 		return "", 0, errs.ErrClientGetServingEndpoint
 	} else if resp.Count > 1 {
@@ -172,7 +172,7 @@ func (r *ResourceManagerDiscovery) parseURLFromStorageValue(value []byte) (strin
 	}
 	listenUrls := primary.GetListenUrls()
 	if len(listenUrls) == 0 {
-		log.Error("[resource-manager] the keyspace serving endpoint list is empty",
+		log.Warn("[resource-manager] the keyspace serving endpoint list is empty",
 			zap.String("discovery-key", r.discoveryKey))
 		return "", errs.ErrClientGetServingEndpoint
 	}
@@ -200,7 +200,7 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
 			url, newRevision, err := r.discoverServiceURL()
 			if err != nil {
-				log.Error("[resource-manager] failed to discover service URL",
+				log.Warn("[resource-manager] failed to discover service URL",
 					zap.String("discovery-key", r.discoveryKey),
 					zap.Error(err))
 				continue

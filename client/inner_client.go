@@ -324,7 +324,7 @@ func (c *innerClient) gRPCErrorHandler(err error) {
 }
 
 func (c *innerClient) resourceManagerErrorHandler(err error) {
-	log.Error("[resource-manager] resource manager error", zap.Error(err))
+	log.Warn("[resource-manager] resource manager error", zap.Error(err))
 	if c.resourceManagerDiscovery != nil {
 		c.resourceManagerDiscovery.ScheduleUpateServiceURL()
 	}
