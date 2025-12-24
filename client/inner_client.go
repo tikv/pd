@@ -162,7 +162,7 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 		if c.tsoSvcDiscovery == nil && !c.option.UseTSOServerProxy {
 			c.resetTSOClientLocked(newMode)
 		}
-		if c.resourceManagerDiscovery == nil && !c.option.UseResourceManagerProxy {
+		if c.resourceManagerDiscovery == nil {
 			c.resetResourceManagerDiscoveryLocked(newMode)
 		}
 	}
@@ -221,7 +221,7 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 
 func (c *innerClient) resetResourceManagerDiscoveryLocked(newMode pdpb.ServiceMode) {
 	var newResourceManagerDiscovery *sd.ResourceManagerDiscovery
-	if newMode == pdpb.ServiceMode_API_SVC_MODE && !c.option.UseResourceManagerProxy {
+	if newMode == pdpb.ServiceMode_API_SVC_MODE {
 		newResourceManagerDiscovery = sd.NewResourceManagerDiscovery(
 			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
 		if err := newResourceManagerDiscovery.Init(); err != nil {
