@@ -254,7 +254,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 	}{
 		// Valid keyspace label rule.
 		{
-			labelRule:  MakeLabelRule(1),
+			labelRule:  makeLabelRule(1, false),
 			expectedID: 1,
 			expectedOK: true,
 		},
