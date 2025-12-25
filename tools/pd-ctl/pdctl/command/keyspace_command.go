@@ -327,20 +327,18 @@ func newShowKeyspaceRangeCommand() *cobra.Command {
 		Use:   "range",
 		Short: "show keyspace range information",
 	}
+	r.PersistentFlags().Bool("raw", false, "show raw key range (default: txn key range)")
 	rangeByID := &cobra.Command{
 		Use:   "id <keyspace_id>",
 		Short: "show key ranges for the given keyspace id",
 		Run:   showKeyspaceRangeByIDCommandFunc,
 	}
-	rangeByID.Flags().Bool("raw", false, "show raw key range (default: txn key range)")
 
 	rangeByName := &cobra.Command{
 		Use:   "name <keyspace_name>",
 		Short: "show key ranges for the given keyspace name",
 		Run:   showKeyspaceRangeByNameCommandFunc,
 	}
-	rangeByName.Flags().Bool("raw", false, "show raw key range (default: txn key range)")
-
 	r.AddCommand(rangeByID)
 	r.AddCommand(rangeByName)
 	return r
@@ -366,21 +364,17 @@ func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges based on raw flag
-	var ranges []any
+	var ranges map[string]string
 	bound := keyspace.MakeRegionBound(uint32(id))
 	if raw {
-		ranges = []any{
-			map[string]any{
-				"start_key": hex.EncodeToString(bound.RawLeftBound),
-				"end_key":   hex.EncodeToString(bound.RawRightBound),
-			},
+		ranges = map[string]string{
+			"start_key": hex.EncodeToString(bound.RawLeftBound),
+			"end_key":   hex.EncodeToString(bound.RawRightBound),
 		}
 	} else {
-		ranges = []any{
-			map[string]any{
-				"start_key": hex.EncodeToString(bound.TxnLeftBound),
-				"end_key":   hex.EncodeToString(bound.TxnRightBound),
-			},
+		ranges = map[string]string{
+			"start_key": hex.EncodeToString(bound.TxnLeftBound),
+			"end_key":   hex.EncodeToString(bound.TxnRightBound),
 		}
 	}
 
@@ -421,21 +415,17 @@ func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges based on raw flag
-	var ranges []any
+	var ranges map[string]string
 	bound := keyspace.MakeRegionBound(keyspaceMeta.Id)
 	if raw {
-		ranges = []any{
-			map[string]any{
-				"start_key": hex.EncodeToString(bound.RawLeftBound),
-				"end_key":   hex.EncodeToString(bound.RawRightBound),
-			},
+		ranges = map[string]string{
+			"start_key": hex.EncodeToString(bound.RawLeftBound),
+			"end_key":   hex.EncodeToString(bound.RawRightBound),
 		}
 	} else {
-		ranges = []any{
-			map[string]any{
-				"start_key": hex.EncodeToString(bound.TxnLeftBound),
-				"end_key":   hex.EncodeToString(bound.TxnRightBound),
-			},
+		ranges = map[string]string{
+			"start_key": hex.EncodeToString(bound.TxnLeftBound),
+			"end_key":   hex.EncodeToString(bound.TxnRightBound),
 		}
 	}
 
