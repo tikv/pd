@@ -88,12 +88,12 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	c.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	c.RegionLabeler = labeler.NewRegionLabeler(ctx, c.Storage)
 	if err := c.RegionLabeler.Initialize(time.Second * 5); err != nil {
-		log.Error("failed to initialize region labeler", errs.ZapError(err))
+		panic(err)
 	}
 
 	c.AffinityManager, _ = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig(), c.RegionLabeler)
 	if err := c.AffinityManager.Initialize(); err != nil {
-		log.Error("failed to initialize affinity manager", errs.ZapError(err))
+		panic(err)
 	}
 
 	return c
@@ -224,7 +224,7 @@ func (mc *Cluster) initRuleManager() {
 		mc.RuleManager = placement.NewRuleManager(mc.ctx, mc.GetStorage(), mc, mc.GetSharedConfig())
 		err := mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel, false)
 		if err != nil {
-			log.Info("failed to initialize rule manager", errs.ZapError(err))
+			panic(err)
 		}
 	}
 }
