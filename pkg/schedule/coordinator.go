@@ -28,12 +28,15 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
@@ -51,6 +54,8 @@ const (
 	maxLoadConfigRetries = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
+	// regionLabelGCInterval is the interval to run region-label's GC work.
+	regionLabelGCInterval = time.Hour
 
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
@@ -69,6 +74,10 @@ type Coordinator struct {
 	schedulersInitialized bool
 
 	cluster           sche.ClusterInformer
+	config            sc.CheckerConfigProvider
+	regionLabeler     *labeler.RegionLabeler
+	ruleManager       *placement.RuleManager
+	affinityManager   *affinity.Manager
 	prepareChecker    *prepareChecker
 	checkers          *checker.Controller
 	regionScatterer   *scatter.RegionScatterer
@@ -101,6 +110,10 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		cancel:                cancel,
 		schedulersInitialized: false,
 		cluster:               cluster,
+		config:                cluster.GetCheckerConfig(),
+		regionLabeler:         cluster.GetRegionLabeler(),
+		ruleManager:           cluster.GetRuleManager(),
+		affinityManager:       cluster.GetAffinityManager(),
 		prepareChecker:        newPrepareChecker(cluster.GetPrepareRegionCount),
 		checkers:              checkers,
 		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddPendingProcessedRegions),
@@ -217,7 +230,30 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 }
 
 // RunUntilStop runs the coordinator until receiving the stop signal.
-func (c *Coordinator) RunUntilStop() {
+func (c *Coordinator) RunUntilStop(skipLoadRules bool) {
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("coordinator initialization is stopped")
+			return
+		default:
+		}
+		err := c.ruleManager.Initialize(c.config.GetMaxReplicas(), c.config.GetLocationLabels(), c.config.GetIsolationLevel(), skipLoadRules)
+		if err != nil {
+			log.Error("rule manager initialize failed", errs.ZapError(err))
+			continue
+		}
+		if err := c.regionLabeler.Initialize(regionLabelGCInterval); err != nil {
+			log.Error("region labeler initialize failed", errs.ZapError(err))
+			continue
+		}
+		if err := c.affinityManager.Initialize(); err != nil {
+			log.Error("affinity manager initialize failed", errs.ZapError(err))
+			continue
+		}
+		break
+	}
+
 	c.Run()
 	<-c.ctx.Done()
 	log.Info("coordinator is stopping")

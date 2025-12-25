@@ -48,10 +48,13 @@ func TestGetRegionAffinityGroupState(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create affinity group with 6 key ranges for testing
@@ -155,10 +158,13 @@ func TestBasicGroupOperations(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create region labeler
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a group
@@ -187,9 +193,12 @@ func TestRegionCountStaleCache(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	ranges := createGroupForTest(re, manager, "g", 2)
@@ -256,9 +265,12 @@ func TestDeleteGroupClearsCache(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a group and add regions
@@ -321,9 +333,12 @@ func TestAvailabilityChangeRegionCount(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a group
@@ -381,9 +396,12 @@ func TestInvalidCacheMultipleTimes(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a group
@@ -445,9 +463,12 @@ func TestConcurrentOperations(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create initial groups
@@ -557,9 +578,12 @@ func TestDegradedExpiration(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a healthy group

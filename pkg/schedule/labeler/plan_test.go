@@ -31,7 +31,8 @@ func TestPlanSetLabelRule(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
+	labeler := NewRegionLabeler(ctx, store)
+	err := labeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 
 	plan := labeler.NewPlan()
@@ -77,7 +78,8 @@ func TestPlanDeleteLabelRule(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
+	labeler := NewRegionLabeler(ctx, store)
+	err := labeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 
 	plan := labeler.NewPlan()
@@ -100,7 +102,8 @@ func TestPlanCommitOps(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
+	labeler := NewRegionLabeler(ctx, store)
+	err := labeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 
 	plan := labeler.NewPlan()
@@ -142,7 +145,8 @@ func TestPlanApply(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
+	labeler := NewRegionLabeler(ctx, store)
+	err := labeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 
 	// First, add a rule to the labeler
@@ -208,7 +212,8 @@ func TestPlanApplyWithError(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
+	labeler := NewRegionLabeler(ctx, store)
+	err := labeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 
 	plan := labeler.NewPlan()
@@ -238,7 +243,8 @@ func TestPlanMultipleOperations(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
+	labeler := NewRegionLabeler(ctx, store)
+	err := labeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 
 	plan := labeler.NewPlan()
@@ -291,7 +297,8 @@ func TestPlanDeleteNonExistentRule(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
+	labeler := NewRegionLabeler(ctx, store)
+	err := labeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 
 	plan := labeler.NewPlan()
