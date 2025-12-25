@@ -65,8 +65,9 @@ type resourceManagerClientTestSuite struct {
 	client     pd.Client
 	initGroups []*rmpb.ResourceGroup
 
-	mode      resourceManagerDeployMode
-	rmCleanup func()
+	mode       resourceManagerDeployMode
+	rmCleanup  func()
+	tsoCleanup func()
 }
 
 func (suite *resourceManagerClientTestSuite) setupPDClient(re *require.Assertions) pd.Client {
@@ -102,12 +103,21 @@ func (suite *resourceManagerClientTestSuite) startMicroservicesForDiscovery(re *
 	rmServer, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 	_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{rmServer.GetAddr(): rmServer})
 	suite.rmCleanup = cleanup
+
+	// Start TSO microservice and wait it is serving.
+	tsoServer, tsoCleanup := tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
+	_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{tsoServer.GetAddr(): tsoServer})
+	suite.tsoCleanup = tsoCleanup
 }
 
 func (suite *resourceManagerClientTestSuite) stopMicroservicesForDiscovery() {
 	if suite.rmCleanup != nil {
 		suite.rmCleanup()
 		suite.rmCleanup = nil
+	}
+	if suite.tsoCleanup != nil {
+		suite.tsoCleanup()
+		suite.tsoCleanup = nil
 	}
 }
 
