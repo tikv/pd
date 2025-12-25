@@ -151,6 +151,7 @@ var _ Client = (*client)(nil)
 type serviceModeKeeper struct {
 	sync.RWMutex
 	serviceMode              pdpb.ServiceMode
+	resourceManagerProvider  pdpb.ServiceProvider
 	tsoClient                *tso.Cli
 	tsoSvcDiscovery          sd.ServiceDiscovery
 	routerClient             *router.Cli

@@ -63,7 +63,7 @@ type innerClient struct {
 
 func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	c.serviceDiscovery = sd.NewServiceDiscovery(
-		c.ctx, c.cancel, &c.wg, c.setServiceMode,
+		c.ctx, c.cancel, &c.wg, c.setServiceMode, c.resetResourceManagerDiscovery,
 		updateKeyspaceIDCb, c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
@@ -150,7 +150,6 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 		return
 	}
 	c.resetTSOClientLocked(newMode)
-	c.resetResourceManagerDiscoveryLocked(newMode)
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed", zap.String("new-mode", newMode.String()))
 }
@@ -203,10 +202,23 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	}
 }
 
-func (c *innerClient) resetResourceManagerDiscoveryLocked(newMode pdpb.ServiceMode) {
-	var newResourceManagerDiscovery *sd.ResourceManagerDiscovery
-	if newMode == pdpb.ServiceMode_API_SVC_MODE {
-		newResourceManagerDiscovery = sd.NewResourceManagerDiscovery(
+func (c *innerClient) resetResourceManagerDiscovery(newProvider pdpb.ServiceProvider) {
+	c.Lock()
+	defer c.Unlock()
+
+	if newProvider == c.resourceManagerProvider {
+		return
+	}
+
+	switch newProvider {
+	case pdpb.ServiceProvider_PD_SERVER:
+		if c.resourceManagerDiscovery != nil {
+			c.resourceManagerDiscovery.Close()
+			c.resourceManagerDiscovery = nil
+		}
+		log.Info("[pd] resource manager provider changed to pd")
+	case pdpb.ServiceProvider_RESOURCE_MANAGER_SERVICE:
+		newResourceManagerDiscovery := sd.NewResourceManagerDiscovery(
 			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
 		if err := newResourceManagerDiscovery.Init(); err != nil {
 			log.Error("[pd] failed to initialize resource manager discovery. keep the current service mode",
@@ -216,16 +228,12 @@ func (c *innerClient) resetResourceManagerDiscoveryLocked(newMode pdpb.ServiceMo
 			newResourceManagerDiscovery.Close()
 			return
 		}
-	}
-	if c.resourceManagerDiscovery != nil {
-		c.resourceManagerDiscovery.Close()
-	}
-	c.resourceManagerDiscovery = newResourceManagerDiscovery
-	if newMode == pdpb.ServiceMode_PD_SVC_MODE {
-		log.Info("[pd] resource manager provider changed to pd")
-	} else {
+		c.resourceManagerDiscovery = newResourceManagerDiscovery
 		log.Info("[pd] resource manager provider changed to resource manager server")
+	default:
+		log.Warn("[pd] intend to switch to unknown resource manager provider, just return", zap.String("new-provider", newProvider.String()))
 	}
+
 	_ = c.scheduleUpdateTokenConnection("")
 }
 
