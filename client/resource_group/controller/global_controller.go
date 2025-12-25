@@ -175,6 +175,8 @@ type ResourceGroupsController struct {
 	safeRuConfig atomic.Pointer[RUConfig]
 
 	degradedRUSettings *rmpb.GroupRequestUnitSettings
+
+	wg sync.WaitGroup
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -248,7 +250,9 @@ const (
 // Start starts ResourceGroupController service.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		if c.ruConfig.DegradedModeWaitDuration > 0 {
 			c.run.responseDeadline = time.NewTimer(c.ruConfig.DegradedModeWaitDuration)
 			c.run.responseDeadline.Stop()
@@ -449,6 +453,7 @@ func (c *ResourceGroupsController) Stop() error {
 		return errors.Errorf("resource groups controller does not start")
 	}
 	c.loopCancel()
+	c.wg.Wait()
 	return nil
 }
 
