@@ -240,15 +240,15 @@ func (c *Coordinator) RunUntilStop(skipLoadRules bool) {
 		}
 		err := c.ruleManager.Initialize(c.config.GetMaxReplicas(), c.config.GetLocationLabels(), c.config.GetIsolationLevel(), skipLoadRules)
 		if err != nil {
-			log.Error("rule manager initialize failed", errs.ZapError(err))
+			log.Warn("rule manager initialize failed", errs.ZapError(err))
 			continue
 		}
 		if err := c.regionLabeler.Initialize(regionLabelGCInterval); err != nil {
-			log.Error("region labeler initialize failed", errs.ZapError(err))
+			log.Warn("region labeler initialize failed", errs.ZapError(err))
 			continue
 		}
 		if err := c.affinityManager.Initialize(); err != nil {
-			log.Error("affinity manager initialize failed", errs.ZapError(err))
+			log.Warn("affinity manager initialize failed", errs.ZapError(err))
 			continue
 		}
 		break

@@ -2170,6 +2170,9 @@ func newTestRaftCluster(
 	}
 	rc.regionLabeler = labeler.NewRegionLabeler(ctx, s)
 	rc.affinityManager, err = affinity.NewManager(ctx, s, rc.BasicCluster, opt, rc.regionLabeler)
+	if err != nil {
+		panic(err)
+	}
 	rc.schedulingController = newSchedulingController(rc.ctx, rc.BasicCluster, rc.opt, rc.ruleManager)
 	return rc
 }
