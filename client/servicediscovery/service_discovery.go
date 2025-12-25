@@ -869,6 +869,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 		return errors.WithStack(errs.ErrNoServiceModeReturned)
 	}
 	c.callbacks.onServiceModeUpdate(clusterInfo.ServiceModes[0])
+	c.callbacks.onResourceManagerProviderUpdate(clusterInfo.ResourceManagerProvider)
 	return nil
 }
 

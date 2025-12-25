@@ -8,6 +8,8 @@ replace (
 	github.com/tikv/pd/tests/integrations/mcs => ./mcs
 )
 
+replace github.com/pingcap/kvproto => github.com/okjiang/kvproto v0.0.0-20251225085511-4394263ccda7
+
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/docker/go-units v0.5.0

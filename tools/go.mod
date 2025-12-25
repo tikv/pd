@@ -7,6 +7,8 @@ replace (
 	github.com/tikv/pd/client => ../client
 )
 
+replace github.com/pingcap/kvproto => github.com/okjiang/kvproto v0.0.0-20251225085511-4394263ccda7
+
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
