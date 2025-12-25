@@ -129,7 +129,9 @@ func (l *RegionLabeler) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
+		l.Lock()
 		l.labelRules[r.ID] = r
+		l.Unlock()
 	})
 	if err != nil {
 		return err
@@ -141,7 +143,10 @@ func (l *RegionLabeler) loadRules() error {
 			return err
 		}
 	}
+
+	l.Lock()
 	l.BuildRangeListLocked()
+	l.Unlock()
 	return nil
 }
 
