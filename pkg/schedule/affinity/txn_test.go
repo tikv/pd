@@ -46,11 +46,14 @@ func TestKeyRangeOverlapValidation(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create region labeler
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	// Create manager with region labeler
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	validate := func(ranges []GroupKeyRanges) error {
@@ -125,10 +128,13 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create region labeler
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create two groups without key ranges for basic testing
@@ -149,9 +155,12 @@ func TestKeyRangeOverlapRebuild(t *testing.T) {
 	re.True(manager.IsGroupExist("group2"))
 
 	// Create a new manager to simulate restart
-	regionLabeler2, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler2 := labeler.NewRegionLabeler(ctx, store)
+	err = regionLabeler2.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager2, err := NewManager(ctx, store, storeInfos, conf, regionLabeler2)
+	re.NoError(err)
+	err = manager2.Initialize()
 	re.NoError(err)
 
 	// Verify groups were loaded from storage
@@ -181,10 +190,13 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	keyRanges := createGroupForTest(re, manager, "persist", 10)
@@ -199,6 +211,8 @@ func TestAffinityPersistenceWithLabeler(t *testing.T) {
 
 	// Reload manager to verify persistence and loadRegionLabel integration.
 	manager2, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager2.Initialize()
 	re.NoError(err)
 	state2 := manager2.GetAffinityGroupState("persist")
 	re.NotNil(state2)
@@ -232,7 +246,8 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 	store := storage.NewStorageWithMemoryBackend()
 	storeInfos := core.NewStoresInfo()
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	// Inject a leftover label rule for a non-existent group "ghost".
@@ -251,6 +266,8 @@ func TestLoadRegionLabelIgnoreUnknownGroup(t *testing.T) {
 
 	// Manager initialization should ignore the unknown label rule.
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 	re.False(manager.IsGroupExist("ghost"))
 
@@ -281,10 +298,13 @@ func TestLabelRuleIntegration(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create region labeler
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Test: Group with no key ranges should not create label rule
@@ -321,9 +341,12 @@ func TestUpdateAffinityGroupKeyRangesAddToEmptyGroup(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a group without key ranges or peers.
@@ -356,9 +379,12 @@ func TestDuplicateRangeAdd(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	r := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
@@ -388,9 +414,12 @@ func TestDeleteAffinityGroupsForceMissing(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a group with a key range.
@@ -421,9 +450,12 @@ func TestSameGroupNonOverlappingAdd(t *testing.T) {
 	storeInfos.PutStore(store1)
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	r1 := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
@@ -457,9 +489,12 @@ func TestOverlapDuringMigration(t *testing.T) {
 	storeInfos.PutStore(store1)
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	r := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
@@ -486,9 +521,12 @@ func TestPartialOverlapSameGroup(t *testing.T) {
 	storeInfos.PutStore(store1)
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	rOld := keyutil.KeyRange{StartKey: []byte{0x00}, EndKey: []byte{0x10}}
@@ -519,9 +557,12 @@ func TestNewGroupOverlapWithExistingGroup(t *testing.T) {
 	storeInfos.PutStore(store1)
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create group A with range [0x00, 0x20]
