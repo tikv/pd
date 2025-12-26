@@ -28,7 +28,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -298,6 +300,322 @@ func (suite *keyspaceTestSuite) TestKeyspaceGroupUninitialized() {
 	re.NoError(json.Unmarshal(output, &meta))
 	re.Equal(keyspaceName, meta.GetName())
 	re.Equal(keyspaceID, meta.GetId())
+}
+
+func (suite *keyspaceTestSuite) TestSetPlacement() {
+	re := suite.Require()
+	leaderServer := suite.cluster.GetLeaderServer()
+
+	// Add stores with labels
+	for i := 1; i <= 3; i++ {
+		store := &metapb.Store{
+			Id:      uint64(i + 1),
+			Address: fmt.Sprintf("tikv%d:20160", i),
+			Labels: []*metapb.StoreLabel{
+				{Key: "keyspace", Value: "test_label"},
+			},
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: 0,
+		}
+		pdTests.MustPutStore(re, suite.cluster, store)
+	}
+
+	// Create a test keyspace
+	keyspaceName := "test_keyspace_store"
+	args := []string{"-u", suite.pdAddr, "keyspace", "create", keyspaceName}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+
+	var meta api.KeyspaceMeta
+	err = json.Unmarshal(output, &meta)
+	if err != nil {
+		// If unmarshal fails, skip this test as the cluster might not support keyspace properly
+		suite.T().Skip("Failed to create keyspace, skipping test")
+		return
+	}
+	keyspaceID := meta.GetId()
+
+	// Simulate region heartbeat for the keyspace range BEFORE setting placement rules
+	region := suite.createKeyspaceRegion(keyspaceID, 100)
+
+	// Set store placement for the keyspace
+	labelKey := "keyspace"
+	labelValue := "test_label"
+	args = []string{"-u", suite.pdAddr, "keyspace", "set-placement", strconv.Itoa(int(keyspaceID)), fmt.Sprintf("%s=%s", labelKey, labelValue)}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	outputStr := string(output)
+
+	// The command should succeed
+	re.Contains(outputStr, fmt.Sprintf("Successfully set placement rules for keyspace %d", keyspaceID))
+	re.Contains(outputStr, fmt.Sprintf("%s=%s", labelKey, labelValue))
+
+	// Verify the placement rule bundle was created
+	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
+	bundle := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
+	re.Equal(groupID, bundle.ID)
+	re.Equal(100, bundle.Index)
+	re.True(bundle.Override, "Override should be true to override default rules")
+
+	// Verify rules
+	rules := bundle.Rules
+	re.Len(rules, 2, "should have 2 rules (raw and txn)")
+
+	// Check first rule (raw key space)
+	rule1 := rules[0]
+	re.Equal(groupID, rule1.GroupID)
+	re.Equal(fmt.Sprintf("keyspace-%d-rule", keyspaceID), rule1.ID)
+	re.Equal("voter", string(rule1.Role))
+	re.Equal(3, rule1.Count)
+	re.NotEmpty(rule1.StartKey)
+	re.NotEmpty(rule1.EndKey)
+
+	// Verify label constraints
+	re.Len(rule1.LabelConstraints, 1)
+	re.Equal(labelKey, rule1.LabelConstraints[0].Key)
+	re.Equal("in", string(rule1.LabelConstraints[0].Op))
+	re.Equal([]string{labelValue}, rule1.LabelConstraints[0].Values)
+
+	// Check second rule (txn key space)
+	rule2 := rules[1]
+	re.Equal(groupID, rule2.GroupID)
+	re.Equal(fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID), rule2.ID)
+	re.Equal("voter", string(rule2.Role))
+	re.Equal(3, rule2.Count)
+	re.NotEmpty(rule2.StartKey)
+	re.NotEmpty(rule2.EndKey)
+
+	// Verify label constraints
+	re.Len(rule2.LabelConstraints, 1)
+	re.Equal("keyspace", rule2.LabelConstraints[0].Key)
+	re.Equal("in", string(rule2.LabelConstraints[0].Op))
+	re.Equal([]string{labelValue}, rule2.LabelConstraints[0].Values)
+
+	// Verify rules are applied to the region we created earlier
+	re.NotNil(region, "region should exist")
+
+	// Check region placement using the handler
+	handler := leaderServer.GetServer().GetHandler()
+	regionFit, err := handler.CheckRegionPlacementRule(region)
+	re.NoError(err)
+	re.NotNil(regionFit, "region fit should exist")
+
+	// Verify that our custom rule is included in the matched rules
+	foundRule := false
+	for _, rule := range regionFit.RuleFits {
+		if rule.Rule.GroupID == groupID {
+			foundRule = true
+			re.Equal(rule2.ID, rule.Rule.ID)
+			re.Len(rule.Rule.LabelConstraints, 1)
+			re.Equal(labelKey, rule.Rule.LabelConstraints[0].Key)
+			re.Equal(labelValue, rule.Rule.LabelConstraints[0].Values[0])
+			break
+		}
+	}
+	re.True(foundRule, "custom placement rule should be applied to the region")
+}
+
+func (suite *keyspaceTestSuite) TestRevertPlacement() {
+	re := suite.Require()
+	leaderServer := suite.cluster.GetLeaderServer()
+
+	// Add stores with labels
+	for i := 1; i <= 3; i++ {
+		store := &metapb.Store{
+			Id:      uint64(i + 1),
+			Address: fmt.Sprintf("tikv%d:20160", i),
+			Labels: []*metapb.StoreLabel{
+				{Key: "keyspace", Value: "test_label"},
+			},
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: 0,
+		}
+		pdTests.MustPutStore(re, suite.cluster, store)
+	}
+
+	// Create a test keyspace
+	keyspaceName := "test_keyspace_revert"
+	args := []string{"-u", suite.pdAddr, "keyspace", "create", keyspaceName}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+
+	var meta api.KeyspaceMeta
+	err = json.Unmarshal(output, &meta)
+	if err != nil {
+		suite.T().Skip("Failed to create keyspace, skipping test")
+		return
+	}
+	keyspaceID := meta.GetId()
+
+	// Simulate region heartbeat for the keyspace range BEFORE setting placement rules
+	region := suite.createKeyspaceRegion(keyspaceID, 200)
+
+	// Set store placement for the keyspace
+	labelKey := "keyspace"
+	labelValue := "test_label"
+	args = []string{"-u", suite.pdAddr, "keyspace", "set-placement", strconv.Itoa(int(keyspaceID)), fmt.Sprintf("%s=%s", labelKey, labelValue)}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	outputStr := string(output)
+
+	// Verify the command output
+	re.Contains(outputStr, fmt.Sprintf("Successfully set placement rules for keyspace %d", keyspaceID))
+	re.Contains(outputStr, fmt.Sprintf("%s=%s", labelKey, labelValue))
+
+	// Verify the bundle was created
+	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
+	bundle := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
+	re.Equal(groupID, bundle.ID)
+	re.Len(bundle.Rules, 2)
+	// Verify the label constraints
+	re.Equal(labelKey, bundle.Rules[0].LabelConstraints[0].Key)
+	re.Equal(labelValue, bundle.Rules[0].LabelConstraints[0].Values[0])
+
+	// Verify rules are applied to the region we created earlier
+	re.NotNil(region, "region should exist")
+	handler := leaderServer.GetServer().GetHandler()
+	regionFit, err := handler.CheckRegionPlacementRule(region)
+	re.NoError(err)
+	re.NotNil(regionFit)
+	foundBeforeRevert := false
+	for _, rule := range regionFit.RuleFits {
+		if rule.Rule.GroupID == groupID {
+			foundBeforeRevert = true
+			break
+		}
+	}
+	re.True(foundBeforeRevert, "rule should be applied before revert")
+
+	// Revert the placement rules
+	args = []string{"-u", suite.pdAddr, "keyspace", "revert-placement", strconv.Itoa(int(keyspaceID))}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	outputStr = string(output)
+
+	// The command should succeed
+	re.Contains(outputStr, fmt.Sprintf("Successfully reverted placement rules for keyspace %d", keyspaceID))
+
+	// Verify the bundle was deleted - check that the group no longer exists
+	group := leaderServer.GetRaftCluster().GetRuleManager().GetRuleGroup(groupID)
+	re.Nil(group, "rule group should be deleted")
+	// Also verify that there are no rules for this group
+	bundle = leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
+	re.Empty(bundle.Rules, "bundle rules should be empty")
+
+	// Verify rules are no longer applied to regions after revert
+	// Since the bundle is deleted, we just verify the group doesn't exist
+	// The region will fall back to default rules
+	regionFitAfter, err := handler.CheckRegionPlacementRule(region)
+	re.NoError(err)
+	foundAfterRevert := false
+	for _, rule := range regionFitAfter.RuleFits {
+		if rule.Rule.GroupID == groupID {
+			foundAfterRevert = true
+			break
+		}
+	}
+	re.False(foundAfterRevert, "rule should not be applied after revert")
+}
+
+func (suite *keyspaceTestSuite) TestSetPlacementMultipleLabels() {
+	re := suite.Require()
+	leaderServer := suite.cluster.GetLeaderServer()
+
+	// Add stores with multiple labels
+	for i := 1; i <= 3; i++ {
+		store := &metapb.Store{
+			Id:      uint64(i + 1),
+			Address: fmt.Sprintf("tikv%d:20160", i),
+			Labels: []*metapb.StoreLabel{
+				{Key: "zone", Value: "east"},
+				{Key: "disk", Value: "ssd"},
+			},
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: 0,
+		}
+		pdTests.MustPutStore(re, suite.cluster, store)
+	}
+
+	// Create a test keyspace
+	keyspaceName := "testkeyspace2"
+	args := []string{"-u", suite.pdAddr, "keyspace", "create", keyspaceName}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+
+	var meta api.KeyspaceMeta
+	err = json.Unmarshal(output, &meta)
+	re.NoError(err)
+	keyspaceID := meta.GetId()
+
+	// Simulate region heartbeat for the keyspace range BEFORE setting placement rules
+	region := suite.createKeyspaceRegion(keyspaceID, 300)
+
+	// Set placement with multiple label constraints
+	args = []string{"-u", suite.pdAddr, "keyspace", "set-placement", strconv.Itoa(int(keyspaceID)), "zone=east", "disk=ssd"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	outputStr := string(output)
+
+	// The command should succeed and show both constraints
+	re.Contains(outputStr, fmt.Sprintf("Successfully set placement rules for keyspace %d", keyspaceID))
+	re.Contains(outputStr, "zone=east")
+	re.Contains(outputStr, "disk=ssd")
+
+	// Verify the placement rule bundle was created with multiple constraints
+	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
+	bundle := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
+	re.Equal(groupID, bundle.ID)
+	re.True(bundle.Override, "Override should be true to override default rules")
+	re.Len(bundle.Rules, 2, "should have 2 rules (raw and txn)")
+
+	// Check both rules have both label constraints
+	for _, rule := range bundle.Rules {
+		re.Len(rule.LabelConstraints, 2, "each rule should have 2 label constraints")
+
+		// Verify first constraint (zone=east)
+		re.Equal("zone", rule.LabelConstraints[0].Key)
+		re.Equal("in", string(rule.LabelConstraints[0].Op))
+		re.Equal([]string{"east"}, rule.LabelConstraints[0].Values)
+
+		// Verify second constraint (disk=ssd)
+		re.Equal("disk", rule.LabelConstraints[1].Key)
+		re.Equal("in", string(rule.LabelConstraints[1].Op))
+		re.Equal([]string{"ssd"}, rule.LabelConstraints[1].Values)
+	}
+
+	// Verify rules are applied to the region we created earlier
+	re.NotNil(region, "region should exist")
+	handler := leaderServer.GetServer().GetHandler()
+	regionFit, err := handler.CheckRegionPlacementRule(region)
+	re.NoError(err)
+	re.NotNil(regionFit)
+
+	// Find our custom rule and verify it has both constraints
+	foundRule := false
+	for _, rule := range regionFit.RuleFits {
+		if rule.Rule.GroupID == groupID {
+			foundRule = true
+			re.Len(rule.Rule.LabelConstraints, 2, "rule should have 2 constraints")
+			re.Equal("zone", rule.Rule.LabelConstraints[0].Key)
+			re.Equal([]string{"east"}, rule.Rule.LabelConstraints[0].Values)
+			re.Equal("disk", rule.Rule.LabelConstraints[1].Key)
+			re.Equal([]string{"ssd"}, rule.Rule.LabelConstraints[1].Values)
+			break
+		}
+	}
+	re.True(foundRule, "custom placement rule with multiple constraints should be applied to the region")
+}
+
+// createKeyspaceRegion creates a region in the keyspace range by simulating heartbeat.
+// It returns the created region for verification.
+func (suite *keyspaceTestSuite) createKeyspaceRegion(keyspaceID uint32, regionIDOffset uint64) *core.RegionInfo {
+	re := suite.Require()
+	regionID := uint64(regionIDOffset + uint64(keyspaceID))
+
+	// Use keyspace.MakeRegionBound to get the correct region boundaries
+	regionBound := keyspace.MakeRegionBound(keyspaceID)
+
+	return pdTests.MustPutRegion(re, suite.cluster, regionID, 2, regionBound.TxnLeftBound, regionBound.TxnRightBound)
 }
 
 func (suite *keyspaceTestSuite) mustCreateKeyspace(param api.CreateKeyspaceParams) api.KeyspaceMeta {

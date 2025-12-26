@@ -45,8 +45,9 @@ const (
 // NewKeyspaceCommand returns a keyspace subcommand of rootCmd.
 func NewKeyspaceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "keyspace <command> [flags]",
-		Short: "keyspace commands",
+		Use:               "keyspace <command> [flags]",
+		Short:             "keyspace commands",
+		PersistentPreRunE: requirePDClient,
 	}
 	cmd.AddCommand(newShowKeyspaceCommand())
 	cmd.AddCommand(newCreateKeyspaceCommand())
@@ -54,6 +55,8 @@ func NewKeyspaceCommand() *cobra.Command {
 	cmd.AddCommand(newUpdateKeyspaceStateCommand())
 	cmd.AddCommand(newListKeyspaceCommand())
 	cmd.AddCommand(newShowKeyspaceRangeCommand())
+	cmd.AddCommand(newSetPlacementCommand())
+	cmd.AddCommand(newRevertPlacementCommand())
 	return cmd
 }
 
