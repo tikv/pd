@@ -62,6 +62,7 @@ type option struct {
 	useResourceManagerProxy bool
 	metricsLabels           prometheus.Labels
 	initMetrics             bool
+	enableGRPCClientMetrics bool
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
@@ -269,5 +270,16 @@ func WithMetricsLabels(labels prometheus.Labels) ClientOption {
 func WithInitMetricsOption(initMetrics bool) ClientOption {
 	return func(c *client) {
 		c.option.initMetrics = initMetrics
+	}
+}
+
+// WithGRPCClientMetricsOption enables/disables Prometheus `grpc_client_*` metrics for
+// all internal gRPC connections created by this PD client.
+//
+// When enabled, the client will register `go-grpc-prometheus` collectors to the default
+// Prometheus registry and inject client interceptors into internal `grpc.Dial` options.
+func WithGRPCClientMetricsOption(enable bool) ClientOption {
+	return func(c *client) {
+		c.option.enableGRPCClientMetrics = enable
 	}
 }

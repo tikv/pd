@@ -491,6 +491,11 @@ func (c *client) setup() error {
 		initAndRegisterMetrics(c.option.metricsLabels)
 	}
 
+	// Enable gRPC client metrics (grpc_client_*) for all internal gRPC connections.
+	if c.option.enableGRPCClientMetrics {
+		c.option.gRPCDialOptions = append(c.option.gRPCDialOptions, grpcClientMetricsDialOptions()...)
+	}
+
 	// Init the client base.
 	if err := c.pdSvcDiscovery.Init(); err != nil {
 		return err
