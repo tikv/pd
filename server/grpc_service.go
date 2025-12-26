@@ -254,24 +254,20 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 		}, nil
 	}
 
-	resp := &pdpb.GetClusterInfoResponse{Header: grpcutil.WrapHeader()}
-
+	var tsoServiceAddrs []string
+	svcModes := make([]pdpb.ServiceMode, 0)
 	if s.IsServiceIndependent(constant.TSOServiceName) {
-		resp.ServiceModes = []pdpb.ServiceMode{pdpb.ServiceMode_API_SVC_MODE}
-		resp.TsoUrls = s.keyspaceGroupManager.GetTSOServiceAddrs()
-		resp.TsoProvider = pdpb.ServiceProvider_TSO_SERVICE
+		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
+		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()
 	} else {
-		resp.ServiceModes = []pdpb.ServiceMode{pdpb.ServiceMode_PD_SVC_MODE}
-		resp.TsoProvider = pdpb.ServiceProvider_PD_SERVER
+		svcModes = append(svcModes, pdpb.ServiceMode_PD_SVC_MODE)
 	}
 
-	if !s.cfg.Microservice.EnableResourceManagerFallback {
-		resp.ResourceManagerProvider = pdpb.ServiceProvider_RESOURCE_MANAGER_SERVICE
-	} else {
-		resp.ResourceManagerProvider = pdpb.ServiceProvider_PD_SERVER
-	}
-
-	return resp, nil
+	return &pdpb.GetClusterInfoResponse{
+		Header:       grpcutil.WrapHeader(),
+		ServiceModes: svcModes,
+		TsoUrls:      tsoServiceAddrs,
+	}, nil
 }
 
 // GetMinTS implements gRPC PDServer. In non-microservice env, it simply returns a timestamp.

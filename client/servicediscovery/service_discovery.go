@@ -444,7 +444,7 @@ func NewDefaultServiceDiscovery(
 	urls []string, tlsCfg *tls.Config,
 ) ServiceDiscovery {
 	var wg sync.WaitGroup
-	return NewServiceDiscovery(ctx, cancel, &wg, nil, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
+	return NewServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
 }
 
 // NewServiceDiscovery returns a new service discovery-based client.
@@ -452,7 +452,6 @@ func NewServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
-	resourceManagerProviderUpdateCb func(pdpb.ServiceProvider),
 	updateKeyspaceIDFunc UpdateKeyspaceIDFunc,
 	keyspaceID uint32,
 	urls []string, tlsCfg *tls.Config, option *opt.Option,
@@ -470,7 +469,6 @@ func NewServiceDiscovery(
 		option:               option,
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
-	pdsd.callbacks.setResourceManagerProviderUpdateCallback(resourceManagerProviderUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
@@ -869,7 +867,6 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 		return errors.WithStack(errs.ErrNoServiceModeReturned)
 	}
 	c.callbacks.onServiceModeUpdate(clusterInfo.ServiceModes[0])
-	c.callbacks.onResourceManagerProviderUpdate(clusterInfo.ResourceManagerProvider)
 	return nil
 }
 

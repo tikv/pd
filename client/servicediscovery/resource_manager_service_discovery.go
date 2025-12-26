@@ -74,6 +74,7 @@ func NewResourceManagerDiscovery(ctx context.Context, clusterID uint64, metaCli 
 		onLeaderChanged:    leaderChangedCb,
 		updateServiceURLCh: make(chan struct{}, 1),
 	}
+	d.option.MaxRetryTimes = 3
 
 	log.Info("[resource-manager] created resource manager discovery",
 		zap.Uint64("cluster-id", clusterID),
@@ -82,7 +83,7 @@ func NewResourceManagerDiscovery(ctx context.Context, clusterID uint64, metaCli 
 }
 
 // Init implements ServiceDiscovery.
-func (r *ResourceManagerDiscovery) Init() error {
+func (r *ResourceManagerDiscovery) Init() {
 	log.Info("[resource-manager] initializing service discovery",
 		zap.Int("max-retry-times", r.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
@@ -99,14 +100,14 @@ func (r *ResourceManagerDiscovery) Init() error {
 		}
 		select {
 		case <-r.ctx.Done():
-			return r.ctx.Err()
+			log.Info("[resource-manager] exit service discovery initialization due to context canceled")
+			return
 		case <-ticker.C:
 		}
 	}
 	r.resetConn(url)
 	r.wg.Add(1)
 	go r.updateServiceURLLoop(revision)
-	return nil
 }
 
 func (r *ResourceManagerDiscovery) resetConn(url string) {
@@ -127,6 +128,7 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 		r.conn.Close()
 	}
 	r.serviceURL, r.conn = url, newConn
+	r.onLeaderChanged("")
 }
 
 // GetConn returns the gRPC connection to the resource manager service.

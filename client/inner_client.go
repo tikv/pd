@@ -63,7 +63,7 @@ type innerClient struct {
 
 func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	c.serviceDiscovery = sd.NewServiceDiscovery(
-		c.ctx, c.cancel, &c.wg, c.setServiceMode, c.resetResourceManagerDiscovery,
+		c.ctx, c.cancel, &c.wg, c.setServiceMode,
 		updateKeyspaceIDCb, c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
@@ -80,6 +80,9 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	c.wg.Add(1)
 	go c.routerClientInitializer()
 
+	c.resourceManagerDiscovery = sd.NewResourceManagerDiscovery(
+		c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
+	c.resourceManagerDiscovery.Init()
 	return nil
 }
 
@@ -200,41 +203,6 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 		// We are switching from microservice env to non-microservice env, so delete the old tso microservice discovery.
 		oldTSOSvcDiscovery.Close()
 	}
-}
-
-func (c *innerClient) resetResourceManagerDiscovery(newProvider pdpb.ServiceProvider) {
-	c.Lock()
-	defer c.Unlock()
-
-	if newProvider == c.resourceManagerProvider {
-		return
-	}
-
-	switch newProvider {
-	case pdpb.ServiceProvider_PD_SERVER:
-		if c.resourceManagerDiscovery != nil {
-			c.resourceManagerDiscovery.Close()
-			c.resourceManagerDiscovery = nil
-		}
-		log.Info("[pd] resource manager provider changed to pd")
-	case pdpb.ServiceProvider_RESOURCE_MANAGER_SERVICE:
-		newResourceManagerDiscovery := sd.NewResourceManagerDiscovery(
-			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
-		if err := newResourceManagerDiscovery.Init(); err != nil {
-			log.Error("[pd] failed to initialize resource manager discovery. keep the current service mode",
-				zap.Strings("svr-urls", c.svrUrls),
-				zap.String("current-mode", c.serviceMode.String()),
-				zap.Error(err))
-			newResourceManagerDiscovery.Close()
-			return
-		}
-		c.resourceManagerDiscovery = newResourceManagerDiscovery
-		log.Info("[pd] resource manager provider changed to resource manager server")
-	default:
-		log.Warn("[pd] intend to switch to unknown resource manager provider, just return", zap.String("new-provider", newProvider.String()))
-	}
-
-	_ = c.scheduleUpdateTokenConnection("")
 }
 
 func (c *innerClient) getResourceManagerDiscovery() *sd.ResourceManagerDiscovery {

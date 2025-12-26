@@ -28,8 +28,6 @@ type serviceCallbacks struct {
 	sync.RWMutex
 	// serviceModeUpdateCb will be called when the service mode gets updated
 	serviceModeUpdateCb func(pdpb.ServiceMode)
-	// resourceManagerProviderUpdateCb will be called when the resource manager provider gets updated
-	resourceManagerProviderUpdateCb func(pdpb.ServiceProvider)
 	// leaderSwitchedCbs will be called after the leader switched
 	leaderSwitchedCbs []LeaderSwitchedCallbackFunc
 	// membersChangedCbs will be called after there is any membership change in the
@@ -48,12 +46,6 @@ func (c *serviceCallbacks) setServiceModeUpdateCallback(cb func(pdpb.ServiceMode
 	c.Lock()
 	defer c.Unlock()
 	c.serviceModeUpdateCb = cb
-}
-
-func (c *serviceCallbacks) setResourceManagerProviderUpdateCallback(cb func(pdpb.ServiceProvider)) {
-	c.Lock()
-	defer c.Unlock()
-	c.resourceManagerProviderUpdateCb = cb
 }
 
 func (c *serviceCallbacks) addLeaderSwitchedCallback(cb LeaderSwitchedCallbackFunc) {
@@ -77,17 +69,6 @@ func (c *serviceCallbacks) onServiceModeUpdate(mode pdpb.ServiceMode) {
 		return
 	}
 	cb(mode)
-}
-
-func (c *serviceCallbacks) onResourceManagerProviderUpdate(provider pdpb.ServiceProvider) {
-	c.RLock()
-	cb := c.resourceManagerProviderUpdateCb
-	c.RUnlock()
-
-	if cb == nil {
-		return
-	}
-	cb(provider)
 }
 
 func (c *serviceCallbacks) onLeaderSwitched(leader string) error {
