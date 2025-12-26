@@ -1480,7 +1480,7 @@ func TestGetBucketMeta(t *testing.T) {
 	}
 	re.True(origin.UpdateBuckets(bucket1, origin.GetBuckets()))
 	re.Equal(uint64(2), origin.GetBuckets().GetVersion())
-	region.bucketMeta = &pdpb.BucketMeta{
+	region.bucketMeta = &metapb.BucketMeta{
 		Version: 1,
 		Keys:    [][]byte{[]byte("a"), []byte("b"), []byte("d")},
 	}

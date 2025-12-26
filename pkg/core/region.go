@@ -92,7 +92,7 @@ type RegionInfo struct {
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
 	// bucketMeta is used to store the bucket meta reported by tikv.
-	bucketMeta *pdpb.BucketMeta
+	bucketMeta *metapb.BucketMeta
 }
 
 // RegionSource is the source of region.
@@ -218,7 +218,7 @@ type RegionHeartbeatRequest interface {
 	GetQueryStats() *pdpb.QueryStats
 	GetApproximateSize() uint64
 	GetApproximateKeys() uint64
-	GetBucketMeta() *pdpb.BucketMeta
+	GetBucketMeta() *metapb.BucketMeta
 }
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -628,7 +628,7 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 
 // SetBucketMeta sets the bucket meta of the region, used by region sync.
 func (r *RegionInfo) SetBucketMeta(buckets *metapb.Buckets) {
-	r.bucketMeta = &pdpb.BucketMeta{
+	r.bucketMeta = &metapb.BucketMeta{
 		Version: buckets.GetVersion(),
 		Keys:    buckets.GetKeys(),
 	}
