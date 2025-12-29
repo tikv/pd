@@ -32,7 +32,6 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -351,23 +350,24 @@ func (suite *storeTestSuite) checkStoreGet(cluster *tests.TestCluster) {
 	}
 
 	leader := cluster.GetLeaderServer()
+	rc := leader.GetRaftCluster()
 	// store 1 is used to bootstrapped that its state might be different the store inside initStores.
-	err := leader.GetRaftCluster().ReadyToServeLocked(1)
+	err := rc.ReadyToServeLocked(1)
 	if err != nil {
 		re.ErrorContains(err, "has been serving")
 	}
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/store/1", urlPrefix)
 
-	tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
-		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Stats: &pdpb.StoreStats{
-			StoreId:   1,
-			Capacity:  1798985089024,
-			Available: 1709868695552,
-			UsedSize:  85150956358,
-		},
-	})
+	stats := &pdpb.StoreStats{
+		StoreId:   1,
+		Capacity:  1798985089024,
+		Available: 1709868695552,
+		UsedSize:  85150956358,
+	}
+	storeInfo := rc.GetStore(1)
+	re.NotNil(storeInfo)
+	rc.PutStore(storeInfo.Clone(core.SetStoreStats(stats)))
 	info := new(response.StoreInfo)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
