@@ -26,6 +26,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server/apiv2/handlers"
 )
@@ -350,10 +351,16 @@ func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	keyspaceID := args[0]
-	id, err := strconv.ParseUint(keyspaceID, 10, 32)
+	id, err := strconv.ParseUint(args[0], 10, 32)
 	if err != nil {
 		cmd.PrintErrln("keyspace id should be a valid number: ", err)
+		return
+	}
+
+	keyspaceID := uint32(id)
+	if keyspaceID < constants.DefaultKeyspaceID || keyspaceID > constants.MaxKeyspaceID {
+		cmd.PrintErrf("invalid keyspace id %d. It must be in the range of [%d, %d]\n",
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
 		return
 	}
 
@@ -365,7 +372,7 @@ func showKeyspaceRangeByIDCommandFunc(cmd *cobra.Command, args []string) {
 
 	// Generate key ranges based on raw flag
 	var ranges map[string]string
-	bound := keyspace.MakeRegionBound(uint32(id))
+	bound := keyspace.MakeRegionBound(keyspaceID)
 	if raw {
 		ranges = map[string]string{
 			"start_key": hex.EncodeToString(bound.RawLeftBound),
