@@ -151,3 +151,10 @@ func (c *Manager[T]) GetConnectionCtx(url string) *ConnectionCtx[T] {
 	}
 	return cc
 }
+
+// Size is used to get the size of the connection context map.
+func (c *Manager[T]) Size() int {
+	c.RLock()
+	defer c.RUnlock()
+	return len(c.connectionCtxs)
+}
