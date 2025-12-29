@@ -128,7 +128,7 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 		r.conn.Close()
 	}
 	r.serviceURL, r.conn = url, newConn
-	r.onLeaderChanged("")
+	_ = r.onLeaderChanged("")
 }
 
 // GetConn returns the gRPC connection to the resource manager service.
