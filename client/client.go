@@ -601,6 +601,10 @@ func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logi
 
 // GetMinTS implements the TSOClient interface.
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
+	if c.inner.serviceMode == pdpb.ServiceMode_UNKNOWN_SVC_MODE {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
+	}
+
 	// Handle compatibility issue in case of PD doesn't support GetMinTS API.
 	if c.inner.getTSOProvider() == tsoProviderPD {
 		// If the service mode is switched to API during GetTS() call, which happens during migration,
