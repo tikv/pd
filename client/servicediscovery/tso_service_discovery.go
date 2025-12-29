@@ -51,10 +51,6 @@ const (
 	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
-	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.
-	tsoQueryRetryMaxTimes = 10
-	// tsoQueryRetryInterval is the retry interval for querying TSO.
-	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
