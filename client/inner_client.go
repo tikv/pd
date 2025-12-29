@@ -80,9 +80,12 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	c.wg.Add(1)
 	go c.routerClientInitializer()
 
-	c.resourceManagerDiscovery = sd.NewResourceManagerDiscovery(
+	rmd := sd.NewResourceManagerDiscovery(
 		c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
-	c.resourceManagerDiscovery.Init()
+	c.Lock()
+	c.resourceManagerDiscovery = rmd
+	c.Unlock()
+	rmd.Init()
 	return nil
 }
 
