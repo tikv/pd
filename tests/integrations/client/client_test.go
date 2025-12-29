@@ -1784,7 +1784,8 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	bo.SetRetryableChecker(needRetry, true)
 
 	// Initialize the client with context and backoff
-	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
+	// Router client doesn't support the rateLimit failpoint injection yet, so disable it for this test
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{}, opt.WithEnableRouterClient(false))
 	re.NoError(err)
 	defer client.Close()
 
@@ -1833,7 +1834,8 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1888,7 +1890,8 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1936,8 +1939,8 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)

@@ -33,7 +33,7 @@ const (
 	defaultEnableTSOFollowerProxy                = false
 	defaultEnableFollowerHandle                  = false
 	defaultTSOClientRPCConcurrency               = 1
-	defaultEnableRouterClient                    = false
+	defaultEnableRouterClient                    = true
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
