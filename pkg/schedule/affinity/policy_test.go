@@ -59,9 +59,12 @@ func TestCollectUnavailableStores(t *testing.T) {
 	storeInfos := core.NewStoresInfo()
 	conf := mockconfig.NewTestOptions()
 	conf.SetLabelProperty("reject-leader", "reject", "leader")
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, memoryStorage, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, memoryStorage)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, memoryStorage, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	stores := make([]*core.StoreInfo, 12)
@@ -129,10 +132,13 @@ func TestObserveAvailableRegion(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create region labeler
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	group := &Group{ID: "g", LeaderStoreID: 0, VoterStoreIDs: nil}
@@ -220,10 +226,13 @@ func TestAvailabilityCheckInvalidatesGroup(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create region labeler
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	group := &Group{ID: "avail", LeaderStoreID: 1, VoterStoreIDs: []uint64{1, 2}}
@@ -274,11 +283,14 @@ func TestStoreHealthCheck(t *testing.T) {
 	conf := mockconfig.NewTestOptions()
 
 	// Create region labeler
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	// Create affinity manager
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a test affinity group with healthy stores
@@ -367,10 +379,13 @@ func TestDegradedGroupShouldExpire(t *testing.T) {
 
 	conf := mockconfig.NewTestOptions()
 
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Create a healthy group first.
@@ -413,9 +428,12 @@ func TestGroupAvailabilityPriority(t *testing.T) {
 		storeInfos.PutStore(storeInfo)
 	}
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	// Case 1: leader-only constraint should degrade when on leader, ignored on followers.
