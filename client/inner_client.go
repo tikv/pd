@@ -80,6 +80,12 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	c.wg.Add(1)
 	go c.routerClientInitializer()
 
+	rmd := sd.NewResourceManagerDiscovery(
+		c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
+	c.Lock()
+	c.resourceManagerDiscovery = rmd
+	c.Unlock()
+	rmd.Init()
 	return nil
 }
 
@@ -149,28 +155,9 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 	if newMode == c.serviceMode {
 		return
 	}
-	log.Info("[pd] changing TSO provider",
-		zap.String("old", convertToString(c.serviceMode)),
-		zap.String("new", convertToString(newMode)))
 	c.resetTSOClientLocked(newMode)
-	oldMode := c.serviceMode
 	c.serviceMode = newMode
-	log.Info("[pd] TSO provider changed",
-		zap.String("old", convertToString(oldMode)),
-		zap.String("new", convertToString(newMode)))
-}
-
-func convertToString(mode pdpb.ServiceMode) string {
-	switch mode {
-	case pdpb.ServiceMode_PD_SVC_MODE:
-		return "pd"
-	case pdpb.ServiceMode_API_SVC_MODE:
-		return "tso server"
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
-		return "unknown"
-	default:
-		return "invalid"
-	}
+	log.Info("[pd] service mode changed", zap.String("new-mode", newMode.String()))
 }
 
 // Reset a new TSO client.
@@ -184,6 +171,7 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = tso.NewClient(c.ctx, c.option,
 			c.serviceDiscovery, &tso.PDStreamBuilderFactory{})
+		log.Info("[pd] tso provider changed to pd")
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.serviceDiscovery,
@@ -198,6 +186,7 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 				zap.Error(err))
 			return
 		}
+		log.Info("[pd] tso provider changed to tso server")
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
@@ -219,6 +208,12 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	}
 }
 
+func (c *innerClient) getResourceManagerDiscovery() *sd.ResourceManagerDiscovery {
+	c.RLock()
+	defer c.RUnlock()
+	return c.resourceManagerDiscovery
+}
+
 func (c *innerClient) scheduleUpdateTokenConnection(string) error {
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
@@ -227,10 +222,20 @@ func (c *innerClient) scheduleUpdateTokenConnection(string) error {
 	return nil
 }
 
-func (c *innerClient) getServiceMode() pdpb.ServiceMode {
+type tsoProvider int
+
+const (
+	tsoProviderPD tsoProvider = iota
+	tsoProviderTSOServer
+)
+
+func (c *innerClient) getTSOProvider() tsoProvider {
 	c.RLock()
 	defer c.RUnlock()
-	return c.serviceMode
+	if c.tsoSvcDiscovery != nil {
+		return tsoProviderTSOServer
+	}
+	return tsoProviderPD
 }
 
 func (c *innerClient) getTSOClient() *tso.Cli {
@@ -294,6 +299,15 @@ func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFol
 func (c *innerClient) gRPCErrorHandler(err error) {
 	if errs.IsLeaderChange(err) {
 		c.serviceDiscovery.ScheduleCheckMemberChanged()
+	}
+}
+
+func (c *innerClient) resourceManagerErrorHandler(err error) {
+	c.Lock()
+	defer c.Unlock()
+	log.Warn("[resource-manager] resource manager error", zap.Error(err))
+	if c.resourceManagerDiscovery != nil {
+		c.resourceManagerDiscovery.ScheduleUpateServiceURL()
 	}
 }
 

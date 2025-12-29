@@ -42,10 +42,13 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	srvconfig "github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs/utils"
 )
@@ -61,10 +64,61 @@ type resourceManagerClientTestSuite struct {
 	cluster    *tests.TestCluster
 	client     pd.Client
 	initGroups []*rmpb.ResourceGroup
+
+	mode       resourceManagerDeployMode
+	rmCleanup  func()
+	tsoCleanup func()
 }
 
+func (suite *resourceManagerClientTestSuite) setupPDClient(re *require.Assertions) pd.Client {
+	cli, err := pd.NewClientWithContext(suite.ctx,
+		caller.TestComponent,
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	re.NoError(err)
+	return cli
+}
+
+type resourceManagerDeployMode int
+
+const (
+	resourceManagerProvidedByPD resourceManagerDeployMode = iota
+	resourceManagerStandaloneWithClientDiscovery
+)
+
 func TestResourceManagerClientTestSuite(t *testing.T) {
-	suite.Run(t, new(resourceManagerClientTestSuite))
+	t.Run("pd-resource-manager", func(t *testing.T) {
+		suite.Run(t, &resourceManagerClientTestSuite{mode: resourceManagerProvidedByPD})
+	})
+	t.Run("standalone-resource-manager-with-client-discovery", func(t *testing.T) {
+		suite.Run(t, &resourceManagerClientTestSuite{mode: resourceManagerStandaloneWithClientDiscovery})
+	})
+}
+
+func (suite *resourceManagerClientTestSuite) startMicroservicesForDiscovery(re *require.Assertions) {
+	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	re.NotNil(leader)
+	backendEndpoints := leader.GetAddr()
+
+	// Start Resource Manager microservice and wait it is serving.
+	rmServer, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
+	_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{rmServer.GetAddr(): rmServer})
+	suite.rmCleanup = cleanup
+
+	// Start TSO microservice and wait it is serving.
+	tsoServer, tsoCleanup := tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
+	_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{tsoServer.GetAddr(): tsoServer})
+	suite.tsoCleanup = tsoCleanup
+}
+
+func (suite *resourceManagerClientTestSuite) stopMicroservicesForDiscovery() {
+	if suite.rmCleanup != nil {
+		suite.rmCleanup()
+		suite.rmCleanup = nil
+	}
+	if suite.tsoCleanup != nil {
+		suite.tsoCleanup()
+		suite.tsoCleanup = nil
+	}
 }
 
 func (suite *resourceManagerClientTestSuite) SetupSuite() {
@@ -73,21 +127,35 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
+	}
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 2, func(conf *srvconfig.Config, _ string) {
+			conf.Microservice.EnableResourceManagerFallback = false
+		})
+	} else {
+		suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
+	}
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 
-	suite.client, err = pd.NewClientWithContext(suite.ctx,
-		caller.TestComponent,
-		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
-	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(leader)
+
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		// Bootstrap the cluster so that the microservices can work normally.
+		re.NoError(leader.BootstrapCluster())
+		suite.startMicroservicesForDiscovery(re)
+		suite.client = suite.setupPDClient(re)
+	} else {
+		suite.client = suite.setupPDClient(re)
+	}
 	waitLeaderServingClient(re, suite.client, leader.GetAddr())
 
 	suite.initGroups = []*rmpb.ResourceGroup{
@@ -157,11 +225,15 @@ func waitLeaderServingClient(re *require.Assertions, cli pd.Client, leaderAddr s
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	re := suite.Require()
+	suite.stopMicroservicesForDiscovery()
 	suite.client.Close()
 	suite.cluster.Destroy()
 	suite.clean()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
+	}
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownTest() {
@@ -1109,6 +1181,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	groups, err := cli.ListResourceGroups(suite.ctx)
 	re.NoError(err)
 	servers := suite.cluster.GetServers()
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		suite.stopMicroservicesForDiscovery()
+	}
 	re.NoError(suite.cluster.StopAll())
 	cli.Close()
 	serverList := make([]*tests.TestServer, 0, len(servers))
@@ -1117,11 +1192,11 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	}
 	re.NoError(tests.RunServers(serverList))
 	re.NotEmpty(suite.cluster.WaitLeader())
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		suite.startMicroservicesForDiscovery(re)
+	}
 	// re-connect client as well
-	suite.client, err = pd.NewClientWithContext(suite.ctx,
-		caller.TestComponent,
-		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
-	re.NoError(err)
+	suite.client = suite.setupPDClient(re)
 	cli = suite.client
 	var newGroups []*rmpb.ResourceGroup
 	testutil.Eventually(re, func() bool {
@@ -1194,10 +1269,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	suite.cluster.WaitLeader()
 	// re-connect client as
 	cli.Close()
-	suite.client, err = pd.NewClientWithContext(suite.ctx,
-		caller.TestComponent,
-		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
-	re.NoError(err)
+	suite.client = suite.setupPDClient(re)
 	cli = suite.client
 	// check ru stats not loss after restart
 	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
@@ -1512,6 +1584,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, constants.NullKeyspaceID, controller.WithMaxWaitDuration(time.Hour))
 	re.NoError(err)
 	c2.Start(suite.ctx)
+	defer func() {
+		err := c2.Stop()
+		re.NoError(err)
+	}()
 	// helper function for sending HTTP requests and checking responses
 	sendRequest := func(method, url string, body io.Reader) []byte {
 		req, err := http.NewRequest(method, url, body)
@@ -1621,11 +1697,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	cli := suite.client
 	keyspaceID := uint32(1)
 	clientKeyspace := utils.SetupClientWithKeyspaceID(
-		suite.ctx,
-		re,
-		keyspaceID,
-		suite.cluster.GetConfig().GetClientURLs(),
-	)
+		suite.ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs())
 	defer clientKeyspace.Close()
 
 	// Add keyspace meta.
@@ -1765,9 +1837,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		keyspaceName := fmt.Sprintf("keyspace%d_test", keyspaceID)
 		groupName := fmt.Sprintf("rg_multi_%d", keyspaceID)
 		// Create a specific client for this keyspace
-		client := utils.SetupClientWithKeyspaceID(
-			ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs(),
-		)
+		client := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs())
 		clients[i] = client
 		// Create and save keyspace metadata
 		keyspaceMeta := &keyspacepb.KeyspaceMeta{Id: keyspaceID, Name: keyspaceName}
@@ -1866,11 +1936,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 			continue
 		}
 		cli := utils.SetupClientWithKeyspaceID(
-			suite.ctx,
-			re,
-			keyspace,
-			suite.cluster.GetConfig().GetClientURLs(),
-		)
+			suite.ctx, re, keyspace, suite.cluster.GetConfig().GetClientURLs())
 		clients[keyspace] = cli
 	}
 
