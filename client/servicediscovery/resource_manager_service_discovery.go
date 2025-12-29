@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -46,6 +47,8 @@ type ResourceManagerDiscovery struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
+	started      atomic.Bool
+	initRetries  int
 	clusterID    uint64
 	metaCli      metastorage.Client
 	discoveryKey string
@@ -71,10 +74,10 @@ func NewResourceManagerDiscovery(ctx context.Context, clusterID uint64, metaCli 
 		discoveryKey:       fmt.Sprintf(resourceManagerSvcDiscoveryFormat, clusterID),
 		tlsCfg:             tlsCfg,
 		option:             opt,
+		initRetries:        3,
 		onLeaderChanged:    leaderChangedCb,
 		updateServiceURLCh: make(chan struct{}, 1),
 	}
-	d.option.MaxRetryTimes = 3
 
 	log.Info("[resource-manager] created resource manager discovery",
 		zap.Uint64("cluster-id", clusterID),
@@ -84,8 +87,17 @@ func NewResourceManagerDiscovery(ctx context.Context, clusterID uint64, metaCli 
 
 // Init implements ServiceDiscovery.
 func (r *ResourceManagerDiscovery) Init() {
+	if !r.started.CompareAndSwap(false, true) {
+		return
+	}
+	r.wg.Add(1)
+	go r.initAndUpdateLoop()
+}
+
+func (r *ResourceManagerDiscovery) initAndUpdateLoop() {
+	defer r.wg.Done()
 	log.Info("[resource-manager] initializing service discovery",
-		zap.Int("max-retry-times", r.option.MaxRetryTimes),
+		zap.Int("max-retry-times", r.initRetries),
 		zap.Duration("retry-interval", initRetryInterval))
 
 	ticker := time.NewTicker(initRetryInterval)
@@ -93,7 +105,7 @@ func (r *ResourceManagerDiscovery) Init() {
 	var url string
 	var revision int64
 	var err error
-	for range r.option.MaxRetryTimes {
+	for range r.initRetries {
 		url, revision, err = r.discoverServiceURL()
 		if err == nil {
 			break
@@ -106,8 +118,7 @@ func (r *ResourceManagerDiscovery) Init() {
 		}
 	}
 	r.resetConn(url)
-	r.wg.Add(1)
-	go r.updateServiceURLLoop(revision)
+	r.updateServiceURLLoop(revision)
 }
 
 func (r *ResourceManagerDiscovery) resetConn(url string) {
@@ -191,8 +202,6 @@ func (r *ResourceManagerDiscovery) ScheduleUpateServiceURL() {
 }
 
 func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
-	defer r.wg.Done()
-
 	for {
 		select {
 		case <-r.ctx.Done():
