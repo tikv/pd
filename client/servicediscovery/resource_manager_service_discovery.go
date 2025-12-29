@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
@@ -40,6 +40,7 @@ const (
 	// resourceManagerSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/primary".
 	resourceManagerSvcDiscoveryFormat = "/ms/%d/" + resourceManagerServiceName + "/primary"
+	resourceManagerInitRetryTime      = 3
 )
 
 // ResourceManagerDiscovery is used to discover the resource manager service.
@@ -48,7 +49,6 @@ type ResourceManagerDiscovery struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 	started      atomic.Bool
-	initRetries  int
 	clusterID    uint64
 	metaCli      metastorage.Client
 	discoveryKey string
@@ -74,7 +74,6 @@ func NewResourceManagerDiscovery(ctx context.Context, clusterID uint64, metaCli 
 		discoveryKey:       fmt.Sprintf(resourceManagerSvcDiscoveryFormat, clusterID),
 		tlsCfg:             tlsCfg,
 		option:             opt,
-		initRetries:        3,
 		onLeaderChanged:    leaderChangedCb,
 		updateServiceURLCh: make(chan struct{}, 1),
 	}
@@ -97,25 +96,19 @@ func (r *ResourceManagerDiscovery) Init() {
 func (r *ResourceManagerDiscovery) initAndUpdateLoop() {
 	defer r.wg.Done()
 	log.Info("[resource-manager] initializing service discovery",
-		zap.Int("max-retry-times", r.initRetries),
+		zap.Int("max-retry-times", resourceManagerInitRetryTime),
 		zap.Duration("retry-interval", initRetryInterval))
 
-	ticker := time.NewTicker(initRetryInterval)
-	defer ticker.Stop()
-	var url string
-	var revision int64
-	var err error
-	for range r.initRetries {
+	var (
+		url      string
+		revision int64
+		err      error
+	)
+	if err := retry.IntervalRetry(r.ctx, resourceManagerInitRetryTime, initRetryInterval, func() error {
 		url, revision, err = r.discoverServiceURL()
-		if err == nil {
-			break
-		}
-		select {
-		case <-r.ctx.Done():
-			log.Info("[resource-manager] exit service discovery initialization due to context canceled")
-			return
-		case <-ticker.C:
-		}
+		return err
+	}); err != nil {
+		log.Error("[resource-manager] failed to discover service. initialization failed.", zap.Error(err))
 	}
 	r.resetConn(url)
 	r.updateServiceURLLoop(revision)
