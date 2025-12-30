@@ -95,6 +95,15 @@ var (
 			Name:      "store_sync",
 			Help:      "The state of store sync config",
 		}, []string{"address", "state"})
+
+	raftClusterStartDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "raftcluster_start_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of raft cluster start.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 13), // 1ms ~ 4s
+		})
 )
 
 func init() {
@@ -108,4 +117,5 @@ func init() {
 	prometheus.MustRegister(storesETAGauge)
 	prometheus.MustRegister(storeSyncConfigEvent)
 	prometheus.MustRegister(updateStoreStatsGauge)
+	prometheus.MustRegister(raftClusterStartDuration)
 }

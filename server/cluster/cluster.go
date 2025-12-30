@@ -320,6 +320,11 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
+	start := time.Now()
+	defer func() {
+		raftClusterStartDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	c.Lock()
 	defer c.Unlock()
 
@@ -328,15 +333,24 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	c.isAPIServiceMode = s.IsAPIServiceMode()
+	log.Info("[leader-ready] start to init cluster")
+	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
+		log.Error("[leader-ready] failed to init cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
 	}
+	initClusterDuration := time.Since(initClusterStart)
+	log.Info("[leader-ready] init cluster completed", zap.Duration("cost", initClusterDuration))
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
 	if !bootstrap {
+		log.Info("[leader-ready] start to check TSO service")
+		checkTSOStart := time.Now()
 		c.checkTSOService()
+		checkTSODuration := time.Since(checkTSOStart)
+		log.Info("[leader-ready] check TSO service completed", zap.Duration("cost", checkTSODuration))
 	}
 	defer func() {
 		if !bootstrap && err != nil {
@@ -354,45 +368,83 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 		failpoint.Return(err)
 	})
+	log.Info("[leader-ready] start to load cluster info")
+	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
+		log.Error("[leader-ready] failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
 		return err
 	}
+	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
 	if cluster == nil {
-		log.Warn("cluster is not bootstrapped")
+		log.Warn("[leader-ready] cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
 		return nil
 	}
+	log.Info("[leader-ready] load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
 
+	log.Info("[leader-ready] creating region labeler")
+	labelerStart := time.Now()
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	labelerDuration := time.Since(labelerStart)
 	if err != nil {
+		log.Error("[leader-ready] region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
 		return err
 	}
+	log.Info("[leader-ready] region labeler created", zap.Duration("cost", labelerDuration))
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		log.Info("[leader-ready] start to observe slow store status")
+		observeSlowStoreStart := time.Now()
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
 		}
+		observeSlowStoreDuration := time.Since(observeSlowStoreStart)
+		log.Info("[leader-ready] observe slow store status completed", zap.Duration("cost", observeSlowStoreDuration))
 	}
+	log.Info("[leader-ready] start to create replication mode manager")
+	replicationModeStart := time.Now()
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
+		log.Error("[leader-ready] failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
 		return err
 	}
+	replicationModeDuration := time.Since(replicationModeStart)
+	log.Info("[leader-ready] create replication mode manager completed", zap.Duration("cost", replicationModeDuration))
+	log.Info("[leader-ready] start to create store limiter")
+	limiterStart := time.Now()
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
+	limiterDuration := time.Since(limiterStart)
+	log.Info("[leader-ready] create store limiter completed", zap.Duration("cost", limiterDuration))
+	loadExternalTSStart := time.Now()
 	c.externalTS, err = c.storage.LoadExternalTS()
 	if err != nil {
-		log.Error("load external timestamp meets error", zap.Error(err))
+		log.Error("[leader-ready] load external timestamp meets error", zap.Error(err), zap.Duration("cost", time.Since(loadExternalTSStart)))
+	} else {
+		loadExternalTSDuration := time.Since(loadExternalTSStart)
+		log.Info("[leader-ready] load external timestamp completed", zap.Duration("cost", loadExternalTSDuration))
 	}
 
 	if c.isAPIServiceMode {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
+		log.Info("[leader-ready] start to bootstrap keyspace group manager")
+		bootstrapKeyspaceStart := time.Now()
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
+			log.Error("[leader-ready] failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
+		bootstrapKeyspaceDuration := time.Since(bootstrapKeyspaceStart)
+		log.Info("[leader-ready] bootstrap keyspace group manager completed", zap.Duration("cost", bootstrapKeyspaceDuration))
 	}
+	log.Info("[leader-ready] start to check scheduling service")
+	checkSchedulingStart := time.Now()
 	c.checkSchedulingService()
+	checkSchedulingDuration := time.Since(checkSchedulingStart)
+	log.Info("[leader-ready] check scheduling service completed", zap.Duration("cost", checkSchedulingDuration))
+	log.Info("[leader-ready] start to start background jobs")
+	backgroundJobsStart := time.Now()
 	c.wg.Add(9)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
@@ -403,11 +455,17 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
+	backgroundJobsDuration := time.Since(backgroundJobsStart)
+	log.Info("[leader-ready] start background jobs completed", zap.Duration("cost", backgroundJobsDuration))
 
+	log.Info("[leader-ready] start to start runners")
+	runnersStart := time.Now()
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)
+	runnersDuration := time.Since(runnersStart)
+	log.Info("[leader-ready] start runners completed", zap.Duration("cost", runnersDuration))
 	return nil
 }
 
