@@ -1,0 +1,10 @@
+# Require review from domain experts when the PR modified significant config files
+
+/conf/config.toml @tikv/pd-configuration-reviewer
+/server/config/config.go @tikv/pd-configuration-reviewer
+/pkg/schedule/config/config.go @tikv/pd-configuration-reviewer
+/pkg/schedule/schedulers/hot_region_config.go @tikv/pd-configuration-reviewer
+/pkg/mcs/resourcemanager/server/config.go @tikv/pd-configuration-reviewer
+/pkg/mcs/scheduling/server/config/config.go @tikv/pd-configuration-reviewer
+/pkg/mcs/tso/server/config.go @tikv/pd-configuration-reviewer
+/metrics/grafana/pd.json @tikv/pd-configuration-reviewer

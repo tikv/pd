@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ABSPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )/.."
+pushd "$(dirname "$0")/.." >/dev/null
+make
+data_dir=./run/pd1
+mkdir -p "$data_dir"
+popd >/dev/null
+
+"$ABSPATH/bin/pd-server" --name=pd1 \
+	    --data-dir="$ABSPATH/$data_dir" \
+	    --client-urls="https://127.0.0.1:2379" \
+	    --peer-urls="https://127.0.0.1:2380" \
+	    --initial-cluster="pd1=https://127.0.0.1:2380" \
+	    "$@"

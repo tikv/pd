@@ -1,0 +1,158 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package audit
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/requestutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+)
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestLabelMatcher(t *testing.T) {
+	re := require.New(t)
+	matcher := &LabelMatcher{"testSuccess"}
+	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
+	re.True(matcher.Match(labels1))
+	labels2 := &BackendLabels{Labels: []string{"testFail"}}
+	re.False(matcher.Match(labels2))
+}
+
+func TestPrometheusBackend(t *testing.T) {
+	re := require.New(t)
+	serviceAuditHistogramTest := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_handling_seconds_test",
+			Help:      "PD server service handling audit",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"service", "method"})
+
+	serviceAuditCounterTest := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_requests_total_test",
+			Help:      "Total number of service requests for audit test",
+		}, []string{"service", "method", "caller_id"})
+
+	prometheus.MustRegister(serviceAuditHistogramTest)
+	prometheus.MustRegister(serviceAuditCounterTest)
+
+	ts := httptest.NewServer(promhttp.Handler())
+	defer ts.Close()
+
+	backend := NewPrometheusBackend(serviceAuditHistogramTest, serviceAuditCounterTest, true)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
+	re.NoError(err)
+	info := requestutil.GetRequestInfo(req)
+	info.ServiceLabel = "test"
+	info.CallerID = "user1"
+	info.IP = "localhost"
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	re.False(backend.ProcessHTTPRequest(req))
+
+	endTime := time.Now().Unix() + 20
+	req = req.WithContext(requestutil.WithEndTime(req.Context(), endTime))
+
+	re.True(backend.ProcessHTTPRequest(req))
+	re.True(backend.ProcessHTTPRequest(req))
+
+	info.CallerID = "user2"
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	re.True(backend.ProcessHTTPRequest(req))
+
+	// For test, sleep time needs longer than the push interval
+	time.Sleep(time.Second)
+	req, err = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
+	re.NoError(err)
+	resp, err := http.DefaultClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	content, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	output := string(content)
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{method=\"HTTP\",service=\"test\"}")
+	re.Contains(output, "pd_service_audit_requests_total_test{caller_id=\"user1\",method=\"HTTP\",service=\"test\"}")
+}
+
+func TestLocalLogBackendUsingFile(t *testing.T) {
+	re := require.New(t)
+	backend := NewLocalLogBackend(true)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	re.NoError(err)
+	re.False(backend.ProcessHTTPRequest(req))
+	info := requestutil.GetRequestInfo(req)
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	re.True(backend.ProcessHTTPRequest(req))
+	b, err := os.ReadFile(fname)
+	re.NoError(err)
+	output := strings.SplitN(string(b), "]", 4)
+	re.Equal(
+		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, CallerID:anonymous, IP:, Port:, "+
+			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
+			time.Unix(info.StartTimeStamp, 0).String()),
+		output[3],
+	)
+}
+
+func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
+	re := require.New(b)
+	b.StopTimer()
+	backend := NewLocalLogBackend(true)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	re.NoError(err)
+	b.StartTimer()
+	for range b.N {
+		info := requestutil.GetRequestInfo(req)
+		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+		backend.ProcessHTTPRequest(req)
+	}
+}
+
+func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
+	re := require.New(b)
+	b.StopTimer()
+	backend := NewLocalLogBackend(true)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	re.NoError(err)
+	b.StartTimer()
+	for range b.N {
+		info := requestutil.GetRequestInfo(req)
+		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+		re.True(backend.ProcessHTTPRequest(req))
+	}
+}

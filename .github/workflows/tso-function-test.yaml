@@ -1,0 +1,33 @@
+name: TSO Function Test
+on:
+  push:
+    branches:
+      - master
+      - release-5.*
+      - release-6.*
+      - release-7.*
+      - release-8.*
+      - release-nextgen-20250815
+  pull_request:
+    branches:
+      - master
+      - release-5.*
+      - release-6.*
+      - release-7.*
+      - release-8.*
+      - release-nextgen-20250815
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+jobs:
+  tso-function-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          check-latest: true
+      - name: Make TSO Function Test
+        run: make test-tso-function

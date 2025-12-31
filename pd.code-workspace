@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"name": "pd-server",
+			"path": "."
+		},
+		{
+			"name": "pd-client",
+			"path": "client"
+		},
+		{
+			"name": "pd-integration-tests",
+			"path": "tests/integrations"
+		},
+		{
+			"name": "pd-tools",
+			"path": "tools"
+		}
+	],
+	"settings": {
+		"makefile.configureOnOpen": false
+	}
+}

@@ -1,0 +1,29 @@
+# See the OWNERS docs at https://www.kubernetes.dev/docs/guide/owners/#owners
+# The members of 'sig-community-*' are synced from memberships defined in repository: https://github.com/tikv/community.
+approvers:
+  - AndreMouche
+  - CabinfeverB
+  - Connor1996
+  - HuSharp
+  - HunDunDM
+  - JmPotato
+  - Yisaer
+  - binshi-bing
+  - bufferflies
+  - disksing
+  - huachaohuang
+  - lhy1024
+  - nolouch
+  - overvenus
+  - qiuyesuifeng
+  - rleungx
+  - siddontang
+  - zhouqiang-cl
+reviewers:
+  - BusyJay
+  - Luffbee
+  - Tema
+  - howardlau1999
+  - okJiang
+  - shafreeck
+  - xhebox
