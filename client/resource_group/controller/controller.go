@@ -267,10 +267,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
-		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
-		}
 		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
@@ -279,7 +275,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
+			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithPrefix(), pd.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
@@ -306,7 +302,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-watchRetryTimer.C:
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
 					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
+					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithPrefix(), pd.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -360,7 +356,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					continue
 				}
 				for _, item := range resp {
-					metaRevision = item.Kv.ModRevision
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
