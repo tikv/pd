@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -30,9 +31,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	api "github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
@@ -309,8 +312,8 @@ func (suite *keyspaceTestSuite) TestSetPlacement() {
 	// Add stores with labels
 	for i := 1; i <= 3; i++ {
 		store := &metapb.Store{
-			Id:      uint64(i + 1),
-			Address: fmt.Sprintf("tikv%d:20160", i),
+			Id:      uint64(i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 			Labels: []*metapb.StoreLabel{
 				{Key: "keyspace", Value: "test_label"},
 			},
@@ -321,22 +324,18 @@ func (suite *keyspaceTestSuite) TestSetPlacement() {
 	}
 
 	// Create a test keyspace
-	keyspaceName := "test_keyspace_store"
+	keyspaceName := "test_keyspace"
 	args := []string{"-u", suite.pdAddr, "keyspace", "create", keyspaceName}
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
 
 	var meta api.KeyspaceMeta
 	err = json.Unmarshal(output, &meta)
-	if err != nil {
-		// If unmarshal fails, skip this test as the cluster might not support keyspace properly
-		suite.T().Skip("Failed to create keyspace, skipping test")
-		return
-	}
+	re.NoError(err)
 	keyspaceID := meta.GetId()
 
 	// Simulate region heartbeat for the keyspace range BEFORE setting placement rules
-	region := suite.createKeyspaceRegion(keyspaceID, 100)
+	region := suite.createKeyspaceRegion(keyspaceID)
 
 	// Set store placement for the keyspace
 	labelKey := "keyspace"
@@ -367,8 +366,14 @@ func (suite *keyspaceTestSuite) TestSetPlacement() {
 	re.Equal(fmt.Sprintf("keyspace-%d-rule", keyspaceID), rule1.ID)
 	re.Equal("voter", string(rule1.Role))
 	re.Equal(3, rule1.Count)
-	re.NotEmpty(rule1.StartKey)
-	re.NotEmpty(rule1.EndKey)
+	// Verify StartKey and EndKey match the keyspace boundaries
+	regionBound := keyspace.MakeRegionBound(keyspaceID)
+	expectedStartKey := hex.EncodeToString(regionBound.RawLeftBound)
+	expectedEndKey := hex.EncodeToString(regionBound.RawRightBound)
+	actualStartKey := hex.EncodeToString(rule1.StartKey)
+	actualEndKey := hex.EncodeToString(rule1.EndKey)
+	re.Equal(expectedStartKey, actualStartKey, "raw rule StartKey should match keyspace boundary")
+	re.Equal(expectedEndKey, actualEndKey, "raw rule EndKey should match keyspace boundary")
 
 	// Verify label constraints
 	re.Len(rule1.LabelConstraints, 1)
@@ -382,8 +387,13 @@ func (suite *keyspaceTestSuite) TestSetPlacement() {
 	re.Equal(fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID), rule2.ID)
 	re.Equal("voter", string(rule2.Role))
 	re.Equal(3, rule2.Count)
-	re.NotEmpty(rule2.StartKey)
-	re.NotEmpty(rule2.EndKey)
+	// Verify txn key space StartKey and EndKey
+	expectedTxnStartKey := hex.EncodeToString(regionBound.TxnLeftBound)
+	expectedTxnEndKey := hex.EncodeToString(regionBound.TxnRightBound)
+	actualTxnStartKey := hex.EncodeToString(rule2.StartKey)
+	actualTxnEndKey := hex.EncodeToString(rule2.EndKey)
+	re.Equal(expectedTxnStartKey, actualTxnStartKey, "txn rule StartKey should match keyspace boundary")
+	re.Equal(expectedTxnEndKey, actualTxnEndKey, "txn rule EndKey should match keyspace boundary")
 
 	// Verify label constraints
 	re.Len(rule2.LabelConstraints, 1)
@@ -400,19 +410,14 @@ func (suite *keyspaceTestSuite) TestSetPlacement() {
 	re.NoError(err)
 	re.NotNil(regionFit, "region fit should exist")
 
-	// Verify that our custom rule is included in the matched rules
-	foundRule := false
-	for _, rule := range regionFit.RuleFits {
-		if rule.Rule.GroupID == groupID {
-			foundRule = true
-			re.Equal(rule2.ID, rule.Rule.ID)
-			re.Len(rule.Rule.LabelConstraints, 1)
-			re.Equal(labelKey, rule.Rule.LabelConstraints[0].Key)
-			re.Equal(labelValue, rule.Rule.LabelConstraints[0].Values[0])
-			break
-		}
-	}
-	re.True(foundRule, "custom placement rule should be applied to the region")
+	// Verify that only our custom rule is applied (Override=true should replace default rules)
+	re.Len(regionFit.RuleFits, 1, "should only have one rule fit due to Override=true")
+	appliedRule := regionFit.RuleFits[0]
+	re.Equal(groupID, appliedRule.Rule.GroupID, "applied rule should be from our custom keyspace group")
+	re.Equal(rule2.ID, appliedRule.Rule.ID, "applied rule should be the txn rule")
+	re.Len(appliedRule.Rule.LabelConstraints, 1)
+	re.Equal(labelKey, appliedRule.Rule.LabelConstraints[0].Key)
+	re.Equal(labelValue, appliedRule.Rule.LabelConstraints[0].Values[0])
 }
 
 func (suite *keyspaceTestSuite) TestRevertPlacement() {
@@ -422,8 +427,8 @@ func (suite *keyspaceTestSuite) TestRevertPlacement() {
 	// Add stores with labels
 	for i := 1; i <= 3; i++ {
 		store := &metapb.Store{
-			Id:      uint64(i + 1),
-			Address: fmt.Sprintf("tikv%d:20160", i),
+			Id:      uint64(i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 			Labels: []*metapb.StoreLabel{
 				{Key: "keyspace", Value: "test_label"},
 			},
@@ -441,14 +446,11 @@ func (suite *keyspaceTestSuite) TestRevertPlacement() {
 
 	var meta api.KeyspaceMeta
 	err = json.Unmarshal(output, &meta)
-	if err != nil {
-		suite.T().Skip("Failed to create keyspace, skipping test")
-		return
-	}
+	re.NoError(err)
 	keyspaceID := meta.GetId()
 
 	// Simulate region heartbeat for the keyspace range BEFORE setting placement rules
-	region := suite.createKeyspaceRegion(keyspaceID, 200)
+	region := suite.createKeyspaceRegion(keyspaceID)
 
 	// Set store placement for the keyspace
 	labelKey := "keyspace"
@@ -477,14 +479,9 @@ func (suite *keyspaceTestSuite) TestRevertPlacement() {
 	regionFit, err := handler.CheckRegionPlacementRule(region)
 	re.NoError(err)
 	re.NotNil(regionFit)
-	foundBeforeRevert := false
-	for _, rule := range regionFit.RuleFits {
-		if rule.Rule.GroupID == groupID {
-			foundBeforeRevert = true
-			break
-		}
-	}
-	re.True(foundBeforeRevert, "rule should be applied before revert")
+	// Verify that only our custom rule is applied (Override=true should replace default rules)
+	re.Len(regionFit.RuleFits, 1, "should only have one rule fit due to Override=true")
+	re.Equal(groupID, regionFit.RuleFits[0].Rule.GroupID, "applied rule should be from our custom keyspace group")
 
 	// Revert the placement rules
 	args = []string{"-u", suite.pdAddr, "keyspace", "revert-placement", strconv.Itoa(int(keyspaceID))}
@@ -503,18 +500,183 @@ func (suite *keyspaceTestSuite) TestRevertPlacement() {
 	re.Empty(bundle.Rules, "bundle rules should be empty")
 
 	// Verify rules are no longer applied to regions after revert
-	// Since the bundle is deleted, we just verify the group doesn't exist
-	// The region will fall back to default rules
+	// The region should fall back to default rules
 	regionFitAfter, err := handler.CheckRegionPlacementRule(region)
 	re.NoError(err)
-	foundAfterRevert := false
-	for _, rule := range regionFitAfter.RuleFits {
-		if rule.Rule.GroupID == groupID {
-			foundAfterRevert = true
+	// After revert, should use only one default placement rule (not the keyspace-specific rules)
+	re.Len(regionFitAfter.RuleFits, 1, "should have only one default rule applied after revert")
+	re.NotEqual(groupID, regionFitAfter.RuleFits[0].Rule.GroupID, "should use default rule, not keyspace-specific rule")
+}
+
+// TestSetPlacementWithTiFlash ensures keyspace set-placement coexists with TiFlash rules.
+// It verifies that:
+// 1. set-placement does not remove or alter an existing TiFlash learner bundle
+// 2. Keyspace voter rules in keyspace-{id} remain intact
+// 3. A TiFlash region within the keyspace matches both voter and learner rules concurrently
+func (suite *keyspaceTestSuite) TestSetPlacementWithTiFlash() {
+	re := suite.Require()
+	leaderServer := suite.cluster.GetLeaderServer()
+	ctx := context.Background()
+
+	httpClient := pd.NewClient("pd-keyspace-test", []string{suite.pdAddr})
+	defer httpClient.Close()
+
+	// Add TiKV stores
+	for i := 1; i <= 3; i++ {
+		pdTests.MustPutStore(re, suite.cluster, &metapb.Store{
+			Id:      uint64(i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			Labels:  []*metapb.StoreLabel{{Key: "keyspace", Value: "test_label"}},
+			State:   metapb.StoreState_Up,
+		})
+	}
+
+	// Add TiFlash stores
+	for i := 4; i <= 6; i++ {
+		pdTests.MustPutStore(re, suite.cluster, &metapb.Store{
+			Id:      uint64(i),
+			Address: fmt.Sprintf("mock://tiflash-%d:%d", i, i),
+			Labels:  []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
+			State:   metapb.StoreState_Up,
+		})
+	}
+
+	// Create keyspace and prepare TiFlash rule range inside its txn range
+	meta := suite.mustCreateKeyspace(api.CreateKeyspaceParams{Name: "tiflash_test"})
+	keyspaceID := meta.GetId()
+	bound := keyspace.MakeRegionBound(keyspaceID)
+	regionStartKey := append([]byte(nil), bound.TxnLeftBound...)
+	regionEndKey := append([]byte(nil), bound.TxnRightBound...)
+	regionStartKeyHex := hex.EncodeToString(regionStartKey)
+	regionEndKeyHex := hex.EncodeToString(regionEndKey)
+
+	// Create TiFlash rule before running set-placement to ensure it is preserved
+	tiflashGroupID := fmt.Sprintf("tiflash-table-%d", keyspaceID)
+	tiflashBundle := &pd.GroupBundle{
+		ID:       tiflashGroupID,
+		Index:    200,
+		Override: false,
+		Rules: []*pd.Rule{{
+			GroupID:     tiflashGroupID,
+			ID:          "tiflash-learner",
+			Role:        pd.Learner,
+			Count:       1,
+			StartKeyHex: regionStartKeyHex,
+			EndKeyHex:   regionEndKeyHex,
+			LabelConstraints: []pd.LabelConstraint{{
+				Key: "engine", Op: pd.In, Values: []string{"tiflash"},
+			}},
+		}},
+	}
+	re.NoError(httpClient.SetPlacementRuleBundles(ctx, []*pd.GroupBundle{tiflashBundle}, true))
+
+	// Run set-placement; it should not override the TiFlash rule bundle
+	args := []string{"-u", suite.pdAddr, "keyspace", "set-placement", strconv.Itoa(int(keyspaceID)), "keyspace=test_label"}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Successfully set placement rules")
+
+	// Verify keyspace bundle exists and targets TiKV stores
+	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
+	bundle := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
+	re.Len(bundle.Rules, 2, "keyspace should have 2 voter rules (raw + txn)")
+	re.True(bundle.Override)
+	for _, rule := range bundle.Rules {
+		re.Equal(placement.Voter, rule.Role, "keyspace rules should be voter role")
+		re.Len(rule.LabelConstraints, 1)
+		re.Equal("keyspace", rule.LabelConstraints[0].Key)
+		re.Contains(rule.LabelConstraints[0].Values, "test_label")
+	}
+
+	// TiFlash bundle should still exist and remain untouched
+	tiflashBundleVerify := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(tiflashGroupID)
+	re.NotNil(tiflashBundleVerify, "TiFlash bundle should exist after set-placement")
+	re.Len(tiflashBundleVerify.Rules, 1, "TiFlash bundle should keep its learner rule")
+	re.Equal(placement.Learner, tiflashBundleVerify.Rules[0].Role, "TiFlash rule should be learner role")
+	re.Len(tiflashBundleVerify.Rules[0].LabelConstraints, 1)
+	re.Equal("engine", tiflashBundleVerify.Rules[0].LabelConstraints[0].Key)
+	re.Contains(tiflashBundleVerify.Rules[0].LabelConstraints[0].Values, "tiflash")
+	re.Equal(regionStartKey, tiflashBundleVerify.Rules[0].StartKey, "TiFlash rule start key should remain unchanged")
+	re.Equal(regionEndKey, tiflashBundleVerify.Rules[0].EndKey, "TiFlash rule end key should remain unchanged")
+	re.False(tiflashBundleVerify.Override, "TiFlash bundle should have Override=false to coexist with keyspace rules")
+
+	// Both bundles should be registered in the rule manager
+	allBundles := leaderServer.GetRaftCluster().GetRuleManager().GetAllGroupBundles()
+	bundleIDs := make([]string, 0, len(allBundles))
+	for _, b := range allBundles {
+		bundleIDs = append(bundleIDs, b.ID)
+	}
+	re.Contains(bundleIDs, groupID, "keyspace bundle should exist")
+	re.Contains(bundleIDs, tiflashGroupID, "TiFlash bundle should coexist with keyspace bundle")
+
+	// Create a region within the keyspace range that has both TiKV voters and TiFlash learner
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+		{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner},
+	}
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       uint64(1000),
+			StartKey: append([]byte(nil), regionStartKey...),
+			EndKey:   append([]byte(nil), regionEndKey...),
+			Peers:    peers,
+		},
+		peers[0],
+	)
+	leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+
+	// Wait for bundles to apply and ensure both rules match the region
+	testutil.Eventually(re, func() bool {
+		handler := leaderServer.GetServer().GetHandler()
+		regionFit, err := handler.CheckRegionPlacementRule(region)
+		if err != nil || regionFit == nil {
+			return false
+		}
+		hasKeyspaceVoterRule := false
+		hasTiFlashLearnerRule := false
+		for _, fit := range regionFit.RuleFits {
+			if fit.Rule.GroupID == groupID && fit.Rule.Role == placement.Voter {
+				hasKeyspaceVoterRule = true
+			}
+			if fit.Rule.GroupID == tiflashGroupID && fit.Rule.Role == placement.Learner {
+				hasTiFlashLearnerRule = true
+			}
+		}
+		return hasKeyspaceVoterRule && hasTiFlashLearnerRule
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	// Final verification on rule fits
+	handler := leaderServer.GetServer().GetHandler()
+	regionFit, err := handler.CheckRegionPlacementRule(region)
+	re.NoError(err)
+	re.NotNil(regionFit, "region fit should exist")
+	re.GreaterOrEqual(len(regionFit.RuleFits), 2, "region should match at least keyspace and TiFlash rules")
+
+	hasKeyspaceVoterRule := false
+	for _, fit := range regionFit.RuleFits {
+		if fit.Rule.GroupID == groupID && fit.Rule.Role == placement.Voter {
+			hasKeyspaceVoterRule = true
+			re.Len(fit.Rule.LabelConstraints, 1)
+			re.Equal("keyspace", fit.Rule.LabelConstraints[0].Key)
+			re.Contains(fit.Rule.LabelConstraints[0].Values, "test_label")
 			break
 		}
 	}
-	re.False(foundAfterRevert, "rule should not be applied after revert")
+	re.True(hasKeyspaceVoterRule, "region should match keyspace voter rule")
+
+	hasTiFlashLearnerRule := false
+	for _, fit := range regionFit.RuleFits {
+		if fit.Rule.GroupID == tiflashGroupID && fit.Rule.Role == placement.Learner {
+			hasTiFlashLearnerRule = true
+			re.Len(fit.Rule.LabelConstraints, 1)
+			re.Equal("engine", fit.Rule.LabelConstraints[0].Key)
+			re.Contains(fit.Rule.LabelConstraints[0].Values, "tiflash")
+			break
+		}
+	}
+	re.True(hasTiFlashLearnerRule, "region should match TiFlash learner rule")
 }
 
 func (suite *keyspaceTestSuite) TestSetPlacementMultipleLabels() {
@@ -524,8 +686,8 @@ func (suite *keyspaceTestSuite) TestSetPlacementMultipleLabels() {
 	// Add stores with multiple labels
 	for i := 1; i <= 3; i++ {
 		store := &metapb.Store{
-			Id:      uint64(i + 1),
-			Address: fmt.Sprintf("tikv%d:20160", i),
+			Id:      uint64(i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 			Labels: []*metapb.StoreLabel{
 				{Key: "zone", Value: "east"},
 				{Key: "disk", Value: "ssd"},
@@ -537,7 +699,7 @@ func (suite *keyspaceTestSuite) TestSetPlacementMultipleLabels() {
 	}
 
 	// Create a test keyspace
-	keyspaceName := "testkeyspace2"
+	keyspaceName := "test_keyspace"
 	args := []string{"-u", suite.pdAddr, "keyspace", "create", keyspaceName}
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
@@ -548,7 +710,7 @@ func (suite *keyspaceTestSuite) TestSetPlacementMultipleLabels() {
 	keyspaceID := meta.GetId()
 
 	// Simulate region heartbeat for the keyspace range BEFORE setting placement rules
-	region := suite.createKeyspaceRegion(keyspaceID, 300)
+	region := suite.createKeyspaceRegion(keyspaceID)
 
 	// Set placement with multiple label constraints
 	args = []string{"-u", suite.pdAddr, "keyspace", "set-placement", strconv.Itoa(int(keyspaceID)), "zone=east", "disk=ssd"}
@@ -590,27 +752,22 @@ func (suite *keyspaceTestSuite) TestSetPlacementMultipleLabels() {
 	re.NoError(err)
 	re.NotNil(regionFit)
 
-	// Find our custom rule and verify it has both constraints
-	foundRule := false
-	for _, rule := range regionFit.RuleFits {
-		if rule.Rule.GroupID == groupID {
-			foundRule = true
-			re.Len(rule.Rule.LabelConstraints, 2, "rule should have 2 constraints")
-			re.Equal("zone", rule.Rule.LabelConstraints[0].Key)
-			re.Equal([]string{"east"}, rule.Rule.LabelConstraints[0].Values)
-			re.Equal("disk", rule.Rule.LabelConstraints[1].Key)
-			re.Equal([]string{"ssd"}, rule.Rule.LabelConstraints[1].Values)
-			break
-		}
-	}
-	re.True(foundRule, "custom placement rule with multiple constraints should be applied to the region")
+	// Verify that only our custom rule is applied (Override=true should replace default rules)
+	re.Len(regionFit.RuleFits, 1, "should only have one rule fit due to Override=true")
+	appliedRule := regionFit.RuleFits[0]
+	re.Equal(groupID, appliedRule.Rule.GroupID, "applied rule should be from our custom keyspace group")
+	re.Len(appliedRule.Rule.LabelConstraints, 2, "rule should have 2 constraints")
+	re.Equal("zone", appliedRule.Rule.LabelConstraints[0].Key)
+	re.Equal([]string{"east"}, appliedRule.Rule.LabelConstraints[0].Values)
+	re.Equal("disk", appliedRule.Rule.LabelConstraints[1].Key)
+	re.Equal([]string{"ssd"}, appliedRule.Rule.LabelConstraints[1].Values)
 }
 
 // createKeyspaceRegion creates a region in the keyspace range by simulating heartbeat.
 // It returns the created region for verification.
-func (suite *keyspaceTestSuite) createKeyspaceRegion(keyspaceID uint32, regionIDOffset uint64) *core.RegionInfo {
+func (suite *keyspaceTestSuite) createKeyspaceRegion(keyspaceID uint32) *core.RegionInfo {
 	re := suite.Require()
-	regionID := uint64(regionIDOffset + uint64(keyspaceID))
+	regionID := uint64(keyspaceID)
 
 	// Use keyspace.MakeRegionBound to get the correct region boundaries
 	regionBound := keyspace.MakeRegionBound(keyspaceID)
@@ -627,7 +784,11 @@ func (suite *keyspaceTestSuite) mustCreateKeyspace(param api.CreateKeyspaceParam
 	}
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &meta))
+	err = json.Unmarshal(output, &meta)
+	if err != nil {
+		// Print output for debugging
+		re.Failf("Failed to unmarshal keyspace create output", "output: %s, error: %v", string(output), err)
+	}
 	return meta
 }
 

@@ -16,6 +16,7 @@ package command
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tikv/pd/client/constants"
+	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server/apiv2/handlers"
 )
@@ -446,4 +449,164 @@ func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	cmd.Println(string(output))
+}
+
+func newSetPlacementCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "set-placement <keyspace-id> <label-key>=<label-value> [<label-key>=<label-value>...]",
+		Short: "set keyspace placement rules with store label constraints",
+		Long: "Set placement rules for all regions of a keyspace to stores matching the specified labels.\n" +
+			"This creates a placement rule bundle that places the keyspace's regions on stores matching all the label constraints.\n" +
+			"Examples:\n" +
+			"  pd-ctl keyspace set-placement 1 zone=east\n" +
+			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd",
+		Run: setPlacementCommandFunc,
+	}
+	return r
+}
+
+func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 2 {
+		cmd.Usage()
+		return
+	}
+
+	keyspaceIDStr := args[0]
+	labelPairs := args[1:]
+
+	// Parse keyspace ID
+	var keyspaceID uint64
+	if _, err := fmt.Sscanf(keyspaceIDStr, "%d", &keyspaceID); err != nil {
+		cmd.PrintErrf("Invalid keyspace ID: %v\n", err)
+		return
+	}
+
+	// Parse all label key=value pairs
+	var labelConstraints []pd.LabelConstraint
+	for _, labelPair := range labelPairs {
+		parts := strings.SplitN(labelPair, "=", 2)
+		if len(parts) != 2 {
+			cmd.PrintErrf("Invalid label format, expected <label-key>=<label-value>, got: %s\n", labelPair)
+			return
+		}
+		labelKey := strings.TrimSpace(parts[0])
+		labelValue := strings.TrimSpace(parts[1])
+		if labelKey == "" || labelValue == "" {
+			cmd.PrintErrf("Label key and value cannot be empty\n")
+			return
+		}
+		labelConstraints = append(labelConstraints, pd.LabelConstraint{
+			Key:    labelKey,
+			Op:     pd.In,
+			Values: []string{labelValue},
+		})
+	}
+
+	// Generate key ranges for the keyspace
+	keyspaceID32 := uint32(keyspaceID)
+	keyRanges := makeKeyRanges(keyspaceID32)
+
+	// Create placement rule bundle
+	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
+	bundle := &pd.GroupBundle{
+		ID:       groupID,
+		Index:    100,
+		Override: true,
+		Rules: []*pd.Rule{
+			{
+				GroupID:          groupID,
+				ID:               fmt.Sprintf("keyspace-%d-rule", keyspaceID),
+				Role:             pd.Voter,
+				Count:            3,
+				StartKeyHex:      keyRanges[0].(map[string]any)["start_key"].(string),
+				EndKeyHex:        keyRanges[0].(map[string]any)["end_key"].(string),
+				LabelConstraints: labelConstraints,
+			},
+			{
+				GroupID:          groupID,
+				ID:               fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID),
+				Role:             pd.Voter,
+				Count:            3,
+				StartKeyHex:      keyRanges[1].(map[string]any)["start_key"].(string),
+				EndKeyHex:        keyRanges[1].(map[string]any)["end_key"].(string),
+				LabelConstraints: labelConstraints,
+			},
+		},
+	}
+
+	// Send to PD server using PDCli
+	// Use partial=true to allow this bundle to coexist with other bundles (like TiFlash rules)
+	if err := PDCli.SetPlacementRuleBundles(cmd.Context(), []*pd.GroupBundle{bundle}, true); err != nil {
+		cmd.PrintErrf("Failed to set placement rule: %v\n", err)
+		return
+	}
+
+	// Build label description for output
+	var labelDescs []string
+	for _, lc := range labelConstraints {
+		labelDescs = append(labelDescs, fmt.Sprintf("%s=%s", lc.Key, strings.Join(lc.Values, ",")))
+	}
+	cmd.Printf("Successfully set placement rules for keyspace %d with label constraints: %s\n", keyspaceID, strings.Join(labelDescs, ", "))
+}
+
+func newRevertPlacementCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "revert-placement <keyspace-id>",
+		Short: "revert keyspace placement rules",
+		Long: "Remove placement rules for a keyspace.\n" +
+			"This deletes the placement rule bundle that was created by set-placement command.",
+		Run: revertPlacementCommandFunc,
+	}
+	return r
+}
+
+func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+
+	keyspaceIDStr := args[0]
+
+	// Parse keyspace ID
+	var keyspaceID uint64
+	if _, err := fmt.Sscanf(keyspaceIDStr, "%d", &keyspaceID); err != nil {
+		cmd.PrintErrf("Invalid keyspace ID: %v\n", err)
+		return
+	}
+
+	// Delete the placement rule bundle using PDCli
+	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
+	if err := PDCli.DeletePlacementRuleBundleByGroup(cmd.Context(), groupID); err != nil {
+		cmd.PrintErrf("Failed to revert placement rule: %v\n", err)
+		return
+	}
+
+	cmd.Printf("Successfully reverted placement rules for keyspace %d\n", keyspaceID)
+}
+
+// makeKeyRanges generates key ranges for a keyspace ID
+// This matches the implementation in pkg/keyspace/util.go:MakeKeyRanges
+func makeKeyRanges(id uint32) []any {
+	keyspaceIDBytes := make([]byte, 4)
+	nextKeyspaceIDBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
+	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
+
+	// Encode using codec.EncodeBytes for proper memcomparable format
+	rawLeft := codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...))
+	rawRight := codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...))
+	txnLeft := codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...))
+	txnRight := codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...))
+
+	return []any{
+		map[string]any{
+			"start_key": hex.EncodeToString(rawLeft),
+			"end_key":   hex.EncodeToString(rawRight),
+		},
+		map[string]any{
+			"start_key": hex.EncodeToString(txnLeft),
+			"end_key":   hex.EncodeToString(txnRight),
+		},
+	}
 }
