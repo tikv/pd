@@ -112,10 +112,10 @@ func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.Re
 
 	bound := keyspace.MakeRegionBound(id)
 
-	re.Equal(bound.RawLeftBound, rangeRule[0].StartKeyHex)
-	re.Equal(bound.RawRightBound, rangeRule[0].EndKeyHex)
-	re.Equal(bound.TxnLeftBound, rangeRule[1].StartKeyHex)
-	re.Equal(bound.TxnRightBound, rangeRule[1].EndKeyHex)
+	re.Equal(string(bound.RawLeftBound), rangeRule[0].StartKeyHex)
+	re.Equal(string(bound.RawRightBound), rangeRule[0].EndKeyHex)
+	re.Equal(string(bound.TxnLeftBound), rangeRule[1].StartKeyHex)
+	re.Equal(string(bound.TxnRightBound), rangeRule[1].EndKeyHex)
 }
 
 func (suite *keyspaceTestSuite) TestPreAlloc() {
