@@ -16,7 +16,6 @@ package command
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -29,7 +28,6 @@ import (
 
 	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server/apiv2/handlers"
 )
@@ -509,7 +507,7 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges for the keyspace
-	keyRanges := makeKeyRanges(keyspaceID32)
+	keyRanges := keyspace.MakeKeyRanges(keyspaceID32)
 
 	// Create placement rule bundle
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
@@ -594,30 +592,4 @@ func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	cmd.Printf("Successfully reverted placement rules for keyspace %d\n", keyspaceID)
-}
-
-// makeKeyRanges generates key ranges for a keyspace ID
-// This matches the implementation in pkg/keyspace/util.go:MakeKeyRanges
-func makeKeyRanges(id uint32) []any {
-	keyspaceIDBytes := make([]byte, 4)
-	nextKeyspaceIDBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
-	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
-
-	// Encode using codec.EncodeBytes for proper memcomparable format
-	rawLeft := codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...))
-	rawRight := codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...))
-	txnLeft := codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...))
-	txnRight := codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...))
-
-	return []any{
-		map[string]any{
-			"start_key": hex.EncodeToString(rawLeft),
-			"end_key":   hex.EncodeToString(rawRight),
-		},
-		map[string]any{
-			"start_key": hex.EncodeToString(txnLeft),
-			"end_key":   hex.EncodeToString(txnRight),
-		},
-	}
 }

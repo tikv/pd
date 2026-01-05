@@ -16,8 +16,6 @@ package keyspace
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"strconv"
 	"testing"
@@ -30,7 +28,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -113,19 +110,12 @@ func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.Re
 	re.True(ok)
 	re.Len(rangeRule, 2)
 
-	keyspaceIDBytes := make([]byte, 4)
-	nextKeyspaceIDBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
-	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
-	rawLeftBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)))
-	rawRightBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)))
-	txnLeftBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...)))
-	txnRightBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)))
+	bound := keyspace.MakeRegionBound(id)
 
-	re.Equal(rawLeftBound, rangeRule[0].StartKeyHex)
-	re.Equal(rawRightBound, rangeRule[0].EndKeyHex)
-	re.Equal(txnLeftBound, rangeRule[1].StartKeyHex)
-	re.Equal(txnRightBound, rangeRule[1].EndKeyHex)
+	re.Equal(bound.RawLeftBound, rangeRule[0].StartKeyHex)
+	re.Equal(bound.RawRightBound, rangeRule[0].EndKeyHex)
+	re.Equal(bound.TxnLeftBound, rangeRule[1].StartKeyHex)
+	re.Equal(bound.TxnRightBound, rangeRule[1].EndKeyHex)
 }
 
 func (suite *keyspaceTestSuite) TestPreAlloc() {
