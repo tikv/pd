@@ -55,11 +55,11 @@ type Request struct {
 
 // IsFrom checks if the request is from the specified pool.
 func (req *Request) IsFrom(pool *sync.Pool) bool {
-	req.mu.RLock()
-	defer req.mu.RUnlock()
 	if req == nil {
 		return false
 	}
+	req.mu.RLock()
+	defer req.mu.RUnlock()
 	return req.pool == pool
 }
 
