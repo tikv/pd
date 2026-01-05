@@ -264,6 +264,8 @@ const (
 	// The checking of store compatibility has a drawback that it may block the downgrade process.
 	// In serverless, it's safe to disable this checking as cluster is managed, and the compatibility is guaranteed.
 	defaultEnableCheckStoreCompatible = false
+
+	defaultEnableGRPCClientMetrics = false
 )
 
 // Special keys for Labels
@@ -542,6 +544,8 @@ type PDServerConfig struct {
 	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
 	// EnableCheckStoreCompatible is used to enable the checking store compatibility.
 	EnableCheckStoreCompatible bool `toml:"enable-check-store-compatible" json:"enable-check-store-compatible"`
+	// EnableGRPCClientMetrics enables grpc_client_* metrics for outgoing gRPC/etcd requests.
+	EnableGRPCClientMetrics bool `toml:"enable-grpc-client-metrics" json:"enable-grpc-client-metrics,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
@@ -593,6 +597,9 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	}
 	if !meta.IsDefined("enable-check-store-compatible") {
 		c.EnableCheckStoreCompatible = defaultEnableCheckStoreCompatible
+	}
+	if !meta.IsDefined("enable-grpc-client-metrics") {
+		c.EnableGRPCClientMetrics = defaultEnableGRPCClientMetrics
 	}
 	if err := migrateConfigurationFromFile(meta); err != nil {
 		return err

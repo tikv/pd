@@ -61,6 +61,8 @@ const (
 	defaultMaxWaitDuration = 30 * time.Second
 	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
 	defaultLTBTokenRPCMaxDelay = 1 * time.Second
+
+	defaultEnableGRPCClientMetrics = false
 )
 
 // Config is the configuration for the resource manager.
@@ -91,6 +93,9 @@ type Config struct {
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	Controller ControllerConfig `toml:"controller" json:"controller"`
+
+	// EnableGRPCClientMetrics enables grpc_client_* metrics for outgoing gRPC/etcd requests.
+	EnableGRPCClientMetrics bool `toml:"enable-grpc-client-metrics" json:"enable-grpc-client-metrics,string"`
 }
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
@@ -250,6 +255,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
+	}
+	if !configMetaData.IsDefined("enable-grpc-client-metrics") {
+		c.EnableGRPCClientMetrics = defaultEnableGRPCClientMetrics
 	}
 
 	c.adjustLog(configMetaData.Child("log"))

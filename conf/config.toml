@@ -108,6 +108,8 @@
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"
+## Enable grpc_client_* metrics for outgoing gRPC/etcd requests.
+# enable-grpc-client-metrics = false
 
 [schedule]
 ## Controls the size limit of Region Merge.

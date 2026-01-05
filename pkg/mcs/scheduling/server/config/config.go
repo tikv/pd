@@ -50,6 +50,8 @@ const (
 	defaultName             = "scheduling"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
+
+	defaultEnableGRPCClientMetrics = false
 )
 
 // Config is the configuration for the scheduling.
@@ -83,6 +85,9 @@ type Config struct {
 
 	Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
 	Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
+
+	// EnableGRPCClientMetrics enables grpc_client_* metrics for outgoing gRPC/etcd requests.
+	EnableGRPCClientMetrics bool `toml:"enable-grpc-client-metrics" json:"enable-grpc-client-metrics,string"`
 }
 
 // NewConfig creates a new config.
@@ -145,6 +150,9 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = mcsconstant.DefaultEnableGRPCGateway
+	}
+	if !configMetaData.IsDefined("enable-grpc-client-metrics") {
+		c.EnableGRPCClientMetrics = defaultEnableGRPCClientMetrics
 	}
 
 	c.adjustLog(configMetaData.Child("log"))

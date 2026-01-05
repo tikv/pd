@@ -45,6 +45,8 @@ const (
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
+
+	defaultEnableGRPCClientMetrics = false
 )
 
 var _ tso.ServiceConfig = (*Config)(nil)
@@ -95,6 +97,9 @@ type Config struct {
 	LogProps *log.ZapProperties
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
+
+	// EnableGRPCClientMetrics enables grpc_client_* metrics for outgoing gRPC/etcd requests.
+	EnableGRPCClientMetrics bool `toml:"enable-grpc-client-metrics" json:"enable-grpc-client-metrics,string"`
 }
 
 // NewConfig creates a new config.
@@ -222,6 +227,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
+	}
+	if !configMetaData.IsDefined("enable-grpc-client-metrics") {
+		c.EnableGRPCClientMetrics = defaultEnableGRPCClientMetrics
 	}
 
 	c.adjustLog(configMetaData.Child("log"))

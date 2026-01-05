@@ -597,7 +597,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	} else {
 		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
-	if enableClientMetrics, e := flagSet.GetBool("enable-grpc-client-metrics"); e == nil && enableClientMetrics {
+	if cfg.EnableGRPCClientMetrics {
 		grpcutil.EnableGRPCClientMetrics()
 	}
 	// Flushing any buffered log entries
