@@ -119,7 +119,7 @@ func (r *ResourceManagerDiscovery) initAndUpdateLoop() {
 func (r *ResourceManagerDiscovery) resetConn(url string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if url == "" {
+	if len(url) == 0 {
 		if r.conn != nil {
 			r.conn.Close()
 			r.conn = nil
@@ -143,6 +143,8 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 		r.conn.Close()
 	}
 	r.serviceURL, r.conn = url, newConn
+	log.Info("[resource-manager] updated service URL",
+		zap.String("new-url", url))
 	_ = r.onLeaderChanged("")
 }
 
@@ -221,48 +223,36 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 	ticker := time.NewTicker(initRetryInterval)
 	defer ticker.Stop()
 
+	discoverAndUpdate := func() {
+		url, newRevision, err := r.discoverServiceURL()
+		if err != nil {
+			log.Warn("[resource-manager] failed to discover service URL",
+				zap.String("discovery-key", r.discoveryKey),
+				zap.Error(err))
+			// Endpoint is absent; keep connection cleared so the client can fall back to PD.
+			if errors.ErrorEqual(err, errs.ErrClientGetServingEndpoint) {
+				r.resetConn("")
+			}
+			return
+		}
+		if newRevision > revision {
+			r.resetConn(url)
+			revision = newRevision
+		}
+	}
 	for {
 		select {
 		case <-r.ctx.Done():
 			log.Info("[resource-manager] exit update service URL loop due to context canceled")
 			return
 		case <-ticker.C:
-			if r.GetServiceURL() != "" {
-				continue
+			if len(r.GetServiceURL()) != 0 {
+				return
 			}
-			url, newRevision, err := r.discoverServiceURL()
-			if err != nil {
-				// Endpoint is absent; keep connection cleared so the client can fall back to PD.
-				if errors.ErrorEqual(err, errs.ErrClientGetServingEndpoint) {
-					r.resetConn("")
-				}
-				continue
-			}
-			if newRevision > revision {
-				r.resetConn(url)
-				revision = newRevision
-			}
+			discoverAndUpdate()
 		case <-r.updateServiceURLCh:
 			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
-			url, newRevision, err := r.discoverServiceURL()
-			if err != nil {
-				log.Warn("[resource-manager] failed to discover service URL",
-					zap.String("discovery-key", r.discoveryKey),
-					zap.Error(err))
-				// Endpoint is absent; clear existing connection so the client can fall back to PD.
-				if errors.ErrorEqual(err, errs.ErrClientGetServingEndpoint) {
-					r.resetConn("")
-				}
-				continue
-			}
-			log.Info("[resource-manager] updated service URL",
-				zap.String("new-url", url),
-				zap.Int64("new-revision", newRevision),
-				zap.Int64("revision", revision))
-			if newRevision > revision {
-				r.resetConn(url)
-				revision = newRevision
-			}
+			discoverAndUpdate()
 		}
 	}
 }
