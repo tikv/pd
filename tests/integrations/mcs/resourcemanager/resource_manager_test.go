@@ -67,7 +67,7 @@ type resourceManagerClientTestSuite struct {
 	client     pd.Client
 	initGroups []*rmpb.ResourceGroup
 
-	mode         resourceManagerDeployMode
+	mode resourceManagerDeployMode
 
 	fastUpdateServiceModeEnabled bool
 
