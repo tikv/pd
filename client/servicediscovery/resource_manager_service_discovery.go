@@ -146,17 +146,13 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 	_ = r.onLeaderChanged("")
 }
 
-func (r *ResourceManagerDiscovery) getServiceURL() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.serviceURL
-}
-
 // GetServiceURL returns the currently discovered resource manager service URL.
 // It returns an empty string when there is no standalone service endpoint and
 // the client should fall back to PD-provided resource manager.
 func (r *ResourceManagerDiscovery) GetServiceURL() string {
-	return r.getServiceURL()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.serviceURL
 }
 
 // GetConn returns the gRPC connection to the resource manager service.
@@ -231,7 +227,7 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 			log.Info("[resource-manager] exit update service URL loop due to context canceled")
 			return
 		case <-ticker.C:
-			if r.getServiceURL() != "" {
+			if r.GetServiceURL() != "" {
 				continue
 			}
 			url, newRevision, err := r.discoverServiceURL()

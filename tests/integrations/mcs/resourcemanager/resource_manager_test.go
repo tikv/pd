@@ -118,7 +118,6 @@ func TestResourceManagerClientTestSuite(t *testing.T) {
 		{name: "pd-resource-manager", mode: resourceManagerProvidedByPD},
 		{name: "standalone-resource-manager-with-client-discovery", mode: resourceManagerStandaloneWithClientDiscovery},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			suite.Run(t, &resourceManagerClientTestSuite{mode: tc.mode})
 		})
@@ -282,7 +281,6 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 		{name: "pd-to-standalone", startMode: resourceManagerProvidedByPD},
 		{name: "standalone-to-pd", startMode: resourceManagerStandaloneWithClientDiscovery},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog", `return(true)`))
