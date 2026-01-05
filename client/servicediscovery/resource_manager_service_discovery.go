@@ -104,7 +104,7 @@ func (r *ResourceManagerDiscovery) initAndUpdateLoop() {
 		revision int64
 		err      error
 	)
-	if err := retry.IntervalRetry(r.ctx, resourceManagerInitRetryTime, initRetryInterval, func() error {
+	if err := retry.Retry(r.ctx, resourceManagerInitRetryTime, initRetryInterval, func() error {
 		url, revision, err = r.discoverServiceURL()
 		return err
 	}); err != nil {

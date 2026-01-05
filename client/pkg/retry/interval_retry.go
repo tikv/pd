@@ -28,15 +28,15 @@ var (
 	queryRetryInterval = 500 * time.Millisecond
 )
 
-// IntervalRetryByDefault retries the given function with a fixed interval.
-func IntervalRetryByDefault(
+// RetryWithConfig retries the given function with a fixed interval.
+func RetryWithConfig(
 	ctx context.Context, f func() error,
 ) error {
-	return IntervalRetry(ctx, queryRetryMaxTimes, queryRetryInterval, f)
+	return Retry(ctx, queryRetryMaxTimes, queryRetryInterval, f)
 }
 
-// IntervalRetry retries the given function with a fixed interval.
-func IntervalRetry(
+// Retry retries the given function with a fixed interval.
+func Retry(
 	ctx context.Context, maxTimes int, interval time.Duration, f func() error,
 ) error {
 	var err error
