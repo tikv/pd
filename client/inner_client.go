@@ -22,6 +22,8 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -313,7 +315,28 @@ func (c *innerClient) gRPCErrorHandler(err error) {
 	}
 }
 
+func shouldScheduleResourceManagerServiceURLUpdate(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errs.IsLeaderChange(err) {
+		return true
+	}
+	if s, ok := status.FromError(err); ok {
+		// If the rm instance stops, we can reset the connection and
+		// use pd instance url instead of it.
+		if errs.IsNetworkError(s.Code()) || s.Code() == codes.Canceled {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *innerClient) resourceManagerErrorHandler(err error) {
+	if !shouldScheduleResourceManagerServiceURLUpdate(err) {
+		return
+	}
+
 	c.RLock()
 	defer c.RUnlock()
 	log.Warn("[resource-manager] resource manager error", zap.Error(err))
