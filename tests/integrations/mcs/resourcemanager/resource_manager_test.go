@@ -40,12 +40,12 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -80,7 +80,6 @@ func (suite *resourceManagerClientTestSuite) setupPDClient(re *require.Assertion
 		caller.TestComponent,
 		suite.cluster.GetConfig().GetClientURLs(),
 		pd.SecurityOption{},
-		opt.WithTSOServerProxyOption(true), // Avoid tso affects test
 	)
 	re.NoError(err)
 	return cli
@@ -92,7 +91,6 @@ func (suite *resourceManagerClientTestSuite) setupKeyspaceClient(re *require.Ass
 		re,
 		keyspaceID,
 		suite.cluster.GetConfig().GetClientURLs(),
-		opt.WithTSOServerProxyOption(true), // Avoid tso affects test
 	)
 	// In standalone RM mode, ensure the newly created client has already discovered
 	// and connected to the RM microservice; otherwise RM RPCs may temporarily fall
@@ -309,6 +307,28 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 			re.NotNil(leader)
 			re.NoError(leader.BootstrapCluster())
 
+			restartPDWithFallback := func(enableFallback bool) {
+				// Restart all PD servers so that handler builders respect the updated config.
+				servers := cluster.GetServers()
+				for _, s := range servers {
+					if s.State() == tests.Running {
+						re.NoError(s.Stop())
+					}
+				}
+				newServers := make([]*tests.TestServer, 0, len(servers))
+				for name, s := range servers {
+					cfg := s.GetConfig()
+					cfg.Microservice.EnableResourceManagerFallback = enableFallback
+					newServer, err := tests.NewTestServer(ctx, cfg, []string{mcsconstant.PDServiceName})
+					re.NoError(err)
+					servers[name] = newServer
+					newServers = append(newServers, newServer)
+				}
+				re.NoError(tests.RunServersWithRetry(newServers, 3))
+				leader = cluster.GetServer(cluster.WaitLeader())
+				re.NotNil(leader)
+			}
+
 			startMicroservices := func() (rmCleanup func(), tsoCleanup func()) {
 				backendEndpoints := leader.GetAddr()
 				rmServer, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
@@ -336,6 +356,8 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 			defer stopMicroservices()
 
 			if tc.startMode == resourceManagerStandaloneWithClientDiscovery {
+				// In standalone mode, PD should redirect RM requests to the standalone service.
+				restartPDWithFallback(false)
 				rmCleanup, tsoCleanup = startMicroservices()
 			}
 
@@ -343,7 +365,6 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 				caller.TestComponent,
 				cluster.GetConfig().GetClientURLs(),
 				pd.SecurityOption{},
-				opt.WithTSOServerProxyOption(true),
 			)
 			re.NoError(err)
 			defer cli.Close()
@@ -437,6 +458,9 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 			)
 
 			if tc.startMode == resourceManagerProvidedByPD {
+				// Switch to standalone RM: disable fallback on PD and restart it,
+				// then start microservices and wait for client discovery.
+				restartPDWithFallback(false)
 				rmCleanup, tsoCleanup = startMicroservices()
 				waitResourceManagerServiceURL(re, cli, true)
 				testutil.Eventually(re, func() bool {
@@ -446,7 +470,10 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 					return err == nil
 				})
 			} else {
+				// Switch back to PD-provided RM: stop microservices, enable fallback on PD and restart it,
+				// then ensure client falls back to PD.
 				stopMicroservices()
+				restartPDWithFallback(true)
 				testutil.Eventually(re, func() bool {
 					ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 					defer cancel()
@@ -455,8 +482,6 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 				})
 				waitResourceManagerServiceURL(re, cli, false)
 			}
-			leader = cluster.GetServer(cluster.WaitLeader())
-			re.NotNil(leader)
 			waitLeaderServingClient(re, cli, leader.GetAddr())
 
 			switched.Store(true)

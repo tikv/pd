@@ -79,13 +79,6 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	}
 	c.wg.Add(1)
 	go c.routerClientInitializer()
-
-	rmd := sd.NewResourceManagerDiscovery(
-		c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
-	c.Lock()
-	c.resourceManagerDiscovery = rmd
-	c.Unlock()
-	rmd.Init()
 	return nil
 }
 
@@ -147,21 +140,22 @@ func (c *innerClient) disableRouterClient() {
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
-
-	if c.option.UseTSOServerProxy {
-		// If we are using TSO server proxy, we always use PD_SVC_MODE.
-		newMode = pdpb.ServiceMode_PD_SVC_MODE
-	}
 	if newMode == c.serviceMode {
 		return
 	}
 	c.resetTSOClientLocked(newMode)
+	c.resetResourceManagerDiscoveryLocked(newMode)
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed", zap.String("new-mode", newMode.String()))
 }
 
 // Reset a new TSO client.
 func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
+	// `UseTSOServerProxy` is intended to force using PD as the TSO provider,
+	// but should not block other components (e.g. RM) from switching service mode.
+	if c.option.UseTSOServerProxy {
+		mode = pdpb.ServiceMode_PD_SVC_MODE
+	}
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tso.Cli
@@ -205,6 +199,23 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	if oldTSOSvcDiscovery != nil {
 		// We are switching from microservice env to non-microservice env, so delete the old tso microservice discovery.
 		oldTSOSvcDiscovery.Close()
+	}
+}
+
+func (c *innerClient) resetResourceManagerDiscoveryLocked(mode pdpb.ServiceMode) {
+	switch mode {
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		if c.resourceManagerDiscovery != nil {
+			c.resourceManagerDiscovery.Close()
+			c.resourceManagerDiscovery = nil
+		}
+	case pdpb.ServiceMode_API_SVC_MODE:
+		c.resourceManagerDiscovery = sd.NewResourceManagerDiscovery(
+			c.ctx, c.serviceDiscovery.GetClusterID(), c, c.tlsCfg, c.option, c.scheduleUpdateTokenConnection)
+		c.resourceManagerDiscovery.Init()
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		log.Warn("[pd] intend to switch to unknown service mode, just return")
+		return
 	}
 }
 
@@ -303,8 +314,8 @@ func (c *innerClient) gRPCErrorHandler(err error) {
 }
 
 func (c *innerClient) resourceManagerErrorHandler(err error) {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 	log.Warn("[resource-manager] resource manager error", zap.Error(err))
 	if c.resourceManagerDiscovery != nil {
 		c.resourceManagerDiscovery.ScheduleUpateServiceURL()
