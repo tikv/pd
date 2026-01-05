@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/keyspace"
 )
 
 func TestMakeKeyRanges(t *testing.T) {
@@ -38,7 +39,7 @@ func TestMakeKeyRanges(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		ranges := makeKeyRanges(tc.keyspaceID)
+		ranges := keyspace.MakeKeyRanges(tc.keyspaceID)
 		re.Len(ranges, 2, "should have 2 ranges (raw and txn)")
 
 		// Verify raw key range
