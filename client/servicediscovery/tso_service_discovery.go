@@ -197,7 +197,7 @@ func (c *tsoServiceDiscovery) Init() error {
 	log.Info("initializing tso service discovery",
 		zap.Int("max-retry-times", c.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
-	if err := retry.IntervalRetry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+	if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
@@ -247,7 +247,7 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := retry.IntervalRetry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+		if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -333,7 +333,7 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := retry.IntervalRetryByDefault(c.ctx, c.updateMember); err != nil {
+	if err := retry.WithConfig(c.ctx, c.updateMember); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}
