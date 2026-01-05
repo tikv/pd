@@ -247,7 +247,7 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 			return
 		case <-ticker.C:
 			if len(r.GetServiceURL()) != 0 {
-				return
+				continue
 			}
 			discoverAndUpdate()
 		case <-r.updateServiceURLCh:
