@@ -55,6 +55,8 @@ type Request struct {
 
 // IsFrom checks if the request is from the specified pool.
 func (req *Request) IsFrom(pool *sync.Pool) bool {
+	req.mu.RLock()
+	defer req.mu.RUnlock()
 	if req == nil {
 		return false
 	}
@@ -63,6 +65,8 @@ func (req *Request) IsFrom(pool *sync.Pool) bool {
 
 // TryDone tries to send the result to the channel, it will not block.
 func (req *Request) TryDone(err error) {
+	req.mu.RLock()
+	defer req.mu.RUnlock()
 	select {
 	case req.done <- err:
 	default:
