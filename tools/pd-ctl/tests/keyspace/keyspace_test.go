@@ -784,11 +784,7 @@ func (suite *keyspaceTestSuite) mustCreateKeyspace(param api.CreateKeyspaceParam
 	}
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
-	err = json.Unmarshal(output, &meta)
-	if err != nil {
-		// Print output for debugging
-		re.Failf("Failed to unmarshal keyspace create output", "output: %s, error: %v", string(output), err)
-	}
+	re.NoError(json.Unmarshal(output, &meta))
 	return meta
 }
 
