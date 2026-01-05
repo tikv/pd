@@ -480,6 +480,12 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.PrintErrf("Invalid keyspace ID: %v\n", err)
 		return
 	}
+	keyspaceID32 := uint32(keyspaceID)
+	if keyspaceID32 < constants.DefaultKeyspaceID || keyspaceID32 > constants.MaxKeyspaceID {
+		cmd.PrintErrf("Invalid keyspace ID %d. It must be in the range of [%d, %d]\n",
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
+		return
+	}
 
 	// Parse all label key=value pairs
 	var labelConstraints []pd.LabelConstraint
@@ -503,7 +509,6 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges for the keyspace
-	keyspaceID32 := uint32(keyspaceID)
 	keyRanges := makeKeyRanges(keyspaceID32)
 
 	// Create placement rule bundle
@@ -572,6 +577,12 @@ func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	var keyspaceID uint64
 	if _, err := fmt.Sscanf(keyspaceIDStr, "%d", &keyspaceID); err != nil {
 		cmd.PrintErrf("Invalid keyspace ID: %v\n", err)
+		return
+	}
+	keyspaceID32 := uint32(keyspaceID)
+	if keyspaceID32 < constants.DefaultKeyspaceID || keyspaceID32 > constants.MaxKeyspaceID {
+		cmd.PrintErrf("Invalid keyspace ID %d. It must be in the range of [%d, %d]\n",
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
 		return
 	}
 
