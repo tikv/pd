@@ -414,9 +414,11 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 			workCtx, workCancel := context.WithCancel(ctx)
 			defer workCancel()
 
-			var switched atomic.Bool
-			var okBefore, okAfter int64
-			var errBefore, errAfter int64
+			var (
+				switched            atomic.Bool
+				okBefore, okAfter   int64
+				errBefore, errAfter int64
+			)
 
 			go func() {
 				ticker := time.NewTicker(10 * time.Millisecond)
@@ -439,7 +441,9 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 						continue
 					}
 					if switched.Load() {
-						atomic.AddInt64(&okAfter, 1)
+						if !rgController.IsDegraded() {
+							atomic.AddInt64(&okAfter, 1)
+						}
 					} else {
 						atomic.AddInt64(&okBefore, 1)
 					}

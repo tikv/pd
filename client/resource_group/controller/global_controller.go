@@ -163,7 +163,7 @@ type ResourceGroupsController struct {
 
 	run struct {
 		responseDeadline *time.Timer
-		inDegradedMode   bool
+		inDegradedMode   atomic.Bool
 		// currentRequests is used to record the request and resource group.
 		// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
 		currentRequests []*rmpb.TokenBucketRequest
@@ -339,7 +339,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				metrics.ResourceGroupStatusGauge.Reset()
 				return
 			case <-c.responseDeadlineCh:
-				c.run.inDegradedMode = true
+				c.run.inDegradedMode.Store(true)
 				c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				log.Warn("[resource group controller] enter degraded mode")
 			case resp := <-c.tokenResponseChan:
@@ -352,7 +352,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.executeOnAllGroups((*groupCostController).updateRunState)
 				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
 				c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */, notifyMsg)
-				if c.run.inDegradedMode {
+				if c.IsDegraded() {
 					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
 			case resp, ok := <-watchMetaChannel:
@@ -612,7 +612,7 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 		}
 		c.responseDeadlineCh = nil
 	}
-	c.run.inDegradedMode = false
+	c.run.inDegradedMode.Store(false)
 	for _, res := range resp {
 		name := res.GetResourceGroupName()
 		gc, ok := c.loadGroupController(name)
@@ -764,4 +764,9 @@ func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, c
 	}
 
 	gc.addRUConsumption(consumption)
+}
+
+// IsDegraded returns whether the controller is in degraded mode.
+func (c *ResourceGroupsController) IsDegraded() bool {
+	return c.run.inDegradedMode.Load()
 }
