@@ -315,7 +315,7 @@ func (c *innerClient) gRPCErrorHandler(err error) {
 	}
 }
 
-func shouldScheduleResourceManagerServiceURLUpdate(err error) bool {
+func shouldUpdateRMURL(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -333,7 +333,7 @@ func shouldScheduleResourceManagerServiceURLUpdate(err error) bool {
 }
 
 func (c *innerClient) resourceManagerErrorHandler(err error) {
-	if !shouldScheduleResourceManagerServiceURLUpdate(err) {
+	if !shouldUpdateRMURL(err) {
 		return
 	}
 
