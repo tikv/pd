@@ -432,6 +432,19 @@ func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
 	return c.inner.serviceDiscovery
 }
 
+// GetResourceManagerServiceURL returns the discovered standalone resource manager
+// service URL. It is an optional extension method (not part of the Client
+// interface) mainly intended for integration tests.
+//
+// When it returns an empty string, the client will fall back to PD-provided
+// resource manager service.
+func (c *client) GetResourceManagerServiceURL() string {
+	if ds := c.inner.getResourceManagerDiscovery(); ds != nil {
+		return ds.GetServiceURL()
+	}
+	return ""
+}
+
 // GetTSOServiceDiscovery returns the TSO service discovery object. Only used for testing.
 func (c *client) GetTSOServiceDiscovery() sd.ServiceDiscovery {
 	return c.inner.tsoSvcDiscovery

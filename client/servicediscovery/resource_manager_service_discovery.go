@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
@@ -117,7 +119,16 @@ func (r *ResourceManagerDiscovery) initAndUpdateLoop() {
 func (r *ResourceManagerDiscovery) resetConn(url string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.serviceURL == url || url == "" {
+	if url == "" {
+		if r.conn != nil {
+			r.conn.Close()
+			r.conn = nil
+		}
+		r.serviceURL = ""
+		_ = r.onLeaderChanged("")
+		return
+	}
+	if r.serviceURL == url {
 		return
 	}
 	newConn, err := grpcutil.GetClientConn(r.ctx, url, r.tlsCfg, r.option.GRPCDialOptions...)
@@ -133,6 +144,19 @@ func (r *ResourceManagerDiscovery) resetConn(url string) {
 	}
 	r.serviceURL, r.conn = url, newConn
 	_ = r.onLeaderChanged("")
+}
+
+func (r *ResourceManagerDiscovery) getServiceURL() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.serviceURL
+}
+
+// GetServiceURL returns the currently discovered resource manager service URL.
+// It returns an empty string when there is no standalone service endpoint and
+// the client should fall back to PD-provided resource manager.
+func (r *ResourceManagerDiscovery) GetServiceURL() string {
+	return r.getServiceURL()
 }
 
 // GetConn returns the gRPC connection to the resource manager service.
@@ -195,11 +219,33 @@ func (r *ResourceManagerDiscovery) ScheduleUpateServiceURL() {
 }
 
 func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
+	// If no service URL exists (e.g. running in PD-provided mode), we still need to
+	// periodically check whether a standalone resource-manager appears later.
+	// This enables runtime switching between deployment modes.
+	ticker := time.NewTicker(initRetryInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-r.ctx.Done():
 			log.Info("[resource-manager] exit update service URL loop due to context canceled")
 			return
+		case <-ticker.C:
+			if r.getServiceURL() != "" {
+				continue
+			}
+			url, newRevision, err := r.discoverServiceURL()
+			if err != nil {
+				// Endpoint is absent; keep connection cleared so the client can fall back to PD.
+				if errors.ErrorEqual(err, errs.ErrClientGetServingEndpoint) {
+					r.resetConn("")
+				}
+				continue
+			}
+			if newRevision > revision {
+				r.resetConn(url)
+				revision = newRevision
+			}
 		case <-r.updateServiceURLCh:
 			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
 			url, newRevision, err := r.discoverServiceURL()
@@ -207,6 +253,10 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 				log.Warn("[resource-manager] failed to discover service URL",
 					zap.String("discovery-key", r.discoveryKey),
 					zap.Error(err))
+				// Endpoint is absent; clear existing connection so the client can fall back to PD.
+				if errors.ErrorEqual(err, errs.ErrClientGetServingEndpoint) {
+					r.resetConn("")
+				}
 				continue
 			}
 			log.Info("[resource-manager] updated service URL",

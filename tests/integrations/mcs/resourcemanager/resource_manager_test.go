@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -65,7 +67,10 @@ type resourceManagerClientTestSuite struct {
 	client     pd.Client
 	initGroups []*rmpb.ResourceGroup
 
-	mode       resourceManagerDeployMode
+	mode         resourceManagerDeployMode
+
+	fastUpdateServiceModeEnabled bool
+
 	rmCleanup  func()
 	tsoCleanup func()
 }
@@ -73,8 +78,28 @@ type resourceManagerClientTestSuite struct {
 func (suite *resourceManagerClientTestSuite) setupPDClient(re *require.Assertions) pd.Client {
 	cli, err := pd.NewClientWithContext(suite.ctx,
 		caller.TestComponent,
-		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+		suite.cluster.GetConfig().GetClientURLs(),
+		pd.SecurityOption{},
+		opt.WithTSOServerProxyOption(true), // Avoid tso affects test
+	)
 	re.NoError(err)
+	return cli
+}
+
+func (suite *resourceManagerClientTestSuite) setupKeyspaceClient(re *require.Assertions, keyspaceID uint32) pd.Client {
+	cli := utils.SetupClientWithKeyspaceID(
+		suite.ctx,
+		re,
+		keyspaceID,
+		suite.cluster.GetConfig().GetClientURLs(),
+		opt.WithTSOServerProxyOption(true), // Avoid tso affects test
+	)
+	// In standalone RM mode, ensure the newly created client has already discovered
+	// and connected to the RM microservice; otherwise RM RPCs may temporarily fall
+	// back to PD and split state across backends.
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		waitResourceManagerServiceURL(re, cli, true)
+	}
 	return cli
 }
 
@@ -86,12 +111,18 @@ const (
 )
 
 func TestResourceManagerClientTestSuite(t *testing.T) {
-	t.Run("pd-resource-manager", func(t *testing.T) {
-		suite.Run(t, &resourceManagerClientTestSuite{mode: resourceManagerProvidedByPD})
-	})
-	t.Run("standalone-resource-manager-with-client-discovery", func(t *testing.T) {
-		suite.Run(t, &resourceManagerClientTestSuite{mode: resourceManagerStandaloneWithClientDiscovery})
-	})
+	for _, tc := range []struct {
+		name string
+		mode resourceManagerDeployMode
+	}{
+		{name: "pd-resource-manager", mode: resourceManagerProvidedByPD},
+		{name: "standalone-resource-manager-with-client-discovery", mode: resourceManagerStandaloneWithClientDiscovery},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			suite.Run(t, &resourceManagerClientTestSuite{mode: tc.mode})
+		})
+	}
 }
 
 func (suite *resourceManagerClientTestSuite) startMicroservicesForDiscovery(re *require.Assertions) {
@@ -129,6 +160,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
+		suite.fastUpdateServiceModeEnabled = true
 	}
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
@@ -149,14 +181,21 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	re.NotNil(leader)
 
 	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
-		// Bootstrap the cluster so that the microservices can work normally.
+		// Bootstrap the cluster so that the microservices (now or later) can work normally.
 		re.NoError(leader.BootstrapCluster())
+	}
+
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
 		suite.startMicroservicesForDiscovery(re)
 		suite.client = suite.setupPDClient(re)
 	} else {
 		suite.client = suite.setupPDClient(re)
 	}
 	waitLeaderServingClient(re, suite.client, leader.GetAddr())
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		// Ensure RM service discovery has picked up the standalone endpoint before running tests.
+		waitResourceManagerServiceURL(re, suite.client, true)
+	}
 
 	suite.initGroups = []*rmpb.ResourceGroup{
 		{
@@ -223,6 +262,221 @@ func waitLeaderServingClient(re *require.Assertions, cli pd.Client, leaderAddr s
 	})
 }
 
+func waitResourceManagerServiceURL(re *require.Assertions, cli pd.Client, wantNonEmpty bool) {
+	innerCli, ok := cli.(interface{ GetResourceManagerServiceURL() string })
+	re.True(ok)
+	testutil.Eventually(re, func() bool {
+		url := innerCli.GetResourceManagerServiceURL()
+		if wantNonEmpty {
+			return url != ""
+		}
+		return url == ""
+	})
+}
+
+func TestSwitchModeDuringWorkload(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		startMode resourceManagerDeployMode
+	}{
+		{name: "pd-to-standalone", startMode: resourceManagerProvidedByPD},
+		{name: "standalone-to-pd", startMode: resourceManagerStandaloneWithClientDiscovery},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog", `return(true)`))
+			t.Cleanup(func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog"))
+			})
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+			t.Cleanup(func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+			})
+			// This test switches in/out of standalone mode, so always enable faster SD updates.
+			re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
+			t.Cleanup(func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
+			})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 2)
+			re.NoError(err)
+			defer cluster.Destroy()
+
+			re.NoError(cluster.RunInitialServers())
+			leader := cluster.GetServer(cluster.WaitLeader())
+			re.NotNil(leader)
+			re.NoError(leader.BootstrapCluster())
+
+			startMicroservices := func() (rmCleanup func(), tsoCleanup func()) {
+				backendEndpoints := leader.GetAddr()
+				rmServer, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+				_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{rmServer.GetAddr(): rmServer})
+				rmCleanup = cleanup
+
+				tsoServer, cleanupTSO := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+				_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{tsoServer.GetAddr(): tsoServer})
+				tsoCleanup = cleanupTSO
+				return rmCleanup, tsoCleanup
+			}
+
+			var rmCleanup func()
+			var tsoCleanup func()
+			stopMicroservices := func() {
+				if rmCleanup != nil {
+					rmCleanup()
+					rmCleanup = nil
+				}
+				if tsoCleanup != nil {
+					tsoCleanup()
+					tsoCleanup = nil
+				}
+			}
+			defer stopMicroservices()
+
+			if tc.startMode == resourceManagerStandaloneWithClientDiscovery {
+				rmCleanup, tsoCleanup = startMicroservices()
+			}
+
+			cli, err := pd.NewClientWithContext(ctx,
+				caller.TestComponent,
+				cluster.GetConfig().GetClientURLs(),
+				pd.SecurityOption{},
+				opt.WithTSOServerProxyOption(true),
+			)
+			re.NoError(err)
+			defer cli.Close()
+
+			waitLeaderServingClient(re, cli, leader.GetAddr())
+			if tc.startMode == resourceManagerStandaloneWithClientDiscovery {
+				waitResourceManagerServiceURL(re, cli, true)
+			} else {
+				waitResourceManagerServiceURL(re, cli, false)
+			}
+
+			group := &rmpb.ResourceGroup{
+				Name: "switch_workload",
+				Mode: rmpb.GroupMode_RUMode,
+				RUSettings: &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{FillRate: 10000},
+						Tokens:   100000,
+					},
+				},
+			}
+			resp, err := cli.AddResourceGroup(ctx, group)
+			re.NoError(err)
+			re.Contains(resp, "Success!")
+
+			cfg := &controller.RequestUnitConfig{
+				ReadBaseCost:     1,
+				ReadCostPerByte:  1,
+				WriteBaseCost:    1,
+				WriteCostPerByte: 1,
+				CPUMsCost:        1,
+			}
+			rgController, err := controller.NewResourceGroupController(
+				ctx,
+				1,
+				cli,
+				cfg,
+				constants.NullKeyspaceID,
+				controller.EnableSingleGroupByKeyspace(),
+			)
+			re.NoError(err)
+			rgController.Start(ctx)
+			defer func() {
+				re.NoError(rgController.Stop())
+			}()
+
+			workCtx, workCancel := context.WithCancel(ctx)
+			defer workCancel()
+
+			var switched atomic.Bool
+			var okBefore, okAfter int64
+			var errBefore, errAfter int64
+
+			go func() {
+				ticker := time.NewTicker(10 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-workCtx.Done():
+						return
+					case <-ticker.C:
+					}
+					req := controller.NewTestRequestInfo(false, 0, 0, controller.AccessUnknown)
+					res := controller.NewTestResponseInfo(0, 0, true)
+					_, _, _, _, err := rgController.OnRequestWait(workCtx, group.Name, req)
+					if err != nil {
+						if switched.Load() {
+							atomic.AddInt64(&errAfter, 1)
+						} else {
+							atomic.AddInt64(&errBefore, 1)
+						}
+						continue
+					}
+					if switched.Load() {
+						atomic.AddInt64(&okAfter, 1)
+					} else {
+						atomic.AddInt64(&okBefore, 1)
+					}
+					_, _ = rgController.OnResponse(group.Name, req, res)
+				}
+			}()
+
+			testutil.Eventually(re, func() bool {
+				return atomic.LoadInt64(&okBefore) >= 10
+			}, testutil.WithTickInterval(20*time.Millisecond))
+
+			log.Info("switching mode during workload",
+				zap.Int("fromMode", int(tc.startMode)),
+				zap.Int64("okBefore", atomic.LoadInt64(&okBefore)),
+				zap.Int64("errBefore", atomic.LoadInt64(&errBefore)),
+			)
+
+			if tc.startMode == resourceManagerProvidedByPD {
+				rmCleanup, tsoCleanup = startMicroservices()
+				waitResourceManagerServiceURL(re, cli, true)
+				testutil.Eventually(re, func() bool {
+					ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+					defer cancel()
+					_, err := cli.ListResourceGroups(ctx)
+					return err == nil
+				})
+			} else {
+				stopMicroservices()
+				testutil.Eventually(re, func() bool {
+					ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+					defer cancel()
+					_, err := cli.ListResourceGroups(ctx)
+					return err == nil
+				})
+				waitResourceManagerServiceURL(re, cli, false)
+			}
+			leader = cluster.GetServer(cluster.WaitLeader())
+			re.NotNil(leader)
+			waitLeaderServingClient(re, cli, leader.GetAddr())
+
+			switched.Store(true)
+			testutil.Eventually(re, func() bool {
+				return atomic.LoadInt64(&okAfter) >= 10
+			}, testutil.WithTickInterval(20*time.Millisecond))
+
+			log.Info("switch during workload finished",
+				zap.Int("startMode", int(tc.startMode)),
+				zap.Int64("okBefore", atomic.LoadInt64(&okBefore)),
+				zap.Int64("errBefore", atomic.LoadInt64(&errBefore)),
+				zap.Int64("okAfter", atomic.LoadInt64(&okAfter)),
+				zap.Int64("errAfter", atomic.LoadInt64(&errAfter)),
+			)
+		})
+	}
+}
+
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	re := suite.Require()
 	suite.stopMicroservicesForDiscovery()
@@ -231,13 +485,14 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.clean()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+	if suite.fastUpdateServiceModeEnabled {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
 	}
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownTest() {
-	suite.cleanupResourceGroups(suite.Require())
+	re := suite.Require()
+	suite.cleanupResourceGroups(re)
 }
 
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups(re *require.Assertions) {
@@ -1696,8 +1951,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re := suite.Require()
 	cli := suite.client
 	keyspaceID := uint32(1)
-	clientKeyspace := utils.SetupClientWithKeyspaceID(
-		suite.ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs())
+	clientKeyspace := suite.setupKeyspaceClient(re, keyspaceID)
 	defer clientKeyspace.Close()
 
 	// Add keyspace meta.
@@ -1837,7 +2091,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		keyspaceName := fmt.Sprintf("keyspace%d_test", keyspaceID)
 		groupName := fmt.Sprintf("rg_multi_%d", keyspaceID)
 		// Create a specific client for this keyspace
-		client := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceID, suite.cluster.GetConfig().GetClientURLs())
+		client := suite.setupKeyspaceClient(re, keyspaceID)
 		clients[i] = client
 		// Create and save keyspace metadata
 		keyspaceMeta := &keyspacepb.KeyspaceMeta{Id: keyspaceID, Name: keyspaceName}
@@ -1881,12 +2135,20 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 	re.NoError(err)
 	re.NotNil(resp)
 	re.Len(resp, numKeyspaces)
-	for i, tbResp := range resp {
-		expectedGroup := groups[i]
-		re.Equal(expectedGroup.Name, tbResp.ResourceGroupName)
-		re.NotNil(tbResp.KeyspaceId)
-		re.Equal(expectedGroup.KeyspaceId.GetValue(), tbResp.KeyspaceId.GetValue())
+	expectedByKeyspace := make(map[uint32]*rmpb.ResourceGroup, numKeyspaces)
+	for _, g := range groups {
+		re.NotNil(g.KeyspaceId)
+		expectedByKeyspace[g.KeyspaceId.GetValue()] = g
 	}
+	for _, tbResp := range resp {
+		re.NotNil(tbResp.KeyspaceId)
+		keyspaceID := tbResp.KeyspaceId.GetValue()
+		expectedGroup, ok := expectedByKeyspace[keyspaceID]
+		re.True(ok, "unexpected keyspace id in response: %d", keyspaceID)
+		re.Equal(expectedGroup.Name, tbResp.ResourceGroupName)
+		delete(expectedByKeyspace, keyspaceID)
+	}
+	re.Empty(expectedByKeyspace, "some keyspaces did not appear in response")
 
 	// Verify state change using the keyspace-specific clients
 	for i := range numKeyspaces {
@@ -1935,8 +2197,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 			clients[keyspace] = suite.client
 			continue
 		}
-		cli := utils.SetupClientWithKeyspaceID(
-			suite.ctx, re, keyspace, suite.cluster.GetConfig().GetClientURLs())
+		cli := suite.setupKeyspaceClient(re, keyspace)
 		clients[keyspace] = cli
 	}
 
@@ -2047,7 +2308,7 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 	re.NoError(err)
 
 	// Create clients for keyspaceA
-	clientA := utils.SetupClientWithKeyspaceID(ctx, re, keyspaceA, suite.cluster.GetConfig().GetClientURLs())
+	clientA := suite.setupKeyspaceClient(re, keyspaceA)
 	defer clientA.Close()
 
 	// Add a resource group in Keyspace A and check
