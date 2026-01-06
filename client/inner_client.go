@@ -74,11 +74,17 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		}
 		return err
 	}
+	c.mcsSvcDiscovery = sd.NewRouterServiceDiscovery(c.ctx, c, c.serviceDiscovery,
+		c.tlsCfg, c.option)
+
+	// Check if the router service client has been enabled.
+	c.enableRouterServiceClient()
 
 	// Check if the router client has been enabled.
 	if c.option.GetEnableRouterClient() {
 		c.enableRouterClient()
 	}
+
 	c.wg.Add(1)
 	go c.routerClientInitializer()
 	return nil
@@ -113,7 +119,7 @@ func (c *innerClient) enableRouterClient() {
 	}
 	c.RUnlock()
 	// Create a new router client first before acquiring the lock.
-	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.option)
+	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.mcsSvcDiscovery, c.option)
 	c.Lock()
 	// Double check if the router client has been enabled.
 	if c.routerClient != nil {
@@ -137,6 +143,14 @@ func (c *innerClient) disableRouterClient() {
 	c.Unlock()
 	// Close the router client after the lock is released.
 	routerClient.Close()
+}
+
+func (c *innerClient) enableRouterServiceClient() {
+	c.Lock()
+	defer c.Unlock()
+	if err := c.mcsSvcDiscovery.Init(); err != nil {
+		log.Warn("[pd] failed to initialize router service discovery", zap.Error(err))
+	}
 }
 
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
@@ -269,6 +283,7 @@ func (c *innerClient) close() {
 		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
 		c.tokenDispatcher.dispatcherCancel()
 	}
+	log.Info("[pd] close client successfully")
 }
 
 func (c *innerClient) setup() error {
@@ -291,21 +306,42 @@ func (c *innerClient) setup() error {
 	return nil
 }
 
-// getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
-// follower pd client and the context which holds forward information.
-func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (sd.ServiceClient, context.Context) {
-	var serviceClient sd.ServiceClient
-	if allowFollower {
-		serviceClient = c.serviceDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
-		if serviceClient != nil {
-			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
-		}
+// getServiceClient returns the service client according to the options.
+// It returns the service client, the context built for gRPC target, and a boolean indicating whether it's a router service client.
+// when can't get the client from the router service or follower, it will rollback to the leader client.
+func (c *innerClient) getServiceClient(ctx context.Context, regionOp *opt.GetRegionOp, storeOp ...*opt.GetStoreOp) (sd.ServiceClient, context.Context, bool) {
+	var (
+		serviceClient  sd.ServiceClient
+		mustLeader     bool
+		isRouterClient bool
+	)
+	allowRouterServiceHandle := regionOp.AllowRouterServiceHandle
+	if len(storeOp) > 0 {
+		allowRouterServiceHandle = allowRouterServiceHandle || storeOp[0].AllowRouterServiceHandle
 	}
+
+	switch {
+	case allowRouterServiceHandle:
+		isRouterClient = true
+		serviceClient = c.mcsSvcDiscovery.GetServiceClient()
+		mustLeader = false
+	case regionOp.AllowFollowerHandle && c.option.GetEnableFollowerHandle():
+		mustLeader = false
+		serviceClient = c.serviceDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
+	default:
+		mustLeader = true
+		isRouterClient = false
+	}
+	if serviceClient != nil && serviceClient.GetClientConn() != nil && serviceClient.Available() {
+		return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
+	}
+	// Fallback to the leader client.
+	isRouterClient = false
 	serviceClient = c.serviceDiscovery.GetServiceClient()
 	if serviceClient == nil || serviceClient.GetClientConn() == nil {
-		return nil, ctx
+		return nil, ctx, false
 	}
-	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
+	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, mustLeader), isRouterClient
 }
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
