@@ -579,3 +579,40 @@ func TestMeteringWriter(t *testing.T) {
 	re.True(ok)
 	re.Equal(rmserver.ResourceManagerCategory, ruCollector.Category())
 }
+
+func TestSetPDServerConfigWithDashboard(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	svr := cluster.GetServer(leader).GetServer()
+
+	// Test updating config without changing dashboard address
+	cfg := svr.GetPDServerConfig()
+	originalDashboard := cfg.DashboardAddress
+	originalUseRegionStorage := cfg.UseRegionStorage
+
+	// Change some other field but keep dashboard the same
+	cfg.UseRegionStorage = !cfg.UseRegionStorage
+	err = svr.SetPDServerConfig(*cfg)
+	re.NoError(err)
+
+	newCfg := svr.GetPDServerConfig()
+	re.Equal(originalDashboard, newCfg.DashboardAddress)
+	re.NotEqual(originalUseRegionStorage, newCfg.UseRegionStorage)
+
+	// Change both other field and dashboard
+	cfg.UseRegionStorage = !cfg.UseRegionStorage
+	cfg.DashboardAddress = "invalid"
+	err = svr.SetPDServerConfig(*cfg)
+	re.ErrorContains(err, "invalid URI for request")
+}
