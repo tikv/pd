@@ -222,6 +222,7 @@ func (s *Service) RegisterConfigRouter() {
 	regionLabel.GET("/rules", getAllRegionLabelRules)
 	regionLabel.GET("/rules/ids", getRegionLabelRulesByIDs)
 	regionLabel.GET("/rules/:id", getRegionLabelRuleByID)
+	regionLabel.GET("/rules/keyspaces/:id", getRegionLabelRuleByKeyspaceID)
 
 	regions := router.Group("regions")
 	regions.GET("/:id/label/:key", getRegionLabelByKey)
@@ -1144,6 +1145,36 @@ func getRegionLabelRulesByIDs(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, rules)
+}
+
+// @Tags     region_label
+// @Summary  Get label rule of cluster by keyspace id.
+// @Param    id  path  string  true  "Keyspace Id"
+// @Produce  json
+// @Success  200  {object}  labeler.LabelRule
+// @Failure  404  {string}  string  "The keyspace region rule does not exist."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rules/keyspaces/{id} [get]
+func getRegionLabelRuleByKeyspaceID(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	id, err := url.PathUnescape(c.Param("id"))
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	id = "keyspaces/" + id
+	rule := l.GetLabelRule(id)
+	if rule == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionRuleNotFound.FastGenByArgs().Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, rule)
 }
 
 // @Tags     region_label

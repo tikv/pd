@@ -327,7 +327,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 
 	c.Lock()
 	defer c.Unlock()
-
 	if c.running {
 		log.Warn("raft cluster has already been started")
 		return nil
@@ -384,7 +383,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 
 	log.Info("[leader-ready] creating region labeler")
 	labelerStart := time.Now()
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval, c.isAPIServiceMode)
 	labelerDuration := time.Since(labelerStart)
 	if err != nil {
 		log.Error("[leader-ready] region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))

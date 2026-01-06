@@ -153,6 +153,7 @@ var (
 	replicaCheckerReplaceOfflineFailedCounter     = replicaCheckerCounterWithEvent("replace-offline-replica-failed")
 	replicaCheckerReplaceDownFailedCounter        = replicaCheckerCounterWithEvent("replace-down-replica-failed")
 
-	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")
-	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitChecker, "paused")
+	splitCheckerCounter                = checkerCounter.WithLabelValues(splitChecker, "check")
+	splitCheckerPausedCounter          = checkerCounter.WithLabelValues(splitChecker, "paused")
+	splitCheckerLabelerNotReadyCounter = checkerCounter.WithLabelValues(splitChecker, "labeler_not_ready")
 )

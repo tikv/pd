@@ -55,6 +55,10 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 		splitCheckerPausedCounter.Inc()
 		return nil
 	}
+	if !c.labeler.IsReady() {
+		splitCheckerLabelerNotReadyCounter.Inc()
+		return nil
+	}
 
 	start, end := region.GetStartKey(), region.GetEndKey()
 	// We may consider to merge labeler split keys and rule split keys together

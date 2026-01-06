@@ -254,6 +254,9 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 
 	if cl, ok := cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 		l := cl.GetRegionLabeler()
+		if !l.IsReady() {
+			return false
+		}
 		if len(l.GetSplitKeys(start, end)) > 0 {
 			return false
 		}
