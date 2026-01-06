@@ -2905,8 +2905,14 @@ func TestCheckCache(t *testing.T) {
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
-	err := tc.SetStoreLimit(1, storelimit.AddPeer, 0)
+	err := tc.SetStoreLimit(1, storelimit.AddPeer, 0.0001)
 	re.NoError(err)
+	// StoreRateLimit treats rate=0 as unlimited. To simulate a throttled store,
+	// we set a small positive rate and exhaust the initial tokens.
+	store := tc.GetStore(1)
+	re.NotNil(store)
+	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Low))
+	re.False(store.IsAvailable(storelimit.AddPeer, constant.Low))
 	checker.PatrolRegions()
 	re.Len(checker.GetPendingProcessedRegions(), 1)
 

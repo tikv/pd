@@ -2451,10 +2451,6 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 
 // refreshStoreRateLimit applies the schedule config's store limit to the in-memory store limiter.
 func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit.Type) {
-	// Only v1 uses StoreRateLimit for AddPeer/RemovePeer.
-	if c.opt.GetStoreLimitVersion() != storelimit.VersionV1 {
-		return
-	}
 	store := c.GetStore(storeID)
 	if store == nil {
 		return
