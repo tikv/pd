@@ -2442,7 +2442,7 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
-	for storeID := range c.opt.GetAllStoresLimit() {
+	for _, storeID := range c.GetStoreIDs() {
 		c.refreshStoreRateLimit(storeID, typ)
 	}
 	log.Info("all store limit changed", zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
