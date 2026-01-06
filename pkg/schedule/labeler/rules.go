@@ -87,6 +87,18 @@ func (rule *LabelRule) String() string {
 	return b.String()
 }
 
+// GetKeyRanges returns the key ranges of the LabelRule.
+func (rule *LabelRule) GetKeyRanges() []*KeyRangeRule {
+	if rule.RuleType != KeyRange {
+		return nil
+	}
+	rs, ok := rule.Data.([]*KeyRangeRule)
+	if !ok {
+		return nil
+	}
+	return rs
+}
+
 // NewLabelRuleFromJSON creates a label rule from the JSON data.
 func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
 	lr := &LabelRule{}
