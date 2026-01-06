@@ -208,8 +208,8 @@ func (r *ResourceManagerDiscovery) parseURLFromStorageValue(value []byte) (strin
 	return listenUrls[0], nil
 }
 
-// ScheduleUpateServiceURL schedules an update of the service URL.
-func (r *ResourceManagerDiscovery) ScheduleUpateServiceURL() {
+// ScheduleUpdateServiceURL schedules an update of the service URL.
+func (r *ResourceManagerDiscovery) ScheduleUpdateServiceURL() {
 	select {
 	case r.updateServiceURLCh <- struct{}{}:
 	default:

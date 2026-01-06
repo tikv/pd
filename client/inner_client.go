@@ -341,7 +341,7 @@ func (c *innerClient) resourceManagerErrorHandler(err error) {
 	defer c.RUnlock()
 	log.Warn("[resource-manager] resource manager error", zap.Error(err))
 	if c.resourceManagerDiscovery != nil {
-		c.resourceManagerDiscovery.ScheduleUpateServiceURL()
+		c.resourceManagerDiscovery.ScheduleUpdateServiceURL()
 	}
 }
 
