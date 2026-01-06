@@ -974,9 +974,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 				default:
 					_, err = stream.Recv()
 					if err != nil {
-						isCanceled := strings.Contains(err.Error(), "context canceled")
-						isEOF := strings.Contains(err.Error(), "EOF")
-						re.True(isCanceled || isEOF)
+						re.ErrorContains(err, "code = Canceled")
 					}
 				}
 			}
