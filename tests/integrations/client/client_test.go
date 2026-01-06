@@ -538,7 +538,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
@@ -558,7 +558,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
@@ -630,7 +630,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
@@ -700,7 +700,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(ctx, re, suite.endpoints)
+	// TODO: enable router client after fixing the issue that router client
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	err := cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
@@ -1784,7 +1785,8 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	bo.SetRetryableChecker(needRetry, true)
 
 	// Initialize the client with context and backoff
-	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
+	// Router client doesn't support the rateLimit failpoint injection yet, so disable it for this test
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{}, opt.WithEnableRouterClient(false))
 	re.NoError(err)
 	defer client.Close()
 
@@ -1833,7 +1835,8 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1888,7 +1891,8 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1936,8 +1940,8 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
