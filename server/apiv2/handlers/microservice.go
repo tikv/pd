@@ -32,11 +32,12 @@ func RegisterMicroservice(r *gin.RouterGroup) {
 }
 
 // GetMembers gets all members of the cluster for the specified service.
-// @Tags     members
-// @Summary  Get all members of the cluster for the specified service.
-// @Produce  json
-// @Success  200  {object}  []discovery.ServiceRegistryEntry
-// @Router   /ms/members/{service} [get]
+//
+//	@Tags		members
+//	@Summary	Get all members of the cluster for the specified service.
+//	@Produce	json
+//	@Success	200	{object}	[]discovery.ServiceRegistryEntry
+//	@Router		/ms/members/{service} [get]
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if !svr.IsKeyspaceGroupEnabled() {
@@ -58,11 +59,12 @@ func GetMembers(c *gin.Context) {
 }
 
 // GetPrimary gets the primary member of the specified service.
-// @Tags     primary
-// @Summary  Get the primary member of the specified service.
-// @Produce  json
-// @Success  200  {object}  string
-// @Router   /ms/primary/{service} [get]
+//
+//	@Tags		primary
+//	@Summary	Get the primary member of the specified service.
+//	@Produce	json
+//	@Success	200	{object}	string
+//	@Router		/ms/primary/{service} [get]
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if !svr.IsKeyspaceGroupEnabled() {

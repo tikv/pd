@@ -247,13 +247,14 @@ type ReadyStatus struct {
 }
 
 // Ready checks if the region is loaded.
-// @Description  It will return whether pd follower is ready to became leader.
-// @Deprecated  This endpoint is deprecated. Please use /readyz/leader-promotion instead.
-// @Summary  It will return whether pd follower is ready to became leader. This request is always served by the instance that receives it and never forwarded to the leader.
-// @Router   /ready [get]
-// @Param    verbose  query  bool  false  "Whether to return details."
-// @Success  200
-// @Failure  500
+//
+//	@Description	It will return whether pd follower is ready to became leader.
+//	@Deprecated		This endpoint is deprecated. Please use /readyz/leader-promotion instead.
+//	@Summary		It will return whether pd follower is ready to became leader. This request is always served by the instance that receives it and never forwarded to the leader.
+//	@Router			/ready [get]
+//	@Param			verbose	query	bool	false	"Whether to return details."
+//	@Success		200
+//	@Failure		500
 func Ready(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	err := checkLeaderPromotion(c.Request.Context(), svr)

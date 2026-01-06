@@ -35,13 +35,14 @@ func newTSOHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 }
 
 // TransferLocalTSOAllocator transfers the local TSO allocator to another PD server.
-// @Tags     tso
-// @Summary  Transfer Local TSO Allocator
-// @Accept   json
-// @Param    name  path  string  true  "PD server name"
-// @Param    body  body  object  true  "json params"
-// @Produce  json
-// @Router   /tso/allocator/transfer/{name} [post]
+//
+//	@Tags		tso
+//	@Summary	Transfer Local TSO Allocator
+//	@Accept		json
+//	@Param		name	path	string	true	"PD server name"
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Router		/tso/allocator/transfer/{name} [post]
 func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The transfer command is deprecated.")
 }

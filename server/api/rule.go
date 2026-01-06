@@ -81,13 +81,14 @@ func getRuleManager(r *http.Request) *placement.RuleManager {
 }
 
 // GetAllRules returns all rules of the cluster.
-// @Tags     rule
-// @Summary  List all rules of cluster.
-// @Produce  json
-// @Success  200  {array}   placement.Rule
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rules [get]
+//
+//	@Tags		rule
+//	@Summary	List all rules of cluster.
+//	@Produce	json
+//	@Success	200	{array}		placement.Rule
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rules [get]
 func (h *ruleHandler) GetAllRules(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	rules := manager.GetAllRules()
@@ -95,15 +96,16 @@ func (h *ruleHandler) GetAllRules(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetAllRules sets all rules for the cluster.
-// @Tags     rule
-// @Summary  Set all rules for the cluster. If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You probably want to request again to make rules in memory/disk consistent.
-// @Produce  json
-// @Param    rules  body      []placement.Rule  true  "Parameters of rules"
-// @Success  200    {string}  string            "Update rules successfully."
-// @Failure  400    {string}  string            "The input is invalid."
-// @Failure  412    {string}  string            "Placement rules feature is disabled."
-// @Failure  500    {string}  string            "PD server failed to proceed the request."
-// @Router   /config/rules [post]
+//
+//	@Tags		rule
+//	@Summary	Set all rules for the cluster. If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You probably want to request again to make rules in memory/disk consistent.
+//	@Produce	json
+//	@Param		rules	body		[]placement.Rule	true	"Parameters of rules"
+//	@Success	200		{string}	string				"Update rules successfully."
+//	@Failure	400		{string}	string				"The input is invalid."
+//	@Failure	412		{string}	string				"Placement rules feature is disabled."
+//	@Failure	500		{string}	string				"PD server failed to proceed the request."
+//	@Router		/config/rules [post]
 func (h *ruleHandler) SetAllRules(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	var rules []*placement.Rule
@@ -129,14 +131,15 @@ func (h *ruleHandler) SetAllRules(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetRuleByGroup returns all rules of the cluster by group.
-// @Tags     rule
-// @Summary  List all rules of cluster by group.
-// @Param    group  path  string  true  "The name of group"
-// @Produce  json
-// @Success  200  {array}   placement.Rule
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rules/group/{group} [get]
+//
+//	@Tags		rule
+//	@Summary	List all rules of cluster by group.
+//	@Param		group	path	string	true	"The name of group"
+//	@Produce	json
+//	@Success	200	{array}		placement.Rule
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rules/group/{group} [get]
 func (h *ruleHandler) GetRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	group := mux.Vars(r)["group"]
@@ -145,16 +148,17 @@ func (h *ruleHandler) GetRuleByGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetRulesByRegion returns all rules of the cluster by region.
-// @Tags     rule
-// @Summary  List all rules of cluster by region.
-// @Param    id  path  integer  true  "Region Id"
-// @Produce  json
-// @Success  200  {array}   placement.Rule
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  404  {string}  string  "The region does not exist."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rules/region/{region} [get]
+//
+//	@Tags		rule
+//	@Summary	List all rules of cluster by region.
+//	@Param		id	path	integer	true	"Region Id"
+//	@Produce	json
+//	@Success	200	{array}		placement.Rule
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	404	{string}	string	"The region does not exist."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rules/region/{region} [get]
 func (h *ruleHandler) GetRulesByRegion(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	regionStr := mux.Vars(r)["region"]
@@ -168,16 +172,17 @@ func (h *ruleHandler) GetRulesByRegion(w http.ResponseWriter, r *http.Request) {
 }
 
 // CheckRegionPlacementRule checks the rules and matched peers related to the given region.
-// @Tags     rule
-// @Summary  List rules and matched peers related to the given region.
-// @Param    id  path  integer  true  "Region Id"
-// @Produce  json
-// @Success  200  {object}  placement.RegionFit
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  404  {string}  string  "The region does not exist."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rules/region/{region}/detail [get]
+//
+//	@Tags		rule
+//	@Summary	List rules and matched peers related to the given region.
+//	@Param		id	path	integer	true	"Region Id"
+//	@Produce	json
+//	@Success	200	{object}	placement.RegionFit
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	404	{string}	string	"The region does not exist."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rules/region/{region}/detail [get]
 func (h *ruleHandler) CheckRegionPlacementRule(w http.ResponseWriter, r *http.Request) {
 	regionStr := mux.Vars(r)["region"]
 	region, code, err := h.PreCheckForRegion(regionStr)
@@ -198,15 +203,16 @@ func (h *ruleHandler) CheckRegionPlacementRule(w http.ResponseWriter, r *http.Re
 }
 
 // GetRulesByKey returns all rules of the cluster by key.
-// @Tags     rule
-// @Summary  List all rules of cluster by key.
-// @Param    key  path  string  true  "The name of key"
-// @Produce  json
-// @Success  200  {array}   placement.Rule
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rules/key/{key} [get]
+//
+//	@Tags		rule
+//	@Summary	List all rules of cluster by key.
+//	@Param		key	path	string	true	"The name of key"
+//	@Produce	json
+//	@Success	200	{array}		placement.Rule
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rules/key/{key} [get]
 func (h *ruleHandler) GetRulesByKey(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	keyHex := mux.Vars(r)["key"]
@@ -220,15 +226,16 @@ func (h *ruleHandler) GetRulesByKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetRuleByGroupAndID returns the rule of the cluster by group and id.
-// @Tags     rule
-// @Summary  Get rule of cluster by group and id.
-// @Param    group  path  string  true  "The name of group"
-// @Param    id     path  string  true  "Rule Id"
-// @Produce  json
-// @Success  200  {object}  placement.Rule
-// @Failure  404  {string}  string  "The rule does not exist."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Router   /config/rule/{group}/{id} [get]
+//
+//	@Tags		rule
+//	@Summary	Get rule of cluster by group and id.
+//	@Param		group	path	string	true	"The name of group"
+//	@Param		id		path	string	true	"Rule Id"
+//	@Produce	json
+//	@Success	200	{object}	placement.Rule
+//	@Failure	404	{string}	string	"The rule does not exist."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Router		/config/rule/{group}/{id} [get]
 func (h *ruleHandler) GetRuleByGroupAndID(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
@@ -241,16 +248,17 @@ func (h *ruleHandler) GetRuleByGroupAndID(w http.ResponseWriter, r *http.Request
 }
 
 // SetRule sets the rule for the cluster.
-// @Tags     rule
-// @Summary  Update rule of cluster.
-// @Accept   json
-// @Param    rule  body  placement.Rule  true  "Parameters of rule"
-// @Produce  json
-// @Success  200  {string}  string  "Update rule successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rule [post]
+//
+//	@Tags		rule
+//	@Summary	Update rule of cluster.
+//	@Accept		json
+//	@Param		rule	body	placement.Rule	true	"Parameters of rule"
+//	@Produce	json
+//	@Success	200	{string}	string	"Update rule successfully."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rule [post]
 func (h *ruleHandler) SetRule(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	var rule placement.Rule
@@ -293,15 +301,16 @@ func (h *ruleHandler) syncReplicateConfigWithDefaultRule(rule *placement.Rule) e
 }
 
 // DeleteRuleByGroup deletes the rule of the cluster by group and id.
-// @Tags     rule
-// @Summary  Delete rule of cluster.
-// @Param    group  path  string  true  "The name of group"
-// @Param    id     path  string  true  "Rule Id"
-// @Produce  json
-// @Success  200  {string}  string  "Delete rule successfully."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rule/{group}/{id} [delete]
+//
+//	@Tags		rule
+//	@Summary	Delete rule of cluster.
+//	@Param		group	path	string	true	"The name of group"
+//	@Param		id		path	string	true	"Rule Id"
+//	@Produce	json
+//	@Success	200	{string}	string	"Delete rule successfully."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rule/{group}/{id} [delete]
 func (h *ruleHandler) DeleteRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
@@ -319,15 +328,16 @@ func (h *ruleHandler) DeleteRuleByGroup(w http.ResponseWriter, r *http.Request) 
 }
 
 // BatchRules performs batch operations for the cluster.
-// @Tags     rule
-// @Summary  Batch operations for the cluster. Operations should be independent(different ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You probably want to request again to make rules in memory/disk consistent.
-// @Produce  json
-// @Param    operations  body      []placement.RuleOp  true  "Parameters of rule operations"
-// @Success  200         {string}  string              "Batch operations successfully."
-// @Failure  400         {string}  string              "The input is invalid."
-// @Failure  412         {string}  string              "Placement rules feature is disabled."
-// @Failure  500         {string}  string              "PD server failed to proceed the request."
-// @Router   /config/rules/batch [post]
+//
+//	@Tags		rule
+//	@Summary	Batch operations for the cluster. Operations should be independent(different ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You probably want to request again to make rules in memory/disk consistent.
+//	@Produce	json
+//	@Param		operations	body		[]placement.RuleOp	true	"Parameters of rule operations"
+//	@Success	200			{string}	string				"Batch operations successfully."
+//	@Failure	400			{string}	string				"The input is invalid."
+//	@Failure	412			{string}	string				"Placement rules feature is disabled."
+//	@Failure	500			{string}	string				"PD server failed to proceed the request."
+//	@Router		/config/rules/batch [post]
 func (h *ruleHandler) BatchRules(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	var opts []placement.RuleOp
@@ -347,15 +357,16 @@ func (h *ruleHandler) BatchRules(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetGroupConfig returns the rule group config by group id.
-// @Tags     rule
-// @Summary  Get rule group config by group id.
-// @Param    id  path  string  true  "Group Id"
-// @Produce  json
-// @Success  200  {object}  placement.RuleGroup
-// @Failure  404  {string}  string  "The RuleGroup does not exist."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rule_group/{id} [get]
+//
+//	@Tags		rule
+//	@Summary	Get rule group config by group id.
+//	@Param		id	path	string	true	"Group Id"
+//	@Produce	json
+//	@Success	200	{object}	placement.RuleGroup
+//	@Failure	404	{string}	string	"The RuleGroup does not exist."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rule_group/{id} [get]
 func (h *ruleHandler) GetGroupConfig(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	id := mux.Vars(r)["id"]
@@ -368,16 +379,17 @@ func (h *ruleHandler) GetGroupConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetGroupConfig sets the rule group config.
-// @Tags     rule
-// @Summary  Update rule group config.
-// @Accept   json
-// @Param    rule  body  placement.RuleGroup  true  "Parameters of rule group"
-// @Produce  json
-// @Success  200  {string}  string  "Update rule group config successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rule_group [post]
+//
+//	@Tags		rule
+//	@Summary	Update rule group config.
+//	@Accept		json
+//	@Param		rule	body	placement.RuleGroup	true	"Parameters of rule group"
+//	@Produce	json
+//	@Success	200	{string}	string	"Update rule group config successfully."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rule_group [post]
 func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	var ruleGroup placement.RuleGroup
@@ -396,14 +408,15 @@ func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteGroupConfig deletes the rule group config.
-// @Tags     rule
-// @Summary  Delete rule group config.
-// @Param    id  path  string  true  "Group Id"
-// @Produce  json
-// @Success  200  {string}  string  "Delete rule group config successfully."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rule_group/{id} [delete]
+//
+//	@Tags		rule
+//	@Summary	Delete rule group config.
+//	@Param		id	path	string	true	"Group Id"
+//	@Produce	json
+//	@Success	200	{string}	string	"Delete rule group config successfully."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rule_group/{id} [delete]
 func (h *ruleHandler) DeleteGroupConfig(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	id := mux.Vars(r)["id"]
@@ -420,13 +433,14 @@ func (h *ruleHandler) DeleteGroupConfig(w http.ResponseWriter, r *http.Request) 
 }
 
 // GetAllGroupConfigs returns all rule group configs.
-// @Tags     rule
-// @Summary  List all rule group configs.
-// @Produce  json
-// @Success  200  {array}   placement.RuleGroup
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/rule_groups [get]
+//
+//	@Tags		rule
+//	@Summary	List all rule group configs.
+//	@Produce	json
+//	@Success	200	{array}		placement.RuleGroup
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/rule_groups [get]
 func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	ruleGroups := manager.GetRuleGroups()
@@ -434,13 +448,14 @@ func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request)
 }
 
 // GetPlacementRules returns all rules and groups configuration.
-// @Tags     rule
-// @Summary  List all rules and groups configuration.
-// @Produce  json
-// @Success  200  {array}   placement.GroupBundle
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/placement-rule [get]
+//
+//	@Tags		rule
+//	@Summary	List all rules and groups configuration.
+//	@Produce	json
+//	@Success	200	{array}		placement.GroupBundle
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/placement-rule [get]
 func (h *ruleHandler) GetPlacementRules(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	bundles := manager.GetAllGroupBundles()
@@ -448,15 +463,16 @@ func (h *ruleHandler) GetPlacementRules(w http.ResponseWriter, r *http.Request) 
 }
 
 // SetPlacementRules sets all rules and groups configuration.
-// @Tags     rule
-// @Summary  Update all rules and groups configuration.
-// @Param    partial  query  bool  false  "if partially update rules"  default(false)
-// @Produce  json
-// @Success  200  {string}  string  "Update rules and groups successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/placement-rule [post]
+//
+//	@Tags		rule
+//	@Summary	Update all rules and groups configuration.
+//	@Param		partial	query	bool	false	"if partially update rules"	default(false)
+//	@Produce	json
+//	@Success	200	{string}	string	"Update rules and groups successfully."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/placement-rule [post]
 func (h *ruleHandler) SetPlacementRules(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	var groups []placement.GroupBundle
@@ -477,14 +493,15 @@ func (h *ruleHandler) SetPlacementRules(w http.ResponseWriter, r *http.Request) 
 }
 
 // GetPlacementRuleByGroup returns group config and all rules belong to the group.
-// @Tags     rule
-// @Summary  Get group config and all rules belong to the group.
-// @Param    group  path  string  true  "The name of group"
-// @Produce  json
-// @Success  200  {object}  placement.GroupBundle
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/placement-rule/{group} [get]
+//
+//	@Tags		rule
+//	@Summary	Get group config and all rules belong to the group.
+//	@Param		group	path	string	true	"The name of group"
+//	@Produce	json
+//	@Success	200	{object}	placement.GroupBundle
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/placement-rule/{group} [get]
 func (h *ruleHandler) GetPlacementRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	g := mux.Vars(r)["group"]
@@ -493,16 +510,17 @@ func (h *ruleHandler) GetPlacementRuleByGroup(w http.ResponseWriter, r *http.Req
 }
 
 // DeletePlacementRuleByGroup deletes group config and all rules belong to the group.
-// @Tags     rule
-// @Summary  Get group config and all rules belong to the group.
-// @Param    group   path   string  true   "The name or name pattern of group"
-// @Param    regexp  query  bool    false  "Use regular expression"  default(false)
-// @Produce  plain
-// @Success  200  {string}  string  "Delete group and rules successfully."
-// @Failure  400  {string}  string  "Bad request."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/placement-rule [delete]
+//
+//	@Tags		rule
+//	@Summary	Get group config and all rules belong to the group.
+//	@Param		group	path	string	true	"The name or name pattern of group"
+//	@Param		regexp	query	bool	false	"Use regular expression"	default(false)
+//	@Produce	plain
+//	@Success	200	{string}	string	"Delete group and rules successfully."
+//	@Failure	400	{string}	string	"Bad request."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/placement-rule [delete]
 func (h *ruleHandler) DeletePlacementRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	group := mux.Vars(r)["group"]
@@ -521,14 +539,15 @@ func (h *ruleHandler) DeletePlacementRuleByGroup(w http.ResponseWriter, r *http.
 }
 
 // SetPlacementRuleByGroup sets group config and all rules belong to it.
-// @Tags     rule
-// @Summary  Update group and all rules belong to it.
-// @Produce  json
-// @Success  200  {string}  string  "Update group and rules successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  412  {string}  string  "Placement rules feature is disabled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/placement-rule/{group} [post]
+//
+//	@Tags		rule
+//	@Summary	Update group and all rules belong to it.
+//	@Produce	json
+//	@Success	200	{string}	string	"Update group and rules successfully."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	412	{string}	string	"Placement rules feature is disabled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/placement-rule/{group} [post]
 func (h *ruleHandler) SetPlacementRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	manager := getRuleManager(r)
 	groupID := mux.Vars(r)["group"]

@@ -47,25 +47,27 @@ func newServiceMiddlewareHandler(svr *server.Server, rd *render.Render) *service
 }
 
 // GetServiceMiddlewareConfig gets the service middleware config.
-// @Tags     service_middleware
-// @Summary  Get Service Middleware config.
-// @Produce  json
-// @Success  200  {object}  config.Config
-// @Router   /service-middleware/config [get]
+//
+//	@Tags		service_middleware
+//	@Summary	Get Service Middleware config.
+//	@Produce	json
+//	@Success	200	{object}	config.Config
+//	@Router		/service-middleware/config [get]
 func (h *serviceMiddlewareHandler) GetServiceMiddlewareConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetServiceMiddlewareConfig())
 }
 
 // SetServiceMiddlewareConfig sets the service middleware config.
-// @Tags     service_middleware
-// @Summary  Update some service-middleware's config items.
-// @Accept   json
-// @Param    body  body  object  false  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The config is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /service-middleware/config [post]
+//
+//	@Tags		service_middleware
+//	@Summary	Update some service-middleware's config items.
+//	@Accept		json
+//	@Param		body	body	object	false	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The config is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/service-middleware/config [post]
 func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetServiceMiddlewareConfig()
 	data, err := io.ReadAll(r.Body)
@@ -137,14 +139,15 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 }
 
 // SetRateLimitConfig updates the rate limit config.
-// @Tags     service_middleware
-// @Summary  update ratelimit config
-// @Param    body  body  object  string  "json params"
-// @Produce  json
-// @Success  200  {string}  string
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "config item not found"
-// @Router   /service-middleware/config/rate-limit [post]
+//
+//	@Tags		service_middleware
+//	@Summary	update ratelimit config
+//	@Param		body	body	object	string	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"config item not found"
+//	@Router		/service-middleware/config/rate-limit [post]
 func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -232,14 +235,15 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 }
 
 // SetGRPCRateLimitConfig updates the gRPC rate limit config.
-// @Tags     service_middleware
-// @Summary  update gRPC ratelimit config
-// @Param    body  body  object  string  "json params"
-// @Produce  json
-// @Success  200  {string}  string
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "config item not found"
-// @Router   /service-middleware/config/grpc-rate-limit [post]
+//
+//	@Tags		service_middleware
+//	@Summary	update gRPC ratelimit config
+//	@Param		body	body	object	string	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"config item not found"
+//	@Router		/service-middleware/config/grpc-rate-limit [post]
 func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
