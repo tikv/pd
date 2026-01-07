@@ -102,9 +102,9 @@ func (req *Request) waitCtx(ctx context.Context) (physical int64, logical int64,
 			metrics.CmdFailedDurationTSO.Observe(now.Sub(startAt).Seconds())
 			return 0, 0, err
 		}
-		req.mu.Lock()
+		req.mu.RLock()
 		physical, logical = req.physical, req.logical
-		req.mu.Unlock()
+		req.mu.RUnlock()
 		metrics.CmdDurationTSOWait.Observe(now.Sub(start).Seconds())
 		metrics.CmdDurationTSO.Observe(now.Sub(startAt).Seconds())
 		return
