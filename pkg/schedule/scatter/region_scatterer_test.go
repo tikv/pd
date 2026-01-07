@@ -862,6 +862,37 @@ func TestRemoveStoreLimit(t *testing.T) {
 			re.True(oc.AddOperator(op))
 		}
 	}
+}
+
+func TestScatterReplace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	// Add stores 1~5.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	// Add regions 1~5.
+	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	for i := uint64(2); i <= 5; i++ {
+		tc.AddLeaderRegion(i, 1, 2, 3)
+	}
+
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+
+	for i := uint64(1); i <= 5; i++ {
+		region := tc.GetRegion(i)
+		if op, err := scatterer.Scatter(region, "", true); op != nil {
+			re.NoError(err)
+			re.True(oc.AddOperator(op))
+		}
+	}
 
 	// same scatter operator should be skipped
 	region := tc.GetRegion(2)
@@ -869,24 +900,29 @@ func TestRemoveStoreLimit(t *testing.T) {
 	re.NoError(err)
 	re.Nil(op)
 
-	// different scatter operator should be added
+	// different scatter operator should be rejected
 	region = tc.GetRegion(3)
 	op, err = scatterer.Scatter(region, "test", true)
 	re.Error(err)
 	re.Nil(op)
 
 	// exist lower operator
-	regionID := uint64(5)
-	op = oc.GetOperator(regionID)
-	re.NotNil(op)
-	re.True(oc.RemoveOperator(op))
-	region = tc.GetRegion(regionID)
-	op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
-	op.SetPriorityLevel(constant.Low)
-	re.True(oc.AddOperator(op))
-	op, err = scatterer.Scatter(region, "", true)
-	re.NoError(err)
-	re.NotNil(op)
+	for i := uint64(1); i <= 5; i++ {
+		op = oc.GetOperator(i)
+		if op == nil {
+			continue
+		}
+		re.True(oc.RemoveOperator(op))
+		region = tc.GetRegion(i)
+		op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
+		op.SetPriorityLevel(constant.Low)
+		re.True(oc.AddOperator(op))
+	}
+	testutil.Eventually(re, func() bool {
+		op, err = scatterer.Scatter(tc.GetRegion(1), "", true)
+		re.NoError(err)
+		return op != nil
+	})
 }
 
 func TestScatterWithAffinity(t *testing.T) {
