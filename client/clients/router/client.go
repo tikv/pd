@@ -582,8 +582,8 @@ batchLoop:
 		// Step 2: Choose a stream connection to send the router request.
 		resetTimeoutTimer()
 		var (
-			fn    processFn
-			retry bool
+			processQueryFunc processFn
+			retry            bool
 		)
 	connectionCtxChoosingLoop:
 		for {
@@ -598,9 +598,9 @@ batchLoop:
 				continue batchLoop
 			default:
 			}
-			fn, streamURL = c.sendToMcs(ctx)
-			if fn == nil {
-				fn, streamURL, retry = c.sendToPD(ctx)
+			processQueryFunc, streamURL = c.sendToMcs(ctx)
+			if processQueryFunc == nil {
+				processQueryFunc, streamURL, retry = c.sendToPD(ctx)
 			}
 			if retry {
 				continue connectionCtxChoosingLoop
@@ -610,7 +610,7 @@ batchLoop:
 
 		// Step 3: Dispatch the router requests to the stream connection.
 		// TODO: timeout handling if the stream takes too long to process the requests.
-		err = fn()
+		err = processQueryFunc()
 		if err != nil && !c.handleProcessRequestError(ctx, streamURL, err) {
 			return
 		}
@@ -652,7 +652,7 @@ func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
 	default:
 	}
 	return func() error {
-		return c.processRequests(connectionCtx.Stream)
+		return c.processRequestsInner(connectionCtx.Stream.Send, connectionCtx.Stream.Recv)
 	}, connectionCtx.StreamURL, false
 }
 
@@ -690,94 +690,12 @@ func (c *Cli) sendToMcs(ctx context.Context) (processFn, string) {
 	default:
 	}
 	return func() error {
-		return c.processRouterRequests(stream)
+		return c.processRequestsInner(stream.Send, stream.Recv)
 	}, streamURL
 }
 
 type recvFn func() (*pdpb.QueryRegionResponse, error)
 type sendFn func(*pdpb.QueryRegionRequest) error
-
-func (c *Cli) processRouterRequests(stream routerpb.Router_QueryRegionClient) error {
-	return c.processRequestsInner(stream.Send, stream.Recv)
-}
-
-func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
-	var (
-		requests     = c.batchController.GetCollectedRequests()
-		traceRegions = make([]*trace.Region, 0, len(requests))
-		spans        = make([]opentracing.Span, 0, len(requests))
-	)
-	for _, req := range requests {
-		traceRegions = append(traceRegions, trace.StartRegion(req.requestCtx, "pdclient.regionReqSend"))
-		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
-			spans = append(spans, span.Tracer().StartSpan("pdclient.processRegionRequests", opentracing.ChildOf(span.Context())))
-		}
-	}
-	defer func() {
-		for i := range spans {
-			spans[i].Finish()
-		}
-		for i := range traceRegions {
-			traceRegions[i].End()
-		}
-	}()
-
-	queryReq := &pdpb.QueryRegionRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: c.svcDiscovery.GetClusterID(),
-		},
-		Keys:     make([][]byte, 0, len(requests)),
-		PrevKeys: make([][]byte, 0, len(requests)),
-		Ids:      make([]uint64, 0, len(requests)),
-	}
-	for _, req := range requests {
-		if !queryReq.NeedBuckets && req.options.NeedBuckets {
-			queryReq.NeedBuckets = true
-		}
-		if req.key != nil {
-			queryReq.Keys = append(queryReq.Keys, req.key)
-		} else if req.prevKey != nil {
-			queryReq.PrevKeys = append(queryReq.PrevKeys, req.prevKey)
-		} else if req.id != 0 {
-			queryReq.Ids = append(queryReq.Ids, req.id)
-		} else {
-			panic("invalid region query request received")
-		}
-	}
-	start := time.Now()
-	err := stream.Send(queryReq)
-	if err != nil {
-		return err
-	}
-	metrics.QueryRegionBatchSendLatency.Observe(
-		time.Since(
-			c.batchController.GetExtraBatchingStartTime(),
-		).Seconds(),
-	)
-	resp, err := stream.Recv()
-	if err != nil {
-		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
-		return err
-	}
-	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
-	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
-	// Currently, header errors can occur due to an unready PD leader or follower,
-	// resulting in either a `NOT_BOOTSTRAPPED` or `REGION_NOT_FOUND` error.
-	if headerErr := resp.GetHeader().GetError(); headerErr != nil {
-		return errors.New(headerErr.String())
-	}
-	if keysLen := len(queryReq.Keys); keysLen > 0 {
-		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
-	}
-	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
-		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
-	}
-	if idsLen := len(queryReq.Ids); idsLen > 0 {
-		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
-	}
-	c.doneCollectedRequests(resp)
-	return nil
-}
 
 func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	var (
@@ -825,6 +743,7 @@ func (c *Cli) processRequestsInner(send sendFn, recv recvFn) error {
 	start := time.Now()
 	err := send(queryReq)
 	if err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return err
 	}
 	metrics.QueryRegionBatchSendLatency.Observe(

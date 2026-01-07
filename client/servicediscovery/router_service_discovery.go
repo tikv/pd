@@ -89,16 +89,12 @@ func (r *routerServiceDiscovery) GetClientConns() *sync.Map {
 
 // GetServiceClient returns the ServiceClient of the router service.
 func (r *routerServiceDiscovery) GetServiceClient() ServiceClient {
-	return r.GetServiceClientByKind(ForwardAPIKind)
+	return r.balancer.get()
 }
 
 // GetServiceClientByKind returns the ServiceClient of the router service.
 func (r *routerServiceDiscovery) GetServiceClientByKind(_ APIKind) ServiceClient {
-	client := r.balancer.get()
-	if client == nil {
-		return nil
-	}
-	return client
+	return r.GetServiceClient()
 }
 
 // GetOrCreateGRPCConn creates a gRPC connection to the router service.
