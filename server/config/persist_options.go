@@ -921,25 +921,6 @@ func (o *PersistOptions) getTTLBoolOr(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
-func (o *PersistOptions) getTTLFloat(key string) (float64, bool, error) {
-	stringForm, ok := o.GetTTLData(key)
-	if !ok {
-		return 0, false, nil
-	}
-	r, err := strconv.ParseFloat(stringForm, 64)
-	return r, true, err
-}
-
-func (o *PersistOptions) getTTLFloatOr(key string, defaultValue float64) float64 {
-	if v, ok, err := o.getTTLFloat(key); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
-	}
-	return defaultValue
-}
-
 // GetTTLData returns if there is a TTL data for a given key.
 func (o *PersistOptions) GetTTLData(key string) (string, bool) {
 	if o.ttl == nil {
