@@ -144,7 +144,6 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 
 func (suite *storeTestSuite) TestStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetAllLimit)
-	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLimitTTL)
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLabel)
 }
 
@@ -202,61 +201,6 @@ func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 			re.True(ok)
 		}
 	}
-}
-
-func (suite *storeTestSuite) checkStoreLimitTTL(cluster *tests.TestCluster) {
-	re := suite.Require()
-
-	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
-	// add peer
-	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", urlPrefix, 5)
-	data := map[string]any{
-		"type": "add-peer",
-		"rate": 999,
-	}
-	postData, err := json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// remove peer
-	data = map[string]any{
-		"type": "remove-peer",
-		"rate": 998,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// all store limit add peer
-	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", urlPrefix, 3)
-	data = map[string]any{
-		"type": "add-peer",
-		"rate": 997,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// all store limit remove peer
-	data = map[string]any{
-		"type": "remove-peer",
-		"rate": 996,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-
-	re.Equal(float64(999), leader.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	re.Equal(float64(998), leader.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	re.Equal(float64(997), leader.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	re.Equal(float64(996), leader.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
-	time.Sleep(5 * time.Second)
-	re.NotEqual(float64(999), leader.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	re.NotEqual(float64(998), leader.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	re.NotEqual(float64(997), leader.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	re.NotEqual(float64(996), leader.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
 }
 
 func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {

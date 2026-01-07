@@ -490,55 +490,21 @@ func (o *PersistConfig) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
-	defer func() {
-		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
-		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
-	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
+	limitCfg := sc.StoreLimitConfig{
 		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	v, ok1, err := o.getTTLFloat("default-add-peer")
-	if err != nil {
-		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetAddPeer := ok1 && err == nil
-	if canSetAddPeer {
-		returnSC.AddPeer = v
-	}
-
-	v, ok2, err := o.getTTLFloat("default-remove-peer")
-	if err != nil {
-		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetRemovePeer := ok2 && err == nil
-	if canSetRemovePeer {
-		returnSC.RemovePeer = v
-	}
-
-	if canSetAddPeer || canSetRemovePeer {
-		return returnSC
-	}
-	cfg.StoreLimit[storeID] = sc
+	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
-	defer func() {
-		switch typ {
-		case storelimit.AddPeer:
-			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
-		case storelimit.RemovePeer:
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		default:
-		}
-	}()
 	limit := o.GetStoreLimit(storeID)
 	switch typ {
 	case storelimit.AddPeer:
