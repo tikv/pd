@@ -72,9 +72,13 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	// Prevent store 6 (offline store) from being auto-tombstoned by adding a region to it
-	// This ensures the store remains offline instead of being converted to tombstone
-	tests.MustPutRegion(re, cluster, 999, 6, []byte("a"), []byte("b"))
+	// Prevent store 6 (offline store) from being auto-tombstoned
+
+	// Enable failpoint to prevent auto-burying stores during the test
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	}()
 
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
