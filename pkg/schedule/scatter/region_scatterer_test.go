@@ -878,7 +878,6 @@ func TestScatterReplace(t *testing.T) {
 		tc.AddRegionStore(i, 0)
 	}
 	// Add regions 1~5.
-	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	for i := uint64(2); i <= 5; i++ {
 		tc.AddLeaderRegion(i, 1, 2, 3)
@@ -907,17 +906,15 @@ func TestScatterReplace(t *testing.T) {
 	re.Nil(op)
 
 	// exist lower operator
-	for i := uint64(1); i <= 5; i++ {
-		op = oc.GetOperator(i)
-		if op == nil {
-			continue
-		}
+	op = oc.GetOperator(1)
+	if op != nil {
 		re.True(oc.RemoveOperator(op))
-		region = tc.GetRegion(i)
-		op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
-		op.SetPriorityLevel(constant.Low)
-		re.True(oc.AddOperator(op))
 	}
+	region = tc.GetRegion(1)
+	op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
+	op.SetPriorityLevel(constant.Low)
+	re.True(oc.AddOperator(op))
+
 	testutil.Eventually(re, func() bool {
 		op, err = scatterer.Scatter(tc.GetRegion(1), "", true)
 		re.NoError(err)
