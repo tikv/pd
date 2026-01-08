@@ -612,7 +612,7 @@ func TestSetPDServerConfigWithDashboard(t *testing.T) {
 
 	// Change both other field and dashboard
 	cfg.UseRegionStorage = !cfg.UseRegionStorage
-	cfg.DashboardAddress = "invalid"
+	cfg.DashboardAddress = "https://new-dashboard-address:1234"
 	err = svr.SetPDServerConfig(*cfg)
-	re.ErrorContains(err, "invalid URI for request")
+	re.ErrorContains(err, "is not the client url of any member")
 }
