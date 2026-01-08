@@ -167,7 +167,7 @@ func (a *Allocator) IsInitialize() bool {
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (a *Allocator) UpdateTSO() (err error) {
 	for i := range maxUpdateTSORetryCount {
-		err = a.timestampOracle.updateTimestamp()
+		err = a.timestampOracle.updateTimestamp(a.timestampOracle.tsoMux.physical, true)
 		if err == nil {
 			return nil
 		}
