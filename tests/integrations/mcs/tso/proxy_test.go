@@ -186,6 +186,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
 	defer cancel()
 
 	for i := range clientCount {
+		//nolint:staticcheck
 		conn, err := grpc.Dial(strings.TrimPrefix(s.backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
@@ -390,6 +391,7 @@ func createTSOStreams(
 	streams := make([]pdpb.PD_TsoClient, clientCount)
 
 	for i := range clientCount {
+		//nolint:staticcheck
 		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
