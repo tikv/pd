@@ -72,6 +72,7 @@ func TestStoreStatistics(t *testing.T) {
 	}
 	stats := storeStats.stats
 
+<<<<<<< HEAD
 	re.Equal(6, stats.Up)
 	re.Equal(7, stats.Preparing)
 	re.Equal(0, stats.Serving)
@@ -91,6 +92,16 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal(4, stats.LabelCounter["host:h1"])
 	re.Equal(4, stats.LabelCounter["host:h2"])
 	re.Equal(2, stats.LabelCounter["zone:unknown"])
+=======
+	re.Len(stats.LabelCounter["zone:z1"], 2)
+	re.Equal([]uint64{1, 2}, stats.LabelCounter["zone:z1"])
+	re.Len(stats.LabelCounter["zone:z2"], 2)
+	re.Len(stats.LabelCounter["zone:z3"], 2)
+	re.Len(stats.LabelCounter["host:h1"], 4)
+	re.Equal([]uint64{1, 3, 5, 7}, stats.LabelCounter["host:h1"])
+	re.Len(stats.LabelCounter["host:h2"], 4)
+	re.Len(stats.LabelCounter["zone:unknown"], 2)
+>>>>>>> 697cbd3eb5 (statistics: Add 'store' label to metric pd_cluster_status. (#9898))
 }
 
 func TestSummaryStoreInfos(t *testing.T) {
