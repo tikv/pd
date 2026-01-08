@@ -294,3 +294,12 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 		re.Equal(testCase.expectedOK, ok)
 	}
 }
+
+func TestDecodeKeyspace(t *testing.T) {
+	re := require.New(t)
+	bound := MakeRegionBound(100)
+	k := codec.Key(bound.TxnLeftBound)
+	ok, keyspaceID := k.DecodeKeyspaceTxnKey()
+	re.True(ok)
+	re.Equal(uint32(100), keyspaceID)
+}

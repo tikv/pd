@@ -118,10 +118,11 @@ func MakeRegionBound(id uint32) *RegionBound {
 	nextKeyspaceIDBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
 	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
+	tr := codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...))
 	return &RegionBound{
 		RawLeftBound:  codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)),
 		RawRightBound: codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)),
-		TxnLeftBound:  codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...)),
+		TxnLeftBound:  tr,
 		TxnRightBound: codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)),
 	}
 }

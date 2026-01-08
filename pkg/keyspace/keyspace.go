@@ -884,6 +884,16 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	return actual.(string), nil
 }
 
+// ScanAllKeyspace scans all keyspaces and applies the given function.
+func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string)) {
+	manager.keyspaceNameLookup.Range(func(key, value any) bool {
+		keyspaceID := key.(uint32)
+		name := value.(string)
+		fn(keyspaceID, name)
+		return true
+	})
+}
+
 // GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.
 // If not found, it will try to get it from the storage.
 func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceState, error) {

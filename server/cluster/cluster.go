@@ -422,7 +422,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 	go c.startProgressGC()
-	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
+	go c.runStorageSizeCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
 
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -2591,7 +2591,6 @@ func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
 // runStorageSizeCollector runs the storage size collector for the metering.
 func (c *RaftCluster) runStorageSizeCollector(
 	writer *metering.Writer,
-	regionLabeler *labeler.RegionLabeler,
 	keyspaceManager *keyspace.Manager,
 ) {
 	defer logutil.LogPanic()
@@ -2614,38 +2613,19 @@ func (c *RaftCluster) runStorageSizeCollector(
 			log.Info("storage size collector has been stopped")
 			return
 		case <-ticker.C:
-			storageSizeInfoList := c.collectStorageSize(regionLabeler, keyspaceManager)
+			storageSizeInfoList := c.collectStorageSize(keyspaceManager)
 			// Collect the storage size info list of all keyspaces.
 			collector.Collect(storageSizeInfoList)
 		}
 	}
 }
 
-func (c *RaftCluster) collectStorageSize(
-	regionLabeler *labeler.RegionLabeler,
-	keyspaceManager *keyspace.Manager,
-) []*storageSizeInfo {
+func (c *RaftCluster) collectStorageSize(keyspaceManager *keyspace.Manager) []*storageSizeInfo {
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
 	start := time.Now()
-	// Iterate the region labeler to get all keyspaces and their corresponding region ranges.
-	regionLabeler.IterateLabelRules(func(rule *labeler.LabelRule) bool {
-		// Try to parse the keyspace ID from the label rule.
-		keyspaceID, ok := keyspace.ParseKeyspaceIDFromLabelRule(rule)
-		if !ok {
-			return true
-		}
-		keyspaceName, err := keyspaceManager.GetEnabledKeyspaceNameByID(keyspaceID)
-		if err != nil {
-			// TODO: improve the observability of this error.
-			return true
-		}
-		// Make the region bounds.
-		regionBoundsMap[keyspaceName] = keyspace.MakeRegionBound(keyspaceID)
-		return true
+	keyspaceManager.ScanAllKeyspace(func(keyspaceID uint32, name string) {
+		regionBoundsMap[name] = keyspace.MakeRegionBound(keyspaceID)
 	})
-	log.Info("iterated the region bounds of all keyspaces",
-		zap.Duration("cost", time.Since(start)),
-		zap.Int("count", len(regionBoundsMap)))
 
 	start = time.Now()
 	storageSizeInfoList := make([]*storageSizeInfo, 0, len(regionBoundsMap))
