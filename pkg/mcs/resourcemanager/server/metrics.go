@@ -155,6 +155,14 @@ var (
 			Help:      "request_unit_per_second/fill_rate for all resource groups.",
 		}, []string{newResourceGroupNameLabel})
 
+	resourceUnitServiceLimit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "resource_unit_service_limit",
+			Help:      "Fill rate value for all resource groups.",
+		}, []string{newResourceGroupNameLabel})
+
 	syncLoadGroupCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -188,6 +196,7 @@ func init() {
 	prometheus.MustRegister(pushRUMetricsDuration)
 	prometheus.MustRegister(requestUnitSumPerSec)
 	prometheus.MustRegister(requestUnitConsumeRate)
+	prometheus.MustRegister(resourceUnitServiceLimit)
 	prometheus.MustRegister(syncLoadGroupCounter)
 	prometheus.MustRegister(asyncLoadGroupDuration)
 }
