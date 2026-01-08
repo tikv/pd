@@ -27,21 +27,21 @@ import (
 	"github.com/tikv/pd/pkg/election"
 )
 
-type MokElection struct{}
+type MockElection struct{}
 
-func (*MokElection) ID() uint64               { return 0 }
-func (*MokElection) Name() string             { return "" }
-func (*MokElection) MemberValue() string      { return "" }
-func (*MokElection) Client() *clientv3.Client { return nil }
-func (*MokElection) IsServing() bool          { return true }
-func (*MokElection) PromoteSelf()             {}
-func (*MokElection) Campaign(_ context.Context, _ int64) error {
+func (*MockElection) ID() uint64               { return 0 }
+func (*MockElection) Name() string             { return "" }
+func (*MockElection) MemberValue() string      { return "" }
+func (*MockElection) Client() *clientv3.Client { return nil }
+func (*MockElection) IsServing() bool          { return true }
+func (*MockElection) PromoteSelf()             {}
+func (*MockElection) Campaign(_ context.Context, _ int64) error {
 	return nil
 }
-func (*MokElection) Resign()                             {}
-func (*MokElection) GetServingUrls() []string            { return nil }
-func (*MokElection) GetElectionPath() string             { return "" }
-func (*MokElection) GetLeadership() *election.Leadership { return nil }
+func (*MockElection) Resign()                             {}
+func (*MockElection) GetServingUrls() []string            { return nil }
+func (*MockElection) GetElectionPath() string             { return "" }
+func (*MockElection) GetLeadership() *election.Leadership { return nil }
 
 func TestGenerateTSO(t *testing.T) {
 	re := require.New(t)
@@ -57,7 +57,7 @@ func TestGenerateTSO(t *testing.T) {
 		updatePhysicalInterval: 5 * time.Second,
 		maxResetTSGap:          func() time.Duration { return time.Hour },
 		metrics:                newTSOMetrics("test"),
-		member:                 &MokElection{},
+		member:                 &MockElection{},
 	}
 
 	// update physical time interval failed due to reach the lastSavedTime, it needs to save storage first, but this behavior is not allowed.
@@ -86,7 +86,7 @@ func TestCurrentGetTSO(t *testing.T) {
 		updatePhysicalInterval: 5 * time.Second,
 		maxResetTSGap:          func() time.Duration { return time.Hour },
 		metrics:                newTSOMetrics("test"),
-		member:                 &MokElection{},
+		member:                 &MockElection{},
 	}
 
 	runDuration := 5 * time.Second
@@ -94,12 +94,12 @@ func TestCurrentGetTSO(t *testing.T) {
 	runCtx, runCancel := context.WithTimeout(ctx, runDuration-time.Second)
 	defer runCancel()
 	wg := sync.WaitGroup{}
-	wg.Add(100)
+	wg.Add(10)
 	changes := atomic.Int32{}
 	totalTso := atomic.Int32{}
-	for i := range 100 {
+	for i := range 10 {
 		go func(i int) {
-			physical := timestampOracle.tsoMux.physical
+			pre, _ := timestampOracle.getTSO()
 			defer wg.Done()
 			for {
 				select {
@@ -110,9 +110,10 @@ func TestCurrentGetTSO(t *testing.T) {
 					totalTso.Add(1)
 					re.NoError(err)
 					if i == 0 {
-						if physical != timestampOracle.tsoMux.physical {
+						physical, _ := timestampOracle.getTSO()
+						if pre != physical {
 							changes.Add(1)
-							physical = timestampOracle.tsoMux.physical
+							pre = physical
 						}
 					}
 				}

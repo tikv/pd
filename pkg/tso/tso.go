@@ -119,7 +119,7 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 	return t.tsoMux.physical, t.tsoMux.logical
 }
 
-// generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
+// generateTSO will add the TSO's logical part with the given count and returns the new TSO result with the current physical time for update.
 func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physical int64, logical int64, current time.Time) {
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
@@ -208,7 +208,8 @@ func (t *timestampOracle) syncTimestamp() error {
 		zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
 		zap.Time("save", save), zap.Time("next", next))
 	// save into memory
-	t.setTSOPhysical(t.tsoMux.physical, next, true)
+	current, _ := t.getTSO()
+	t.setTSOPhysical(current, next, true)
 	return nil
 }
 
