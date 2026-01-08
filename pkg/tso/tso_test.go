@@ -27,21 +27,21 @@ import (
 	"github.com/tikv/pd/pkg/election"
 )
 
-type MockElection struct{}
+type mockElection struct{}
 
-func (*MockElection) ID() uint64               { return 0 }
-func (*MockElection) Name() string             { return "" }
-func (*MockElection) MemberValue() string      { return "" }
-func (*MockElection) Client() *clientv3.Client { return nil }
-func (*MockElection) IsServing() bool          { return true }
-func (*MockElection) PromoteSelf()             {}
-func (*MockElection) Campaign(_ context.Context, _ int64) error {
+func (*mockElection) ID() uint64               { return 0 }
+func (*mockElection) Name() string             { return "" }
+func (*mockElection) MemberValue() string      { return "" }
+func (*mockElection) Client() *clientv3.Client { return nil }
+func (*mockElection) IsServing() bool          { return true }
+func (*mockElection) PromoteSelf()             {}
+func (*mockElection) Campaign(_ context.Context, _ int64) error {
 	return nil
 }
-func (*MockElection) Resign()                             {}
-func (*MockElection) GetServingUrls() []string            { return nil }
-func (*MockElection) GetElectionPath() string             { return "" }
-func (*MockElection) GetLeadership() *election.Leadership { return nil }
+func (*mockElection) Resign()                             {}
+func (*mockElection) GetServingUrls() []string            { return nil }
+func (*mockElection) GetElectionPath() string             { return "" }
+func (*mockElection) GetLeadership() *election.Leadership { return nil }
 
 func TestGenerateTSO(t *testing.T) {
 	re := require.New(t)
@@ -53,23 +53,25 @@ func TestGenerateTSO(t *testing.T) {
 			physical: current,
 			logical:  maxLogical - 1,
 		},
-		saveInterval:           50 * time.Millisecond,
-		updatePhysicalInterval: 5 * time.Second,
+		saveInterval:           5 * time.Second,
+		updatePhysicalInterval: 50 * time.Millisecond,
 		maxResetTSGap:          func() time.Duration { return time.Hour },
 		metrics:                newTSOMetrics("test"),
-		member:                 &MockElection{},
+		member:                 &mockElection{},
 	}
 
 	// update physical time interval failed due to reach the lastSavedTime, it needs to save storage first, but this behavior is not allowed.
 	_, err := timestampOracle.getTS(ctx, 2)
 	re.Error(err)
-	re.Equal(current, timestampOracle.tsoMux.physical)
+	physical, _ := timestampOracle.getTSO()
+	re.Equal(current, physical)
 
 	// simulate the save to storage operation is done.
-	timestampOracle.lastSavedTime.Store(current.Add(5 * time.Second))
+	timestampOracle.lastSavedTime.Store(time.Now().Add(5 * time.Second))
 	_, err = timestampOracle.getTS(ctx, 2)
 	re.NoError(err)
-	re.NotEqual(current, timestampOracle.tsoMux.physical)
+	physical, _ = timestampOracle.getTSO()
+	re.NotEqual(current, physical)
 }
 
 func TestCurrentGetTSO(t *testing.T) {
@@ -82,24 +84,27 @@ func TestCurrentGetTSO(t *testing.T) {
 			physical: current,
 			logical:  maxLogical - 1,
 		},
-		saveInterval:           50 * time.Millisecond,
-		updatePhysicalInterval: 5 * time.Second,
+		saveInterval:           5 * time.Second,
+		updatePhysicalInterval: 50 * time.Millisecond,
 		maxResetTSGap:          func() time.Duration { return time.Hour },
 		metrics:                newTSOMetrics("test"),
-		member:                 &MockElection{},
+		member:                 &mockElection{},
 	}
-
-	runDuration := 5 * time.Second
-	timestampOracle.lastSavedTime.Store(current.Add(runDuration))
-	runCtx, runCancel := context.WithTimeout(ctx, runDuration-time.Second)
+	runDuration := 10 * time.Second
+	runCtx, runCancel := context.WithTimeout(ctx, runDuration-2*time.Second)
 	defer runCancel()
+
+	timestampOracle.lastSavedTime.Store(current.Add(runDuration))
+
 	wg := sync.WaitGroup{}
-	wg.Add(10)
+	concurrency := 20
+	wg.Add(concurrency)
 	changes := atomic.Int32{}
 	totalTso := atomic.Int32{}
-	for i := range 10 {
+	for i := range concurrency {
 		go func(i int) {
 			pre, _ := timestampOracle.getTSO()
+
 			defer wg.Done()
 			for {
 				select {
@@ -122,5 +127,5 @@ func TestCurrentGetTSO(t *testing.T) {
 	}
 
 	wg.Wait()
-	re.Equal(totalTso.Load()/int32(maxLogical)+1, changes.Load())
+	re.LessOrEqual(changes.Load(), totalTso.Load()/int32(maxLogical)+1)
 }

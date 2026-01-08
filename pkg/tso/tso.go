@@ -49,7 +49,6 @@ const (
 	// and trigger unnecessary warnings about clock offset.
 	// It's an empirical value.
 	jetLagWarningThreshold = 150 * time.Millisecond
-	waitUpdateTSOInterval  = 50 * time.Millisecond
 )
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
@@ -406,7 +405,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 			if err := t.updateTimestamp(physical, false); err != nil && !errs.ErrUpdateTimestamp.Equal(err) {
 				log.Warn("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
 			}
-			time.Sleep(waitUpdateTSOInterval)
+			time.Sleep(t.updatePhysicalInterval)
 			continue
 		}
 		// In case lease expired after the first check.
