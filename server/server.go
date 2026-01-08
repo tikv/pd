@@ -1293,6 +1293,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		return err
 	}
 	old := s.persistOptions.GetPDServerConfig()
+	// See https://github.com/tikv/pd/issues/10114 for more details
 	if old.DashboardAddress != cfg.DashboardAddress {
 		switch cfg.DashboardAddress {
 		case "auto":
