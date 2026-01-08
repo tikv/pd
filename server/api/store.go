@@ -311,6 +311,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 //	@Tags		store
 //	@Summary	Set the store's limit.
 //	@Param		id			path	integer	true	"Store Id"
+//	@Param		ttlSecond	query	integer	false	"Deprecated"
 //	@Param		body		body	object	true	"json params"
 //	@Produce	json
 //	@Success	200	{string}	string	"The store's limit is updated."
@@ -318,6 +319,10 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/store/{id}/limit [post]
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		h.rd.JSON(w, http.StatusBadRequest, "ttlSecond is deprecated")
+	}
+
 	rc := getCluster(r)
 	if version := rc.GetScheduleConfig().StoreLimitVersion; version != storelimit.VersionV1 {
 		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support set limit", version))
@@ -402,6 +407,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 //	@Tags		store
 //	@Summary	Set limit of all stores in the cluster.
 //	@Accept		json
+//	@Param		ttlSecond	query	integer	false	"Deprecated"
 //	@Param		body		body	object	true	"json params"
 //	@Produce	json
 //	@Success	200	{string}	string	"Set store limit successfully."
@@ -409,6 +415,10 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/stores/limit [post]
 func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		h.rd.JSON(w, http.StatusBadRequest, "ttlSecond is deprecated")
+	}
+
 	cfg := h.GetScheduleConfig()
 	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
 		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
