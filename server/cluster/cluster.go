@@ -2423,6 +2423,7 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	c.refreshStoreRateLimit(storeID, typ)
 	log.Info("store limit changed", zap.Uint64("store-id", storeID), zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
 }
@@ -2441,8 +2442,29 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	for _, storeID := range c.GetStoreIDs() {
+		c.refreshStoreRateLimit(storeID, typ)
+	}
 	log.Info("all store limit changed", zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
+}
+
+// refreshStoreRateLimit applies the schedule config's store limit to the in-memory store limiter.
+func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit.Type) {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return
+	}
+	limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+	if !ok {
+		return
+	}
+	// Schedule config stores the unit in rate-per-minute, but limiter uses rate-per-second.
+	const storeBalanceBaseTime = float64(60)
+	ratePerSec := c.opt.GetStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+	if limit.Rate(limitType) != ratePerSec {
+		c.ResetStoreLimit(storeID, limitType, ratePerSec)
+	}
 }
 
 // GetClusterVersion returns the current cluster version.
