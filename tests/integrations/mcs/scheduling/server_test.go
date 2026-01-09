@@ -1694,6 +1694,7 @@ func (suite *serverTestSuite) TestRegionBucketsStoreNotFound() {
 	tc.WaitForPrimaryServing(re)
 
 	addr := strings.TrimPrefix(tc.GetPrimaryServer().GetAddr(), "http://")
+	//nolint:staticcheck
 	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	defer conn.Close()

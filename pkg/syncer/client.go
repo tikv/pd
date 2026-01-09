@@ -131,6 +131,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				MinConnectTimeout: 5 * time.Second,
 			}),
 			// WithBlock will block the dial step until success or cancel the context.
+			//nolint:staticcheck
 			grpc.WithBlock())
 		// it means the context is canceled.
 		if conn == nil {
