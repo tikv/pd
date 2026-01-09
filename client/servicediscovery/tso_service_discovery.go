@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
@@ -50,10 +51,6 @@ const (
 	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
-	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.
-	tsoQueryRetryMaxTimes = 10
-	// tsoQueryRetryInterval is the retry interval for querying TSO.
-	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -200,7 +197,7 @@ func (c *tsoServiceDiscovery) Init() error {
 	log.Info("initializing tso service discovery",
 		zap.Int("max-retry-times", c.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
-	if err := c.retry(c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+	if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
@@ -208,25 +205,6 @@ func (c *tsoServiceDiscovery) Init() error {
 	c.wg.Add(1)
 	go c.startCheckMemberLoop()
 	return nil
-}
-
-func (c *tsoServiceDiscovery) retry(
-	maxRetryTimes int, retryInterval time.Duration, f func() error,
-) error {
-	var err error
-	ticker := time.NewTicker(retryInterval)
-	defer ticker.Stop()
-	for range maxRetryTimes {
-		if err = f(); err == nil {
-			return nil
-		}
-		select {
-		case <-c.ctx.Done():
-			return err
-		case <-ticker.C:
-		}
-	}
-	return errors.WithStack(err)
 }
 
 // Close releases all resources
@@ -266,10 +244,10 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			log.Info("[tso] exit check member loop")
 			return
 		}
-		// Make sure tsoQueryRetryMaxTimes * tsoQueryRetryInterval is far less than memberUpdateInterval,
+		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+		if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -355,7 +333,7 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+	if err := retry.WithConfig(c.ctx, c.updateMember); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}

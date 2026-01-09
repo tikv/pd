@@ -22,12 +22,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -378,10 +376,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		re.Equal(uint64(0), group.LeaderStoreID)
 
 		// Add a store to the cluster.
-		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
-			Header: testutil.NewRequestHeader(leader.GetClusterID()),
-			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
-		})
+		tests.MustPutStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 
 		// Fake a healthy region that matches store 1.
 		region := core.NewRegionInfo(
@@ -535,10 +530,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Make sure the default store is healthy so UpdateAffinityGroupPeers reaches the
 		// "group not found" branch instead of failing on store availability.
-		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
-			Header: testutil.NewRequestHeader(leader.GetClusterID()),
-			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
-		})
+		tests.MustPutStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 
 		// Update peers for non-existent group.
 		updateReq := handlers.UpdateAffinityGroupPeersRequest{

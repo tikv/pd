@@ -258,15 +258,6 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 
-// SetAllStoresLimitTTL is used to set limit of all stores with ttl
-func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return err
-	}
-	return c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
-}
-
 // SetLabelStoresLimit is used to set limit of label stores.
 func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
 	c, err := h.GetRaftCluster()
@@ -388,13 +379,6 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 // GetAddr returns the server urls for clients.
 func (h *Handler) GetAddr() string {
 	return h.s.GetAddr()
-}
-
-// SetStoreLimitTTL set storeLimit with ttl
-func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
-	return h.s.SaveTTLConfig(map[string]any{
-		data: value,
-	}, ttl)
 }
 
 // IsLeader return true if this server is leader

@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -159,13 +160,19 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 	}
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
+		var cc *checker.Controller
+		if suite.env.Env == tests.MicroserviceEnv {
+			cc = cluster.GetSchedulingPrimaryServer().GetCluster().GetCoordinator().GetCheckerController()
+		} else {
+			cc = leaderServer.GetRaftCluster().GetCoordinator().GetCheckerController()
+		}
 		// clear suspect keyRanges to prevent test case from others
-		leaderServer.GetRaftCluster().ClearSuspectKeyRanges()
+		cc.ClearSuspectKeyRanges()
 		if testCase.success {
 			err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/rule", testCase.rawData, testutil.StatusOK(re))
 			popKeyRangeMap := map[string]struct{}{}
 			for range len(testCase.popKeyRange) / 2 {
-				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
+				v, got := cc.PopOneSuspectKeyRange()
 				re.True(got)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
