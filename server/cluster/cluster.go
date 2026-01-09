@@ -2445,11 +2445,6 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 	return nil
 }
 
-// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
-func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
-	return c.opt.SetAllStoresLimitTTL(c.ctx, c.etcdClient, typ, ratePerMin, ttl)
-}
-
 // GetClusterVersion returns the current cluster version.
 func (c *RaftCluster) GetClusterVersion() string {
 	return c.opt.GetClusterVersion().String()

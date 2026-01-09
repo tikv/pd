@@ -20,7 +20,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
@@ -28,7 +27,6 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
@@ -312,8 +310,8 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 //
 //	@Tags		store
 //	@Summary	Set the store's limit.
-//	@Param		ttlSecond	query	integer	false	"ttl param is only for BR and lightning now. Don't use it."
 //	@Param		id			path	integer	true	"Store Id"
+//	@Param		ttlSecond	query	integer	false	"Deprecated"
 //	@Param		body		body	object	true	"json params"
 //	@Produce	json
 //	@Success	200	{string}	string	"The store's limit is updated."
@@ -321,6 +319,11 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/store/{id}/limit [post]
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		h.rd.JSON(w, http.StatusBadRequest, "ttlSecond is deprecated")
+		return
+	}
+
 	rc := getCluster(r)
 	if version := rc.GetScheduleConfig().StoreLimitVersion; version != storelimit.VersionV1 {
 		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support set limit", version))
@@ -360,26 +363,7 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var ttl int
-	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
-		var err error
-		ttl, err = strconv.Atoi(ttlSec)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
 	for _, typ := range typeValues {
-		if ttl > 0 {
-			key := fmt.Sprintf("add-peer-%v", storeID)
-			if typ == storelimit.RemovePeer {
-				key = fmt.Sprintf("remove-peer-%v", storeID)
-			}
-			if err := h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second); err != nil {
-				log.Warn("failed to set store limit", errs.ZapError(err))
-			}
-			continue
-		}
 		if err := h.handler.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -424,7 +408,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 //	@Tags		store
 //	@Summary	Set limit of all stores in the cluster.
 //	@Accept		json
-//	@Param		ttlSecond	query	integer	false	"ttl param is only for BR and lightning now. Don't use it."
+//	@Param		ttlSecond	query	integer	false	"Deprecated"
 //	@Param		body		body	object	true	"json params"
 //	@Produce	json
 //	@Success	200	{string}	string	"Set store limit successfully."
@@ -432,6 +416,11 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/stores/limit [post]
 func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
+	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
+		h.rd.JSON(w, http.StatusBadRequest, "ttlSecond is deprecated")
+		return
+	}
+
 	cfg := h.GetScheduleConfig()
 	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
 		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
@@ -459,28 +448,11 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var ttl int
-	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
-		var err error
-		ttl, err = strconv.Atoi(ttlSec)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
 	if _, ok := input["labels"]; !ok {
 		for _, typ := range typeValues {
-			if ttl > 0 {
-				if err := h.SetAllStoresLimitTTL(ratePerMin, typ, time.Duration(ttl)*time.Second); err != nil {
-					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-					return
-				}
-			} else {
-				if err := h.Handler.SetAllStoresLimit(ratePerMin, typ); err != nil {
-					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-					return
-				}
+			if err := h.Handler.SetAllStoresLimit(ratePerMin, typ); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
 			}
 		}
 	} else {
