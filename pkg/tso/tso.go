@@ -94,7 +94,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// Do not update the zero physical time if the `force` flag is false.
-	if !t.isInitializedNoLock() && !force {
+	if !t.isInitializedLocked() && !force {
 		return
 	}
 	// else:
@@ -110,7 +110,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	if !t.isInitializedNoLock() {
+	if !t.isInitializedLocked() {
 		return typeutil.ZeroTime, 0
 	}
 	// else (TSO is initialized)
@@ -122,7 +122,7 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physica
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if !t.isInitializedNoLock() {
+	if !t.isInitializedLocked() {
 		return 0, 0
 	}
 	// else (TSO is initialized)
@@ -221,12 +221,12 @@ func (t *timestampOracle) syncTimestamp() error {
 func (t *timestampOracle) isInitialized() bool {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	return t.isInitializedNoLock()
+	return t.isInitializedLocked()
 }
 
-// isInitializedNoLock checks initialization state.
+// isInitializedLocked checks initialization state.
 // Caller must hold t.tsoMux lock (read or write).
-func (t *timestampOracle) isInitializedNoLock() bool {
+func (t *timestampOracle) isInitializedLocked() bool {
 	return !t.tsoMux.physical.IsZero()
 }
 
@@ -246,7 +246,7 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
 	)
 	// check if the TSO is initialized.
-	if !t.isInitializedNoLock() {
+	if !t.isInitializedLocked() {
 		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
 	// do not update if next physical time is less/before than prev
