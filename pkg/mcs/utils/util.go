@@ -183,6 +183,7 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
+	hs.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	s.ServerLoopWgAdd(1)
 	go startGRPCServer(s, grpcL)
 

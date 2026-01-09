@@ -99,6 +99,9 @@ func (r *routerServiceDiscovery) GetServiceClientByKind(_ APIKind) ServiceClient
 
 // GetOrCreateGRPCConn creates a gRPC connection to the router service.
 func (r *routerServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	if r.ctx == nil {
+		return nil, errs.ErrClientRouterServiceNotInitialized.FastGen("router service discovery is not initialized")
+	}
 	return grpcutil.GetOrCreateGRPCConn(r.ctx, &r.clientConns, url, r.tlsCfg, r.option.GRPCDialOptions...)
 }
 
@@ -172,11 +175,12 @@ func (r *routerServiceDiscovery) Init() error {
 func (r *routerServiceDiscovery) updateMember() error {
 	urls, err := metastorage.DiscoveryMSAddrs(r.ctx, r.defaultDiscoveryKey, r.metaCli)
 	if err != nil {
+		// if met the meta storage client error, stop the router service discovery not retry again.
+		if errs.ErrClientGetMetaStorageClient.Equal(err) || errs.ErrClientGetProtoClient.Equal(err) {
+			log.Warn("[router service] meta storage client error, stopping router service discovery", errs.ZapError(err))
+			return nil
+		}
 		return err
-	}
-	if len(urls) == 0 {
-		log.Info("[router service] discovery returned no router service endpoints, maybe not deployed yet")
-		return nil
 	}
 	changed := r.nodesChanged(urls)
 	if !changed {
@@ -195,28 +199,32 @@ func (r *routerServiceDiscovery) updateNodes(urls []string) {
 	})
 
 	for _, url := range urls {
-		if len(url) > 0 {
-			newURL := tlsutil.PickMatchedURL([]string{url}, r.tlsCfg)
-			if client, ok := r.nodes.Load(newURL); ok {
-				if client.(*serviceClient).GetClientConn() == nil {
-					conn, err := r.GetOrCreateGRPCConn(url)
-					if err != nil || conn == nil {
-						log.Warn("[router service] failed to connect router service",
-							zap.String("new-url", newURL), errs.ZapError(err))
-						continue
-					}
-					node := newPDServiceClient(url, r.GetServingURL(), conn, false)
-					r.nodes.Store(url, node)
-				}
-			} else {
-				conn, err := r.GetOrCreateGRPCConn(url)
+		if len(url) == 0 {
+			continue
+		}
+
+		newURL := tlsutil.PickMatchedURL([]string{url}, r.tlsCfg)
+		if client, ok := r.nodes.Load(newURL); ok {
+			if client.(*serviceClient).GetClientConn() == nil {
+				conn, err := r.GetOrCreateGRPCConn(newURL)
 				if err != nil || conn == nil {
-					log.Warn("[router service] failed to connect follower",
-						zap.String("url", url), errs.ZapError(err))
+					log.Warn("[router service] failed to connect router service",
+						zap.String("new-url", newURL), errs.ZapError(err))
+					r.nodes.Delete(newURL)
+					continue
 				}
-				nodeClient := newPDServiceClient(url, r.GetServingURL(), conn, false)
-				r.nodes.LoadOrStore(url, nodeClient)
+				node := newPDServiceClient(newURL, r.GetServingURL(), conn, false)
+				r.nodes.Store(newURL, node)
 			}
+		} else {
+			conn, err := r.GetOrCreateGRPCConn(newURL)
+			if err != nil || conn == nil {
+				log.Warn("[router service] failed to connect router service",
+					zap.String("url", newURL), errs.ZapError(err))
+				continue
+			}
+			nodeClient := newPDServiceClient(newURL, r.GetServingURL(), conn, false)
+			r.nodes.LoadOrStore(newURL, nodeClient)
 		}
 	}
 	clients := make([]ServiceClient, 0, len(urls))
@@ -275,6 +283,7 @@ func (r *routerServiceDiscovery) Close() {
 	if r.cancel != nil {
 		r.cancel()
 	}
+	r.wg.Wait()
 
 	r.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
@@ -286,7 +295,6 @@ func (r *routerServiceDiscovery) Close() {
 	r.sortedUrls.Store([]string{})
 	r.balancer.clean()
 	r.nodes.Clear()
-	r.wg.Wait()
 	log.Info("[router service] is closed")
 }
 

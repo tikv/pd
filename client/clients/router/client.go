@@ -231,7 +231,9 @@ func NewClient(
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
 	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
-	c.mcsDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
+	if c.mcsDiscovery != nil {
+		c.mcsDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
+	}
 
 	c.wg.Add(2)
 	go c.connectionDaemon()
@@ -647,7 +649,7 @@ func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
 	select {
 	case <-connectionCtx.Ctx.Done():
 		log.Info("[router] router stream connection is canceled", zap.String("stream-url", connectionCtx.StreamURL))
-		c.mcsConCtxMgr.Release(connectionCtx.StreamURL)
+		c.conCtxMgr.Release(connectionCtx.StreamURL)
 		return nil, "", true
 	default:
 	}
@@ -809,7 +811,9 @@ func (c *Cli) handleProcessRequestError(
 	} else {
 		// For other errors, we can just schedule a member change check asynchronously.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
-		c.mcsDiscovery.ScheduleCheckMemberChanged()
+		if c.mcsDiscovery != nil {
+			c.mcsDiscovery.ScheduleCheckMemberChanged()
+		}
 	}
 
 	return true
