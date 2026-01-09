@@ -177,7 +177,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		next = next.Add(-time.Hour)
 	})
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
-	// i.e., the system time has not elapsed at least `updateTimestampGuard` since the Etcd timestamp:
+	// i.e., the system time has not elapsed at least `updateTimestampGuard` since the etcd timestamp:
 	// We treat such system time as being too slow.
 	//
 	// To guarantee the monotonicity of allocated timestamps,
@@ -190,7 +190,7 @@ func (t *timestampOracle) syncTimestamp() error {
 			errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(updateTimestampGuard)
 	}
-	// Persist the (possibly Etcd-bumped) 'next' timestamp
+	// Persist the (possibly etcd-bumped) 'next' timestamp
 	// by saving a future 'save' timestamp to storage.
 	failpoint.Inject("failedToSaveTimestamp", func() {
 		failpoint.Return(errs.ErrEtcdTxnInternal)
@@ -224,6 +224,8 @@ func (t *timestampOracle) isInitialized() bool {
 	return t.isInitializedNoLock()
 }
 
+// isInitializedNoLock checks initialization state.
+// Caller must hold t.tsoMux lock (read or write).
 func (t *timestampOracle) isInitializedNoLock() bool {
 	return !t.tsoMux.physical.IsZero()
 }
