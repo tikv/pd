@@ -231,7 +231,9 @@ func NewClient(
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
 	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
-	c.mcsDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
+	if c.mcsDiscovery != nil {
+		c.mcsDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
+	}
 
 	c.wg.Add(2)
 	go c.connectionDaemon()
@@ -375,6 +377,9 @@ func (c *Cli) getAllClientConns() map[string]*grpc.ClientConn {
 }
 
 func (c *Cli) getAllMcsClientConns() map[string]*grpc.ClientConn {
+	if c.mcsDiscovery == nil {
+		return nil
+	}
 	conns := make(map[string]*grpc.ClientConn)
 	c.mcsDiscovery.GetClientConns().Range(func(key, value any) bool {
 		url, ok := key.(string)
@@ -430,6 +435,9 @@ func (c *Cli) connectionDaemon() {
 }
 
 func (c *Cli) updateMcsServiceConnection(ctx context.Context) {
+	if c.mcsDiscovery == nil {
+		return
+	}
 	conns := c.getAllMcsClientConns()
 	if len(conns) == 0 {
 		log.Warn("[router] no router service node found")
@@ -647,7 +655,7 @@ func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
 	select {
 	case <-connectionCtx.Ctx.Done():
 		log.Info("[router] router stream connection is canceled", zap.String("stream-url", connectionCtx.StreamURL))
-		c.mcsConCtxMgr.Release(connectionCtx.StreamURL)
+		c.conCtxMgr.Release(connectionCtx.StreamURL)
 		return nil, "", true
 	default:
 	}
@@ -809,7 +817,9 @@ func (c *Cli) handleProcessRequestError(
 	} else {
 		// For other errors, we can just schedule a member change check asynchronously.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
-		c.mcsDiscovery.ScheduleCheckMemberChanged()
+		if c.mcsDiscovery != nil {
+			c.mcsDiscovery.ScheduleCheckMemberChanged()
+		}
 	}
 
 	return true

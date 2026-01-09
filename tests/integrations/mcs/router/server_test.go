@@ -16,6 +16,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -87,7 +88,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	for i := range 2 {
 		store := &metapb.Store{
 			Id:            uint64(i + 1),
-			Address:       "mock://tikv-100:100",
+			Address:       fmt.Sprintf("mock://tikv-%d:100", i),
 			State:         metapb.StoreState_Up,
 			Version:       versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 			LastHeartbeat: time.Now().UnixNano(),
@@ -103,7 +104,9 @@ func (suite *serverTestSuite) TearDownSuite() {
 	}
 	suite.tsoCleanup()
 	suite.cluster.Destroy()
-	suite.routerServer.Close()
+	if suite.routerServer != nil {
+		suite.routerServer.Close()
+	}
 	suite.cancel()
 }
 
@@ -137,7 +140,7 @@ func (suite *serverTestSuite) TestStoreAPI() {
 	}()
 
 	store1 := uint64(1)
-	// make sure pd server can't support region grpc request
+	// make sure pd server can't support store grpc request
 	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableFollowerHandle(true))
 	re.NoError(err)
@@ -181,6 +184,8 @@ func (suite *serverTestSuite) TestRouterServiceDown() {
 	}()
 	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableFollowerHandle(true))
+	re.NoError(err)
+	defer cli.Close()
 	var r1 *router.Region
 	regionID := uint64(1)
 	testutil.Eventually(re, func() bool {
@@ -211,17 +216,15 @@ func (suite *serverTestSuite) TestRegionAPI() {
 	cli, err := pd.NewClientWithContext(suite.ctx, caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithEnableFollowerHandle(true))
 	re.NoError(err)
+	defer cli.Close()
 	_, err = cli.GetRegionByID(suite.ctx, 1)
 	re.Error(err)
-	defer func() {
-		cli.Close()
-	}()
 
 	// test region apis
 	suite.checkRegionAPI(cli)
 
 	// test region apis with router client enabled
-	re.NoError(cli.UpdateOption(opt.EnableRouterClient, true))
+	re.NoError(cli.UpdateOption(opt.EnableRouterClient, false))
 	suite.checkRegionAPI(cli)
 }
 
@@ -298,15 +301,15 @@ func (suite *serverTestSuite) TestBasicSync() {
 	// test for http api and metrics
 	url := suite.routerServer.GetAddr() + "/status"
 	resp, err := http.DefaultClient.Get(url)
-	defer re.NoError(resp.Body.Close())
-	re.Equal(http.StatusOK, resp.StatusCode)
 	re.NoError(err)
+	re.NoError(resp.Body.Close())
+	re.Equal(http.StatusOK, resp.StatusCode)
 
 	url = suite.routerServer.GetAddr() + "/metrics"
 	resp, err = http.DefaultClient.Get(url)
-	re.Equal(http.StatusOK, resp.StatusCode)
 	re.NoError(err)
-	re.NotNil(resp)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	defer func() { re.NoError(resp.Body.Close()) }()
 	body, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	lines := strings.Split(string(body), "\n")
@@ -316,6 +319,5 @@ func (suite *serverTestSuite) TestBasicSync() {
 			grpcMetrics = append(grpcMetrics, line)
 		}
 	}
-	re.NoError(resp.Body.Close())
 	re.NotEmpty(grpcMetrics)
 }
