@@ -125,3 +125,20 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 	close(tasks)
 	wg.Wait()
 }
+
+// WaitForCondition will wait for the condition function cond to return true
+// until the timeout duration has elapsed. It will log the failure message msg
+// if the condition is not satisfied within the timeout.
+func WaitForCondition(t *testing.T, cond func() bool, timeout time.Duration, msg string) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Logf("WaitForCondition failed: %s", msg)
+	t.Logf("Condition was never satisfied after %v", timeout)
+	// Optionally: print more debug info here if possible
+	t.FailNow()
+}
