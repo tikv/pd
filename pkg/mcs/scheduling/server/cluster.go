@@ -94,9 +94,8 @@ type Cluster struct {
 }
 
 const (
-	regionLabelGCInterval = time.Hour
-	requestTimeout        = 3 * time.Second
-	requestInterval       = 10 * time.Second
+	requestTimeout  = 3 * time.Second
+	requestInterval = 10 * time.Second
 
 	// heartbeat relative const
 	heartbeatTaskRunner = "heartbeat-task-runner"
@@ -118,11 +117,7 @@ func NewCluster(
 	backendAddress string,
 ) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
-	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
+	labelerManager := labeler.NewRegionLabeler(ctx, storage)
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
 	affinityManager, err := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
 	if err != nil {
@@ -550,7 +545,7 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.coordinator.RunUntilStop()
+	c.coordinator.RunUntilStop(true)
 }
 
 // GetPrepareRegionCount returns the count of regions that are in prepare state.
