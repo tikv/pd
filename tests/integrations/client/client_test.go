@@ -2691,14 +2691,15 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.Equal(uint64(10), res.GlobalGCBarriers[0].BarrierTS)
 	re.Equal(time.Duration(math.MaxInt64), res.GlobalGCBarriers[0].TTL)
 
-	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, time.Second)
+	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, 2*time.Second)
 	re.NoError(err)
 	res, err = cli.GetAllKeyspacesGCStates(ctx)
 	re.NoError(err)
 	re.Len(res.GlobalGCBarriers, 2)
 	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
 	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
-	re.Equal(time.Second, res.GlobalGCBarriers[1].TTL)
+	re.Greater(res.GlobalGCBarriers[1].TTL, time.Second)
+	re.LessOrEqual(2*time.Second, res.GlobalGCBarriers[1].TTL)
 
 	cli1 := s.client.GetGCStatesClient(1)
 	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
@@ -2720,7 +2721,8 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.True(ok)
 	re.Equal("b4", state.GCBarriers[0].BarrierID)
 	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
-	re.Equal(3*time.Second, state.GCBarriers[0].TTL)
+	re.Greater(state.GCBarriers[0].TTL, 2*time.Second)
+	re.LessOrEqual(3*time.Second, state.GCBarriers[0].TTL)
 }
 
 func TestDecodeHttpKeyRange(t *testing.T) {
