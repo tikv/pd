@@ -321,6 +321,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
 		h.rd.JSON(w, http.StatusBadRequest, "ttlSecond is deprecated")
+		return
 	}
 
 	rc := getCluster(r)
@@ -417,6 +418,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
 	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
 		h.rd.JSON(w, http.StatusBadRequest, "ttlSecond is deprecated")
+		return
 	}
 
 	cfg := h.GetScheduleConfig()
