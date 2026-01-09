@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -34,8 +36,6 @@ import (
 const (
 	// TopNN is the threshold which means we can get hot threshold from store.
 	TopNN = 60
-	// HotThresholdRatio is used to calculate hot thresholds
-	HotThresholdRatio = 0.8
 
 	rollingWindowsSize = 5
 
@@ -319,8 +319,50 @@ func (f *HotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 		if t.topNLen < TopNN {
 			return t.rates
 		}
+		// Adaptive threshold calculation:
+		// For each dimension, we try to find the threshold by iterating
+		// the topN peer stats in descending order.
+		//
+		// We first consider the maximum load (maxLoad) in topN,
+		// and compute the candidate threshold as the geometric mean of
+		// maxLoad and minLoad (the minimum load in topN).
+		//
+		// If the candidate threshold is greater than the next item in topN,
+		// we consider it as too high, as it excludes all the other items in
+		// topN except the maxLoad item.
+		//
+		// In this case, we exclude the current maxLoad from the threshold
+		// calculation, and consider the next item in topN as the new maxLoad.
+		//
+		// Example with topN = [10000, 81, 80, 70, 60, ..., 1]:
+		//   minLoad = 1
+		//   maxLoad = 10000: candidate = mean(10000, 1) = 100, next item = 81
+		//     100 < 81? No, exclude 10000 and consider 81 as maxLoad
+		//   maxLoad = 81: candidate = mean(81, 1) = 9, next item = 80
+		//     9 < 80? Yes, accept threshold = 9
+	loop_dimensions:
 		for i := range t.rates {
-			t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
+			var topN sort.Float64Slice = slices.Collect(func(yield func(float64) bool) {
+				for _, item := range tn.GetAllTopN(i) {
+					if load := item.(*HotPeerStat).GetLoad(i); load > 0 {
+						if !yield(load) {
+							return
+						}
+					}
+				}
+			})
+			if N := len(topN); N >= 1 {
+				sort.Sort(sort.Reverse(topN))
+				minLoad := topN[N-1]
+				for index, maxLoad := range topN {
+					threshold := math.Sqrt(maxLoad * minLoad)
+					if index+1 >= N-1 || threshold < topN[index+1] {
+						t.rates[i] = math.Max(threshold, t.rates[i])
+						continue loop_dimensions
+					}
+				}
+			}
+			// Else if all loads are zero, we just use the minimum threshold.
 		}
 	}
 	return t.rates
