@@ -161,6 +161,10 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	case constant.ResourceManagerServiceName:
 		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	case constant.RouterServiceName:
+		server, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		re.NoError(err)
+		return server, cleanup
 	default:
 		return nil, nil
 	}
