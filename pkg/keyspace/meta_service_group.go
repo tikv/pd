@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/rand"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -102,8 +103,19 @@ func (m *MetaServiceGroupManager) PatchStatus(groupID string, patch *MetaService
 // AssignToGroup increments count of the enabled meta-service group with least assigned keyspaces.
 // It returns the assigned meta-service group and an error if any.
 func (m *MetaServiceGroupManager) AssignToGroup(count int) (string, error) {
-	m.RLock()
-	defer m.RUnlock()
+	// Use failpoint to test with RLock in test scenarios
+	failpoint.Inject("useRLockInAssignToGroup", func() {
+		m.RLock()
+		defer m.RUnlock()
+		failpoint.Return(m.assignToGroupImpl(count))
+	})
+	m.Lock()
+	defer m.Unlock()
+	return m.assignToGroupImpl(count)
+}
+
+// assignToGroupImpl contains the actual implementation of AssignToGroup.
+func (m *MetaServiceGroupManager) assignToGroupImpl(count int) (string, error) {
 	if roll := rand.Float64(); roll < m.fallbackRatio {
 		log.Info("[keyspace] fallback meta-service group assignment to PD due to fallback ratio",
 			zap.Float64("roll", roll),
