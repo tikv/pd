@@ -242,17 +242,19 @@ func (t *timestampOracle) isInitializedLocked() bool {
 func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	var (
-		nextPhysical, nextLogical = tsoutil.ParseTS(tso)
-		logicalDifference         = int64(nextLogical) - t.tsoMux.logical
-		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
-	)
 	switch {
 	case !t.member.IsServing():
 		t.metrics.errLeaseResetTSEvent.Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs(errs.NotLeaderErr)
 	case !t.isInitializedLocked():
 		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
+	}
+	var (
+		nextPhysical, nextLogical = tsoutil.ParseTS(tso)
+		logicalDifference         = int64(nextLogical) - t.tsoMux.logical
+		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
+	)
+	switch {
 	case physicalDifference < 0:
 		t.metrics.errResetSmallPhysicalTSEvent.Inc()
 		switch {
