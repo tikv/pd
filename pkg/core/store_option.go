@@ -67,6 +67,15 @@ func SetStoreVersion(githash, version string) StoreCreateOption {
 	}
 }
 
+// SetStoreFeatureFlags sets the feature flags for the store.
+func SetStoreFeatureFlags(featureFlags uint64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.FeatureFlags = featureFlags
+		store.meta = meta
+	}
+}
+
 // SetStoreDeployPath sets the deploy path for the store.
 func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	return func(store *StoreInfo) {
