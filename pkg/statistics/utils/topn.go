@@ -153,11 +153,11 @@ func newSingleTopN(k, n int) *singleTopN {
 }
 
 func (stn *singleTopN) getTopNMin() TopNItem {
-	return stn.topn.Top()
+	return stn.topn.Min()
 }
 
 func (stn *singleTopN) getTopNMax() TopNItem {
-	return stn.topn.Bottom()
+	return stn.topn.Max()
 }
 
 func (stn *singleTopN) getAllTopN() []TopNItem {
@@ -205,25 +205,31 @@ func (stn *singleTopN) demote() {
 }
 
 func (stn *singleTopN) maintain() {
-	for stn.topn.Len() < stn.n && stn.rest.Len() > 0 {
-		stn.promote()
-	}
-	rest1 := stn.rest.Top()
-	if rest1 == nil {
-		return
-	}
-	for topn1 := stn.topn.Top(); topn1.Less(stn.k, rest1); {
-		stn.demote()
-		stn.promote()
-		rest1 = stn.rest.Top()
-		topn1 = stn.topn.Top()
+	for {
+		rest1 := stn.rest.Max()
+		switch {
+		case rest1 == nil:
+			return
+		case stn.topn.Len() < stn.n:
+			stn.promote()
+		case stn.topn.Min().Less(stn.k, rest1):
+			stn.demote()
+			stn.promote()
+		}
 	}
 }
+
+type heapOrder bool
+
+const (
+	minRoot heapOrder = false
+	maxRoot heapOrder = true
+)
 
 // indexedHeap is a heap with index.
 type indexedHeap struct {
 	k     int
-	rev   bool
+	order heapOrder
 	items []TopNItem
 	index map[uint64]int
 }
@@ -231,7 +237,7 @@ type indexedHeap struct {
 func newTopNHeap(k, hint int) *indexedHeap {
 	return &indexedHeap{
 		k:     k,
-		rev:   false,
+		order: minRoot,
 		items: make([]TopNItem, 0, hint),
 		index: map[uint64]int{},
 	}
@@ -240,7 +246,7 @@ func newTopNHeap(k, hint int) *indexedHeap {
 func newRevTopNHeap(k, hint int) *indexedHeap {
 	return &indexedHeap{
 		k:     k,
-		rev:   true,
+		order: maxRoot,
 		items: make([]TopNItem, 0, hint),
 		index: map[uint64]int{},
 	}
@@ -253,10 +259,12 @@ func (hp *indexedHeap) Len() int {
 
 // Implementing heap.Interface.
 func (hp *indexedHeap) Less(i, j int) bool {
-	if !hp.rev {
+	switch hp.order {
+	case minRoot:
 		return hp.items[i].Less(hp.k, hp.items[j])
+	default: // maxRoot
+		return hp.items[j].Less(hp.k, hp.items[i])
 	}
-	return hp.items[j].Less(hp.k, hp.items[i])
 }
 
 // Swap swaps the items with the given indices.
@@ -287,22 +295,22 @@ func (hp *indexedHeap) Pop() any {
 	return item
 }
 
-// Top returns the top item.
-func (hp *indexedHeap) Top() TopNItem {
-	if hp.Len() <= 0 {
+// top returns the top item (root of the heap).
+func (hp *indexedHeap) top() TopNItem {
+	switch hp.Len() {
+	case 0:
 		return nil
+	default:
+		return hp.items[0]
 	}
-	return hp.items[0]
 }
 
-// Bottom returns the bottom (opposite of top) item in the heap.
-// Note: This assumes the heap is a non-reversed min-heap (rev == false); in that case,
-// the maximum item resides in the bottom half of the underlying array representation.
-func (hp *indexedHeap) Bottom() TopNItem {
-	switch {
-	case hp.Len() <= 0:
+// bottom returns the bottom (opposite of top) item in the heap.
+func (hp *indexedHeap) bottom() TopNItem {
+	switch hp.Len() {
+	case 0:
 		return nil
-	case hp.Len() == 1:
+	case 1:
 		return hp.items[0]
 	default:
 		// Only check the tail half where max elements reside in a min heap
@@ -314,6 +322,26 @@ func (hp *indexedHeap) Bottom() TopNItem {
 			}
 		}
 		return maxItem
+	}
+}
+
+// Min returns the minimum item in the heap.
+func (hp *indexedHeap) Min() TopNItem {
+	switch hp.order {
+	case minRoot:
+		return hp.top()
+	default: // max_root
+		return hp.bottom()
+	}
+}
+
+// Max returns the maximum item in the heap.
+func (hp *indexedHeap) Max() TopNItem {
+	switch hp.order {
+	case maxRoot:
+		return hp.top()
+	default: // min_root
+		return hp.bottom()
 	}
 }
 
