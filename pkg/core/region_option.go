@@ -16,9 +16,8 @@ package core
 
 import (
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -385,6 +384,18 @@ func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 	}
 }
 
+// WithReplaceLeaderStore sets the peer on leaderStoreID as the leader.
+func WithReplaceLeaderStore(leaderStoreID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if !IsLearner(p) && p.GetStoreId() == leaderStoreID {
+				region.leader = p
+				return
+			}
+		}
+	}
+}
+
 // WithInterval sets the interval
 func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -401,8 +412,7 @@ func SetSource(source RegionSource) RegionCreateOption {
 
 // RandomKindReadQuery returns query stat with random query kind, only used for unit test.
 func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	switch r.Intn(3) {
+	switch rand.IntN(3) {
 	case 0:
 		return &pdpb.QueryStats{
 			Coprocessor: queryRead,
@@ -422,8 +432,7 @@ func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
 
 // RandomKindWriteQuery returns query stat with random query kind, only used for unit test.
 func RandomKindWriteQuery(queryWrite uint64) *pdpb.QueryStats {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	switch r.Intn(7) {
+	switch rand.IntN(7) {
 	case 0:
 		return &pdpb.QueryStats{
 			Put: queryWrite,

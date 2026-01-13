@@ -95,7 +95,7 @@ func TestDynamicOptionChange(t *testing.T) {
 	clearChannel(o.EnableRouterClientCh)
 
 	// Testing that the setting is effective and a notification is sent.
-	for _, expectBool = range []bool{true, false} {
+	for _, expectBool = range []bool{false, true} {
 		o.SetEnableRouterClient(expectBool)
 		testutil.Eventually(re, func() bool {
 			select {

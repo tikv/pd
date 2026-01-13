@@ -16,14 +16,16 @@ package client_test
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -55,6 +57,7 @@ type routerClientSuite struct {
 	cluster         *tests.TestCluster
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
+	conn            *grpc.ClientConn
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 	reportBucket    pdpb.PD_ReportBucketsClient
 
@@ -72,7 +75,7 @@ func (suite *routerClientSuite) SetupSuite() {
 
 	re.NotEmpty(suite.cluster.WaitLeader())
 	leader := suite.cluster.GetLeaderServer()
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, leader.GetAddr())
+	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
 	suite.client = setupCli(suite.ctx, re, endpoints,
 		opt.WithEnableRouterClient(suite.routerClientEnabled),
 		opt.WithEnableFollowerHandle(true))
@@ -89,6 +92,11 @@ func (suite *routerClientSuite) SetupSuite() {
 // TearDownSuite cleans up the test cluster and client.
 func (suite *routerClientSuite) TearDownSuite() {
 	suite.client.Close()
+	_ = suite.regionHeartbeat.CloseSend()
+	_ = suite.reportBucket.CloseSend()
+	if suite.conn != nil {
+		_ = suite.conn.Close()
+	}
 	suite.clean()
 	suite.cluster.Destroy()
 }
@@ -197,6 +205,10 @@ func (suite *routerClientSuite) TestGetPrevRegion() {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			re.NoError(err)
 			if i > 0 && i < regionLen {
+				// In this case, the region must not be nil.
+				if r == nil {
+					return false
+				}
 				return reflect.DeepEqual(peers[0], r.Leader) &&
 					reflect.DeepEqual(regions[i-1], r.Meta)
 			}
@@ -289,7 +301,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 			var (
 				r                   *router.Region
 				err                 error
-				seed                = rand.Intn(100)
+				seed                = rand.IntN(100)
 				allowFollowerHandle = seed%2 == 0
 			)
 			// Randomly sleep to avoid the concurrent requests to be dispatched at the same time.
@@ -304,6 +316,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegion(ctx, region.GetStartKey())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {
@@ -321,6 +336,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {
@@ -339,6 +357,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegionByID(ctx, region.GetId())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {

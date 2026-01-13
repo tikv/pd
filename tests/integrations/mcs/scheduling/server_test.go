@@ -157,6 +157,12 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
 	expectedSchedulerCount := len(types.DefaultSchedulers)
+	// Wait for the cluster to be ready and set it as prepared
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
@@ -168,6 +174,13 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
+	// Wait for the cluster to be ready
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	// Set the cluster as prepared so that the coordinator can start running schedulers
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
@@ -341,6 +354,8 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the PD.
@@ -405,15 +420,16 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String())
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// The default scheduler could not be deleted, it could only be disabled.
 	defaultSchedulerNames := []string{
 		types.BalanceLeaderScheduler.String(),
 		types.BalanceRegionScheduler.String(),
 		types.BalanceHotRegionScheduler.String(),
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
-		re.NotNil(schedulersController.GetScheduler(name), name)
 		testutil.Eventually(re, func() bool {
+			if schedulersController.GetScheduler(name) == nil {
+				return false
+			}
 			disabled, err := schedulersController.IsSchedulerDisabled(name)
 			re.NoError(err, name)
 			return disabled == shouldDisabled
@@ -422,10 +438,15 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, false)
 		tests.MustDeleteScheduler(re, suite.backendEndpoints, name)
-		checkDisabled(name, true)
 	}
+
 	for _, name := range defaultSchedulerNames {
-		checkDisabled(name, true)
+		testutil.Eventually(re, func() bool {
+			return schedulersController.GetScheduler(name) == nil
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
 		tests.MustAddScheduler(re, suite.backendEndpoints, name, nil)
 		checkDisabled(name, false)
 	}
@@ -455,6 +476,51 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 	re.ElementsMatch(evictStoreIDs, expected)
 }
 
+func (suite *serverTestSuite) TestRemoveScheduler() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+
+	// Check the default schedulers exist.
+	defaultSchedulerNames := []string{
+		types.BalanceLeaderScheduler.String(),
+		types.BalanceRegionScheduler.String(),
+		types.BalanceHotRegionScheduler.String(),
+		types.EvictSlowStoreScheduler.String(),
+	}
+	checkSchedulerExist := func(name string, shouldExist bool) {
+		testutil.Eventually(re, func() bool {
+			exist := schedulersController.GetScheduler(name) != nil
+			return exist == shouldExist
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
+		checkSchedulerExist(name, true)
+	}
+
+	// Disable evict-slow-store-scheduler by calling DELETE API.
+	// For the scheduling cluster, when a default scheduler is marked as disabled in config,
+	// the updateScheduler goroutine will detect this and remove the scheduler from the controller.
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String())
+
+	// Wait and verify the scheduler is removed from the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), false)
+
+	// Re-enable the scheduler by calling ADD API.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String(), nil)
+
+	// Verify the scheduler exists again in the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
+}
+
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
@@ -479,14 +545,22 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 	queryStats := &pdpb.QueryStats{
 		Get:                    5,
 		Coprocessor:            6,
@@ -505,7 +579,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		DownPeers:       downPeers,
 		PendingPeers:    pendingPeers,
 		BytesWritten:    10,
@@ -526,7 +600,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		return region != nil && region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
 			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
 			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers)
 	})
@@ -556,16 +630,24 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 
 	// First create a region via region heartbeat
 	heartbeatStream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = heartbeatStream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
@@ -575,7 +657,7 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 			StartKey: []byte("a"),
 			EndKey:   []byte("z"),
 		},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
 		ApproximateKeys: 300,
 	}
@@ -591,6 +673,9 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 	// Now test ReportBuckets forwarding with multiple requests
 	bucketStream, err := grpcPDClient.ReportBuckets(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = bucketStream.CloseSend()
+	}()
 
 	// Send multiple bucket reports to test streaming
 	for version := uint64(1); version <= 3; version++ {
@@ -671,7 +756,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	conf.MaxReplicas = 1
 	err = leaderServer.SetReplicationConfig(*conf)
 	re.NoError(err)
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
 			context.Background(), &pdpb.PutStoreRequest{
@@ -690,8 +776,15 @@ func (suite *serverTestSuite) TestStoreLimit() {
 
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	for i := uint64(2); i <= 10; i++ {
 		peers := []*metapb.Peer{{Id: i, StoreId: 1}}
+		if len(peers) == 0 {
+			re.FailNow("peer list should not be empty")
+		}
+		leaderPeer := peers[0]
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -700,7 +793,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 				StartKey: []byte(fmt.Sprintf("t%d", i)),
 				EndKey:   []byte(fmt.Sprintf("t%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 		}
 		err = stream.Send(regionReq)
@@ -920,15 +1013,23 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	}
 
 	// Send enough regions to satisfy the prepare checker in the initial cluster
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	// Send many regions to ensure the initial scheduling cluster's prepare checker is satisfied
 	for i := uint64(1); i <= 100; i++ {
@@ -940,7 +1041,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -993,7 +1094,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -1022,7 +1123,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -1133,20 +1234,28 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
 		ApproximateKeys: 300,
 		Interval:        interval,
@@ -1159,7 +1268,7 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
 		return region != nil && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval)
 	})
 
@@ -1206,9 +1315,13 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1349,9 +1462,13 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1475,9 +1592,13 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	}
 
 	// Create a region via region heartbeat
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},

@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 
@@ -37,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
@@ -47,10 +51,6 @@ const (
 	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
-	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.
-	tsoQueryRetryMaxTimes = 10
-	// tsoQueryRetryInterval is the retry interval for querying TSO.
-	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -124,6 +124,7 @@ type tsoServiceDiscovery struct {
 	serviceDiscovery ServiceDiscovery
 	clusterID        uint64
 	keyspaceID       atomic.Uint32
+	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
 	// the default keyspace group
@@ -156,7 +157,7 @@ type tsoServiceDiscovery struct {
 // NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func NewTSOServiceDiscovery(
 	ctx context.Context, metacli metastorage.Client, serviceDiscovery ServiceDiscovery,
-	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
+	keyspaceID uint32, keyspaceMeta *keyspacepb.KeyspaceMeta, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -165,6 +166,7 @@ func NewTSOServiceDiscovery(
 		metacli:           metacli,
 		serviceDiscovery:  serviceDiscovery,
 		clusterID:         serviceDiscovery.GetClusterID(),
+		keyspaceMeta:      keyspaceMeta,
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
@@ -184,6 +186,7 @@ func NewTSOServiceDiscovery(
 	log.Info("created tso service discovery",
 		zap.Uint64("cluster-id", c.clusterID),
 		zap.Uint32("keyspace-id", keyspaceID),
+		zap.Any("keyspace-meta", keyspaceMeta),
 		zap.String("default-discovery-key", c.defaultDiscoveryKey))
 
 	return c
@@ -194,7 +197,7 @@ func (c *tsoServiceDiscovery) Init() error {
 	log.Info("initializing tso service discovery",
 		zap.Int("max-retry-times", c.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
-	if err := c.retry(c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+	if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
@@ -202,25 +205,6 @@ func (c *tsoServiceDiscovery) Init() error {
 	c.wg.Add(1)
 	go c.startCheckMemberLoop()
 	return nil
-}
-
-func (c *tsoServiceDiscovery) retry(
-	maxRetryTimes int, retryInterval time.Duration, f func() error,
-) error {
-	var err error
-	ticker := time.NewTicker(retryInterval)
-	defer ticker.Stop()
-	for range maxRetryTimes {
-		if err = f(); err == nil {
-			return nil
-		}
-		select {
-		case <-c.ctx.Done():
-			return err
-		case <-ticker.C:
-		}
-	}
-	return errors.WithStack(err)
 }
 
 // Close releases all resources
@@ -260,10 +244,10 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			log.Info("[tso] exit check member loop")
 			return
 		}
-		// Make sure tsoQueryRetryMaxTimes * tsoQueryRetryInterval is far less than memberUpdateInterval,
+		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+		if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -349,7 +333,7 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+	if err := retry.WithConfig(c.ctx, c.updateMember); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}
@@ -417,6 +401,79 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 	return nil
 }
 
+// hasKeyspaceGroupIDConfig checks if the keyspace has been assigned a keyspace group
+// by checking if tso_keyspace_group_id is present in its config and not equal to 0.
+// Returns the keyspace group ID and true if the keyspace has tso_keyspace_group_id configured
+// with a non-zero value (should block fallback), false otherwise.
+// If keyspaceMeta is nil (not passed from upper layer), returns (0, false).
+// If the configured value is 0 (default group), returns (0, false) to allow fallback.
+func (c *tsoServiceDiscovery) hasKeyspaceGroupIDConfig() (uint32, bool) {
+	if c.keyspaceMeta == nil || c.keyspaceMeta.Config == nil {
+		return 0, false
+	}
+
+	groupIDStr, exists := c.keyspaceMeta.Config[constants.TSOKeyspaceGroupIDKey]
+	if !exists {
+		return 0, false
+	}
+
+	groupID, parseErr := strconv.ParseUint(groupIDStr, 10, 32)
+	if parseErr != nil {
+		// If parsing fails, treat it as not configured, allow fallback
+		return 0, false
+	}
+
+	groupIDUint32 := uint32(groupID)
+
+	// If the keyspace group ID is 0 (default group), return false to allow fallback
+	if groupIDUint32 == constants.DefaultKeyspaceGroupID {
+		return 0, false
+	}
+
+	// The keyspace has been assigned to a non-default keyspace group
+	return groupIDUint32, true
+}
+
+// checkAndHandleFallbackInMicroserviceMode checks if fallback is allowed when TSO server is unavailable
+// in microservice mode. Returns an error if fallback is not allowed, nil otherwise.
+// Only keyspaces with tso_keyspace_group_id in their config should not fallback.
+// This is to support backward compatibility for keyspaces that have not been assigned
+// to any keyspace group yet (they should still use the default group 0).
+// If the keyspace meta has tso_keyspace_group_id configured as 0, fallback to group 0 is allowed.
+func (c *tsoServiceDiscovery) checkAndHandleFallbackInMicroserviceMode(keyspaceID uint32) error {
+	srvDiscovery := c.serviceDiscovery.(*serviceDiscovery)
+	clusterInfo, err := srvDiscovery.getClusterInfo(
+		c.ctx, c.serviceDiscovery.GetServingURL(), srvDiscovery.option.Timeout)
+	if err != nil {
+		log.Warn("[tso] failed to get cluster info to check service mode",
+			zap.Uint32("keyspace-id", keyspaceID),
+			errs.ZapError(err))
+		return err
+	}
+
+	// If we are in API_SVC_MODE (microservice mode), check if fallback is allowed
+	if len(clusterInfo.ServiceModes) > 0 && clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
+		// Check if the keyspace has been assigned a keyspace group
+		// Only keyspaces with tso_keyspace_group_id configured (and not equal to 0) should not fallback
+		groupID, shouldBlockFallback := c.hasKeyspaceGroupIDConfig()
+		if shouldBlockFallback {
+			// This keyspace has been assigned to a non-default keyspace group, don't fallback
+			log.Warn("[tso] in microservice mode but no TSO server available - cannot fallback to group 0",
+				zap.Uint32("keyspace-id", keyspaceID),
+				zap.Uint32("keyspace-group-id", groupID),
+				zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
+			return errors.New("no TSO microservice available in microservice mode")
+		}
+		// Keyspace doesn't have tso_keyspace_group_id config or it's configured as 0, allow fallback
+		log.Info("[tso] keyspace has no tso_keyspace_group_id config or configured as 0, allowing fallback to group 0",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.Any("keyspace-meta", c.keyspaceMeta),
+			zap.String("service-mode", clusterInfo.ServiceModes[0].String()))
+	}
+
+	return nil
+}
+
 func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving URL of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
@@ -442,11 +499,18 @@ func (c *tsoServiceDiscovery) updateMember() error {
 			return err
 		}
 	} else {
-		// There is no error but no tso server URL found, which means
-		// the server side hasn't been upgraded to the modRevision that
-		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
-		// we fall back to the old way of discovering the tso primary URL
-		// from etcd directly.
+		// When service mode is API (microservice) and the keyspace already belongs to a specific
+		// keyspace group (has tso_keyspace_group_id configured), we must not fall back to the
+		// legacy default group even if all microservice endpoints are unavailable.
+		// checkAndHandleFallbackInMicroserviceMode inspects this and returns error when fallback
+		// is forbidden.
+		if err := c.checkAndHandleFallbackInMicroserviceMode(keyspaceID); err != nil {
+			return err
+		}
+
+		// For keyspaces without tso_keyspace_group_id (null or default keyspace) running against older PD
+		// that do not fill GetClusterInfoResponse.TsoUrls, fall back to the legacy discovery path that
+		// looks up the primary in etcd for backward compatibility.
 		c.printFallbackLogOnce.Do(func() {
 			log.Warn("[tso] no tso server URL found,"+
 				" fallback to the legacy path to discover from etcd directly",
@@ -454,6 +518,15 @@ func (c *tsoServiceDiscovery) updateMember() error {
 				zap.String("tso-server-url", tsoServerURL),
 				zap.String("discovery-key", c.defaultDiscoveryKey))
 		})
+
+		// Inject a failpoint to verify that in TSO MCS mode, we should NOT reach discoverWithLegacyPath
+		// This failpoint is used in tests to ensure proper code path execution
+		failpoint.Inject("assertNotReachLegacyPath", func(val failpoint.Value) {
+			if shouldPanic, ok := val.(bool); ok && shouldPanic {
+				panic("BUG: In TSO MCS mode, should not fallback to discoverWithLegacyPath when TSO server is temporarily unavailable")
+			}
+		})
+
 		urls, err := c.discoverWithLegacyPath()
 		if err != nil {
 			return err

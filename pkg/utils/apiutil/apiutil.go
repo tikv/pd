@@ -46,9 +46,9 @@ import (
 )
 
 const (
-	// componentSignatureKey is used for http request header key to identify component signature.
 	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
 	// This is kept for backward compatibility.
+	// componentSignatureKey is used for http request header key to identify component signature.
 	componentSignatureKey = "component"
 	// anonymousValue identifies anonymous request source
 	anonymousValue = "anonymous"
@@ -244,6 +244,17 @@ func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, er
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	return client.Do(req)
+}
+
+// PutJSON is used to do put request
+func PutJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return client.Do(req)
 }
 

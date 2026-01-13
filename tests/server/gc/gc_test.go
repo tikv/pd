@@ -64,7 +64,8 @@ func TestGCOperations(t *testing.T) {
 	})
 	re.NoError(err)
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	header := testutil.NewRequestHeader(clusterID)
 

@@ -306,6 +306,11 @@ func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistConfig) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
+}
+
 // GetLowSpaceRatio returns the low space ratio.
 func (o *PersistConfig) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio
@@ -485,55 +490,21 @@ func (o *PersistConfig) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
-	defer func() {
-		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
-		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
-	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
+	limitCfg := sc.StoreLimitConfig{
 		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	v, ok1, err := o.getTTLFloat("default-add-peer")
-	if err != nil {
-		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetAddPeer := ok1 && err == nil
-	if canSetAddPeer {
-		returnSC.AddPeer = v
-	}
-
-	v, ok2, err := o.getTTLFloat("default-remove-peer")
-	if err != nil {
-		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetRemovePeer := ok2 && err == nil
-	if canSetRemovePeer {
-		returnSC.RemovePeer = v
-	}
-
-	if canSetAddPeer || canSetRemovePeer {
-		return returnSC
-	}
-	cfg.StoreLimit[storeID] = sc
+	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
-	defer func() {
-		switch typ {
-		case storelimit.AddPeer:
-			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
-		case storelimit.RemovePeer:
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		default:
-		}
-	}()
 	limit := o.GetStoreLimit(storeID)
 	switch typ {
 	case storelimit.AddPeer:
@@ -561,6 +532,12 @@ func (o *PersistConfig) GetMaxPendingPeerCount() uint64 {
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistConfig) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLUintOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// A zero value means the affinity merge is disabled.
+func (o *PersistConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
@@ -768,25 +745,6 @@ func (o *PersistConfig) getTTLBool(key string) (result bool, contains bool, err 
 
 func (o *PersistConfig) getTTLBoolOr(key string, defaultValue bool) bool {
 	if v, ok, err := o.getTTLBool(key); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
-	}
-	return defaultValue
-}
-
-func (o *PersistConfig) getTTLFloat(key string) (float64, bool, error) {
-	stringForm, ok := o.GetTTLData(key)
-	if !ok {
-		return 0, false, nil
-	}
-	r, err := strconv.ParseFloat(stringForm, 64)
-	return r, true, err
-}
-
-func (o *PersistConfig) getTTLFloatOr(key string, defaultValue float64) float64 {
-	if v, ok, err := o.getTTLFloat(key); ok {
 		if err == nil {
 			return v
 		}

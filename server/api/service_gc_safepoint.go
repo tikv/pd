@@ -50,12 +50,13 @@ type ListServiceGCSafepoint struct {
 }
 
 // GetGCSafePoint gets the service GC safepoint.
-// @Tags     service_gc_safepoint
-// @Summary  Get all service GC safepoint.
-// @Produce  json
-// @Success  200  {array}   ListServiceGCSafepoint
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /gc/safepoint [get]
+//
+//	@Tags		service_gc_safepoint
+//	@Summary	Get all service GC safepoint.
+//	@Produce	json
+//	@Success	200	{array}		ListServiceGCSafepoint
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *http.Request) {
 	gcStateManager := h.svr.GetGCStateManager()
 	gcState, err := gcStateManager.GetGCState(constant.NullKeyspaceID)
@@ -109,14 +110,15 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 }
 
 // DeleteGCSafePoint deletes a service GC safepoint.
-// @Tags     service_gc_safepoint
-// @Summary  Delete a service GC safepoint.
-// @Param    service_id  path  string  true  "Service ID"
-// @Produce  json
-// @Success  200  {string}  string  "Delete service GC safepoint successfully."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /gc/safepoint/{service_id} [delete]
-// @Tags     rule
+//
+//	@Tags		service_gc_safepoint
+//	@Summary	Delete a service GC safepoint.
+//	@Param		service_id	path	string	true	"Service ID"
+//	@Produce	json
+//	@Success	200	{string}	string	"Delete service GC safepoint successfully."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/gc/safepoint/{service_id} [delete]
+//	@Tags		rule
 func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
 	// Directly write to the storage and bypassing the existing constraint checks.
 	// It's risky to do this, but when this HTTP API is used, it usually means that we are already taking risks.

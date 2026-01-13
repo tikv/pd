@@ -32,6 +32,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
+func checkOperator(re *require.Assertions, op *operator.Operator, sourceScore string, targetScore string) {
+	val, exist := op.GetAdditionalInfo("sourceScore")
+	re.True(exist)
+	re.Equal(sourceScore, val)
+	val, exist = op.GetAdditionalInfo("targetScore")
+	re.True(exist)
+	re.Equal(targetScore, val)
+}
+
 func TestPlacementRule(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -95,18 +104,18 @@ func TestPlacementRule(t *testing.T) {
 	}
 
 	// only store-1 can match the leader rule
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 
 	// all store can match the rules
 	job.Rule = core.PeerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 
 	// only store-1 can match the learner rule
 	job.Rule = core.LearnerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 }
 
@@ -171,7 +180,7 @@ func TestPrepareBalanceRange(t *testing.T) {
 		Rule:   core.LeaderScatter,
 		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 	re.Len(sc.scoreMap, 3)
@@ -221,8 +230,7 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
+	checkOperator(re, op, "3.00", "0.00")
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
 	// case2: move leader from store 1 to store 4
@@ -232,8 +240,7 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
-	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
+	checkOperator(re, op, "3.00", "0.00")
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
 	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
@@ -372,10 +379,13 @@ func TestTIFLASHEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
-	re.Equal("1.00", op.GetAdditionalInfo("sourceExpectScore"))
-	re.Equal("1.00", op.GetAdditionalInfo("targetExpectScore"))
+	checkOperator(re, op, "3.00", "0.00")
+	sourceExpectScore, exist := op.GetAdditionalInfo("sourceExpectScore")
+	re.True(exist)
+	re.Equal("1.00", sourceExpectScore)
+	targetExpectScore, exist := op.GetAdditionalInfo("targetExpectScore")
+	re.True(exist)
+	re.Equal("1.00", targetExpectScore)
 	re.Contains(op.Brief(), "mv peer: store [4] to")
 }
 

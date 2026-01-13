@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -75,8 +76,18 @@ type timestampOracle struct {
 	metrics *tsoMetrics
 }
 
+func (t *timestampOracle) getStorageTimeout() time.Duration {
+	timeout := t.saveInterval
+	if timeout < config.DefaultTSOSaveInterval {
+		return config.DefaultTSOSaveInterval - time.Second
+	}
+	return timeout - time.Second
+}
+
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
+	ctx, cancel := context.WithTimeout(context.Background(), t.getStorageTimeout())
+	defer cancel()
+	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {

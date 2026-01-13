@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -462,6 +462,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection() {
 	re := suite.Require()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/pauseFinishSplitBeforeTxn", `pause`))
+
 	// Create the keyspace group `oldID` with keyspaces [444, 555, 666].
 	oldID := suite.allocID()
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
@@ -517,6 +520,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 	})
 	re.Equal(primary1.GetServingUrls(), primary2.GetServingUrls())
 	// Wait for the keyspace groups to finish the split.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/pauseFinishSplitBeforeTxn"))
 	waitFinishSplit(re, suite.pdLeaderServer, oldID, newID, []uint32{444}, []uint32{555, 666})
 }
 
@@ -970,7 +974,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 		id := suite.allocID()
 		keyspaceGroups = append(keyspaceGroups, &endpoint.KeyspaceGroup{
 			ID:        id,
-			UserKind:  endpoint.UserKind(rand.Intn(int(endpoint.UserKindCount))).String(),
+			UserKind:  endpoint.UserKind(rand.IntN(int(endpoint.UserKindCount))).String(),
 			Keyspaces: []uint32{id},
 		})
 		keyspaces = append(keyspaces, id)

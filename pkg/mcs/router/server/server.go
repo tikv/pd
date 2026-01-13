@@ -44,7 +44,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -287,7 +286,6 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
-	schedulers.Register()
 	err := cmd.Flags().Parse(args)
 	if err != nil {
 		cmd.Println(err)
@@ -323,7 +321,6 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 
 	versioninfo.Log(serviceName)
 	log.Info("router service config", zap.Reflect("config", cfg))
-
 	grpcprometheus.EnableHandlingTimeHistogram()
 	ctx, cancel := context.WithCancel(context.Background())
 	metricutil.Push(ctx, &cfg.Metric)

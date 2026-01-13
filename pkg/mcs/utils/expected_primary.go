@@ -17,8 +17,7 @@ package utils
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"time"
+	"math/rand/v2"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -159,8 +158,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary)
 	}
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	nextPrimaryID := r.Intn(len(primaryIDs))
+	nextPrimaryID := rand.IntN(len(primaryIDs))
 
 	// update expected primary flag
 	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLease)

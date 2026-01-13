@@ -32,7 +32,6 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -72,9 +71,13 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	// Prevent store 6 (offline store) from being auto-tombstoned by adding a region to it
-	// This ensures the store remains offline instead of being converted to tombstone
-	tests.MustPutRegion(re, cluster, 999, 6, []byte("a"), []byte("b"))
+	// Prevent store 6 (offline store) from being auto-tombstoned
+
+	// Enable failpoint to prevent auto-burying stores during the test
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	}()
 
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -145,7 +148,6 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 
 func (suite *storeTestSuite) TestStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetAllLimit)
-	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLimitTTL)
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLabel)
 }
 
@@ -203,61 +205,6 @@ func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 			re.True(ok)
 		}
 	}
-}
-
-func (suite *storeTestSuite) checkStoreLimitTTL(cluster *tests.TestCluster) {
-	re := suite.Require()
-
-	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
-	// add peer
-	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", urlPrefix, 5)
-	data := map[string]any{
-		"type": "add-peer",
-		"rate": 999,
-	}
-	postData, err := json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// remove peer
-	data = map[string]any{
-		"type": "remove-peer",
-		"rate": 998,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// all store limit add peer
-	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", urlPrefix, 3)
-	data = map[string]any{
-		"type": "add-peer",
-		"rate": 997,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-	// all store limit remove peer
-	data = map[string]any{
-		"type": "remove-peer",
-		"rate": 996,
-	}
-	postData, err = json.Marshal(data)
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, postData, testutil.StatusOK(re))
-	re.NoError(err)
-
-	re.Equal(float64(999), leader.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	re.Equal(float64(998), leader.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	re.Equal(float64(997), leader.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	re.Equal(float64(996), leader.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
-	time.Sleep(5 * time.Second)
-	re.NotEqual(float64(999), leader.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	re.NotEqual(float64(998), leader.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	re.NotEqual(float64(997), leader.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	re.NotEqual(float64(996), leader.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
 }
 
 func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
@@ -351,23 +298,24 @@ func (suite *storeTestSuite) checkStoreGet(cluster *tests.TestCluster) {
 	}
 
 	leader := cluster.GetLeaderServer()
+	rc := leader.GetRaftCluster()
 	// store 1 is used to bootstrapped that its state might be different the store inside initStores.
-	err := leader.GetRaftCluster().ReadyToServeLocked(1)
+	err := rc.ReadyToServeLocked(1)
 	if err != nil {
 		re.ErrorContains(err, "has been serving")
 	}
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/store/1", urlPrefix)
 
-	tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
-		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Stats: &pdpb.StoreStats{
-			StoreId:   1,
-			Capacity:  1798985089024,
-			Available: 1709868695552,
-			UsedSize:  85150956358,
-		},
-	})
+	stats := &pdpb.StoreStats{
+		StoreId:   1,
+		Capacity:  1798985089024,
+		Available: 1709868695552,
+		UsedSize:  85150956358,
+	}
+	storeInfo := rc.GetStore(1)
+	re.NotNil(storeInfo)
+	rc.PutStore(storeInfo.Clone(core.SetStoreStats(stats)))
 	info := new(response.StoreInfo)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)

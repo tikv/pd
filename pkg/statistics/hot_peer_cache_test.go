@@ -16,7 +16,7 @@ package statistics
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
 	"sync"
 	"testing"
@@ -195,15 +195,25 @@ func schedule(re *require.Assertions, operator operator, region *core.RegionInfo
 		_, newLeader := pickFollower(region)
 		return region.GetLeader().StoreId, region.Clone(core.WithLeader(newLeader))
 	case movePeer:
+		if len(targets) == 0 {
+			re.Fail("no target provided")
+			return 0, nil
+		}
 		re.Len(targets, 1)
 		index, _ := pickFollower(region)
 		srcStore := region.GetPeers()[index].StoreId
-		region := region.Clone(core.WithAddPeer(&metapb.Peer{Id: targets[0]*10 + 1, StoreId: targets[0]}))
+		target := targets[0]
+		region := region.Clone(core.WithAddPeer(&metapb.Peer{Id: target*10 + 1, StoreId: target}))
 		region = region.Clone(core.WithRemoveStorePeer(srcStore))
 		return srcStore, region
 	case addReplica:
+		if len(targets) == 0 {
+			re.Fail("no target provided")
+			return 0, nil
+		}
 		re.Len(targets, 1)
-		region := region.Clone(core.WithAddPeer(&metapb.Peer{Id: targets[0]*10 + 1, StoreId: targets[0]}))
+		target := targets[0]
+		region := region.Clone(core.WithAddPeer(&metapb.Peer{Id: target*10 + 1, StoreId: target}))
 		return 0, region
 	case removeReplica:
 		if len(targets) == 0 {
@@ -229,7 +239,7 @@ func pickFollower(region *core.RegionInfo) (index int, peer *metapb.Peer) {
 			continue
 		}
 		dst = index
-		if rand.Intn(2) == 0 {
+		if rand.IntN(2) == 0 {
 			break
 		}
 	}
@@ -276,7 +286,7 @@ func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, i
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
 	}
 
-	leader := meta.Peers[rand.Intn(3)]
+	leader := meta.Peers[rand.IntN(3)]
 
 	switch kind {
 	case utils.Read:

@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -801,7 +801,7 @@ func TestRegionHeartbeat(t *testing.T) {
 		// Add a down peer.
 		region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 			{
-				Peer:        region.GetPeers()[rand.Intn(len(region.GetPeers()))],
+				Peer:        region.GetPeers()[rand.IntN(len(region.GetPeers()))],
 				DownSeconds: 42,
 			},
 		}))
@@ -810,7 +810,7 @@ func TestRegionHeartbeat(t *testing.T) {
 		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Add a pending peer.
-		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
+		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
 		checkRegions(re, cluster.BasicCluster, regions[:i+1])
@@ -843,7 +843,7 @@ func TestRegionHeartbeat(t *testing.T) {
 
 		// Change one peer to witness
 		region = region.Clone(
-			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}),
+			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.IntN(len(region.GetPeers()))]}),
 			core.WithIncConfVer(),
 		)
 		regions[i] = region
@@ -2550,7 +2550,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			for range 1000 {
-				re.NoError(tc.addRegionStore(uint64(i%5), rand.Intn(200)))
+				re.NoError(tc.addRegionStore(uint64(i%5), rand.IntN(200)))
 			}
 		}(i)
 	}
@@ -2905,8 +2905,14 @@ func TestCheckCache(t *testing.T) {
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
-	err := tc.SetStoreLimit(1, storelimit.AddPeer, 0)
+	err := tc.SetStoreLimit(1, storelimit.AddPeer, 0.0001)
 	re.NoError(err)
+	// StoreRateLimit treats rate=0 as unlimited. To simulate a throttled store,
+	// we set a small positive rate and exhaust the initial tokens.
+	store := tc.GetStore(1)
+	re.NotNil(store)
+	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Low))
+	re.False(store.IsAvailable(storelimit.AddPeer, constant.Low))
 	checker.PatrolRegions()
 	re.Len(checker.GetPendingProcessedRegions(), 1)
 
@@ -2921,6 +2927,40 @@ func TestCheckCache(t *testing.T) {
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+}
+
+func TestStoreLimitChangeRefreshLimiter(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	// StoreRateLimit (v1) is used for AddPeer/RemovePeer and participates in scheduler filters.
+	opt.GetScheduleConfig().StoreLimitVersion = storelimit.VersionV1
+
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+
+	storeID := uint64(1)
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()))
+	rc.PutStore(store)
+
+	// Simulate that the limiter has been set to an extremely low rate and already consumed,
+	// which would make scheduler filters throttle this store.
+	lowRatePerSec := float64(0.0001) / 60.0
+	rc.ResetStoreLimit(storeID, storelimit.AddPeer, lowRatePerSec)
+	store = rc.GetStore(storeID)
+	re.NotNil(store)
+	re.True(store.GetStoreLimit().Take(storelimit.RegionInfluence[storelimit.AddPeer], storelimit.AddPeer, constant.Low))
+	re.False(store.IsAvailable(storelimit.AddPeer, constant.Low))
+
+	// Increase store limit via config API. Without refreshing the in-memory limiter,
+	// the store would remain throttled and be filtered out.
+	re.NoError(rc.SetStoreLimit(storeID, storelimit.AddPeer, 30))
+	store = rc.GetStore(storeID)
+	re.NotNil(store)
+	re.True(store.IsAvailable(storelimit.AddPeer, constant.Low))
 }
 
 func TestPatrolRegionConcurrency(t *testing.T) {

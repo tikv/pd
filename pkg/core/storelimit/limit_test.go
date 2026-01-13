@@ -16,7 +16,7 @@ package storelimit
 
 import (
 	"container/list"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -141,7 +141,7 @@ func TestFeedback(t *testing.T) {
 	generateOp := func(tick int64) {
 		if s.Available(regionSize, SendSnapshot, constant.Low) && iter > 0 {
 			iter--
-			size := regionSize - rand.Int63n(regionSize/10)
+			size := regionSize - rand.Int64N(regionSize/10)
 			stats := &SnapshotStats{
 				expectCost: size / limit,
 				remaining:  size,

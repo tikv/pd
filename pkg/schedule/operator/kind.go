@@ -27,9 +27,14 @@ const OpWaiting = "waiting"
 type OpKind uint32
 
 // Flags for operators.
+// Note: The order matters! SchedulerKind() returns the lowest bit (via LowBit algorithm) to identify
+// the primary operator type for counting. Place higher-priority operator types earlier.
+// See #3778 for details.
 const (
 	// Initiated by admin.
 	OpAdmin OpKind = 1 << iota
+	// Initiated by affinity checker.
+	OpAffinity
 	// Initiated by merge checker or merge scheduler. Note that it may not include region merge.
 	// the order describe the operator's producer and is very helpful to decouple scheduler or checker limit
 	OpMerge
@@ -63,6 +68,7 @@ var flagToName = map[OpKind]string{
 	OpRange:         "range",
 	OpWitness:       "witness",
 	OpWitnessLeader: "witness-leader",
+	OpAffinity:      "affinity",
 }
 
 var nameToFlag = map[string]OpKind{
@@ -75,6 +81,7 @@ var nameToFlag = map[string]OpKind{
 	"merge":          OpMerge,
 	"range":          OpRange,
 	"witness-leader": OpWitnessLeader,
+	"affinity":       OpAffinity,
 }
 
 func (k OpKind) String() string {

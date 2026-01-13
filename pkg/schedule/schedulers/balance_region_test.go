@@ -212,7 +212,7 @@ func TestTolerantRatio(t *testing.T) {
 	for _, t := range tbl {
 		tc.SetTolerantSizeRatio(t.ratio)
 		basePlan := plan.NewBalanceSchedulerPlan()
-		solver := newSolver(basePlan, t.kind, tc, operator.OpInfluence{})
+		solver := newSolver(basePlan, t.kind, tc, &operator.OpInfluence{})
 		solver.Region = region
 
 		sourceScore := t.expectTolerantResource(t.kind)
@@ -658,10 +658,10 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	)
 	tc.PutRegion(region)
 
-	tc.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+	tc.KeyRangeManager.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
 	operators, _ := sb.Schedule(tc, false)
 	re.Empty(operators)
-	tc.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+	tc.KeyRangeManager.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
 
 	operators, _ = sb.Schedule(tc, false)
 	re.NotEmpty(operators)
