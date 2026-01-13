@@ -91,7 +91,7 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 }
 
 // setTSOPhysical sets the TSO's physical part with the given time.
-func (t *timestampOracle) setTSOPhysical(pre time.Time, next time.Time, force bool) {
+func (t *timestampOracle) setTSOPhysical(old time.Time, next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// Do not update the zero physical time if the `force` flag is false.
@@ -99,7 +99,7 @@ func (t *timestampOracle) setTSOPhysical(pre time.Time, next time.Time, force bo
 		return
 	}
 	// If current physical time is bigger than the previous time, it indicates that the physical time has been updated.
-	if t.tsoMux.physical.After(pre) {
+	if typeutil.SubTSOPhysicalByWallClock(t.tsoMux.physical, old) > 0 {
 		return
 	}
 	// make sure the ts won't fall back
@@ -375,8 +375,10 @@ var maxRetryCount = 10
 
 func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
-	var resp pdpb.Timestamp
-	var physical time.Time
+	var (
+		resp    pdpb.Timestamp
+		current time.Time
+	)
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
@@ -392,7 +394,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical, physical = t.generateTSO(ctx, int64(count))
+		resp.Physical, resp.Logical, current = t.generateTSO(ctx, int64(count))
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -402,7 +404,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
-			if err := t.updateTimestamp(physical, false); err != nil && !errs.ErrUpdateTimestamp.Equal(err) {
+			if err := t.updateTimestamp(current, false); err != nil && !errs.ErrUpdateTimestamp.Equal(err) {
 				log.Warn("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
 			}
 			time.Sleep(t.updatePhysicalInterval)
