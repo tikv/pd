@@ -159,9 +159,9 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "resource_unit_service_limit",
+			Name:      "service_limit",
 			Help:      "Fill rate value for all resource groups.",
-		}, []string{newResourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
 	syncLoadGroupCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
