@@ -65,9 +65,11 @@ type routerServiceDiscovery struct {
 	checkMembershipCh chan struct{}
 
 	parentCtx context.Context
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	// ctx is the context used for managing the lifecycle of the router service discovery.
+	// it will be canceled when Close is called and reset when Init is called.
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	// Client option.
 	option *opt.Option
@@ -76,10 +78,11 @@ type routerServiceDiscovery struct {
 
 // GetServiceURLs returns the URLs of the router service.
 func (r *routerServiceDiscovery) GetServiceURLs() []string {
-	if r.sortedUrls.Load() == nil {
+	urls := r.sortedUrls.Load()
+	if urls == nil {
 		return nil
 	}
-	return r.sortedUrls.Load().([]string)
+	return urls.([]string)
 }
 
 // GetClientConns returns the gRPC client connections to the router service.
@@ -117,6 +120,9 @@ func (r *routerServiceDiscovery) ScheduleCheckMemberChanged() {
 
 // CheckMemberChanged checks if there is any membership change among the members of the router service.
 func (r *routerServiceDiscovery) CheckMemberChanged() error {
+	if r.ctx == nil {
+		return errs.ErrClientRouterServiceNotInitialized.FastGen("router service discovery is not initialized")
+	}
 	if err := retry.WithConfig(r.ctx, r.updateMember); err != nil {
 		log.Warn("[router service] failed to update member", errs.ZapError(err))
 		return err
@@ -251,9 +257,6 @@ func (r *routerServiceDiscovery) updateURLs(urls []string) {
 
 func (r *routerServiceDiscovery) startCheckMemberLoop() {
 	defer r.wg.Done()
-
-	ctx, cancel := context.WithCancel(r.ctx)
-	defer cancel()
 	ticker := time.NewTicker(MemberUpdateInterval)
 	defer ticker.Stop()
 
@@ -261,7 +264,7 @@ func (r *routerServiceDiscovery) startCheckMemberLoop() {
 		select {
 		case <-r.checkMembershipCh:
 		case <-ticker.C:
-		case <-ctx.Done():
+		case <-r.ctx.Done():
 			log.Info("[router service] exit check member loop")
 			return
 		}
@@ -298,9 +301,6 @@ func (r *routerServiceDiscovery) Close() {
 func (r *routerServiceDiscovery) nodeHealthCheckLoop() {
 	defer r.wg.Done()
 
-	nodeCheckLoopCtx, nodeCheckLoopCancel := context.WithCancel(r.ctx)
-	defer nodeCheckLoopCancel()
-
 	ticker := time.NewTicker(MemberHealthCheckInterval)
 	defer ticker.Stop()
 
@@ -310,15 +310,15 @@ func (r *routerServiceDiscovery) nodeHealthCheckLoop() {
 			log.Info("[router service] exit health check member loop")
 			return
 		case <-ticker.C:
-			r.checkNodeHealth(nodeCheckLoopCtx)
+			r.checkNodeHealth()
 		}
 	}
 }
 
-func (r *routerServiceDiscovery) checkNodeHealth(ctx context.Context) {
+func (r *routerServiceDiscovery) checkNodeHealth() {
 	r.nodes.Range(func(_, value any) bool {
 		// To ensure that the leader's healthy check is not delayed, shorten the duration.
-		ctx, cancel := context.WithTimeout(ctx, MemberHealthCheckInterval/3)
+		ctx, cancel := context.WithTimeout(r.ctx, MemberHealthCheckInterval/3)
 		defer cancel()
 		serviceClient := value.(*serviceClient)
 		serviceClient.checkNetworkAvailable(ctx)

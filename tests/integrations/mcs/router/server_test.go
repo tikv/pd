@@ -125,6 +125,7 @@ func (suite *serverTestSuite) SetupTest() {
 func (suite *serverTestSuite) TearDownTest() {
 	if suite.routerCleanup != nil {
 		suite.routerCleanup()
+		suite.routerCleanup = nil
 	}
 	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop"))
 	testutil.Eventually(suite.Require(), func() bool {

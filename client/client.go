@@ -952,7 +952,7 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 		resp *pdpb.BatchScanRegionsResponse
 		err  error
 	)
-	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(scanCtx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
@@ -1087,17 +1087,17 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
-
-	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
-	defer cancel()
-	req := &pdpb.GetAllStoresRequest{
-		Header: c.requestHeader(),
-	}
-
 	// Applies option
 	option := &opt.GetStoreOp{}
 	for _, opt := range opts {
 		opt(option)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+	req := &pdpb.GetAllStoresRequest{
+		Header:                 c.requestHeader(),
+		ExcludeTombstoneStores: option.ExcludeTombstone,
 	}
 
 	var (
