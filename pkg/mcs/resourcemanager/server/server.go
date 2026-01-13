@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -111,6 +112,11 @@ func (s *Server) GetAdvertiseListenAddr() string {
 	return s.cfg.AdvertiseListenAddr
 }
 
+// GetParticipant returns the participant.
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
+}
+
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
 	if !logutil.IsLevelLegal(level) {
@@ -165,6 +171,20 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("the resource manager primary has changed, try to re-campaign a primary")
 		}
 
+		// To make sure the expected primary(if existed) and new primary are on the same server.
+		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
+		// Skip campaign if the expected primary is not empty and not equal to the current memberValue.
+		// Expected primary ONLY SET BY `{service}/primary/transfer` API.
+		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
+			log.Info("skip campaigning of resource manager primary and check later",
+				zap.String("server-name", s.Name()),
+				zap.String("expected-primary-id", expectedPrimary),
+				zap.Uint64("participant-id", s.participant.ID()),
+				zap.String("cur-participant-value", s.participant.ParticipantString()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		s.campaignLeader()
 	}
 }
@@ -202,6 +222,15 @@ func (s *Server) campaignLeader() {
 			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
 		}
 	}
+	// Check expected primary and watch the primary.
+	exitPrimary := make(chan struct{})
+	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
+		s.cfg.LeaderLease, &keypath.MsParam{ServiceName: constant.ResourceManagerServiceName}, s.participant)
+	if err != nil {
+		log.Error("prepare resource manager primary watch error", errs.ZapError(err))
+		return
+	}
+	s.participant.SetExpectedPrimaryLease(lease)
 
 	s.participant.PromoteSelf()
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
@@ -220,6 +249,9 @@ func (s *Server) campaignLeader() {
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
+			return
+		case <-exitPrimary:
+			log.Info("no longer be primary because primary have been updated, the resource manager primary/leader will step down")
 			return
 		}
 	}
