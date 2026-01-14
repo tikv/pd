@@ -67,7 +67,7 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 		return 0, err
 	}
 	if !resp.Succeeded {
-		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
+		log.Error("mark expected primary error", zap.String("primary-path", path))
 		return 0, errors.New("mark expected primary txn did not succeed")
 	}
 	return resp.Header.Revision, nil
