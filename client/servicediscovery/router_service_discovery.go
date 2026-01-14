@@ -19,7 +19,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"reflect"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -179,7 +178,7 @@ func (r *routerServiceDiscovery) Init() error {
 }
 
 func (r *routerServiceDiscovery) updateMember() error {
-	urls, err := metastorage.DiscoveryMSAddrs(r.ctx, r.defaultDiscoveryKey, r.metaCli)
+	sortedAddrs, err := metastorage.DiscoveryMSAddrs(r.ctx, r.defaultDiscoveryKey, r.metaCli)
 	if err != nil {
 		// if met the meta storage client error, stop the router service discovery not retry again.
 		if errs.ErrClientGetMetaStorageClient.Equal(err) || errs.ErrClientGetProtoClient.Equal(err) {
@@ -188,12 +187,12 @@ func (r *routerServiceDiscovery) updateMember() error {
 		}
 		return err
 	}
-	changed := r.nodesChanged(urls)
+	changed := r.nodesChanged(sortedAddrs)
 	if !changed {
 		return nil
 	}
-	r.updateURLs(urls)
-	r.updateNodes(urls)
+	r.updateURLs(sortedAddrs)
+	r.updateNodes(sortedAddrs)
 	return nil
 }
 
@@ -241,18 +240,16 @@ func (r *routerServiceDiscovery) updateNodes(urls []string) {
 	r.balancer.set(clients)
 }
 
-func (r *routerServiceDiscovery) nodesChanged(urls []string) bool {
-	sort.Strings(urls)
+func (r *routerServiceDiscovery) nodesChanged(sortedAddrs []string) bool {
 	oldURLs := r.GetServiceURLs()
-	return !reflect.DeepEqual(oldURLs, urls)
+	return !reflect.DeepEqual(oldURLs, sortedAddrs)
 }
 
-func (r *routerServiceDiscovery) updateURLs(urls []string) {
-	sort.Strings(urls)
-	r.sortedUrls.Store(urls)
+func (r *routerServiceDiscovery) updateURLs(sortedAddrs []string) {
+	r.sortedUrls.Store(sortedAddrs)
 	// Run callbacks to reflect the membership changes in the leader and followers.
 	r.callbacks.onMembersChanged()
-	log.Info("[router service] update member sorted urls", zap.Strings("new-sorted-urls", urls))
+	log.Info("[router service] update member sorted urls", zap.Strings("new-sorted-urls", sortedAddrs))
 }
 
 func (r *routerServiceDiscovery) startCheckMemberLoop() {

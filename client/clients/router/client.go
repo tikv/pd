@@ -180,10 +180,10 @@ type Cli struct {
 	// updateConnectionCh is used to trigger the connection update actively.
 	updateConnectionCh chan struct{}
 
-	// mcsDiscovery is the service discovery for the router mcs service.
-	mcsDiscovery sd.ServiceDiscovery
-	// mcsConCtxMgr is used to store the context of the router service stream connection.
-	mcsConCtxMgr *cctx.Manager[routerpb.Router_QueryRegionClient]
+	// msDiscovery is the service discovery for the router mcs service.
+	msDiscovery sd.ServiceDiscovery
+	// msConCtxMgr is used to store the context of the router service stream connection.
+	msConCtxMgr *cctx.Manager[routerpb.Router_QueryRegionClient]
 	// bo is the backoffer for the router client.
 	bo *retry.Backoffer
 
@@ -207,8 +207,8 @@ func NewClient(
 		option:             option,
 		conCtxMgr:          cctx.NewManager[pdpb.PD_QueryRegionClient](),
 		updateConnectionCh: make(chan struct{}, 1),
-		mcsConCtxMgr:       cctx.NewManager[routerpb.Router_QueryRegionClient](),
-		mcsDiscovery:       mcsSvcDiscovery,
+		msConCtxMgr:        cctx.NewManager[routerpb.Router_QueryRegionClient](),
+		msDiscovery:        mcsSvcDiscovery,
 		bo: retry.InitialBackoffer(
 			sd.UpdateMemberBackOffBaseTime,
 			sd.UpdateMemberMaxBackoffTime,
@@ -231,8 +231,8 @@ func NewClient(
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
 	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
-	if c.mcsDiscovery != nil {
-		c.mcsDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
+	if c.msDiscovery != nil {
+		c.msDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
 	}
 
 	c.wg.Add(2)
@@ -377,11 +377,11 @@ func (c *Cli) getAllClientConns() map[string]*grpc.ClientConn {
 }
 
 func (c *Cli) getAllMcsClientConns() map[string]*grpc.ClientConn {
-	if c.mcsDiscovery == nil {
+	if c.msDiscovery == nil {
 		return nil
 	}
 	conns := make(map[string]*grpc.ClientConn)
-	c.mcsDiscovery.GetClientConns().Range(func(key, value any) bool {
+	c.msDiscovery.GetClientConns().Range(func(key, value any) bool {
 		url, ok := key.(string)
 		if !ok || len(url) == 0 {
 			return true
@@ -435,7 +435,7 @@ func (c *Cli) connectionDaemon() {
 }
 
 func (c *Cli) updateMcsServiceConnection(ctx context.Context) {
-	if c.mcsDiscovery == nil {
+	if c.msDiscovery == nil {
 		return
 	}
 	conns := c.getAllMcsClientConns()
@@ -445,7 +445,7 @@ func (c *Cli) updateMcsServiceConnection(ctx context.Context) {
 	}
 	// Add the missing router service stream connections.
 	for url, conn := range conns {
-		if c.mcsConCtxMgr.Exist(url) {
+		if c.msConCtxMgr.Exist(url) {
 			log.Debug("[router] the router service remains unchanged", zap.String("url", url))
 			continue
 		}
@@ -453,10 +453,12 @@ func (c *Cli) updateMcsServiceConnection(ctx context.Context) {
 		stream, err := routerpb.NewRouterClient(conn).QueryRegion(cctx)
 		if err != nil {
 			log.Warn("[router] failed to create the router service stream connection", errs.ZapError(err))
+			cancel()
+			continue
 		}
 		// Store the stream connection context if it is successfully created.
 		if stream != nil {
-			c.mcsConCtxMgr.Store(cctx, cancel, url, stream)
+			c.msConCtxMgr.Store(cctx, cancel, url, stream)
 			log.Info("[router] successfully established the router service stream connection", zap.String("url", url))
 		} else {
 			log.Warn("[router] failed to create the router service stream connection")
@@ -464,7 +466,7 @@ func (c *Cli) updateMcsServiceConnection(ctx context.Context) {
 		}
 	}
 	// Remove the stale follower router stream connections.
-	c.mcsConCtxMgr.GC(func(url string) bool {
+	c.msConCtxMgr.GC(func(url string) bool {
 		if _, ok := conns[url]; !ok {
 			log.Info("[router] release the stale router service stream connection", zap.String("url", url))
 			return true
@@ -512,6 +514,8 @@ func (c *Cli) updateConnection(ctx context.Context) {
 			stream, err := pdpb.NewPDClient(conn).QueryRegion(cctx)
 			if err != nil {
 				log.Error("[router] failed to create the router stream connection", errs.ZapError(err))
+				cancel()
+				continue
 			}
 			// Store the stream connection context if it is successfully created.
 			if stream != nil {
@@ -668,7 +672,7 @@ type processFn func() error
 
 // sendToMcs returns the stream function, stream url
 func (c *Cli) sendToMcs(ctx context.Context) (processFn, string) {
-	allowRouterServiceHandle := c.mcsConCtxMgr.Size() > 0
+	allowRouterServiceHandle := c.msConCtxMgr.Size() > 0
 	if allowRouterServiceHandle {
 		// We need to ensure all requests in a same batch allow to be handled by the router service.
 		c.batchController.IterCollectedRequests(func(req *Request) bool {
@@ -679,11 +683,11 @@ func (c *Cli) sendToMcs(ctx context.Context) (processFn, string) {
 			return true
 		})
 	}
-	allowRouterServiceHandle = allowRouterServiceHandle && c.mcsConCtxMgr.Size() > 0
+	allowRouterServiceHandle = allowRouterServiceHandle && c.msConCtxMgr.Size() > 0
 	if !allowRouterServiceHandle {
 		return nil, ""
 	}
-	connectionCtx := c.mcsConCtxMgr.RandomlyPick()
+	connectionCtx := c.msConCtxMgr.RandomlyPick()
 	if connectionCtx == nil {
 		log.Info("[router] router service stream connection is not ready")
 		c.updateMcsServiceConnection(ctx)
@@ -693,7 +697,7 @@ func (c *Cli) sendToMcs(ctx context.Context) (processFn, string) {
 	select {
 	case <-streamCtx.Done():
 		log.Info("[router] router service stream connection is canceled", zap.String("stream-url", streamURL))
-		c.mcsConCtxMgr.Release(streamURL)
+		c.msConCtxMgr.Release(streamURL)
 		return nil, ""
 	default:
 	}
@@ -802,7 +806,7 @@ func (c *Cli) handleProcessRequestError(
 
 	// Delete the stream connection context.
 	c.conCtxMgr.Release(streamURL)
-	c.mcsConCtxMgr.Release(streamURL)
+	c.msConCtxMgr.Release(streamURL)
 
 	if errs.IsLeaderChange(err) {
 		// If the leader changes, we better call `CheckMemberChanged` blockingly to
@@ -817,8 +821,8 @@ func (c *Cli) handleProcessRequestError(
 	} else {
 		// For other errors, we can just schedule a member change check asynchronously.
 		c.svcDiscovery.ScheduleCheckMemberChanged()
-		if c.mcsDiscovery != nil {
-			c.mcsDiscovery.ScheduleCheckMemberChanged()
+		if c.msDiscovery != nil {
+			c.msDiscovery.ScheduleCheckMemberChanged()
 		}
 	}
 

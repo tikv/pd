@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -102,7 +102,9 @@ func (suite *serverTestSuite) TearDownSuite() {
 	if suite.routerCleanup != nil {
 		suite.routerCleanup()
 	}
-	suite.tsoCleanup()
+	if suite.tsoCleanup != nil {
+		suite.tsoCleanup()
+	}
 	suite.cluster.Destroy()
 	if suite.routerServer != nil {
 		suite.routerServer.Close()

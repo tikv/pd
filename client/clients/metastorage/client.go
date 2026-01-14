@@ -17,6 +17,7 @@ package metastorage
 import (
 	"context"
 	"encoding/json"
+	"sort"
 
 	"go.uber.org/zap"
 
@@ -38,7 +39,7 @@ type Client interface {
 	Put(ctx context.Context, key []byte, value []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.PutResponse, error)
 }
 
-// DiscoveryMSAddrs returns all the members address of the specified service name.
+// DiscoveryMSAddrs returns all the sorted members address of the specified service name.
 func DiscoveryMSAddrs(ctx context.Context, serviceKey string, client Client) ([]string, error) {
 	resp, err := client.Get(ctx, []byte(serviceKey), opt.WithPrefix())
 	if err != nil {
@@ -47,7 +48,7 @@ func DiscoveryMSAddrs(ctx context.Context, serviceKey string, client Client) ([]
 	if err := resp.GetHeader().GetError(); err != nil {
 		return nil, errs.ErrClientGetProtoClient.Wrap(errors.New(err.GetMessage())).GenWithStackByCause()
 	}
-	ret := make([]string, 0, len(resp.GetKvs()))
+	sortedAddrs := make([]string, 0, len(resp.GetKvs()))
 	for _, kv := range resp.GetKvs() {
 		var entry ServiceRegistryEntry
 		if err = entry.Deserialize(kv.Value); err != nil {
@@ -56,9 +57,10 @@ func DiscoveryMSAddrs(ctx context.Context, serviceKey string, client Client) ([]
 				zap.String("key", string(kv.Key)), zap.Error(err))
 			continue
 		}
-		ret = append(ret, entry.ServiceAddr)
+		sortedAddrs = append(sortedAddrs, entry.ServiceAddr)
 	}
-	return ret, nil
+	sort.Strings(sortedAddrs)
+	return sortedAddrs, nil
 }
 
 // ServiceRegistryEntry is the registry entry of a service
