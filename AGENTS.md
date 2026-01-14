@@ -9,8 +9,6 @@
 - Language: Go modules (root + `client/` submodule).
 - Go version: CI uses 1.25 (install >=1.25).
 - Main binaries: `pd-server`, `pd-ctl`, `pd-recover`, tool suite.
-- Edition: set `PD_EDITION=Community` or `Enterprise` (build will fail otherwise).
-- Common build tags: `SWAGGER`, `DASHBOARD`, `FAILPOINT`, `WITH_RACE`, `PLUGIN`, `ENABLE_FIPS`, `NEXT_GEN`.
 
 ## Build Shortcuts
 - Default all: `make build` (pd-server, pd-ctl, pd-recover).
@@ -58,6 +56,12 @@
 - TSO package: `go test -tags without_dashboard,deadlock -run <Regex> ./tests/server/tso`.
 - Client: `cd client && CGO_ENABLED=1 go test ./... -tags deadlock -race -run <Regex>`.
 - Failpoints: run `make failpoint-enable` before and `make failpoint-disable` after when invoking go test directly.
+
+## Failpoints Discipline
+- Keep failpoints enabled only for tests; disable immediately after (`make failpoint-disable` or `make clean-test`) to avoid polluting the codebase.
+- Prefer make targets that auto-enable/disable failpoints; if running `go test` manually, bracket with enable/disable.
+- Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
+- If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
 
 ## Tags, Flags, and Env
 - Tags: `deadlock` (tests), `without_dashboard` (skip UI), `swagger_server` (SWAGGER=1), `with_fail` (FAILPOINT=1), `with_plugin` (PLUGIN=1), `nextgen` (NEXT_GEN builds/tests).
