@@ -1614,7 +1614,8 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
-	for i := range 3 {
+	// Create stores 1-6 to support all test scenarios
+	for i := range 6 {
 		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
 	}
 
@@ -2646,11 +2647,18 @@ func TestMaxZombieDuration(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		src := &statistics.StoreLoadDetail{
-			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
-		}
+		var src *statistics.StoreLoadDetail
 		if testCase.isTiFlash {
-			src.SetEngineAsTiFlash()
+			store := core.NewStoreInfoWithLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+			}
+		} else {
+			// Create a TiKV store for non-TiFlash cases
+			store := core.NewStoreInfoWithLabel(1, map[string]string{})
+			src = &statistics.StoreLoadDetail{
+				StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+			}
 		}
 		bs := &balanceSolver{
 			sche:          hb.(*hotScheduler),

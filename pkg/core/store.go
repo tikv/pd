@@ -41,7 +41,11 @@ const (
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
 	// EngineTiFlash is the tiflash value of the engine label.
+	// Classic TiFlash and TiFlash write node will use this value.
 	EngineTiFlash = "tiflash"
+	// EngineTiFlashCompute is the tiflash value of the engine label.
+	// TiFlash compute node will use this value.
+	EngineTiFlashCompute = "tiflash_compute"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"
 )
@@ -161,9 +165,19 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type, level constant.Priori
 	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, level)
 }
 
-// IsTiFlash returns true if the store is tiflash.
-func (s *StoreInfo) IsTiFlash() bool {
+// IsTiKV returns true if the store is TiKV store.
+func (s *StoreInfo) IsTiKV() bool {
+	return !s.IsTiFlashWrite() && !s.IsTiFlashCompute()
+}
+
+// IsTiFlashWrite returns true if the store is TiFlash write node or TiFlash classic node.
+func (s *StoreInfo) IsTiFlashWrite() bool {
 	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
+}
+
+// IsTiFlashCompute returns true if the store is TiFlash compute node.
+func (s *StoreInfo) IsTiFlashCompute() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlashCompute)
 }
 
 // IsUp returns true if store is serving or preparing.
@@ -913,5 +927,5 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && s.IsTiKV() && s.GetLeaderCount() != 0
 }

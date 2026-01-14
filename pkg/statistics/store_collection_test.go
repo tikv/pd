@@ -105,7 +105,6 @@ func TestSummaryStoreInfos(t *testing.T) {
 	storeLoads := make(map[uint64][]float64)
 	for _, storeID := range []int{1, 3} {
 		storeInfos[uint64(storeID)] = &StoreSummaryInfo{
-			isTiFlash: false,
 			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
 		}
 		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
