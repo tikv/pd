@@ -297,6 +297,11 @@ func (s *Server) GetConfig() *Config {
 	return s.cfg
 }
 
+// GetParticipant returns the participant.
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
+}
+
 // GetControllerConfig returns the controller config.
 func (s *Server) GetControllerConfig() *ControllerConfig {
 	return &s.cfg.Controller

@@ -79,6 +79,7 @@ func NewService(srv *rmserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	apiHandlerEngine.GET("status", utils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
@@ -90,6 +91,21 @@ func NewService(srv *rmserver.Service) *Service {
 	s.RegisterRouter()
 	s.RegisterPrimaryRouter()
 	return s
+}
+
+// getHealth returns the health status of the Resource Manager service.
+func getHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Server)
+	if svr.IsClosed() {
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
+	if svr.GetParticipant().IsPrimaryElected() {
+		c.String(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no primary elected")
 }
 
 // RegisterAdminRouter registers the router of the TSO admin handler.
