@@ -437,8 +437,8 @@ func transferPrimary(c *gin.Context) {
 
 	if err := utils.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
 		constant.ResourceManagerServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.IndentedJSON(http.StatusOK, "success")
+	c.String(http.StatusOK, "success")
 }

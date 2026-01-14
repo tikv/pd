@@ -62,9 +62,13 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(clientv3.OpPut(path, primary.raw, clientv3.WithLease(leaseID))).
 		Commit()
-	if err != nil || !resp.Succeeded {
+	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
 		return 0, err
+	}
+	if !resp.Succeeded {
+		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
+		return 0, errors.New("mark expected primary txn did not succeed")
 	}
 	return resp.Header.Revision, nil
 }
@@ -96,6 +100,9 @@ func KeepExpectedPrimaryAlive(
 	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
+		if closeErr := lease.Close(); closeErr != nil {
+			log.Warn("failed to revoke expected primary lease", zap.Error(closeErr))
+		}
 		return nil, err
 	}
 	// Keep alive the current expected primary leadership to indicate that the server is still alive.
