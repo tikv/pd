@@ -112,11 +112,6 @@ func (s *Server) GetAdvertiseListenAddr() string {
 	return s.cfg.AdvertiseListenAddr
 }
 
-// GetParticipant returns the participant.
-func (s *Server) GetParticipant() *member.Participant {
-	return s.participant
-}
-
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
 	if !logutil.IsLevelLegal(level) {
