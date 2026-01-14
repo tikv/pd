@@ -147,11 +147,10 @@ func TestOnlyProcessAffinityGroupLabelRules(t *testing.T) {
 	_, err = client.Put(ctx, labelKey, string(labelValue))
 	re.NoError(err)
 
-	time.Sleep(100 * time.Millisecond)
-
-	groupState := affinityManager.GetAffinityGroupState(testGroup.ID)
-	re.NotNil(groupState)
-	re.Equal(0, groupState.RangeCount)
+	testutil.Eventually(re, func() bool {
+		groupState := affinityManager.GetAffinityGroupState(testGroup.ID)
+		return groupState != nil && groupState.RangeCount == 0
+	})
 
 	affinityRule := makeTestLabelRule(testGroup.ID, "7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8")
 	re.NoError(putLabelRule(ctx, client, affinityRule))

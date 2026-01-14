@@ -469,8 +469,6 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		if labelRule == nil {
 			labelRule = m.labelRuleBuffer[group.ID]
 		}
-		// Once group created, the buffer must be deleted.
-		delete(m.labelRuleBuffer, group.ID)
 
 		if labelRule != nil {
 			gkr, labelErr = extractKeyRangesFromLabelRule(labelRule)
@@ -488,6 +486,7 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 				log.Warn("failed to attach existing label rule to new affinity group",
 					zap.String("group-id", group.ID),
 					zap.Error(labelErr))
+				delete(m.labelRuleBuffer, group.ID)
 				return
 			}
 			// Attach only non-empty label rules to avoid marking the group as having ranges when it does not.
@@ -498,6 +497,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 				m.updateGroupLabelRuleLockedWithCount(group.ID, labelRule, len(gkr.KeyRanges), false)
 			}
 		}
+		// Once group created, the buffer must be deleted.
+		delete(m.labelRuleBuffer, group.ID)
 	} else {
 		changed := false
 		if groupInfo.LeaderStoreID != group.LeaderStoreID {
@@ -555,7 +556,11 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	defer m.Unlock()
 
 	// Only buffer non-empty rules
-	if _, exists := m.groups[groupID]; !exists && len(gkr.KeyRanges) > 0 {
+	if _, exists := m.groups[groupID]; !exists {
+		if len(gkr.KeyRanges) == 0 {
+			delete(m.labelRuleBuffer, groupID)
+			return nil
+		}
 		// Store LabelRule information in the buffer when it is synchronized before the group.
 		m.labelRuleBuffer[groupID] = labelRule
 		return nil
