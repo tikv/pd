@@ -289,7 +289,7 @@ func getConfig(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, config)
 }
 
-// TransferPrimary transfers the primary member to `new_primary`.
+// transferPrimary transfers the primary member to `new_primary`.
 // @Tags     primary
 // @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
