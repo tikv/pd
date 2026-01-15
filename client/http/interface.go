@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -1269,6 +1270,31 @@ func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[st
 	return resp.AffinityGroups, nil
 }
 
+// CreateAffinityGroupsWithSkipExistCheck creates affinity groups and ignores existing ones.
+func (c *client) CreateAffinityGroupsWithSkipExistCheck(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error) {
+	reqGroups := make(map[string]CreateAffinityGroupInput, len(affinityGroups))
+	for groupID, ranges := range affinityGroups {
+		reqGroups[groupID] = CreateAffinityGroupInput{Ranges: ranges}
+	}
+	req := CreateAffinityGroupsRequest{AffinityGroups: reqGroups}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	err = c.request(ctx, newRequestInfo().
+		WithName("CreateAffinityGroupsWithSkipExistCheck").
+		WithURI(AffinityGroups+"?skip_exist_check=true").
+		WithMethod(http.MethodPost).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
 // GetAffinityGroup gets an affinity group by group ID.
 func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error) {
 	var state AffinityGroupState
@@ -1281,6 +1307,32 @@ func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*Affinit
 		return nil, err
 	}
 	return &state, nil
+}
+
+// GetAffinityGroups gets affinity groups by group IDs.
+func (c *client) GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error) {
+	if len(groupIDs) == 0 {
+		return make(map[string]*AffinityGroupState), nil
+	}
+
+	var query strings.Builder
+	for i, id := range groupIDs {
+		if i > 0 {
+			query.WriteByte('&')
+		}
+		query.WriteString("ids=")
+		query.WriteString(url.QueryEscape(id))
+	}
+	var resp AffinityGroupsResponse
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAffinityGroups").
+		WithURI(fmt.Sprintf("%s?%s", AffinityGroups, query.String())).
+		WithMethod(http.MethodGet).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
 }
 
 // GetAllAffinityGroups gets all affinity groups.
