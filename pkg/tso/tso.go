@@ -90,8 +90,8 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
-// setTSOPhysical sets the TSO's physical part with the given time.
-func (t *timestampOracle) setTSOPhysical(old time.Time, next time.Time, force bool) {
+// CompareAndSetTSOPhysical sets the TSO's physical part with the given time.
+func (t *timestampOracle) CompareAndSetTSOPhysical(old time.Time, next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// Do not update the zero physical time if the `force` flag is false.
@@ -208,7 +208,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		zap.Time("save", save), zap.Time("next", next))
 	// save into memory
 	current, _ := t.getTSO()
-	t.setTSOPhysical(current, next, true)
+	t.CompareAndSetTSOPhysical(current, next, true)
 	return nil
 }
 
@@ -352,7 +352,7 @@ func (t *timestampOracle) updateTimestamp(pre time.Time, allowSaveStorage bool) 
 		// if need to save into etcd,
 		if !allowSaveStorage {
 			t.metrics.notAllowedSaveTimestampEvent.Inc()
-			return errs.ErrUpdateTimestamp.FastGenByArgs("update timestamp needs to save storage but it is not allowed")
+			return nil
 		}
 		save := next.Add(t.saveInterval)
 		start := time.Now()
@@ -367,7 +367,7 @@ func (t *timestampOracle) updateTimestamp(pre time.Time, allowSaveStorage bool) 
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
 	// save into memory
-	t.setTSOPhysical(pre, next, false)
+	t.CompareAndSetTSOPhysical(pre, next, false)
 	return nil
 }
 
@@ -404,7 +404,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
-			if err := t.updateTimestamp(current, false); err != nil && !errs.ErrUpdateTimestamp.Equal(err) {
+			if err := t.updateTimestamp(current, false); err != nil {
 				log.Warn("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
 			}
 			time.Sleep(t.updatePhysicalInterval)
