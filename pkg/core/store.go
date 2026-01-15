@@ -231,7 +231,8 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type, level constant.Priori
 
 // IsTiKV returns true if the store is TiKV store.
 func (s *StoreInfo) IsTiKV() bool {
-	return !s.IsTiFlashWrite() && !s.IsTiFlashCompute()
+	val := getStoreLabelValue(s.GetMeta(), EngineKey)
+	return val == "" || val == EngineTiKV
 }
 
 // IsTiFlashWrite returns true if the store is TiFlash write node or TiFlash classic node.
@@ -1098,12 +1099,18 @@ func (s *StoresInfo) ResetTriggerNetworkSlowEvict(storeID uint64) {
 
 // IsStoreContainLabel returns if the store contains the given label.
 func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
+	val := getStoreLabelValue(store, key)
+	return value == val
+}
+
+// getStoreLabelValue returns the value of the given label key.
+func getStoreLabelValue(store *metapb.Store, key string) string {
 	for _, l := range store.GetLabels() {
-		if l.GetKey() == key && l.GetValue() == value {
-			return true
+		if l.GetKey() == key {
+			return l.GetValue()
 		}
 	}
-	return false
+	return ""
 }
 
 // IsAvailableForMinResolvedTS returns if the store is available for min resolved ts.
