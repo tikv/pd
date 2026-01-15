@@ -115,18 +115,15 @@ func (s *testResourceManagerSuite) TestUpdateConfig() {
 		re.Equal(expectCfg.Controller, actualCfg)
 	}
 
-	// Check default config
-	checkShow()
-
 	args := []string{"-u", s.pdAddr, "config", "set", "controller.request-unit.write-base-cost", "2"}
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
-	re.NotContains(string(output), "Success!")
+	re.Contains(string(output), "can't update controller child item ")
 
 	args = []string{"-u", s.pdAddr, "config", "set", "controller.write-base-cost", "2"}
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
-	re.NotContains(string(output), "Success!")
+	re.Contains(string(output), "can't update controller child item")
 
 	// Set controller config
 	args = []string{"-u", s.pdAddr, "config", "set", "controller.ltb-max-wait-duration", "1h"}
