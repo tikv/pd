@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -108,6 +109,15 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 			return status.Errorf(
 				codes.FailedPrecondition, "mismatch cluster id, need %d but got %d",
 				keypath.ClusterID(), clusterID)
+		}
+		if calleeID := header.GetCalleeId(); calleeID != "" {
+			au, _ := url.Parse(s.GetAdvertiseListenAddr())
+			if au != nil && calleeID != au.Host {
+				return status.Errorf(
+					codes.FailedPrecondition, "mismatch callee id, need %s but got %s",
+					s.GetAdvertiseListenAddr(), calleeID,
+				)
+			}
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()

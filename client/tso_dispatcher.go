@@ -453,8 +453,12 @@ func (td *tsoDispatcher) handleProcessRequestError(ctx context.Context, bo *retr
 	// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 	td.connectionCtxs.Delete(streamURL)
 	streamCancelFunc()
-	// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
-	if errs.IsLeaderChange(err) {
+	switch {
+	case errs.IsCalleeMismatch(err):
+		// If callee ID mismatches, the gRPC connection is no longer valid, we need to enforce reconnecting.
+		svcDiscovery.RemoveClientConn(streamURL)
+	case errs.IsLeaderChange(err):
+		// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
 			select {
 			case <-ctx.Done():

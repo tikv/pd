@@ -38,6 +38,15 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, NotPrimaryErr)
 }
 
+// IsCalleeMismatch checks whether the error is caused by callee ID mismatch.
+func IsCalleeMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, MismatchCalleeIDErr)
+}
+
 // ZapError is used to make the log output easier.
 func ZapError(err error, causeError ...error) zap.Field {
 	if err == nil {

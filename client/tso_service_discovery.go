@@ -317,6 +317,17 @@ func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn,
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
+// RemoveClientConn removes and closes the gRPC connection of the given url.
+func (c *tsoServiceDiscovery) RemoveClientConn(url string) {
+	cc, ok := c.clientConns.Load(url)
+	if !ok {
+		return
+	}
+	if err := cc.(*grpc.ClientConn).Close(); err != nil {
+		log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+	}
+}
+
 // ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.
 func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {

@@ -34,6 +34,8 @@ const (
 	RetryTimeoutErr = "retry timeout"
 	// NotPrimaryErr indicates the non-primary member received the requests which should be received by primary.
 	NotPrimaryErr = "not primary"
+	// MismatchCalleeIDErr indicates the callee ID is mismatched, usually caused by the stale DNS cache.
+	MismatchCalleeIDErr = "mismatch callee id"
 )
 
 // client errors

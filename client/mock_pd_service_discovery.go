@@ -88,6 +88,9 @@ func (*mockPDServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, er
 	return nil, nil
 }
 
+// RemoveClientConn implements the ServiceDiscovery interface.
+func (*mockPDServiceDiscovery) RemoveClientConn(string) {}
+
 // ScheduleCheckMemberChanged implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) ScheduleCheckMemberChanged() {}
 

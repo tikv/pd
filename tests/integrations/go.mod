@@ -206,3 +206,5 @@ require (
 	gorm.io/driver/sqlite v1.4.3 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/tidbcloud/kvproto v0.0.0-20251121150221-d07b34e68f9f
