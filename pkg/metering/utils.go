@@ -26,8 +26,6 @@ const (
 	UnitRU = "RU"
 	// UnitBytes is the unit of the metering bytes.
 	UnitBytes = "Bytes"
-	// UnitRequests is the unit of the metering requests.
-	UnitRequests = "Requests"
 
 	// DataVersionField is the version field of the metering data.
 	DataVersionField = "version"
@@ -45,9 +43,4 @@ func NewRUValue(value float64) common.MeteringValue {
 // NewBytesValue creates a new metering bytes value.
 func NewBytesValue(value uint64) common.MeteringValue {
 	return common.MeteringValue{Value: value, Unit: UnitBytes}
-}
-
-// NewRequestsValue creates a new metering requests value.
-func NewRequestsValue(value uint64) common.MeteringValue {
-	return common.MeteringValue{Value: value, Unit: UnitRequests}
 }

@@ -113,8 +113,6 @@ const (
 	regionLabelGCInterval = time.Hour
 	// storageSizeCollectorInterval is the interval to run storage size collector.
 	storageSizeCollectorInterval = time.Minute
-	// dfsStatsCollectorInterval is the interval to run store stats collector.
-	dfsStatsCollectorInterval = time.Minute
 
 	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
 	// It should enlarge the limiter if the snapshot's duration is less than this value.
@@ -413,7 +411,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 	}
 	c.checkSchedulingService()
-	c.wg.Add(12)
+	c.wg.Add(11)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -425,7 +423,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
-	go c.runDFSStatsCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
 
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -2426,6 +2423,7 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	c.refreshStoreRateLimit(storeID, typ)
 	log.Info("store limit changed", zap.Uint64("store-id", storeID), zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
 }
@@ -2444,13 +2442,29 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	for _, storeID := range c.GetStoreIDs() {
+		c.refreshStoreRateLimit(storeID, typ)
+	}
 	log.Info("all store limit changed", zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
 }
 
-// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
-func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
-	return c.opt.SetAllStoresLimitTTL(c.ctx, c.etcdClient, typ, ratePerMin, ttl)
+// refreshStoreRateLimit applies the schedule config's store limit to the in-memory store limiter.
+func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit.Type) {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return
+	}
+	limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+	if !ok {
+		return
+	}
+	// Schedule config stores the unit in rate-per-minute, but limiter uses rate-per-second.
+	const storeBalanceBaseTime = float64(60)
+	ratePerSec := c.opt.GetStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+	if limit.Rate(limitType) != ratePerSec {
+		c.ResetStoreLimit(storeID, limitType, ratePerSec)
+	}
 }
 
 // GetClusterVersion returns the current cluster version.
@@ -2666,96 +2680,4 @@ func (c *RaftCluster) collectStorageSize(
 		zap.Duration("cost", time.Since(start)),
 		zap.Int("count", len(storageSizeInfoList)))
 	return storageSizeInfoList
-}
-
-// runDFSStatsCollector runs the DFS (Distributed File System) stats collector for the metering.
-func (c *RaftCluster) runDFSStatsCollector(
-	writer *metering.Writer,
-	keyspaceManager *keyspace.Manager,
-) {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
-
-	if writer == nil {
-		log.Info("no metering writer provided, the dfs stats collector will not be started")
-		return
-	}
-	log.Info("running the dfs stats collector")
-	// Init and register the collector before starting the loop.
-	collector := newDfsStatsCollector()
-	writer.RegisterCollector(collector)
-	// Start the ticker to collect the DFS stats data periodically.
-	ticker := time.NewTicker(dfsStatsCollectorInterval)
-	defer ticker.Stop()
-
-	var start time.Time
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("dfs stats collector has been stopped")
-			return
-		case <-ticker.C:
-			start = time.Now()
-			keyspaceDFSStats, storeCount := c.collectDFSStats(keyspaceManager)
-			log.Info("collected the incremental dfs stats from all stores",
-				zap.Duration("cost", time.Since(start)),
-				zap.Int("keyspace-dfs-stats-count", len(keyspaceDFSStats)),
-				zap.Int("collected-store-count", storeCount))
-			collector.Collect(keyspaceDFSStats)
-		}
-	}
-}
-
-type keyspaceDFSStatsKey struct {
-	keyspaceName string
-	component    string
-}
-
-type keyspaceDFSStatsMap map[keyspaceDFSStatsKey]*core.DFSStats
-
-func (c *RaftCluster) collectDFSStats(keyspaceManager *keyspace.Manager) (keyspaceDFSStatsMap, int) {
-	var (
-		keyspaceDFSStats = make(keyspaceDFSStatsMap, 0)
-		storeCount       = 0
-		keyspaceName     string
-		err              error
-	)
-	for _, store := range c.GetStores() {
-		scopedDFSStats := store.TakeScopedDFSStats()
-		if len(scopedDFSStats) == 0 {
-			continue
-		}
-		storeCount++
-		log.Info("collected the scoped dfs stats from the store",
-			zap.Uint64("store-id", store.GetID()),
-			zap.Int("collected-store-count", storeCount),
-			zap.Int("scoped-dfs-stats-count", len(scopedDFSStats)))
-		// Merge into the keyspace DFS stats.
-		for scope, stats := range scopedDFSStats {
-			// Set the keyspace name to empty string for global scope.
-			if scope.GetIsGlobal() {
-				keyspaceName = ""
-			} else {
-				keyspaceName, err = keyspaceManager.GetEnabledKeyspaceNameByID(scope.GetKeyspaceId())
-				if err != nil {
-					continue
-				}
-			}
-			key := keyspaceDFSStatsKey{
-				keyspaceName: keyspaceName,
-				component:    scope.GetComponent(),
-			}
-			dfsStats, ok := keyspaceDFSStats[key]
-			if ok {
-				dfsStats.WrittenBytes += stats.WrittenBytes
-				dfsStats.WriteRequests += stats.WriteRequests
-			} else {
-				keyspaceDFSStats[key] = &core.DFSStats{
-					WrittenBytes:  stats.WrittenBytes,
-					WriteRequests: stats.WriteRequests,
-				}
-			}
-		}
-	}
-	return keyspaceDFSStats, storeCount
 }

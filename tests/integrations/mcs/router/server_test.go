@@ -16,6 +16,9 @@ package router
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -66,6 +69,49 @@ func (suite *serverTestSuite) SetupSuite() {
 func (suite *serverTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.cancel()
+}
+
+func (suite *serverTestSuite) TestBasic() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop"))
+	}()
+	tc, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	re.NoError(err)
+	defer cleanup()
+	// check sync work well
+	testutil.Eventually(re, func() bool {
+		return tc.IsReady()
+	})
+	url := tc.GetAdvertiseListenAddr() + "/status"
+	resp, err := http.DefaultClient.Get(url)
+	defer re.NoError(resp.Body.Close())
+	re.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+
+	url = tc.GetAdvertiseListenAddr() + "/metrics"
+	resp, err = http.DefaultClient.Get(url)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+	re.NotNil(resp)
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	lines := strings.Split(string(body), "\n")
+	var grpcMetrics []string
+	for _, line := range lines {
+		if strings.Contains(line, "grpc_server_handled_total") {
+			grpcMetrics = append(grpcMetrics, line)
+		}
+	}
+	re.NoError(resp.Body.Close())
+	re.NotEmpty(grpcMetrics)
+
+	// stop router server and ensure it can not serve requests
+	tc.Close()
+	testutil.Eventually(re, func() bool {
+		return !tc.IsReady()
+	})
 }
 
 func (suite *serverTestSuite) TestBasicSync() {

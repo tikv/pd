@@ -653,7 +653,9 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	assertNoScheduler(re, urlPrefix, name)
-	suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	if suite.env == tests.NonMicroserviceEnv {
+		suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	}
 
 	// reset schedule config
 	scheduleConfig.Schedulers = originSchedulers

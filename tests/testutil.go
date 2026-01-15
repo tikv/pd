@@ -288,9 +288,10 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)
 	raftCluster.UpdateAllStoreStatus()
-	if tc.GetSchedulingPrimaryServer() != nil {
-		tc.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
-		tc.GetSchedulingPrimaryServer().GetCluster().UpdateAllStoreStatus()
+	sche := tc.GetSchedulingPrimaryServer()
+	if sche != nil {
+		sche.GetCluster().PutStore(newStore)
+		sche.GetCluster().UpdateAllStoreStatus()
 	}
 }
 
@@ -317,25 +318,28 @@ func MustPutRegion(re *require.Assertions, cluster *TestCluster, regionID, store
 func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo *core.RegionInfo) {
 	err := cluster.HandleRegionHeartbeat(regionInfo)
 	re.NoError(err)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(regionInfo)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		err = sche.GetCluster().HandleRegionHeartbeat(regionInfo)
 		re.NoError(err)
 	}
 }
 
 // MustHandleStoreHeartbeat is used for test purpose.
+// When we need to test statistics, we need to forward store heartbeat to scheduling server.
+// If we only test store metadata, we only use store watcher and not need to forward store heartbeat.
 func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
 	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
 	re.NoError(err)
-	if cluster.GetSchedulingPrimaryServer() != nil {
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		hb := &schedulingpb.StoreHeartbeatRequest{
 			Header: &schedulingpb.RequestHeader{
 				ClusterId: heartbeat.Header.ClusterId,
 			},
 			Stats: heartbeat.GetStats(),
 		}
-		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
+		err = sche.GetCluster().HandleStoreHeartbeat(hb)
 		re.NoError(err)
+		sche.GetCluster().UpdateAllStoreStatus()
 	}
 }
 

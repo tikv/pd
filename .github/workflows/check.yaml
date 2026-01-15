@@ -16,6 +16,6 @@ jobs:
           check-latest: true
       - name: Make Check
         run: |
-          make build
+          SWAGGER=1 make build
           make tools
           make check

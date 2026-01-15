@@ -33,15 +33,13 @@ type storeStats struct {
 	rawStats *pdpb.StoreStats
 
 	// avgAvailable is used to make available smooth, aka no sudden changes.
-	avgAvailable   *movingaverage.HMA
-	scopedDFSStats map[pdpb.DfsStatScope]*DFSStats
+	avgAvailable *movingaverage.HMA
 }
 
 func newStoreStats() *storeStats {
 	return &storeStats{
-		rawStats:       &pdpb.StoreStats{},
-		avgAvailable:   movingaverage.NewHMA(60), // take 10 minutes sample under 10s heartbeat rate
-		scopedDFSStats: make(map[pdpb.DfsStatScope]*DFSStats),
+		rawStats:     &pdpb.StoreStats{},
+		avgAvailable: movingaverage.NewHMA(60), // take 10 minutes sample under 10s heartbeat rate
 	}
 }
 
@@ -53,42 +51,6 @@ func (ss *storeStats) updateRawStats(rawStats *pdpb.StoreStats) {
 	if ss.avgAvailable != nil {
 		ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 	}
-
-	dfsStatItems := rawStats.GetDfs()
-	if len(dfsStatItems) == 0 {
-		return
-	}
-	for _, dfsStat := range dfsStatItems {
-		writtenBytes := dfsStat.GetWrittenBytes()
-		writeRequests := dfsStat.GetWriteRequests()
-		// Skip this item if the written bytes and write requests are both 0.
-		if writtenBytes == 0 && writeRequests == 0 {
-			continue
-		}
-		scope := dfsStat.GetScope()
-		if scope == nil {
-			continue
-		}
-		stat, ok := ss.scopedDFSStats[*scope]
-		if ok {
-			stat.WrittenBytes += writtenBytes
-			stat.WriteRequests += writeRequests
-		} else {
-			ss.scopedDFSStats[*scope] = &DFSStats{
-				WrittenBytes:  writtenBytes,
-				WriteRequests: writeRequests,
-			}
-		}
-	}
-}
-
-// TakeScopedDFSStats takes the DFS stats info for each scope. It will return the DFS stats info and clear the internal map.
-func (ss *storeStats) TakeScopedDFSStats() map[pdpb.DfsStatScope]*DFSStats {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	dfsStats := ss.scopedDFSStats
-	ss.scopedDFSStats = make(map[pdpb.DfsStatScope]*DFSStats)
-	return dfsStats
 }
 
 // GetStoreStats returns the statistics information of the store.
