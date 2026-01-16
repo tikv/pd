@@ -1530,7 +1530,6 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
-
 	defer func() {
 		grpcutil.RequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
@@ -1590,6 +1589,9 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				continue
 			}
 		}
+		failpoint.Inject("queryRegionMetError", func() {
+			failpoint.Return(errs.ErrNotBootstrapped.FastGenByArgs())
+		})
 		start := time.Now()
 		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)
