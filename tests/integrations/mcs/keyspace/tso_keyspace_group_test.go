@@ -387,18 +387,16 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	tests.WaitForPrimaryServing(re, nodes)
 
 	// the default keyspace group is exist.
-	var kg *endpoint.KeyspaceGroup
-	var code int
 	testutil.Eventually(re, func() bool {
-		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
-		return code == http.StatusOK && kg != nil
-	}, testutil.WithWaitFor(time.Second*1))
-	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
-	// the allocNodesToAllKeyspaceGroups loop will run every 100ms.
-	testutil.Eventually(re, func() bool {
-		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
+		kg, code := suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		return code == http.StatusOK && kg != nil &&
+			kg.ID == constant.DefaultKeyspaceGroupID &&
+			len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
-	for _, member := range kg.Members {
+	// get the default keyspace group again.
+	defaultKg, code := suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+	re.Equal(http.StatusOK, code)
+	for _, member := range defaultKg.Members {
 		re.Contains(nodes, member.Address)
 	}
 }
