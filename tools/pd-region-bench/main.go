@@ -134,6 +134,7 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 	if *enableRouterClient {
 		opts = append(opts, opt.WithEnableRouterClient(true))
 	}
+	//nolint:staticcheck
 	opts = append(opts, opt.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    grpcKeepaliveTime,

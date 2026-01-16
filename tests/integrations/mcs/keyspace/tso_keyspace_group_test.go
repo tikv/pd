@@ -105,7 +105,7 @@ func (suite *keyspaceGroupTestSuite) getTSOServerURLs() ([]string, error) {
 	addr := suite.backendEndpoints
 	addr = strings.TrimPrefix(addr, "http://")
 
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 	if err != nil {
 		return nil, err
 	}
