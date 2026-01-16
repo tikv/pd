@@ -49,24 +49,11 @@
 - Coverage split: `make test-with-cover-parallel` after `make split`.
 - Clean test artifacts: `make clean-test` (clears `/tmp/pd_tests*`, go test cache, UT bins, playground log).
 
-## Single-Test Quick Picks
-- Standard: `go test <pkg> -run <Regex> -count=1` (add `-tags deadlock` and/or `-race` to mirror suites).
-- gocheck style: `go test github.com/tikv/pd/server/api -check.f TestJsonRespondError`.
-- Subtests: `-run TestName/SubtestName` works with std testing.
-- TSO package: `go test -tags without_dashboard,deadlock -run <Regex> ./tests/server/tso`.
-- Client: `cd client && CGO_ENABLED=1 go test ./... -tags deadlock -race -run <Regex>`.
-- Failpoints: run `make failpoint-enable` before and `make failpoint-disable` after when invoking go test directly.
-
 ## Failpoints Discipline
 - Keep failpoints enabled only for tests; disable immediately after (`make failpoint-disable` or `make clean-test`) to avoid polluting the codebase.
 - Prefer make targets that auto-enable/disable failpoints; if running `go test` manually, bracket with enable/disable.
 - Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
 - If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
-
-## Tags, Flags, and Env
-- Tags: `deadlock` (tests), `without_dashboard` (skip UI), `swagger_server` (SWAGGER=1), `with_fail` (FAILPOINT=1), `with_plugin` (PLUGIN=1), `nextgen` (NEXT_GEN builds/tests).
-- CGO: on when DASHBOARD=1, WITH_RACE=1, ENABLE_FIPS=1, or simulator build; off otherwise.
-- PD_EDITION required (Community/Enterprise). RELEASE_VERSION defaults to `git describe`; `RUN_CI=1` sets None.
 
 ## Imports & Formatting
 - Use gci/goimports ordering: stdlib | third-party | pingcap | tikv/pd | blank.
