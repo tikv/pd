@@ -616,7 +616,11 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 			// Use Eventually to wait for the key ranges to be available.
 			popKeyRangeMap := map[string]struct{}{}
 			testutil.Eventually(re, func() bool {
-				for range len(testCase.popKeyRange) / 2 {
+				remaining := len(testCase.popKeyRange) - len(popKeyRangeMap)
+				if remaining <= 0 {
+					return true
+				}
+				for range remaining / 2 {
 					v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
 					if !got {
 						return false
@@ -624,9 +628,8 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 					popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 					popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 				}
-				return true
+				return len(popKeyRangeMap) == len(testCase.popKeyRange)
 			})
-			re.Len(popKeyRangeMap, len(testCase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				re.True(ok)
