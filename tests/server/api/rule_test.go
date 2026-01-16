@@ -1363,6 +1363,14 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		Count:       1,
 	})
 	re.NoError(err)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// Wait for the scheduling server to sync the rule updates via etcd watchers.
+		testutil.Eventually(re, func() bool {
+			scheRuleManager := sche.GetCluster().GetRuleManager()
+			return scheRuleManager.GetRule("test", "test2") != nil &&
+				scheRuleManager.GetRule("test", "test3") != nil
+		})
+	}
 	fit := &placement.RegionFit{}
 
 	u := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
