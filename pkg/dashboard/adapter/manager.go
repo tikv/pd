@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -32,7 +34,7 @@ import (
 
 var (
 	// CheckInterval represents the time interval of running check.
-	CheckInterval = time.Second
+	CheckInterval = 3 * time.Second
 )
 
 // Manager is used to control dashboard.
@@ -163,7 +165,7 @@ func (m *Manager) needResetAddress(addr string) bool {
 
 	for _, member := range m.members {
 		if member.GetClientUrls()[0] == addr {
-			return false
+			return len(cluster.CheckHealth(m.srv.GetHTTPClient(), []*pdpb.Member{member})) == 0 // unhealthy
 		}
 	}
 
@@ -172,18 +174,25 @@ func (m *Manager) needResetAddress(addr string) bool {
 
 func (m *Manager) setNewAddress() {
 	// select the sever with minimum member ID(avoid the PD leader if possible) to run dashboard.
-	minMemberIdx := 0
+	minMemberIdx := -1
 	if len(m.members) > 1 {
 		leaderID := m.srv.GetMemberInfo().GetMemberId()
 		for idx, member := range m.members {
 			curMemberID := member.GetMemberId()
-			if curMemberID != leaderID && curMemberID < m.members[minMemberIdx].GetMemberId() {
-				minMemberIdx = idx
-				break
+			if curMemberID != leaderID {
+				if len(cluster.CheckHealth(m.srv.GetHTTPClient(), []*pdpb.Member{member})) != 0 {
+					if minMemberIdx == -1 || curMemberID < m.members[minMemberIdx].GetMemberId() {
+						log.Info("set new dashboard address", zap.Any("addr", member.GetClientUrls()[0]))
+						minMemberIdx = idx
+					}
+				}
 			}
 		}
 	}
 
+	if minMemberIdx == -1 {
+		minMemberIdx = 0
+	}
 	// set new dashboard address
 	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
 	cfg.DashboardAddress = m.members[minMemberIdx].GetClientUrls()[0]
