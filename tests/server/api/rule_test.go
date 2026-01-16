@@ -1375,7 +1375,6 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		})
 	}
 	fit := &placement.RegionFit{}
-
 	u := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
 	re.NoError(err)

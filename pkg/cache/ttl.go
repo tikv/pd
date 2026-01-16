@@ -288,6 +288,11 @@ func (c *TTLString) Get(id string) (any, bool) {
 	return c.get(id)
 }
 
+// Remove removes a key from the cache
+func (c *TTLString) Remove(key string) {
+	c.remove(key)
+}
+
 // GetAllID returns all key ids
 func (c *TTLString) GetAllID() []string {
 	keys := c.getKeys()

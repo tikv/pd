@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
-	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -452,35 +451,26 @@ func assertTTLConfig(
 	cluster *tests.TestCluster,
 	expectedEqual bool,
 ) {
-	equality := re.Equal
-	if !expectedEqual {
-		equality = re.NotEqual
+	equalFunc := func(options ttlConfigInterface) bool {
+		return uint64(999) == options.GetMaxSnapshotCount() &&
+			!options.IsLocationReplacementEnabled() &&
+			uint64(999) == options.GetMaxMergeRegionSize() &&
+			uint64(999) == options.GetMaxMergeRegionKeys() &&
+			uint64(999) == options.GetSchedulerMaxWaitingOperator() &&
+			uint64(999) == options.GetLeaderScheduleLimit() &&
+			uint64(999) == options.GetRegionScheduleLimit() &&
+			uint64(999) == options.GetHotRegionScheduleLimit() &&
+			uint64(999) == options.GetReplicaScheduleLimit() &&
+			uint64(999) == options.GetMergeScheduleLimit() &&
+			!options.IsTikvRegionSplitEnabled()
 	}
-	checkFunc := func(options ttlConfigInterface) {
-		equality(uint64(999), options.GetMaxSnapshotCount())
-		equality(false, options.IsLocationReplacementEnabled())
-		equality(uint64(999), options.GetMaxMergeRegionSize())
-		equality(uint64(999), options.GetMaxMergeRegionKeys())
-		equality(uint64(999), options.GetSchedulerMaxWaitingOperator())
-		equality(uint64(999), options.GetLeaderScheduleLimit())
-		equality(uint64(999), options.GetRegionScheduleLimit())
-		equality(uint64(999), options.GetHotRegionScheduleLimit())
-		equality(uint64(999), options.GetReplicaScheduleLimit())
-		equality(uint64(999), options.GetMergeScheduleLimit())
-		equality(false, options.IsTikvRegionSplitEnabled())
-	}
-	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())
+	re.Equal(expectedEqual, equalFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions()))
 	if cluster.GetSchedulingPrimaryServer() != nil {
-		var options *cfg.PersistConfig
 		testutil.Eventually(re, func() bool {
 			// wait for the scheduling primary server to be synced
-			options = cluster.GetSchedulingPrimaryServer().GetPersistConfig()
-			if expectedEqual {
-				return uint64(999) == options.GetMaxSnapshotCount()
-			}
-			return uint64(999) != options.GetMaxSnapshotCount()
+			return expectedEqual == equalFunc(cluster.GetSchedulingPrimaryServer().GetPersistConfig())
 		})
-		checkFunc(options)
+		equalFunc(cluster.GetSchedulingPrimaryServer().GetPersistConfig())
 	}
 }
 
