@@ -245,3 +245,8 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+// Due to https://github.com/stretchr/testify/pull/1427, `Eventually` and `EventuallyWithT` starts checking the condition immediately,
+// which will cause several different tests to fail. So this is a temporary workaround to use the old version of `testify`.
+// TODO: fix those flasky tests introduced by the behavior change of `Eventually` and `EventuallyWithT` assertions.
+replace github.com/stretchr/testify => github.com/stretchr/testify v1.10.0
