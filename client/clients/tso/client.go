@@ -174,6 +174,7 @@ func (c *Cli) scheduleUpdateTSOConnectionCtxs() {
 func (c *Cli) GetTSORequest(ctx context.Context) *Request {
 	req := c.tsoReqPool.Get().(*Request)
 	// Set needed fields in the request before using it.
+	req.mu.Lock()
 	req.start = time.Now()
 	req.pool = c.tsoReqPool
 	req.requestCtx = ctx
@@ -181,6 +182,7 @@ func (c *Cli) GetTSORequest(ctx context.Context) *Request {
 	req.physical = 0
 	req.logical = 0
 	req.streamID = ""
+	req.mu.Unlock()
 	return req
 }
 
