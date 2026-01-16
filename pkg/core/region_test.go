@@ -1456,3 +1456,35 @@ func TestResetRegionCache(t *testing.T) {
 	re.Equal(1, regions.GetTotalRegionCount())
 	re.NotNil(regions.GetRegion(4))
 }
+
+func TestGetBucketMeta(t *testing.T) {
+	re := require.New(t)
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("d"))
+	re.Nil(region.GetBuckets())
+	origin := NewTestRegionInfo(1, 2, []byte("a"), []byte("d"))
+	bucket := &metapb.Buckets{
+		RegionId: 100,
+		Version:  1,
+		Keys:     [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	origin.UpdateBuckets(bucket, nil)
+	re.Equal(uint64(1), origin.GetBuckets().GetVersion())
+	region.Inherit(origin, true)
+	re.Equal(uint64(1), region.GetBuckets().GetVersion())
+
+	// Inherit false if region has bucket meta
+	bucket1 := &metapb.Buckets{
+		RegionId: 100,
+		Version:  2,
+		Keys:     [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	re.True(origin.UpdateBuckets(bucket1, origin.GetBuckets()))
+	re.Equal(uint64(2), origin.GetBuckets().GetVersion())
+	region.bucketMeta = &metapb.BucketMeta{
+		Version: 1,
+		Keys:    [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	region.Inherit(origin, true)
+	// Inherit false if region
+	re.Equal(uint64(1), region.GetBuckets().GetVersion())
+}
