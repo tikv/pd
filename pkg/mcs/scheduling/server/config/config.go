@@ -196,6 +196,7 @@ type PersistConfig struct {
 	schedule       atomic.Value
 	replication    atomic.Value
 	storeConfig    atomic.Value
+	pdServerCfg    atomic.Value
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
 	// Store as `chan<- struct{}`.
 	schedulersUpdatingNotifier atomic.Value
@@ -289,6 +290,16 @@ func (o *PersistConfig) SetStoreConfig(cfg *sc.StoreConfig) {
 	// so we need to adjust it here before storing it.
 	cfg.Adjust()
 	o.storeConfig.Store(cfg)
+}
+
+// SetPDServerCfg sets the PD server configuration.
+func (o *PersistConfig) SetPDServerCfg(cfg *sc.PDServerCfg) {
+	o.pdServerCfg.Store(cfg)
+}
+
+// GetPDServerCfg returns the PD server configuration.
+func (o *PersistConfig) GetPDServerCfg() *sc.PDServerCfg {
+	return o.pdServerCfg.Load().(*sc.PDServerCfg)
 }
 
 // GetStoreConfig returns the TiKV store configuration.
