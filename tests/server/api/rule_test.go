@@ -15,6 +15,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,8 +29,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -67,6 +70,54 @@ func (suite *ruleTestSuite) TearDownSuite() {
 func (suite *ruleTestSuite) TearDownTest() {
 	re := suite.Require()
 	suite.env.Reset(re)
+}
+
+func (suite *ruleTestSuite) TestRegionLabel() {
+	suite.env.RunTestInMicroserviceEnv(suite.checkRegionLabeler)
+}
+
+func (suite *ruleTestSuite) checkRegionLabeler(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config/region-label/rule", pdAddr)
+	startKey := codec.EncodeBytes([]byte{'r', 0, 0, 0})
+	endKey := codec.EncodeBytes([]byte{'r', 0, 0, 1})
+	rule := &labeler.LabelRule{
+		ID:    "keyspaces/0",
+		Index: 0,
+		Labels: []labeler.RegionLabel{
+			{
+				Key:   "id",
+				Value: "0",
+			},
+		},
+		RuleType: "key-range",
+		Data: []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(startKey),
+				"end_key":   hex.EncodeToString(endKey),
+			},
+		},
+	}
+	data, err := json.Marshal(rule)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, data, testutil.StatusOK(re))
+	re.NoError(err)
+	server := cluster.GetSchedulingPrimaryServer()
+	var kr [2][]byte
+	var exist bool
+	testutil.Eventually(re, func() bool {
+		kr, exist = server.GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
+		if exist {
+			return bytes.Equal(kr[0], []byte(startKey)) && bytes.Equal(kr[1], []byte(endKey))
+		}
+		return false
+	})
 }
 
 func (suite *ruleTestSuite) TestSet() {

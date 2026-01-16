@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -210,10 +211,15 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
+	suspectKeyRanges := make([]*labeler.KeyRangeRule, 0)
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.regionLabeler.Lock()
+		for i := range suspectKeyRanges {
+			suspectKeyRanges[i] = nil // avoid memory leak
+		}
+		suspectKeyRanges = suspectKeyRanges[:0]
 		return nil
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -222,16 +228,41 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		if err != nil {
 			return err
 		}
-		return rw.regionLabeler.SetLabelRuleLocked(rule)
+		err = rw.regionLabeler.SetLabelRuleLocked(rule)
+		if err == nil {
+			krs := rule.GetKeyRanges()
+			if krs != nil {
+				suspectKeyRanges = append(suspectKeyRanges, krs...)
+			}
+		}
+		return err
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Debug("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
+		err := rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
+		if err == nil {
+			rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
+			if err != nil {
+				log.Warn("marshal label rule failed", zap.Error(err))
+			} else {
+				krs := rule.GetKeyRanges()
+				if krs != nil {
+					suspectKeyRanges = append(suspectKeyRanges, krs...)
+				}
+			}
+		}
+		return err
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
 		rw.regionLabeler.BuildRangeListLocked()
+		if rw.checkerController == nil {
+			return errors.New("checker controller is nil")
+		}
+		for _, kr := range suspectKeyRanges {
+			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
+		}
 		return nil
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
