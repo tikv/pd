@@ -692,7 +692,6 @@ func (h *confHandler) updateControllerConfig(key string, value any) error {
 	addr := addrs[0]
 	url := fmt.Sprintf("%s%s", addr, controllerConfigURL)
 
-	// 构造请求体
 	body := map[string]any{
 		key: value,
 	}
