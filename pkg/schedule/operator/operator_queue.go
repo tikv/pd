@@ -54,6 +54,7 @@ func (opn *operatorQueue) Pop() any {
 		return nil
 	}
 	item := old[n-1]
+	old[n-1] = nil // avoid memory leak
 	*opn = old[0 : n-1]
 	return item
 }
