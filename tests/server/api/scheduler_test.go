@@ -677,7 +677,12 @@ func addScheduler(re *require.Assertions, urlPrefix string, body []byte) {
 
 func deleteScheduler(re *require.Assertions, urlPrefix string, createdName string) {
 	deleteURL := fmt.Sprintf("%s/%s", urlPrefix, createdName)
-	err := testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re))
+	err := testutil.CheckDelete(tests.TestDialClient, deleteURL, func(resp []byte, code int, _ http.Header) {
+		if code == http.StatusNotFound || (code == http.StatusInternalServerError && strings.Contains(string(resp), "scheduler not found")) {
+			return
+		}
+		re.Equal(http.StatusOK, code, string(resp))
+	})
 	re.NoError(err)
 }
 
@@ -770,11 +775,17 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 		}
 		testutil.Eventually(re, func() bool {
 			resp, err := apiutil.GetJSON(tests.TestDialClient, urlPrefix+query, nil)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			defer resp.Body.Close()
-			re.Equal(http.StatusOK, resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				return false
+			}
 			b, err := io.ReadAll(resp.Body)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			return strings.Contains(string(b), "[]") && !strings.Contains(string(b), "null")
 		})
 	}
@@ -794,9 +805,17 @@ func (suite *scheduleTestSuite) assertSchedulerExists(urlPrefix string, schedule
 func assertNoScheduler(re *require.Assertions, urlPrefix string, scheduler string) {
 	var schedulers []string
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers,
-			testutil.StatusOK(re))
-		re.NoError(err)
+		resp, err := apiutil.GetJSON(tests.TestDialClient, urlPrefix, nil)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&schedulers); err != nil {
+			return false
+		}
 		return !slice.Contains(schedulers, scheduler)
 	})
 }

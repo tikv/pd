@@ -612,13 +612,20 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 		err = testutil.CheckDelete(tests.TestDialClient, url, testutil.StatusOK(re))
 		re.NoError(err)
 		if len(testCase.popKeyRange) > 0 {
+			// In microservice mode, there's a sync delay before suspect key ranges are populated.
+			// Use Eventually to wait for the key ranges to be available.
 			popKeyRangeMap := map[string]struct{}{}
-			for range len(testCase.popKeyRange) / 2 {
-				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
-				re.True(got)
-				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
-				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
-			}
+			testutil.Eventually(re, func() bool {
+				for range len(testCase.popKeyRange) / 2 {
+					v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
+					if !got {
+						return false
+					}
+					popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+					popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
+				}
+				return true
+			})
 			re.Len(popKeyRangeMap, len(testCase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
