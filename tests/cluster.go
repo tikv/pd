@@ -654,6 +654,9 @@ func (c *TestCluster) RunInitialServers() error {
 
 // RunInitialServersWithRetry starts to run servers with port conflict handling.
 func (c *TestCluster) RunInitialServersWithRetry(maxRetries int) error {
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
 	var lastErr error
 	for i := range maxRetries {
 		servers := make([]*TestServer, 0, len(c.config.InitialServers))
