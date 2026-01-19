@@ -17,9 +17,7 @@ package keyspace
 import (
 	"container/heap"
 	"encoding/binary"
-	"encoding/hex"
 	"regexp"
-	"strconv"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -27,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -123,42 +120,6 @@ func MakeRegionBound(id uint32) *RegionBound {
 		RawRightBound: codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)),
 		TxnLeftBound:  tr,
 		TxnRightBound: codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)),
-	}
-}
-
-// MakeKeyRanges encodes keyspace ID to correct LabelRule data.
-func MakeKeyRanges(id uint32) []any {
-	regionBound := MakeRegionBound(id)
-	return []any{
-		map[string]any{
-			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
-			"end_key":   hex.EncodeToString(regionBound.RawRightBound),
-		},
-		map[string]any{
-			"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
-			"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
-		},
-	}
-}
-
-// getRegionLabelID returns the region label id of the target keyspace.
-func getRegionLabelID(id uint32) string {
-	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
-}
-
-// MakeLabelRule makes the label rule for the given keyspace id.
-func MakeLabelRule(id uint32) *labeler.LabelRule {
-	return &labeler.LabelRule{
-		ID:    getRegionLabelID(id),
-		Index: 0,
-		Labels: []labeler.RegionLabel{
-			{
-				Key:   regionLabelKey,
-				Value: strconv.FormatUint(uint64(id), endpoint.SpaceIDBase),
-			},
-		},
-		RuleType: labeler.KeyRange,
-		Data:     MakeKeyRanges(id),
 	}
 }
 

@@ -45,10 +45,6 @@ const (
 	// AllocStep set idAllocator's step when write persistent window boundary.
 	// Use a lower value for denser idAllocation in the event of frequent pd leader change.
 	AllocStep = uint64(100)
-	// regionLabelIDPrefix is used to prefix the keyspace region label.
-	regionLabelIDPrefix = "keyspaces/"
-	// regionLabelKey is the key for keyspace id in keyspace region label.
-	regionLabelKey = "id"
 	// UserKindKey is the key for user kind in keyspace config.
 	UserKindKey = "user_kind"
 	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
