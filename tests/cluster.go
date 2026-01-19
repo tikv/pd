@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -502,6 +503,9 @@ type TestCluster struct {
 	}
 	schedulingCluster *TestSchedulingCluster
 	tsoCluster        *TestTSOCluster
+	// services and opts are stored for recreating servers on port conflicts
+	services []string
+	opts     []ConfigOption
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -544,8 +548,10 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		servers[cfg.Name] = s
 	}
 	return &TestCluster{
-		config:  config,
-		servers: servers,
+		config:   config,
+		servers:  servers,
+		services: services,
+		opts:     opts,
 		tsPool: struct {
 			syncutil.Mutex
 			pool map[uint64]struct{}
@@ -643,11 +649,88 @@ func RunServers(servers []*TestServer) error {
 
 // RunInitialServers starts to run servers in InitialServers.
 func (c *TestCluster) RunInitialServers() error {
-	servers := make([]*TestServer, 0, len(c.config.InitialServers))
-	for _, conf := range c.config.InitialServers {
-		servers = append(servers, c.GetServer(conf.Name))
+	return c.RunInitialServersWithRetry(3)
+}
+
+// RunInitialServersWithRetry starts to run servers with port conflict handling.
+func (c *TestCluster) RunInitialServersWithRetry(maxRetries int) error {
+	var lastErr error
+	for i := range maxRetries {
+		servers := make([]*TestServer, 0, len(c.config.InitialServers))
+		for _, conf := range c.config.InitialServers {
+			servers = append(servers, c.GetServer(conf.Name))
+		}
+
+		lastErr = RunServers(servers)
+		if lastErr == nil {
+			return nil
+		}
+
+		// Check if it's a port conflict
+		isPortConflict := strings.Contains(lastErr.Error(), "address already in use")
+
+		if isPortConflict {
+			log.Warn("port conflict detected, recreating servers with new ports",
+				zap.Int("attempt", i+1),
+				zap.Int("maxRetries", maxRetries),
+				zap.Error(lastErr))
+
+			// Stop and destroy all servers
+			for _, s := range servers {
+				if s.State() == Running {
+					_ = s.Stop()
+				}
+				_ = s.Destroy()
+			}
+
+			// Recreate servers with new ports
+			for _, conf := range c.config.InitialServers {
+				// Regenerate config to get new ports
+				conf.ClientURLs = tempurl.Alloc()
+				conf.PeerURLs = tempurl.Alloc()
+				conf.AdvertiseClientURLs = conf.ClientURLs
+				conf.AdvertisePeerURLs = conf.PeerURLs
+
+				// Use the original opts passed during cluster creation
+				allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
+				serverConf, err := conf.Generate(allOpts...)
+				if err != nil {
+					return err
+				}
+
+				// Use the original services passed during cluster creation
+				s, err := NewTestServer(context.Background(), serverConf, c.services)
+				if err != nil {
+					return err
+				}
+				c.servers[conf.Name] = s
+			}
+
+			// Wait before retry
+			backoff := time.Duration(i+1) * 500 * time.Millisecond
+			if backoff > 3*time.Second {
+				backoff = 3 * time.Second
+			}
+			time.Sleep(backoff)
+			continue
+		}
+
+		// For non-port-conflict errors, use regular retry
+		if strings.Contains(lastErr.Error(), "ErrStartEtcd") {
+			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
+			for _, s := range servers {
+				if s.State() == Running {
+					_ = s.Stop()
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		// For other errors, don't retry
+		return lastErr
 	}
-	return RunServersWithRetry(servers, 3)
+	return errors.Wrapf(lastErr, "failed to start servers after %d retries", maxRetries)
 }
 
 // RunServersWithRetry starts to run multiple TestServer with retry logic.
