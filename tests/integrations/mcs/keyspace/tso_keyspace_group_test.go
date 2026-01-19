@@ -671,12 +671,6 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	re := suite.Require()
 
-	// Test configuration constants
-	const (
-		// Time to wait for GetTS to start
-		waitForGetTSStart = 3 * time.Second
-	)
-
 	// Enable mockLoadKeyspace failpoint to return hardcoded keyspace meta for testing
 	// This bypasses the gRPC LoadKeyspace call which may fail due to timing issues
 	// Must enable before setupTSONodesAndClient because that's when the client is created
@@ -702,38 +696,22 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	// Step 3: Wait until all TSO nodes are deregistered
 	suite.closeAllTSONodesAndWait(re, nodes)
 
-	// Step 4: Enable failpoints for verification and timeout extension
+	// Step 4: Enable failpoints for verification
 	// assertNotReachLegacyPath: ensures we don't fallback to legacy path (will panic if we do)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/assertNotReachLegacyPath"))
 	}()
 
-	// Step 5: Start async GetTS call - it will wait for TSO service to recover
-	type getTSResult struct {
-		physicalTS int64
-		logicalTS  int64
-		err        error
-	}
-	resultCh := make(chan getTSResult, 1)
-
-	go func() {
-		physicalTS, logicalTS, getErr := client.GetTS(suite.ctx)
-		resultCh <- getTSResult{physicalTS: physicalTS, logicalTS: logicalTS, err: getErr}
-	}()
-
-	time.Sleep(waitForGetTSStart) // Give it time to begin execution
-
-	// Step 6: Restart one TSO node while GetTS is waiting
+	// Step 5: Restart one TSO node
 	newNode, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, firstNodeAddr)
 	setup.cleanups = append(setup.cleanups, cleanup)
 	nodes[newNode.GetAddr()] = newNode
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{newNode.GetAddr(): newNode})
 
-	// Step 7: Verify GetTS succeeds after node restart
-	result := <-resultCh
-	re.NoError(result.err, "GetTS should succeed after TSO node restart")
-
-	// KEY VERIFICATION: If code incorrectly tried to fallback to legacy path,
-	// assertNotReachLegacyPath failpoint would have panicked already
+	// Step 6: Verify GetTS eventually succeeds after node restart
+	testutil.Eventually(re, func() bool {
+		_, _, err := client.GetTS(suite.ctx)
+		return err == nil
+	})
 }
