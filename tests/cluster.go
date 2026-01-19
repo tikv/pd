@@ -497,6 +497,7 @@ func (s *TestServer) GetServicePrimaryAddr(ctx context.Context, serviceName stri
 
 // TestCluster is only for test.
 type TestCluster struct {
+	ctx     context.Context
 	config  *clusterConfig
 	servers map[string]*TestServer
 	// tsPool is used to check the TSO uniqueness among the test cluster
@@ -551,6 +552,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		servers[cfg.Name] = s
 	}
 	return &TestCluster{
+		ctx:      ctx,
 		config:   config,
 		servers:  servers,
 		services: services,
@@ -704,7 +706,7 @@ func (c *TestCluster) RunInitialServersWithRetry(maxRetries int) error {
 				}
 
 				// Use the original services passed during cluster creation
-				s, err := NewTestServer(context.Background(), serverConf, c.services)
+				s, err := NewTestServer(c.ctx, serverConf, c.services)
 				if err != nil {
 					return err
 				}
