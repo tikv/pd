@@ -63,7 +63,7 @@ make basic-test      # Fast tests without race detection
 ### File Headers
 All Go files must include the Apache 2.0 license header:
 ```go
-// Copyright YEAR TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,6 +77,7 @@ All Go files must include the Apache 2.0 license header:
 // See the License for the specific language governing permissions and
 // limitations under the License.
 ```
+Note: Use the current year when creating new files.
 
 ### Prohibited Dependencies
 The following packages are banned by depguard and must NOT be used:
