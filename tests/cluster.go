@@ -576,8 +576,11 @@ func restartTestCluster(
 ) (newTestCluster *TestCluster, err error) {
 	schedulers.Register()
 	newTestCluster = &TestCluster{
-		config:  cluster.config,
-		servers: make(map[string]*TestServer, len(cluster.servers)),
+		ctx:      ctx,
+		config:   cluster.config,
+		servers:  make(map[string]*TestServer, len(cluster.servers)),
+		services: cluster.services,
+		opts:     cluster.opts,
 		tsPool: struct {
 			syncutil.Mutex
 			pool map[uint64]struct{}
