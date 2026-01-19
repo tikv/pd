@@ -334,3 +334,126 @@ func isProtectedKeyspaceName(name string) bool {
 	}
 	return name == constant.DefaultKeyspaceName
 }
+
+// ExtractKeyspaceID extracts the keyspace ID from a region key.
+// It returns the keyspace ID and a boolean indicating whether the key contains a valid keyspace ID.
+// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'r' for raw or 'x' for txn.
+func ExtractKeyspaceID(key []byte) (uint32, bool) {
+	// Empty key represents the start of the entire key space (no keyspace)
+	if len(key) == 0 {
+		return 0, false
+	}
+
+	// Decode the key
+	_, decoded, err := codec.DecodeBytes(key)
+	if err != nil {
+		return 0, false
+	}
+
+	// Check if the key has a mode prefix and keyspace ID (at least 4 bytes: prefix + 3 bytes ID)
+	if len(decoded) < 4 {
+		return 0, false
+	}
+
+	// Check if it's a raw mode ('r') or txn mode ('x') key
+	prefix := decoded[0]
+	if prefix != 'r' && prefix != 'x' {
+		return 0, false
+	}
+
+	// Extract keyspace ID (3 bytes after the prefix)
+	keyspaceIDBytes := append([]byte{0}, decoded[1:4]...)
+	keyspaceID := binary.BigEndian.Uint32(keyspaceIDBytes)
+
+	return keyspaceID, true
+}
+
+// RegionSpansMultipleKeyspaces checks if a region spans across multiple keyspaces.
+// It returns true if the region crosses keyspace boundaries, false otherwise.
+// startKey is the region start key, endKey is the region end key (exclusive).
+// A region [startKey, endKey) is considered to span multiple keyspaces if endKey
+// is at or beyond the right bound of startKey's keyspace.
+func RegionSpansMultipleKeyspaces(startKey, endKey []byte) bool {
+	// If either key is empty, it may represent infinity boundary
+	// Empty endKey means the region extends to infinity
+	if len(endKey) == 0 {
+		return false
+	}
+
+	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
+	
+	// If start key doesn't have a keyspace ID, cannot determine
+	if !startHasKeyspace {
+		return false
+	}
+
+	// Get the right bound of the start keyspace
+	startBound := MakeRegionBound(startKeyspaceID)
+	
+	// Determine the mode from the start key
+	_, decoded, _ := codec.DecodeBytes(startKey)
+	var rightBound []byte
+	if len(decoded) > 0 && decoded[0] == 'r' {
+		rightBound = startBound.RawRightBound
+	} else {
+		rightBound = startBound.TxnRightBound
+	}
+
+	// If endKey > rightBound, the region spans multiple keyspaces
+	// If endKey <= rightBound, the region is within one keyspace
+	if string(endKey) > string(rightBound) {
+		return true
+	}
+
+	return false
+}
+
+// GetKeyspaceSplitKeys returns the split keys for a region that spans multiple keyspaces.
+// It returns a list of keys where the region should be split to separate keyspaces.
+func GetKeyspaceSplitKeys(startKey, endKey []byte) [][]byte {
+	if len(endKey) == 0 {
+		return nil
+	}
+
+	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
+	
+	// If start key doesn't have a keyspace ID, cannot determine split keys
+	if !startHasKeyspace {
+		return nil
+	}
+
+	// Determine the mode (raw or txn) from the start key
+	_, decoded, _ := codec.DecodeBytes(startKey)
+	isRawMode := len(decoded) > 0 && decoded[0] == 'r'
+
+	var splitKeys [][]byte
+	
+	// Generate split keys starting from the right bound of startKeyspace
+	// Continue until we reach or exceed endKey
+	currentID := startKeyspaceID
+	for {
+		bound := MakeRegionBound(currentID)
+		var rightBound []byte
+		if isRawMode {
+			rightBound = bound.RawRightBound
+		} else {
+			rightBound = bound.TxnRightBound
+		}
+		
+		// If the right bound is >= endKey, we're done
+		if string(rightBound) >= string(endKey) {
+			break
+		}
+		
+		// Add this boundary as a split key
+		splitKeys = append(splitKeys, rightBound)
+		currentID++
+		
+		// Safety check to prevent infinite loops
+		if currentID > constant.MaxValidKeyspaceID {
+			break
+		}
+	}
+
+	return splitKeys
+}

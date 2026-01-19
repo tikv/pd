@@ -303,3 +303,230 @@ func TestDecodeKeyspace(t *testing.T) {
 	re.True(ok)
 	re.Equal(uint32(100), keyspaceID)
 }
+
+func TestExtractKeyspaceID(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		name            string
+		key             []byte
+		expectedID      uint32
+		expectedSuccess bool
+	}{
+		{
+			name:            "empty key",
+			key:             []byte{},
+			expectedID:      0,
+			expectedSuccess: false,
+		},
+		{
+			name:            "keyspace 0 raw mode",
+			key:             MakeRegionBound(0).RawLeftBound,
+			expectedID:      0,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 0 txn mode",
+			key:             MakeRegionBound(0).TxnLeftBound,
+			expectedID:      0,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 100 raw mode",
+			key:             MakeRegionBound(100).RawLeftBound,
+			expectedID:      100,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 100 txn mode",
+			key:             MakeRegionBound(100).TxnLeftBound,
+			expectedID:      100,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 4242 raw mode",
+			key:             MakeRegionBound(4242).RawLeftBound,
+			expectedID:      4242,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 4242 txn mode",
+			key:             MakeRegionBound(4242).TxnLeftBound,
+			expectedID:      4242,
+			expectedSuccess: true,
+		},
+		{
+			name:            "non-keyspace key (table key)",
+			key:             codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			expectedID:      0,
+			expectedSuccess: false,
+		},
+		{
+			name:            "short key",
+			key:             codec.EncodeBytes([]byte{'x'}),
+			expectedID:      0,
+			expectedSuccess: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			id, ok := ExtractKeyspaceID(tc.key)
+			re.Equal(tc.expectedSuccess, ok, "test case: %s", tc.name)
+			if tc.expectedSuccess {
+				re.Equal(tc.expectedID, id, "test case: %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestRegionSpansMultipleKeyspaces(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		name           string
+		startKey       []byte
+		endKey         []byte
+		expectedResult bool
+	}{
+		{
+			name:           "empty end key",
+			startKey:       MakeRegionBound(1).RawLeftBound,
+			endKey:         []byte{},
+			expectedResult: false,
+		},
+		{
+			name:           "same keyspace raw mode",
+			startKey:       MakeRegionBound(100).RawLeftBound,
+			endKey:         MakeRegionBound(100).RawRightBound,
+			expectedResult: false,
+		},
+		{
+			name:           "same keyspace txn mode",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(100).TxnRightBound,
+			expectedResult: false,
+		},
+		{
+			name:           "adjacent keyspace boundary raw mode",
+			startKey:       MakeRegionBound(100).RawLeftBound,
+			endKey:         MakeRegionBound(101).RawLeftBound, // same as rightBound(100)
+			expectedResult: false,                              // [left100, right100) is within keyspace 100
+		},
+		{
+			name:           "span two keyspaces raw mode",
+			startKey:       MakeRegionBound(100).RawLeftBound,
+			endKey:         MakeRegionBound(101).RawRightBound, // beyond keyspace 100
+			expectedResult: true,
+		},
+		{
+			name:           "span two keyspaces txn mode",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(101).TxnRightBound,
+			expectedResult: true,
+		},
+		{
+			name:           "span multiple keyspaces raw mode",
+			startKey:       MakeRegionBound(100).RawLeftBound,
+			endKey:         MakeRegionBound(105).RawRightBound,
+			expectedResult: true,
+		},
+		{
+			name:           "span multiple keyspaces txn mode",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(105).TxnRightBound,
+			expectedResult: true,
+		},
+		{
+			name:           "empty start key",
+			startKey:       []byte{},
+			endKey:         MakeRegionBound(100).RawLeftBound,
+			expectedResult: false,
+		},
+		{
+			name:           "non-keyspace keys",
+			startKey:       codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 4}),
+			expectedResult: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey)
+			re.Equal(tc.expectedResult, result, "test case: %s", tc.name)
+		})
+	}
+}
+
+func TestGetKeyspaceSplitKeys(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		name              string
+		startKey          []byte
+		endKey            []byte
+		expectedSplitKeys int
+	}{
+		{
+			name:              "empty end key",
+			startKey:          MakeRegionBound(1).RawLeftBound,
+			endKey:            []byte{},
+			expectedSplitKeys: 0,
+		},
+		{
+			name:              "same keyspace raw mode",
+			startKey:          MakeRegionBound(100).RawLeftBound,
+			endKey:            MakeRegionBound(100).RawRightBound,
+			expectedSplitKeys: 0, // [left100, right100) is within one keyspace
+		},
+		{
+			name:              "same keyspace txn mode",
+			startKey:          MakeRegionBound(100).TxnLeftBound,
+			endKey:            MakeRegionBound(100).TxnRightBound,
+			expectedSplitKeys: 0,
+		},
+		{
+			name:              "span two keyspaces raw mode",
+			startKey:          MakeRegionBound(100).RawLeftBound,
+			endKey:            MakeRegionBound(101).RawRightBound, // spans keyspace 100 and 101
+			expectedSplitKeys: 1,                                   // one boundary: rightBound(100)
+		},
+		{
+			name:              "span two keyspaces txn mode",
+			startKey:          MakeRegionBound(100).TxnLeftBound,
+			endKey:            MakeRegionBound(101).TxnRightBound,
+			expectedSplitKeys: 1,
+		},
+		{
+			name:              "span 5 keyspaces raw mode",
+			startKey:          MakeRegionBound(100).RawLeftBound,
+			endKey:            MakeRegionBound(105).RawRightBound,
+			expectedSplitKeys: 5, // boundaries at 100, 101, 102, 103, 104
+		},
+		{
+			name:              "span 5 keyspaces txn mode",
+			startKey:          MakeRegionBound(100).TxnLeftBound,
+			endKey:            MakeRegionBound(105).TxnRightBound,
+			expectedSplitKeys: 5,
+		},
+		{
+			name:              "non-keyspace keys",
+			startKey:          codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			endKey:            codec.EncodeBytes([]byte{'t', 1, 2, 4}),
+			expectedSplitKeys: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey)
+			re.Equal(tc.expectedSplitKeys, len(splitKeys), "test case: %s", tc.name)
+
+			// Verify that the split keys are valid and properly ordered
+			if len(splitKeys) > 0 {
+				for i := 0; i < len(splitKeys)-1; i++ {
+					re.True(string(splitKeys[i]) < string(splitKeys[i+1]),
+						"split keys should be in ascending order for test case: %s", tc.name)
+				}
+			}
+		})
+	}
+}
