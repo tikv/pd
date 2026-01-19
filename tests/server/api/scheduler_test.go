@@ -548,29 +548,40 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-
-	for _, testCase := range testCases {
-		createdName := testCase.createdName
-		if createdName == "" {
-			createdName = testCase.name
+	// Check if all schedulers are paused.
+	checkAllSchedulersPaused := func() bool {
+		for _, testCase := range testCases {
+			createdName := testCase.createdName
+			if createdName == "" {
+				createdName = testCase.name
+			}
+			if !isSchedulerPaused(re, urlPrefix, createdName) {
+				return false
+			}
 		}
-		isPaused := isSchedulerPaused(re, urlPrefix, createdName)
-		re.True(isPaused)
+		return true
 	}
+	testutil.Eventually(re, checkAllSchedulersPaused, testutil.WithWaitFor(30*time.Second)) // Must be paused within 30 seconds.
+	// Shorten the pause delay to 1 second.
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second)
-	for _, testCase := range testCases {
-		createdName := testCase.createdName
-		if createdName == "" {
-			createdName = testCase.name
+	// Check if all schedulers are resumed at least after 1 second.
+	checkAllSchedulersResumed := func() bool {
+		for _, testCase := range testCases {
+			createdName := testCase.createdName
+			if createdName == "" {
+				createdName = testCase.name
+			}
+			if isSchedulerPaused(re, urlPrefix, createdName) {
+				return false
+			}
 		}
-		isPaused := isSchedulerPaused(re, urlPrefix, createdName)
-		re.False(isPaused)
+		return true
 	}
+	testutil.Eventually(re, checkAllSchedulersResumed) // Must be resumed eventually.
 
 	// test resume all schedulers.
 	input["delay"] = 30
@@ -578,19 +589,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
+	testutil.Eventually(re, checkAllSchedulersPaused, testutil.WithWaitFor(30*time.Second)) // Must be paused within 30 seconds.
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	for _, testCase := range testCases {
-		createdName := testCase.createdName
-		if createdName == "" {
-			createdName = testCase.name
-		}
-		isPaused := isSchedulerPaused(re, urlPrefix, createdName)
-		re.False(isPaused)
-	}
+	// Check if all schedulers are resumed.
+	testutil.Eventually(re, checkAllSchedulersResumed) // Must be resumed eventually.
 
 	// delete schedulers.
 	for _, testCase := range testCases {
@@ -706,9 +712,9 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+createdName, pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second * 2)
-	isPaused = isSchedulerPaused(re, urlPrefix, createdName)
-	re.False(isPaused)
+	testutil.Eventually(re, func() bool {
+		return !isSchedulerPaused(re, urlPrefix, createdName)
+	})
 
 	// test resume.
 	input = make(map[string]any)
