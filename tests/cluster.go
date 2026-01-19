@@ -654,11 +654,11 @@ func RunServers(servers []*TestServer) error {
 
 // RunInitialServers starts to run servers in InitialServers.
 func (c *TestCluster) RunInitialServers() error {
-	return c.RunInitialServersWithRetry(defaultMaxRetryTimes)
+	return c.runInitialServersWithRetry(defaultMaxRetryTimes)
 }
 
-// RunInitialServersWithRetry starts to run servers with port conflict handling.
-func (c *TestCluster) RunInitialServersWithRetry(maxRetries int) error {
+// runInitialServersWithRetry starts to run servers with port conflict handling.
+func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 	if maxRetries <= 0 {
 		maxRetries = 1
 	}
