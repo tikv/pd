@@ -421,17 +421,6 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 
-		// Test transfer primary to a specific node
-		var newPrimary string
-		for _, member := range nodes {
-			if service == "tso" && !suite.tsoAvailMembers[member.GetAddr()] {
-				continue
-			}
-			if member.GetAddr() != primary {
-				newPrimary = member.Name()
-				break
-			}
-		}
 		// Mock the new primary can not grant leader which means the lease will expire
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
 		newPrimaryData := make(map[string]any)
@@ -451,12 +440,16 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 		// TODO: Add campaign times check in mcs to avoid frequent campaign
-		// for now, close the current primary to mock the server down
-		nodes[newPrimary].Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 
+		// Wait for new primary to be elected after disabling failpoint
+		newPrimary := tests.WaitForPrimaryServing(re, nodes)
+
+		// Close the current primary to mock the server down
+		nodes[newPrimary].Close()
+
 		tests.WaitForPrimaryServing(re, nodes)
-		// Primary should be different with before
+		// Primary should be different with the one we just closed
 		onlyPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(newPrimary, onlyPrimary)
