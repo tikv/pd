@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -237,6 +238,12 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 	} else if bytes.Equal(adjacent.GetEndKey(), region.GetStartKey()) && len(adjacent.GetEndKey()) != 0 {
 		start, end = adjacent.GetStartKey(), region.GetEndKey()
 	} else {
+		return false
+	}
+
+	// Check if merging these regions would span multiple keyspaces
+	// This ensures one region corresponds to one keyspace
+	if keyspace.RegionSpansMultipleKeyspaces(start, end) {
 		return false
 	}
 
