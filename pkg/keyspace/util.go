@@ -362,8 +362,8 @@ func ExtractKeyspaceID(key []byte) (uint32, bool) {
 	}
 
 	// Extract keyspace ID (3 bytes after the prefix)
-	keyspaceIDBytes := append([]byte{0}, decoded[1:4]...)
-	keyspaceID := binary.BigEndian.Uint32(keyspaceIDBytes)
+	// Convert 3 bytes to uint32 by shifting and combining
+	keyspaceID := uint32(decoded[1])<<16 | uint32(decoded[2])<<8 | uint32(decoded[3])
 
 	return keyspaceID, true
 }
