@@ -75,6 +75,9 @@ var (
 	WaitPreAllocKeyspacesInterval = 500 * time.Millisecond
 	// WaitPreAllocKeyspacesRetryTimes represents the maximum number of loops of WaitPreAllocKeyspaces.
 	WaitPreAllocKeyspacesRetryTimes = 100
+
+	// defaultMaxRetryTimes is the default maximum retry times for starting servers.
+	defaultMaxRetryTimes = 5
 )
 
 // TestServer is only for test.
@@ -649,7 +652,7 @@ func RunServers(servers []*TestServer) error {
 
 // RunInitialServers starts to run servers in InitialServers.
 func (c *TestCluster) RunInitialServers() error {
-	return c.RunInitialServersWithRetry(3)
+	return c.RunInitialServersWithRetry(defaultMaxRetryTimes)
 }
 
 // RunInitialServersWithRetry starts to run servers with port conflict handling.
@@ -669,10 +672,9 @@ func (c *TestCluster) RunInitialServersWithRetry(maxRetries int) error {
 			return nil
 		}
 
-		// Check if it's a port conflict
-		isPortConflict := strings.Contains(lastErr.Error(), "address already in use")
-
-		if isPortConflict {
+		errMsg := lastErr.Error()
+		switch {
+		case strings.Contains(errMsg, "address already in use"):
 			log.Warn("port conflict detected, recreating servers with new ports",
 				zap.Int("attempt", i+1),
 				zap.Int("maxRetries", maxRetries),
@@ -716,10 +718,7 @@ func (c *TestCluster) RunInitialServersWithRetry(maxRetries int) error {
 			}
 			time.Sleep(backoff)
 			continue
-		}
-
-		// For non-port-conflict errors, use regular retry
-		if strings.Contains(lastErr.Error(), "ErrStartEtcd") {
+		case strings.Contains(errMsg, "ErrStartEtcd"):
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			for _, s := range servers {
 				if s.State() == Running {
@@ -728,10 +727,10 @@ func (c *TestCluster) RunInitialServersWithRetry(maxRetries int) error {
 			}
 			time.Sleep(100 * time.Millisecond)
 			continue
+		default:
+			// For other errors, don't retry
+			return lastErr
 		}
-
-		// For other errors, don't retry
-		return lastErr
 	}
 	return errors.Wrapf(lastErr, "failed to start servers after %d retries", maxRetries)
 }
