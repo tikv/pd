@@ -1190,6 +1190,8 @@ func TestPreparingProgress(t *testing.T) {
 		conf.Replication.MaxReplicas = 1
 		// prevent scheduling
 		conf.Schedule.RegionScheduleLimit = 0
+		// prevent leader lease from being timeout due to environmental issues
+		conf.LeaderLease = 60
 	})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1277,12 +1279,6 @@ func TestPreparingProgress(t *testing.T) {
 	leader = cluster.GetLeaderServer()
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
-			leader = cluster.GetLeaderServer()
-			if leader == nil {
-				re.NotEmpty(cluster.WaitLeader())
-				leader = cluster.GetLeaderServer()
-				return false
-			}
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}

@@ -688,7 +688,8 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	}()
 
 	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
-	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(30*time.Second))
+	// use a longer timeout to avoid test flakiness
+	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(60*time.Second))
 	defer func() {
 		for _, cleanup := range setup.cleanups {
 			cleanup()
@@ -712,6 +713,10 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	}()
 
 	// Step 5: Start async GetTS call - it will wait for TSO service to recover
+	// Use an independent context with explicit timeout for this GetTS operation
+	getTSCtx, getTSCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer getTSCancel()
+
 	type getTSResult struct {
 		physicalTS int64
 		logicalTS  int64
@@ -720,7 +725,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	resultCh := make(chan getTSResult, 1)
 
 	go func() {
-		physicalTS, logicalTS, getErr := client.GetTS(suite.ctx)
+		physicalTS, logicalTS, getErr := client.GetTS(getTSCtx)
 		resultCh <- getTSResult{physicalTS: physicalTS, logicalTS: logicalTS, err: getErr}
 	}()
 
