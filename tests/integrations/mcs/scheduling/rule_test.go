@@ -201,9 +201,17 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	err = apiRegionLabeler.Patch(patch)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		return len(regionLabeler.GetAllLabelRules()) == 2
+		labelRules = regionLabeler.GetAllLabelRules()
+		if len(labelRules) != 2 {
+			return false
+		}
+		for _, r := range labelRules {
+			if r.ID == "rule2" {
+				return true
+			}
+		}
+		return false
 	})
-	labelRules = regionLabeler.GetAllLabelRules()
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
 	})
