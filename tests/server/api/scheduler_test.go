@@ -909,16 +909,24 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	// check job again
 	testutil.Eventually(re, func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
 		b, err := io.ReadAll(resp.Body)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var scheduler []map[string]any
-		re.NoError(json.Unmarshal(b, &scheduler))
-		re.Len(scheduler, 2)
+		if err := json.Unmarshal(b, &scheduler); err != nil {
+			return false
+		}
+		if len(scheduler) != 2 {
+			return false
+		}
 		slices.SortFunc(scheduler, func(a, b map[string]any) int {
 			aID := a["job-id"].(float64)
 			bID := b["job-id"].(float64)
@@ -930,8 +938,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 			}
 			return -1
 		})
-		re.Equal("cancelled", scheduler[1]["status"])
-		return true
+		return scheduler[1]["status"] == "cancelled"
 	})
 	// delete scheduler
 	deleteURL := fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceRangeScheduler.String())
