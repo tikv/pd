@@ -37,6 +37,27 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
+// keyspaceCheckerWrapperForMerge wraps the cluster to provide keyspace existence checking for merge.
+type keyspaceCheckerWrapperForMerge struct {
+	cluster sche.SharedCluster
+}
+
+// KeyspaceExists checks if a keyspace exists by probing the cluster interface.
+func (w *keyspaceCheckerWrapperForMerge) KeyspaceExists(id uint32) bool {
+	// Try to get the keyspace manager from the cluster
+	type keyspaceManagerGetter interface {
+		GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool }
+	}
+	if kg, ok := w.cluster.(keyspaceManagerGetter); ok {
+		if km := kg.GetKeyspaceManager(); km != nil {
+			return km.KeyspaceExists(id)
+		}
+	}
+	// If we can't get the keyspace manager, assume the keyspace exists
+	// to maintain backward compatibility
+	return true
+}
+
 const (
 	maxTargetRegionSize   = 500
 	maxTargetRegionFactor = 4
@@ -243,7 +264,8 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 
 	// Check if merging these regions would span multiple keyspaces
 	// This ensures one region corresponds to one keyspace
-	if keyspace.RegionSpansMultipleKeyspaces(start, end) {
+	checker := &keyspaceCheckerWrapperForMerge{cluster: cluster}
+	if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
 		return false
 	}
 

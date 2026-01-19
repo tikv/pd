@@ -337,7 +337,8 @@ func isProtectedKeyspaceName(name string) bool {
 
 // ExtractKeyspaceID extracts the keyspace ID from a region key.
 // It returns the keyspace ID and a boolean indicating whether the key contains a valid keyspace ID.
-// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'r' for raw or 'x' for txn.
+// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'x' for txn.
+// Only txn mode keys are supported.
 func ExtractKeyspaceID(key []byte) (uint32, bool) {
 	// Empty key represents the start of the entire key space (no keyspace)
 	if len(key) == 0 {
@@ -355,9 +356,9 @@ func ExtractKeyspaceID(key []byte) (uint32, bool) {
 		return 0, false
 	}
 
-	// Check if it's a raw mode ('r') or txn mode ('x') key
+	// Check if it's a txn mode ('x') key - raw mode is not supported
 	prefix := decoded[0]
-	if prefix != 'r' && prefix != 'x' {
+	if prefix != 'x' {
 		return 0, false
 	}
 
@@ -368,89 +369,115 @@ func ExtractKeyspaceID(key []byte) (uint32, bool) {
 	return keyspaceID, true
 }
 
+// KeyspaceChecker is an interface to check if a keyspace exists.
+type KeyspaceChecker interface {
+	// KeyspaceExists checks if a keyspace with the given ID exists.
+	KeyspaceExists(id uint32) bool
+}
+
 // RegionSpansMultipleKeyspaces checks if a region spans across multiple keyspaces.
 // It returns true if the region crosses keyspace boundaries, false otherwise.
 // startKey is the region start key, endKey is the region end key (exclusive).
-// A region [startKey, endKey) is considered to span multiple keyspaces if endKey
-// is at or beyond the right bound of startKey's keyspace.
-func RegionSpansMultipleKeyspaces(startKey, endKey []byte) bool {
-	// If either key is empty, it may represent infinity boundary
-	// Empty endKey means the region extends to infinity
+// A region [startKey, endKey) spans multiple keyspaces if:
+// 1. startKey and endKey have different keyspace IDs, AND
+// 2. endKey is NOT exactly at the right bound of startKey's keyspace (i.e., not just at the boundary), AND
+// 3. All keyspaces that the region actually spans exist (checked via checker)
+func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker KeyspaceChecker) bool {
+	// If endKey is empty, it represents infinity boundary
 	if len(endKey) == 0 {
 		return false
 	}
 
 	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
-	
-	// If start key doesn't have a keyspace ID, cannot determine
-	if !startHasKeyspace {
+	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
+
+	// If either key doesn't have a keyspace ID, cannot determine
+	if !startHasKeyspace || !endHasKeyspace {
 		return false
 	}
 
-	// Get the right bound of the start keyspace
-	startBound := MakeRegionBound(startKeyspaceID)
-	
-	// Determine the mode from the start key
-	_, decoded, _ := codec.DecodeBytes(startKey)
-	var rightBound []byte
-	if len(decoded) > 0 && decoded[0] == 'r' {
-		rightBound = startBound.RawRightBound
-	} else {
-		rightBound = startBound.TxnRightBound
+	// If keyspace IDs are the same, definitely within one keyspace
+	if startKeyspaceID == endKeyspaceID {
+		return false
 	}
 
-	// If endKey > rightBound, the region spans multiple keyspaces
-	// If endKey <= rightBound, the region is within one keyspace
-	if string(endKey) > string(rightBound) {
-		return true
+	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
+	// check if endKey is at the exact boundary (right bound of startKeyspace)
+	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace
+	if endKeyspaceID == startKeyspaceID+1 {
+		startBound := MakeRegionBound(startKeyspaceID)
+		// endKey == TxnRightBound means the region is [startKey, rightBound of startKeyspace)
+		// which is still within one keyspace
+		if string(endKey) == string(startBound.TxnRightBound) {
+			return false
+		}
 	}
 
-	return false
+	// Check if all keyspaces that the region spans (between start and end, exclusive of endKeyspace)
+	// exist. Since endKey is exclusive, we check up to endKeyspaceID-1.
+	// If any keyspace doesn't exist (deleted), don't enforce the boundary
+	if checker != nil {
+		for id := startKeyspaceID; id < endKeyspaceID; id++ {
+			if !checker.KeyspaceExists(id) {
+				return false
+			}
+		}
+	}
+
+	// Otherwise, the region spans multiple keyspaces
+	return true
 }
 
 // GetKeyspaceSplitKeys returns the split keys for a region that spans multiple keyspaces.
 // It returns a list of keys where the region should be split to separate keyspaces.
-func GetKeyspaceSplitKeys(startKey, endKey []byte) [][]byte {
+// Only returns split keys for keyspaces that exist (checked via checker).
+func GetKeyspaceSplitKeys(startKey, endKey []byte, checker KeyspaceChecker) [][]byte {
 	if len(endKey) == 0 {
 		return nil
 	}
 
 	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
-	
-	// If start key doesn't have a keyspace ID, cannot determine split keys
-	if !startHasKeyspace {
+	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
+
+	// If either key doesn't have a keyspace ID, cannot determine split keys
+	if !startHasKeyspace || !endHasKeyspace {
 		return nil
 	}
 
-	// Determine the mode (raw or txn) from the start key
-	_, decoded, _ := codec.DecodeBytes(startKey)
-	isRawMode := len(decoded) > 0 && decoded[0] == 'r'
+	// If same keyspace, no split needed
+	if startKeyspaceID == endKeyspaceID {
+		return nil
+	}
+
+	// Check if the start keyspace exists
+	if checker != nil && !checker.KeyspaceExists(startKeyspaceID) {
+		return nil
+	}
 
 	var splitKeys [][]byte
-	
-	// Generate split keys starting from the right bound of startKeyspace
-	// Continue until we reach or exceed endKey
-	currentID := startKeyspaceID
-	for {
-		bound := MakeRegionBound(currentID)
-		var rightBound []byte
-		if isRawMode {
-			rightBound = bound.RawRightBound
-		} else {
-			rightBound = bound.TxnRightBound
+
+	// Generate split keys for each keyspace boundary between start and end
+	// Only include boundaries for keyspaces that exist
+	for currentID := startKeyspaceID; currentID < endKeyspaceID; currentID++ {
+		// Check if the next keyspace exists before adding a split key
+		nextID := currentID + 1
+		if checker != nil && !checker.KeyspaceExists(nextID) {
+			continue
 		}
-		
+
+		bound := MakeRegionBound(currentID)
+		rightBound := bound.TxnRightBound
+
 		// If the right bound is >= endKey, we're done
 		if string(rightBound) >= string(endKey) {
 			break
 		}
-		
+
 		// Add this boundary as a split key
 		splitKeys = append(splitKeys, rightBound)
-		currentID++
-		
+
 		// Safety check to prevent infinite loops
-		if currentID > constant.MaxValidKeyspaceID {
+		if currentID >= constant.MaxValidKeyspaceID {
 			break
 		}
 	}

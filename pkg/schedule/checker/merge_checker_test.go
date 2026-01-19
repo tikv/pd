@@ -614,8 +614,8 @@ func TestKeyspaceMerge(t *testing.T) {
 	bound102 := keyspace.MakeRegionBound(102)
 
 	// Test 1: Two regions in the same keyspace should be mergeable
-	region1 := newRegionInfo(1, string(bound100.RawLeftBound), string(bound100.RawRightBound[:len(bound100.RawRightBound)/2]), 1, 1, []uint64{1, 1}, []uint64{1, 1})
-	region2 := newRegionInfo(2, string(bound100.RawRightBound[:len(bound100.RawRightBound)/2]), string(bound100.RawRightBound), 1, 1, []uint64{2, 1}, []uint64{2, 1})
+	region1 := newRegionInfo(1, string(bound100.TxnLeftBound), string(bound100.TxnRightBound[:len(bound100.TxnRightBound)/2]), 1, 1, []uint64{1, 1}, []uint64{1, 1})
+	region2 := newRegionInfo(2, string(bound100.TxnRightBound[:len(bound100.TxnRightBound)/2]), string(bound100.TxnRightBound), 1, 1, []uint64{2, 1}, []uint64{2, 1})
 	
 	cluster.PutRegion(region1)
 	cluster.PutRegion(region2)
@@ -624,8 +624,8 @@ func TestKeyspaceMerge(t *testing.T) {
 	re.True(AllowMerge(cluster, region1, region2), "regions in the same keyspace should be mergeable")
 
 	// Test 2: Two regions in different keyspaces should NOT be mergeable
-	region3 := newRegionInfo(3, string(bound100.RawLeftBound), string(bound100.RawRightBound), 1, 1, []uint64{3, 1}, []uint64{3, 1})
-	region4 := newRegionInfo(4, string(bound101.RawLeftBound), string(bound101.RawRightBound), 1, 1, []uint64{4, 1}, []uint64{4, 1})
+	region3 := newRegionInfo(3, string(bound100.TxnLeftBound), string(bound100.TxnRightBound), 1, 1, []uint64{3, 1}, []uint64{3, 1})
+	region4 := newRegionInfo(4, string(bound101.TxnLeftBound), string(bound101.TxnRightBound), 1, 1, []uint64{4, 1}, []uint64{4, 1})
 	
 	cluster.PutRegion(region3)
 	cluster.PutRegion(region4)
@@ -634,22 +634,12 @@ func TestKeyspaceMerge(t *testing.T) {
 	re.False(AllowMerge(cluster, region3, region4), "regions from different keyspaces should not be mergeable")
 
 	// Test 3: Merging would create a region spanning multiple keyspaces - should not be allowed
-	region5 := newRegionInfo(5, string(bound100.RawLeftBound), string(bound101.RawLeftBound), 1, 1, []uint64{5, 1}, []uint64{5, 1})
-	region6 := newRegionInfo(6, string(bound101.RawLeftBound), string(bound102.RawLeftBound), 1, 1, []uint64{6, 1}, []uint64{6, 1})
+	region5 := newRegionInfo(5, string(bound100.TxnLeftBound), string(bound101.TxnLeftBound), 1, 1, []uint64{5, 1}, []uint64{5, 1})
+	region6 := newRegionInfo(6, string(bound101.TxnLeftBound), string(bound102.TxnLeftBound), 1, 1, []uint64{6, 1}, []uint64{6, 1})
 	
 	cluster.PutRegion(region5)
 	cluster.PutRegion(region6)
 	
 	// Merging these would span from keyspace 100 to keyspace 102
 	re.False(AllowMerge(cluster, region5, region6), "merging should not create a region spanning multiple keyspaces")
-
-	// Test 4: Txn mode regions should also follow the same rules
-	region7 := newRegionInfo(7, string(bound100.TxnLeftBound), string(bound100.TxnRightBound), 1, 1, []uint64{7, 1}, []uint64{7, 1})
-	region8 := newRegionInfo(8, string(bound101.TxnLeftBound), string(bound101.TxnRightBound), 1, 1, []uint64{8, 1}, []uint64{8, 1})
-	
-	cluster.PutRegion(region7)
-	cluster.PutRegion(region8)
-	
-	// Txn mode regions from different keyspaces should not allow merge
-	re.False(AllowMerge(cluster, region7, region8), "txn mode regions from different keyspaces should not be mergeable")
 }

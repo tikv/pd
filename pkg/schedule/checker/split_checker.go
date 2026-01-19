@@ -27,6 +27,27 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 )
 
+// keyspaceCheckerWrapper wraps the cluster to provide keyspace existence checking.
+type keyspaceCheckerWrapper struct {
+	cluster sche.CheckerCluster
+}
+
+// KeyspaceExists checks if a keyspace exists by probing the cluster interface.
+func (w *keyspaceCheckerWrapper) KeyspaceExists(id uint32) bool {
+	// Try to get the keyspace manager from the cluster
+	type keyspaceManagerGetter interface {
+		GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool }
+	}
+	if kg, ok := w.cluster.(keyspaceManagerGetter); ok {
+		if km := kg.GetKeyspaceManager(); km != nil {
+			return km.KeyspaceExists(id)
+		}
+	}
+	// If we can't get the keyspace manager, assume the keyspace exists
+	// to maintain backward compatibility
+	return true
+}
+
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
 	PauseController
@@ -62,9 +83,10 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	
 	// First check if the region spans multiple keyspaces
 	// This ensures one region corresponds to one keyspace
-	if keyspace.RegionSpansMultipleKeyspaces(start, end) {
+	checker := &keyspaceCheckerWrapper{cluster: c.cluster}
+	if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
 		desc := "keyspace-split-region"
-		keys := keyspace.GetKeyspaceSplitKeys(start, end)
+		keys := keyspace.GetKeyspaceSplitKeys(start, end, checker)
 		if len(keys) > 0 {
 			op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
 			if err != nil {

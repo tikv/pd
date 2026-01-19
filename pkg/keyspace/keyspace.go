@@ -864,6 +864,13 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	return actual.(string), nil
 }
 
+// KeyspaceExists checks if a keyspace with the given ID exists in the cache.
+// This is used to determine if keyspace boundaries should be enforced during split/merge.
+func (manager *Manager) KeyspaceExists(id uint32) bool {
+	_, ok := manager.keyspaceNameLookup.Load(id)
+	return ok
+}
+
 // ScanAllKeyspace scans all keyspaces and applies the given function.
 func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string)) {
 	manager.keyspaceNameLookup.Range(func(key, value any) bool {
