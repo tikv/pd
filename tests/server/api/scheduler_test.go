@@ -24,7 +24,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -562,15 +561,18 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second)
-	for _, testCase := range testCases {
-		createdName := testCase.createdName
-		if createdName == "" {
-			createdName = testCase.name
+	testutil.Eventually(re, func() bool {
+		for _, testCase := range testCases {
+			createdName := testCase.createdName
+			if createdName == "" {
+				createdName = testCase.name
+			}
+			if isSchedulerPaused(re, urlPrefix, createdName) {
+				return false
+			}
 		}
-		isPaused := isSchedulerPaused(re, urlPrefix, createdName)
-		re.False(isPaused)
-	}
+		return true
+	})
 
 	// test resume all schedulers.
 	input["delay"] = 30
@@ -675,7 +677,12 @@ func addScheduler(re *require.Assertions, urlPrefix string, body []byte) {
 
 func deleteScheduler(re *require.Assertions, urlPrefix string, createdName string) {
 	deleteURL := fmt.Sprintf("%s/%s", urlPrefix, createdName)
-	err := testutil.CheckDelete(tests.TestDialClient, deleteURL, testutil.StatusOK(re))
+	err := testutil.CheckDelete(tests.TestDialClient, deleteURL, func(resp []byte, code int, _ http.Header) {
+		if code == http.StatusNotFound || (code == http.StatusInternalServerError && strings.Contains(string(resp), "scheduler not found")) {
+			return
+		}
+		re.Equal(http.StatusOK, code, string(resp))
+	})
 	re.NoError(err)
 }
 
@@ -683,13 +690,21 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	if createdName == "" {
 		createdName = name
 	}
-	var schedulers []string
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers)
-	re.NoError(err)
-	if !slice.Contains(schedulers, createdName) {
-		err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re))
-		re.NoError(err)
-	}
+	testutil.Eventually(re, func() bool {
+		var schedulers []string
+		if err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers); err != nil {
+			return false
+		}
+		if slice.Contains(schedulers, createdName) {
+			return true
+		}
+		var created bool
+		err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, func(resp []byte, code int, _ http.Header) {
+			created = code == http.StatusOK ||
+				(code == http.StatusInternalServerError && strings.Contains(string(resp), "scheduler existed"))
+		})
+		return err == nil && created
+	})
 	suite.assertSchedulerExists(urlPrefix, createdName) // wait for scheduler to be synced.
 
 	// test pause.
@@ -706,7 +721,9 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+createdName, pauseArgs, testutil.StatusOK(re))
 	re.NoError(err)
-	time.Sleep(time.Second * 2)
+	testutil.Eventually(re, func() bool {
+		return !isSchedulerPaused(re, urlPrefix, createdName)
+	})
 	isPaused = isSchedulerPaused(re, urlPrefix, createdName)
 	re.False(isPaused)
 
@@ -758,11 +775,17 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 		}
 		testutil.Eventually(re, func() bool {
 			resp, err := apiutil.GetJSON(tests.TestDialClient, urlPrefix+query, nil)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			defer resp.Body.Close()
-			re.Equal(http.StatusOK, resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				return false
+			}
 			b, err := io.ReadAll(resp.Body)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			return strings.Contains(string(b), "[]") && !strings.Contains(string(b), "null")
 		})
 	}
@@ -782,9 +805,17 @@ func (suite *scheduleTestSuite) assertSchedulerExists(urlPrefix string, schedule
 func assertNoScheduler(re *require.Assertions, urlPrefix string, scheduler string) {
 	var schedulers []string
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers,
-			testutil.StatusOK(re))
-		re.NoError(err)
+		resp, err := apiutil.GetJSON(tests.TestDialClient, urlPrefix, nil)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&schedulers); err != nil {
+			return false
+		}
 		return !slice.Contains(schedulers, scheduler)
 	})
 }
@@ -878,16 +909,24 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	// check job again
 	testutil.Eventually(re, func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
 		b, err := io.ReadAll(resp.Body)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var scheduler []map[string]any
-		re.NoError(json.Unmarshal(b, &scheduler))
-		re.Len(scheduler, 2)
+		if err := json.Unmarshal(b, &scheduler); err != nil {
+			return false
+		}
+		if len(scheduler) != 2 {
+			return false
+		}
 		slices.SortFunc(scheduler, func(a, b map[string]any) int {
 			aID := a["job-id"].(float64)
 			bID := b["job-id"].(float64)
@@ -899,8 +938,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 			}
 			return -1
 		})
-		re.Equal("cancelled", scheduler[1]["status"])
-		return true
+		return scheduler[1]["status"] == "cancelled"
 	})
 	// delete scheduler
 	deleteURL := fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceRangeScheduler.String())

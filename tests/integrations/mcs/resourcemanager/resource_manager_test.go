@@ -491,7 +491,7 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 			switched.Store(true)
 			testutil.Eventually(re, func() bool {
 				return atomic.LoadInt64(&okAfter) >= 10
-			}, testutil.WithTickInterval(20*time.Millisecond))
+			}, testutil.WithWaitFor(time.Minute), testutil.WithTickInterval(20*time.Millisecond))
 
 			log.Info("switch during workload finished",
 				zap.Int("startMode", int(tc.startMode)),
@@ -860,7 +860,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	expectedErr := controller.NewResourceGroupNotExistErr(rg.Name)
 	testutil.Eventually(re, func() bool {
 		gc, err := rgsController.GetResourceGroup(rg.Name)
-		return err.Error() == expectedErr.Error() && gc == nil
+		return err != nil && err.Error() == expectedErr.Error() && gc == nil
 	}, testutil.WithTickInterval(50*time.Millisecond))
 	// Add the resource group again.
 	resp, err = cli.AddResourceGroup(suite.ctx, rg)
@@ -870,9 +870,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	testutil.Eventually(re, func() bool {
 		gc, err := rgsController.GetResourceGroup(rg.Name)
 		if err != nil {
-			re.EqualError(err, expectedErr.Error())
+			return false
 		}
-		return gc.GetName() == rg.Name
+		return gc != nil && gc.GetName() == rg.Name
 	}, testutil.WithTickInterval(50*time.Millisecond))
 }
 

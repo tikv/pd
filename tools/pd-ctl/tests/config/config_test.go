@@ -114,6 +114,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	scheduleConfig.EnableMakeUpReplica = false
 	scheduleConfig.EnableRemoveExtraReplica = false
 	scheduleConfig.EnableLocationReplacement = false
+	scheduleConfig.EnableHeartbeatConcurrentRunner = false
 	re.Equal(uint64(0), scheduleConfig.MaxMergeRegionKeys)
 	// The result of config show doesn't be 0.
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()

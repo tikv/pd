@@ -21,10 +21,12 @@ import (
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // Manager is the manager of meta storage.
 type Manager struct {
+	syncutil.RWMutex
 	srv    bs.Server
 	client *clientv3.Client
 }
@@ -35,6 +37,8 @@ func NewManager(srv bs.Server) *Manager {
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
 		log.Info("meta storage starts to initialize", zap.String("name", srv.Name()))
+		m.Lock()
+		defer m.Unlock()
 		m.client = srv.GetClient()
 		m.srv = srv
 	})
@@ -43,5 +47,14 @@ func NewManager(srv bs.Server) *Manager {
 
 // GetClient returns the client of etcd.
 func (m *Manager) GetClient() *clientv3.Client {
+	m.RLock()
+	defer m.RUnlock()
 	return m.client
+}
+
+// GetServer returns the server.
+func (m *Manager) GetServer() bs.Server {
+	m.RLock()
+	defer m.RUnlock()
+	return m.srv
 }

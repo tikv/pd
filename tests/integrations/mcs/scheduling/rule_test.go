@@ -110,9 +110,9 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	err = apiRuleManager.SetRule(rule)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		rules = ruleManager.GetAllRules()
-		return len(rules) == 2
+		return len(ruleManager.GetAllRules()) == 2
 	})
+	rules = ruleManager.GetAllRules()
 	sort.Slice(rules, func(i, j int) bool {
 		return rules[i].ID > rules[j].ID
 	})
@@ -127,9 +127,9 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	err = apiRuleManager.DeleteRule(rule.GroupID, rule.ID)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		rules = ruleManager.GetAllRules()
-		return len(rules) == 1
+		return len(ruleManager.GetAllRules()) == 1
 	})
+	rules = ruleManager.GetAllRules()
 	re.Len(rules, 1)
 	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
 	// Create a new rule group.
@@ -141,9 +141,9 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	err = apiRuleManager.SetRuleGroup(ruleGroup)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		ruleGroups = ruleManager.GetRuleGroups()
-		return len(ruleGroups) == 2
+		return len(ruleManager.GetRuleGroups()) == 2
 	})
+	ruleGroups = ruleManager.GetRuleGroups()
 	re.Len(ruleGroups, 2)
 	re.Equal(ruleGroup.ID, ruleGroups[1].ID)
 	re.Equal(ruleGroup.Index, ruleGroups[1].Index)
@@ -152,9 +152,9 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	err = apiRuleManager.DeleteRuleGroup(ruleGroup.ID)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		ruleGroups = ruleManager.GetRuleGroups()
-		return len(ruleGroups) == 1
+		return len(ruleManager.GetRuleGroups()) == 1
 	})
+	ruleGroups = ruleManager.GetRuleGroups()
 	re.Len(ruleGroups, 1)
 
 	// Test the region label rule watch.
@@ -177,9 +177,9 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	err = apiRegionLabeler.SetLabelRule(labelRule)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		labelRules = regionLabeler.GetAllLabelRules()
-		return len(labelRules) == 2
+		return len(regionLabeler.GetAllLabelRules()) == 2
 	})
+	labelRules = regionLabeler.GetAllLabelRules()
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
 	})
@@ -202,7 +202,15 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		labelRules = regionLabeler.GetAllLabelRules()
-		return len(labelRules) == 2
+		if len(labelRules) != 2 {
+			return false
+		}
+		for _, r := range labelRules {
+			if r.ID == "rule2" {
+				return true
+			}
+		}
+		return false
 	})
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID

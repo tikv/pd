@@ -171,7 +171,7 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := strings.TrimPrefix(string(kv.Key), sc.TTLConfigPrefix+"/")
-		cw.ttl.PutWithTTL(key, nil, 0)
+		cw.ttl.Remove(key)
 		return nil
 	}
 	cw.ttlConfigWatcher = etcdutil.NewLoopWatcher(

@@ -612,14 +612,24 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 		err = testutil.CheckDelete(tests.TestDialClient, url, testutil.StatusOK(re))
 		re.NoError(err)
 		if len(testCase.popKeyRange) > 0 {
+			// In microservice mode, there's a sync delay before suspect key ranges are populated.
+			// Use Eventually to wait for the key ranges to be available.
 			popKeyRangeMap := map[string]struct{}{}
-			for range len(testCase.popKeyRange) / 2 {
-				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
-				re.True(got)
-				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
-				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
-			}
-			re.Len(popKeyRangeMap, len(testCase.popKeyRange))
+			testutil.Eventually(re, func() bool {
+				remaining := len(testCase.popKeyRange) - len(popKeyRangeMap)
+				if remaining <= 0 {
+					return true
+				}
+				for range remaining / 2 {
+					v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
+					if !got {
+						return false
+					}
+					popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+					popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
+				}
+				return len(popKeyRangeMap) == len(testCase.popKeyRange)
+			})
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				re.True(ok)
@@ -1356,8 +1366,15 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		Count:       1,
 	})
 	re.NoError(err)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// Wait for the scheduling server to sync the rule updates via etcd watchers.
+		testutil.Eventually(re, func() bool {
+			scheRuleManager := sche.GetCluster().GetRuleManager()
+			return scheRuleManager.GetRule("test", "test2") != nil &&
+				scheRuleManager.GetRule("test", "test3") != nil
+		})
+	}
 	fit := &placement.RegionFit{}
-
 	u := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
 	re.NoError(err)
