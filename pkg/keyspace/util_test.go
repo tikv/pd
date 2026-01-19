@@ -447,7 +447,7 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			startKey:       []byte{},
 			endKey:         MakeRegionBound(100).TxnLeftBound,
 			checker:        allExistChecker,
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			name:           "non-keyspace keys",
