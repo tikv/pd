@@ -70,6 +70,8 @@ func (tc *TestSchedulingCluster) AddServer(addr string) error {
 	if err != nil {
 		return err
 	}
+	// disable the heartbeat async runner in test, same as tests/cluster.go
+	generatedCfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err = InitLogger(generatedCfg.Log, generatedCfg.Logger, generatedCfg.LogProps, generatedCfg.Security.RedactInfoLog)
 	if err != nil {
 		return err
