@@ -47,6 +47,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
@@ -112,6 +114,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 	if len(handlers) > 0 {
 		serviceBuilders = append(serviceBuilders, handlers...)
 	} else {
+		serviceBuilders = []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 		if swaggerserver.Enabled() {
 			serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 		}
