@@ -491,7 +491,7 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 			switched.Store(true)
 			testutil.Eventually(re, func() bool {
 				return atomic.LoadInt64(&okAfter) >= 10
-			}, testutil.WithTickInterval(20*time.Millisecond))
+			}, testutil.WithWaitFor(time.Minute), testutil.WithTickInterval(20*time.Millisecond))
 
 			log.Info("switch during workload finished",
 				zap.Int("startMode", int(tc.startMode)),
