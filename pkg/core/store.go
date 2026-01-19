@@ -24,6 +24,7 @@ import (
 	"github.com/docker/go-units"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -1118,4 +1119,15 @@ func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
 	return !s.IsRemoved() && s.IsTiKV() && s.GetLeaderCount() != 0
+}
+
+// ValidateStoreEngineKey checks if the engine label value is valid.
+// Valid values are: "", "tikv", "tiflash", "tiflash_compute".
+func ValidateStoreEngineKey(store *metapb.Store) error {
+	val := getStoreLabelValue(store, EngineKey)
+	if val == "" || val == EngineTiKV || val == EngineTiFlash || val == EngineTiFlashCompute {
+		return nil
+	}
+	return errors.Errorf("invalid store engine label value: %q, valid values are %q, %q, %q or empty",
+		val, EngineTiKV, EngineTiFlash, EngineTiFlashCompute)
 }
