@@ -327,19 +327,18 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
 		resp.Body.Close()
-
-		tests.WaitForPrimaryServing(re, nodes)
-		newPrimary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
-		re.NoError(err)
-		re.NotEqual(primary, newPrimary)
-
+		// The new primary should be different with before.
+		testutil.Eventually(re, func() bool {
+			newPrimary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
+			return err == nil && len(newPrimary) > 0 && newPrimary != primary
+		})
 		// Close primary to push other nodes campaign primary
 		nodes[newPrimary].Close()
-		tests.WaitForPrimaryServing(re, nodes)
-		// Primary should be different with before
-		anotherPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
-		re.NoError(err)
-		re.NotEqual(newPrimary, anotherPrimary)
+		// Primary should be different with before again.
+		testutil.Eventually(re, func() bool {
+			anotherPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
+			return err == nil && len(anotherPrimary) > 0 && anotherPrimary != newPrimary
+		})
 	}
 }
 
