@@ -315,8 +315,8 @@ func TestExtractKeyspaceID(t *testing.T) {
 		{
 			name:            "empty key",
 			key:             []byte{},
-			expectedID:      0,
-			expectedSuccess: false,
+			expectedID:      constant.MaxValidKeyspaceID,
+			expectedSuccess: true,
 		},
 		{
 			name:            "keyspace 0 txn mode",
@@ -363,7 +363,7 @@ func TestExtractKeyspaceID(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name, func(_ *testing.T) {
 			id, ok := ExtractKeyspaceID(tc.key)
 			re.Equal(tc.expectedSuccess, ok, "test case: %s", tc.name)
 			if tc.expectedSuccess {
@@ -387,10 +387,10 @@ func (m *mockKeyspaceChecker) KeyspaceExists(id uint32) bool {
 
 func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 	re := require.New(t)
-	
+
 	// Mock checker where all keyspaces exist
 	allExistChecker := &mockKeyspaceChecker{}
-	
+
 	// Mock checker where only specific keyspaces exist
 	specificChecker := &mockKeyspaceChecker{
 		existingKeyspaces: map[uint32]bool{
@@ -399,7 +399,7 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			105: true,
 		},
 	}
-	
+
 	testCases := []struct {
 		name           string
 		startKey       []byte
@@ -482,10 +482,10 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 
 func TestGetKeyspaceSplitKeys(t *testing.T) {
 	re := require.New(t)
-	
+
 	// Mock checker where all keyspaces exist
 	allExistChecker := &mockKeyspaceChecker{}
-	
+
 	// Mock checker where only specific keyspaces exist
 	specificChecker := &mockKeyspaceChecker{
 		existingKeyspaces: map[uint32]bool{
@@ -495,7 +495,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			// 103, 104, 105 don't exist
 		},
 	}
-	
+
 	testCases := []struct {
 		name              string
 		startKey          []byte

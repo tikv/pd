@@ -342,7 +342,7 @@ func isProtectedKeyspaceName(name string) bool {
 func ExtractKeyspaceID(key []byte) (uint32, bool) {
 	// Empty key represents the start of the entire key space (no keyspace)
 	if len(key) == 0 {
-		return 0, false
+		return constant.MaxValidKeyspaceID, true
 	}
 
 	// Decode the key
