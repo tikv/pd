@@ -180,7 +180,7 @@ type Cli struct {
 	// updateConnectionCh is used to trigger the connection update actively.
 	updateConnectionCh chan struct{}
 
-	// msDiscovery is the service discovery for the router mcs service.
+	// msDiscovery is the service discovery for the router service.
 	msDiscovery sd.ServiceDiscovery
 	// msConCtxMgr is used to store the context of the router service stream connection.
 	msConCtxMgr *cctx.Manager[routerpb.Router_QueryRegionClient]
@@ -196,7 +196,7 @@ type Cli struct {
 func NewClient(
 	ctx context.Context,
 	svcDiscovery sd.ServiceDiscovery,
-	mcsSvcDiscovery sd.ServiceDiscovery,
+	msDiscovery sd.ServiceDiscovery,
 	option *opt.Option,
 ) *Cli {
 	ctx, cancel := context.WithCancel(ctx)
@@ -208,7 +208,7 @@ func NewClient(
 		conCtxMgr:          cctx.NewManager[pdpb.PD_QueryRegionClient](),
 		updateConnectionCh: make(chan struct{}, 1),
 		msConCtxMgr:        cctx.NewManager[routerpb.Router_QueryRegionClient](),
-		msDiscovery:        mcsSvcDiscovery,
+		msDiscovery:        msDiscovery,
 		bo: retry.InitialBackoffer(
 			sd.UpdateMemberBackOffBaseTime,
 			sd.UpdateMemberMaxBackoffTime,
@@ -376,7 +376,7 @@ func (c *Cli) getAllClientConns() map[string]*grpc.ClientConn {
 	return conns
 }
 
-func (c *Cli) getAllMcsClientConns() map[string]*grpc.ClientConn {
+func (c *Cli) getAllMsClientConns() map[string]*grpc.ClientConn {
 	if c.msDiscovery == nil {
 		return nil
 	}
@@ -417,7 +417,7 @@ func (c *Cli) connectionDaemon() {
 	log.Info("[router] connection daemon is started")
 	for {
 		c.updateConnection(updaterCtx)
-		c.updateMcsServiceConnection(updaterCtx)
+		c.updateMsConnection(updaterCtx)
 		select {
 		case <-updaterCtx.Done():
 			log.Info("[router] connection daemon is exiting")
@@ -434,11 +434,11 @@ func (c *Cli) connectionDaemon() {
 	}
 }
 
-func (c *Cli) updateMcsServiceConnection(ctx context.Context) {
+func (c *Cli) updateMsConnection(ctx context.Context) {
 	if c.msDiscovery == nil {
 		return
 	}
-	conns := c.getAllMcsClientConns()
+	conns := c.getAllMsClientConns()
 	if len(conns) == 0 {
 		log.Warn("[router] no router service node found")
 		return
@@ -610,7 +610,7 @@ batchLoop:
 				continue batchLoop
 			default:
 			}
-			processQueryFunc, streamURL = c.sendToMcs(ctx)
+			processQueryFunc, streamURL = c.sendToMs(ctx)
 			if processQueryFunc == nil {
 				processQueryFunc, streamURL, retry = c.sendToPD(ctx)
 			}
@@ -670,8 +670,8 @@ func (c *Cli) sendToPD(ctx context.Context) (processFn, string, bool) {
 
 type processFn func() error
 
-// sendToMcs returns the stream function, stream url
-func (c *Cli) sendToMcs(ctx context.Context) (processFn, string) {
+// sendToMs returns the stream function, stream url
+func (c *Cli) sendToMs(ctx context.Context) (processFn, string) {
 	allowRouterServiceHandle := c.msConCtxMgr.Size() > 0
 	if allowRouterServiceHandle {
 		// We need to ensure all requests in a same batch allow to be handled by the router service.
@@ -690,7 +690,7 @@ func (c *Cli) sendToMcs(ctx context.Context) (processFn, string) {
 	connectionCtx := c.msConCtxMgr.RandomlyPick()
 	if connectionCtx == nil {
 		log.Info("[router] router service stream connection is not ready")
-		c.updateMcsServiceConnection(ctx)
+		c.updateMsConnection(ctx)
 		return nil, ""
 	}
 	streamCtx, streamURL, stream := connectionCtx.Ctx, connectionCtx.StreamURL, connectionCtx.Stream

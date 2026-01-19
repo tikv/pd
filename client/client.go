@@ -156,7 +156,7 @@ type serviceModeKeeper struct {
 	tsoSvcDiscovery          sd.ServiceDiscovery
 	routerClient             *router.Cli
 	resourceManagerDiscovery *sd.ResourceManagerDiscovery
-	mcsSvcDiscovery          sd.ServiceDiscovery
+	msDiscovery              sd.ServiceDiscovery
 }
 
 func (k *serviceModeKeeper) close() {
@@ -170,8 +170,8 @@ func (k *serviceModeKeeper) close() {
 		k.resourceManagerDiscovery.Close()
 		k.resourceManagerDiscovery = nil
 	}
-	if k.mcsSvcDiscovery != nil {
-		k.mcsSvcDiscovery.Close()
+	if k.msDiscovery != nil {
+		k.msDiscovery.Close()
 	}
 
 	k.tsoClient.Close()

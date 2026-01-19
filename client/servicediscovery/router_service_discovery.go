@@ -101,9 +101,6 @@ func (r *routerServiceDiscovery) GetServiceClientByKind(_ APIKind) ServiceClient
 
 // GetOrCreateGRPCConn creates a gRPC connection to the router service.
 func (r *routerServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	if r.ctx == nil {
-		return nil, errs.ErrClientRouterServiceNotInitialized.FastGen("router service discovery is not initialized")
-	}
 	return grpcutil.GetOrCreateGRPCConn(r.ctx, &r.clientConns, url, r.tlsCfg, r.option.GRPCDialOptions...)
 }
 
@@ -119,9 +116,6 @@ func (r *routerServiceDiscovery) ScheduleCheckMemberChanged() {
 
 // CheckMemberChanged checks if there is any membership change among the members of the router service.
 func (r *routerServiceDiscovery) CheckMemberChanged() error {
-	if r.ctx == nil {
-		return errs.ErrClientRouterServiceNotInitialized.FastGen("router service discovery is not initialized")
-	}
 	if err := retry.WithConfig(r.ctx, r.updateMember); err != nil {
 		log.Warn("[router service] failed to update member", errs.ZapError(err))
 		return err
@@ -158,6 +152,9 @@ func NewRouterServiceDiscovery(
 		zap.Uint64("cluster-id", c.GetClusterID()),
 		zap.Uint32("keyspace-id", c.GetKeyspaceID()),
 		zap.String("default-discovery-key", c.defaultDiscoveryKey))
+	if err := c.Init(); err != nil {
+		log.Warn("[pd] failed to initialize router service discovery, will retry init later", zap.Error(err))
+	}
 	return c
 }
 

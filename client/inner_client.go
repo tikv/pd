@@ -74,11 +74,8 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		}
 		return err
 	}
-	c.mcsSvcDiscovery = sd.NewRouterServiceDiscovery(c.ctx, c, c.serviceDiscovery,
+	c.msDiscovery = sd.NewRouterServiceDiscovery(c.ctx, c, c.serviceDiscovery,
 		c.tlsCfg, c.option)
-
-	// Check if the router service client has been enabled.
-	c.enableRouterServiceClient()
 
 	// Check if the router client has been enabled.
 	if c.option.GetEnableRouterClient() {
@@ -119,7 +116,7 @@ func (c *innerClient) enableRouterClient() {
 	}
 	c.RUnlock()
 	// Create a new router client first before acquiring the lock.
-	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.mcsSvcDiscovery, c.option)
+	routerClient := router.NewClient(c.ctx, c.serviceDiscovery, c.msDiscovery, c.option)
 	c.Lock()
 	// Double check if the router client has been enabled.
 	if c.routerClient != nil {
@@ -143,14 +140,6 @@ func (c *innerClient) disableRouterClient() {
 	c.Unlock()
 	// Close the router client after the lock is released.
 	routerClient.Close()
-}
-
-func (c *innerClient) enableRouterServiceClient() {
-	c.Lock()
-	defer c.Unlock()
-	if err := c.mcsSvcDiscovery.Init(); err != nil {
-		log.Warn("[pd] failed to initialize router service discovery", zap.Error(err))
-	}
 }
 
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
@@ -323,7 +312,7 @@ func (c *innerClient) getServiceClient(ctx context.Context, regionOp *opt.GetReg
 	switch {
 	case allowRouterServiceHandle:
 		isRouterClient = true
-		serviceClient = c.mcsSvcDiscovery.GetServiceClient()
+		serviceClient = c.msDiscovery.GetServiceClient()
 		mustLeader = false
 	case regionOp.AllowFollowerHandle && c.option.GetEnableFollowerHandle():
 		mustLeader = false
