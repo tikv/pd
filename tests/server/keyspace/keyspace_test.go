@@ -219,84 +219,84 @@ func TestProtectedKeyspace(t *testing.T) {
 
 // TestKeyspaceRegionSplit tests the full flow of keyspace boundary detection.
 func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
-re := suite.Require()
-manager := suite.manager
+	re := suite.Require()
+	manager := suite.manager
 
-// Test ExtractKeyspaceID function
-testCases := []struct {
-name     string
-key      []byte
-expected uint32
-ok       bool
-}{
-{"keyspace 1 txn", []byte{'x', 0, 0, 1, 0}, 1, true},
-{"keyspace 2 txn", []byte{'x', 0, 0, 2, 100}, 2, true},
-{"keyspace 100 txn", []byte{'x', 0, 0, 100, 50}, 100, true},
-{"empty key", []byte{}, 0, false},
-{"short key", []byte{'x', 0}, 0, false},
-}
+	// Test ExtractKeyspaceID function
+	testCases := []struct {
+		name     string
+		key      []byte
+		expected uint32
+		ok       bool
+	}{
+		{"keyspace 1 txn", []byte{'x', 0, 0, 1, 0}, 1, true},
+		{"keyspace 2 txn", []byte{'x', 0, 0, 2, 100}, 2, true},
+		{"keyspace 100 txn", []byte{'x', 0, 0, 100, 50}, 100, true},
+		{"empty key", []byte{}, 0, false},
+		{"short key", []byte{'x', 0}, 0, false},
+	}
 
-for _, tc := range testCases {
-id, ok := keyspace.ExtractKeyspaceID(tc.key)
-re.Equal(tc.ok, ok, "test case: %s", tc.name)
-if ok {
-re.Equal(tc.expected, id, "test case: %s", tc.name)
-}
-}
+	for _, tc := range testCases {
+		id, ok := keyspace.ExtractKeyspaceID(tc.key)
+		re.Equal(tc.ok, ok, "test case: %s", tc.name)
+		if ok {
+			re.Equal(tc.expected, id, "test case: %s", tc.name)
+		}
+	}
 
-// Test RegionSpansMultipleKeyspaces function
-spanTestCases := []struct {
-name      string
-startKey  []byte
-endKey    []byte
-shouldSpan bool
-}{
-{
-"same keyspace",
-[]byte{'x', 0, 0, 1, 0},
-[]byte{'x', 0, 0, 1, 100},
-false,
-},
-{
-"at boundary (should not span)",
-[]byte{'x', 0, 0, 1, 0},
-[]byte{'x', 0, 0, 2},  // Exactly at the right bound
-false,
-},
-{
-"spans two keyspaces",
-[]byte{'x', 0, 0, 1, 0},
-[]byte{'x', 0, 0, 2, 100},
-true,
-},
-{
-"spans multiple keyspaces",
-[]byte{'x', 0, 0, 1, 0},
-[]byte{'x', 0, 0, 5, 0},
-true,
-},
-}
+	// Test RegionSpansMultipleKeyspaces function
+	spanTestCases := []struct {
+		name       string
+		startKey   []byte
+		endKey     []byte
+		shouldSpan bool
+	}{
+		{
+			"same keyspace",
+			[]byte{'x', 0, 0, 1, 0},
+			[]byte{'x', 0, 0, 1, 100},
+			false,
+		},
+		{
+			"at boundary (should not span)",
+			[]byte{'x', 0, 0, 1, 0},
+			[]byte{'x', 0, 0, 2}, // Exactly at the right bound
+			false,
+		},
+		{
+			"spans two keyspaces",
+			[]byte{'x', 0, 0, 1, 0},
+			[]byte{'x', 0, 0, 2, 100},
+			true,
+		},
+		{
+			"spans multiple keyspaces",
+			[]byte{'x', 0, 0, 1, 0},
+			[]byte{'x', 0, 0, 5, 0},
+			true,
+		},
+	}
 
-for _, tc := range spanTestCases {
-spans := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, manager)
-re.Equal(tc.shouldSpan, spans, "test case: %s", tc.name)
-}
+	for _, tc := range spanTestCases {
+		spans := keyspace.RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, manager)
+		re.Equal(tc.shouldSpan, spans, "test case: %s", tc.name)
+	}
 
-// Test GetKeyspaceSplitKeys function
-// For a region spanning keyspaces 1-3, it should generate split keys at boundaries 2 and 3
-startKey := []byte{'x', 0, 0, 1, 0}
-endKey := []byte{'x', 0, 0, 3, 100}
-splitKeys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)
-re.NotNil(splitKeys)
-re.GreaterOrEqual(len(splitKeys), 1, "Should generate at least one split key")
+	// Test GetKeyspaceSplitKeys function
+	// For a region spanning keyspaces 1-3, it should generate split keys at boundaries 2 and 3
+	startKey := []byte{'x', 0, 0, 1, 0}
+	endKey := []byte{'x', 0, 0, 3, 100}
+	splitKeys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)
+	re.NotNil(splitKeys)
+	re.GreaterOrEqual(len(splitKeys), 1, "Should generate at least one split key")
 
-// Verify first split key is at keyspace 2 boundary
-expectedBound2 := keyspace.MakeRegionBound(2)
-re.Equal(expectedBound2.TxnLeftBound, splitKeys[0], "First split key should be at keyspace 2 boundary")
+	// Verify first split key is at keyspace 2 boundary
+	expectedBound2 := keyspace.MakeRegionBound(2)
+	re.Equal(expectedBound2.TxnLeftBound, splitKeys[0], "First split key should be at keyspace 2 boundary")
 
-// If there are two split keys, the second should be at keyspace 3 boundary
-if len(splitKeys) >= 2 {
-expectedBound3 := keyspace.MakeRegionBound(3)
-re.Equal(expectedBound3.TxnLeftBound, splitKeys[1], "Second split key should be at keyspace 3 boundary")
-}
+	// If there are two split keys, the second should be at keyspace 3 boundary
+	if len(splitKeys) >= 2 {
+		expectedBound3 := keyspace.MakeRegionBound(3)
+		re.Equal(expectedBound3.TxnLeftBound, splitKeys[1], "Second split key should be at keyspace 3 boundary")
+	}
 }
