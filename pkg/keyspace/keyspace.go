@@ -32,13 +32,11 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -47,10 +45,6 @@ const (
 	// AllocStep set idAllocator's step when write persistent window boundary.
 	// Use a lower value for denser idAllocation in the event of frequent pd leader change.
 	AllocStep = uint64(100)
-	// regionLabelIDPrefix is used to prefix the keyspace region label.
-	regionLabelIDPrefix = "keyspaces/"
-	// regionLabelKey is the key for keyspace id in keyspace region label.
-	regionLabelKey = "id"
 	// UserKindKey is the key for user kind in keyspace config.
 	UserKindKey = "user_kind"
 	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
@@ -480,55 +474,37 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	})
 }
 
-// splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
-// region will then be split by Coordinator's patrolRegion.
-func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (err error) {
+// splitKeyspaceRegion waits for the region at keyspace boundaries to be split.
+// The actual splitting is now handled by the SplitChecker which detects keyspace
+// boundaries by parsing region keys, rather than using label rules.
+func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) error {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
 
 	start := time.Now()
-	keyspaceRule := MakeLabelRule(id)
-	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
-	if !ok {
-		return errors.New("cluster does not support region label")
-	}
-	err = cl.GetRegionLabeler().SetLabelRule(keyspaceRule)
-	if err != nil {
-		log.Warn("[keyspace] failed to add region label for keyspace",
-			zap.Uint32("keyspace-id", id),
-			zap.Error(err),
-		)
-		return err
-	}
-	defer func() {
-		if err != nil {
-			if err := cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID); err != nil {
-				log.Warn("[keyspace] failed to delete region label for keyspace",
-					zap.Uint32("keyspace-id", id),
-					zap.Error(err),
-				)
-			}
-		}
-	}()
 
 	if waitRegionSplit {
-		err = manager.waitKeyspaceRegionSplit(id)
+		err := manager.waitKeyspaceRegionSplit(id)
 		if err != nil {
 			log.Warn("[keyspace] wait region split meets error",
 				zap.Uint32("keyspace-id", id),
 				zap.Error(err),
 			)
+			return err
 		}
-		return err
+		log.Info("[keyspace] keyspace region split completed",
+			zap.Uint32("keyspace-id", id),
+			zap.Duration("takes", time.Since(start)),
+		)
+		return nil
 	}
 
-	log.Info("[keyspace] added region label for keyspace",
+	log.Info("[keyspace] keyspace region split initiated",
 		zap.Uint32("keyspace-id", id),
-		logutil.ZapRedactString("label-rule", keyspaceRule.String()),
 		zap.Duration("takes", time.Since(start)),
 	)
-	return
+	return nil
 }
 
 func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
@@ -882,6 +858,13 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	// Load or store the keyspace name to the cache.
 	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
 	return actual.(string), nil
+}
+
+// KeyspaceExists checks if a keyspace with the given ID exists in the cache.
+// This is used to determine if keyspace boundaries should be enforced during split/merge.
+func (manager *Manager) KeyspaceExists(id uint32) bool {
+	_, err := manager.GetKeyspaceNameByID(id)
+	return err == nil
 }
 
 // ScanAllKeyspace scans all keyspaces and applies the given function.

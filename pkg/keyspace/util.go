@@ -17,10 +17,7 @@ package keyspace
 import (
 	"container/heap"
 	"encoding/binary"
-	"encoding/hex"
 	"regexp"
-	"strconv"
-	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -28,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -125,75 +121,6 @@ func MakeRegionBound(id uint32) *RegionBound {
 		TxnLeftBound:  tr,
 		TxnRightBound: codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)),
 	}
-}
-
-// MakeKeyRanges encodes keyspace ID to correct LabelRule data.
-func MakeKeyRanges(id uint32) []any {
-	regionBound := MakeRegionBound(id)
-	return []any{
-		map[string]any{
-			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
-			"end_key":   hex.EncodeToString(regionBound.RawRightBound),
-		},
-		map[string]any{
-			"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
-			"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
-		},
-	}
-}
-
-// getRegionLabelID returns the region label id of the target keyspace.
-func getRegionLabelID(id uint32) string {
-	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
-}
-
-// MakeLabelRule makes the label rule for the given keyspace id.
-func MakeLabelRule(id uint32) *labeler.LabelRule {
-	return &labeler.LabelRule{
-		ID:    getRegionLabelID(id),
-		Index: 0,
-		Labels: []labeler.RegionLabel{
-			{
-				Key:   regionLabelKey,
-				Value: strconv.FormatUint(uint64(id), endpoint.SpaceIDBase),
-			},
-		},
-		RuleType: labeler.KeyRange,
-		Data:     MakeKeyRanges(id),
-	}
-}
-
-// ParseKeyspaceIDFromLabelRule parses the keyspace ID from the label rule.
-// It will return the keyspace ID and a boolean indicating whether the label
-// rule is a keyspace label rule.
-func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
-	// Validate the ID matches the expected format "keyspaces/<id>".
-	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
-		return 0, false
-	}
-	// Retrieve the keyspace ID.
-	keyspaceID, err := strconv.ParseUint(
-		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
-		endpoint.SpaceIDBase, 32,
-	)
-	if err != nil {
-		return 0, false
-	}
-	// Double check the keyspace ID from the label rule.
-	var idFromLabel uint64
-	for _, label := range rule.Labels {
-		if label.Key == regionLabelKey {
-			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
-			if err != nil {
-				return 0, false
-			}
-			break
-		}
-	}
-	if keyspaceID != idFromLabel {
-		return 0, false
-	}
-	return uint32(keyspaceID), true
 }
 
 // indexedHeap is a heap with index.
@@ -333,4 +260,159 @@ func isProtectedKeyspaceName(name string) bool {
 		return name == constant.SystemKeyspaceName
 	}
 	return name == constant.DefaultKeyspaceName
+}
+
+// ExtractKeyspaceID extracts the keyspace ID from a region key.
+// It returns the keyspace ID and a boolean indicating whether the key contains a valid keyspace ID.
+// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'x' for txn.
+// Only txn mode keys are supported.
+func ExtractKeyspaceID(key []byte) (uint32, bool) {
+	// Empty key represents the start of the entire key space (no keyspace)
+	if len(key) == 0 {
+		return constant.MaxValidKeyspaceID, true
+	}
+
+	// Decode the key
+	_, decoded, err := codec.DecodeBytes(key)
+	if err != nil {
+		return 0, false
+	}
+
+	// Check if the key has a mode prefix and keyspace ID (at least 4 bytes: prefix + 3 bytes ID)
+	if len(decoded) < 4 {
+		return 0, false
+	}
+
+	// Check if it's a txn mode ('x') key - raw mode is not supported
+	prefix := decoded[0]
+	if prefix != 'x' {
+		return 0, false
+	}
+
+	// Extract keyspace ID (3 bytes after the prefix)
+	// Convert 3 bytes to uint32 by shifting and combining
+	keyspaceID := uint32(decoded[1])<<16 | uint32(decoded[2])<<8 | uint32(decoded[3])
+
+	return keyspaceID, true
+}
+
+// KeyspaceChecker is an interface to check if a keyspace exists.
+type KeyspaceChecker interface {
+	// KeyspaceExists checks if a keyspace with the given ID exists.
+	KeyspaceExists(id uint32) bool
+}
+
+// RegionSpansMultipleKeyspaces checks if a region spans across multiple keyspaces.
+// It returns true if the region crosses keyspace boundaries, false otherwise.
+// startKey is the region start key, endKey is the region end key (exclusive).
+// A region [startKey, endKey) spans multiple keyspaces if:
+// 1. startKey and endKey have different keyspace IDs, AND
+// 2. endKey is NOT exactly at the right bound of startKey's keyspace (i.e., not just at the boundary), AND
+// 3. All keyspaces that the region actually spans exist (checked via checker)
+func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker KeyspaceChecker) bool {
+	// If endKey is empty, it represents infinity boundary
+	if len(endKey) == 0 {
+		return false
+	}
+
+	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
+	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
+
+	// If either key doesn't have a keyspace ID, cannot determine
+	if !startHasKeyspace || !endHasKeyspace {
+		return false
+	}
+
+	// If keyspace IDs are the same, definitely within one keyspace
+	if startKeyspaceID == endKeyspaceID {
+		return false
+	}
+
+	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
+	// check if endKey is at the exact boundary (right bound of startKeyspace)
+	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace
+	if endKeyspaceID == startKeyspaceID+1 {
+		startBound := MakeRegionBound(startKeyspaceID)
+		// endKey == TxnRightBound means the region is [startKey, rightBound of startKeyspace)
+		// which is still within one keyspace
+		if string(endKey) == string(startBound.TxnRightBound) {
+			return false
+		}
+	}
+
+	// Check if all keyspaces that the region spans (between start and end, exclusive of endKeyspace)
+	// exist. Since endKey is exclusive, we check up to endKeyspaceID-1.
+	// If any keyspace doesn't exist (deleted), don't enforce the boundary
+	if checker != nil {
+		for id := startKeyspaceID; id < endKeyspaceID; id++ {
+			if !checker.KeyspaceExists(id) {
+				return false
+			}
+		}
+	}
+
+	// Otherwise, the region spans multiple keyspaces
+	return true
+}
+
+// GetKeyspaceSplitKeys returns the split keys for a region that spans multiple keyspaces.
+// It returns a list of keys where the region should be split to separate keyspaces.
+// Only returns split keys for keyspaces that exist (checked via checker).
+func GetKeyspaceSplitKeys(startKey, endKey []byte, checker KeyspaceChecker) [][]byte {
+	// If checker is nil, cannot verify keyspace existence
+	if checker == nil {
+		return nil
+	}
+
+	if len(endKey) == 0 {
+		return nil
+	}
+
+	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
+	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
+
+	// If either key doesn't have a keyspace ID, cannot determine split keys
+	if !startHasKeyspace || !endHasKeyspace {
+		return nil
+	}
+
+	// If same keyspace, no split needed
+	if startKeyspaceID == endKeyspaceID {
+		return nil
+	}
+
+	// Check if the start keyspace exists
+	if !checker.KeyspaceExists(startKeyspaceID) {
+		return nil
+	}
+
+	var splitKeys [][]byte
+
+	// Generate split keys for each keyspace boundary between start and end
+	// Only include boundaries for keyspaces that exist
+	for currentID := startKeyspaceID; currentID < endKeyspaceID; currentID++ {
+		// Check if the next keyspace exists before adding a split key
+		nextID := currentID + 1
+		if !checker.KeyspaceExists(nextID) {
+			continue
+		}
+
+		bound := MakeRegionBound(currentID)
+		rightBound := bound.TxnRightBound
+
+		// If the right bound is >= endKey, we're done
+		if string(rightBound) >= string(endKey) {
+			break
+		}
+
+		// Add this boundary as a split key
+		splitKeys = append(splitKeys, rightBound)
+
+		// Safety check to prevent infinite loops
+		if currentID >= constant.MaxValidKeyspaceID {
+			break
+		}
+	}
+
+	return splitKeys
 }

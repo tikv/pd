@@ -187,6 +187,7 @@ type RaftCluster struct {
 	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
+	keyspaceManager          *keyspace.Manager
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
@@ -314,6 +315,7 @@ func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt sc.ConfProvider,
 	hbstreams *hbstream.HeartbeatStreams,
+	keyspaceManager *keyspace.Manager,
 	keyspaceGroupManager *keyspace.GroupManager) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
@@ -322,6 +324,7 @@ func (c *RaftCluster) InitCluster(
 		c.changedRegions = make(chan *core.RegionInfo, 100)
 	})
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
+	c.keyspaceManager = keyspaceManager
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
@@ -340,7 +343,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
-	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceManager(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
 	}
@@ -984,6 +987,11 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 // GetKeyRangeManager returns the key range manager reference
 func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
 	return c.keyRangeManager
+}
+
+// GetKeyspaceManager returns the keyspace manager reference.
+func (c *RaftCluster) GetKeyspaceManager() *keyspace.Manager {
+	return c.keyspaceManager
 }
 
 // GetRegionLabeler returns the region labeler.
