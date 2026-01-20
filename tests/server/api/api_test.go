@@ -1275,10 +1275,19 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	re.NotEmpty(cluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		return len(cluster.GetLeader()) > 0
+	})
 	leader = cluster.GetLeaderServer()
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
+			if len(cluster.GetLeader()) == 0 {
+				return false
+			}
+			leader = cluster.GetLeaderServer()
+			if leader == nil {
+				return false
+			}
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}
@@ -1295,10 +1304,11 @@ func TestPreparingProgress(t *testing.T) {
 	var p api.Progress
 	testutil.Eventually(re, func() bool {
 		defer triggerCheckStores()
+		if len(cluster.GetLeader()) == 0 {
+			return false
+		}
 		leader = cluster.GetLeaderServer()
 		if leader == nil {
-			re.NotEmpty(cluster.WaitLeader())
-			leader = cluster.GetLeaderServer()
 			return false
 		}
 		// wait for cluster prepare
