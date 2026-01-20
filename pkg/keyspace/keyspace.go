@@ -254,15 +254,35 @@ func (manager *Manager) UpdateConfig(cfg Config) error {
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
-	// Validate purposed name's legality.
+	// Ensure metrics.go is compiled by referencing the metric variable
+	_ = createKeyspaceStepDuration
+
+	// Helper function to record step duration and log
+	recordStep := func(step string, startTime time.Time, keyspaceID uint32, keyspaceName string) {
+		duration := time.Since(startTime)
+		createKeyspaceStepDuration.WithLabelValues(step).Observe(duration.Seconds())
+		log.Info("[create-keyspace] step completed",
+			zap.String("step", step),
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("keyspace-name", keyspaceName),
+			zap.Duration("duration", duration),
+		)
+	}
+
+	// Step 1: Validate purposed name's legality.
+	stepStart := time.Now()
 	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
-	// Allocate new keyspaceID.
+	recordStep(stepValidateName, stepStart, 0, request.Name)
+
+	// Step 2: Allocate new keyspaceID.
+	stepStart = time.Now()
 	newID, err := manager.allocID()
 	if err != nil {
 		return nil, err
 	}
+	recordStep(stepAllocateID, stepStart, newID, request.Name)
 	// Failpoint to override keyspaceID for testing purposes.
 	failpoint.Inject("overrideKeyspaceID", func(val failpoint.Value) {
 		if overrideID, ok := val.(int); ok {
@@ -272,6 +292,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 				zap.String("name", request.Name))
 		}
 	})
+
+	// Step 3: Get keyspace config.
+	stepStart = time.Now()
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
@@ -291,15 +314,19 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		}
 		request.Config[SafePointVersion] = KeyspaceGlobalSafePointVersionV2
 	}
+	recordStep(stepGetConfig, stepStart, newID, request.Name)
+
+	// Step 4: Assign to meta service group (if needed).
 	assignToMetaServiceGroup := manager.mgm != nil &&
 		manager.mgm.GetAutoAssign() &&
 		len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
+		stepStart = time.Now()
 		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
 		if err != nil {
-			log.Error("[keyspace] failed to assign keyspace to meta-service group",
+			log.Error("[create-keyspace] failed to assign keyspace to meta-service group",
 				zap.Uint32("keyspace-id", newID),
-				zap.String("name", request.Name),
+				zap.String("keyspace-name", request.Name),
 				zap.Error(err),
 			)
 			return nil, err
@@ -307,9 +334,11 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		if metaServiceGroup != "" {
 			request.Config[MetaServiceGroupIDKey] = metaServiceGroup
 		}
+		recordStep(stepAssignMetaServiceGroup, stepStart, newID, request.Name)
 	}
 
-	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
+	// Step 5: Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
+	stepStart = time.Now()
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
 		Name:           request.Name,
@@ -320,14 +349,17 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	}
 	err = manager.saveNewKeyspace(keyspace)
 	if err != nil {
-		log.Warn("[keyspace] failed to save keyspace before split",
+		log.Warn("[create-keyspace] failed to save keyspace before split",
 			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("name", keyspace.GetName()),
+			zap.String("keyspace-name", keyspace.GetName()),
 			zap.Error(err),
 		)
 		return nil, err
 	}
-	// Split keyspace region.
+	recordStep(stepSaveKeyspaceMeta, stepStart, newID, request.Name)
+
+	// Step 6: Split keyspace region.
+	stepStart = time.Now()
 	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -340,34 +372,47 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			return txn.Remove(metaPath)
 		})
 		if err2 != nil {
-			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
+			log.Warn("[create-keyspace] failed to remove pre-created keyspace after split failed",
 				zap.Uint32("keyspace-id", keyspace.GetId()),
-				zap.String("name", keyspace.GetName()),
+				zap.String("keyspace-name", keyspace.GetName()),
 				zap.Error(err2),
 			)
 		}
 		return nil, err
 	}
-	// enable the keyspace metadata after split.
+	recordStep(stepSplitRegion, stepStart, newID, request.Name)
+
+	// Step 7: Enable the keyspace metadata after split.
+	stepStart = time.Now()
 	keyspace.State = keyspacepb.KeyspaceState_ENABLED
 	_, err = manager.UpdateKeyspaceStateByID(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
 	if err != nil {
-		log.Warn("[keyspace] failed to create keyspace",
+		log.Warn("[create-keyspace] failed to create keyspace",
 			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("name", keyspace.GetName()),
+			zap.String("keyspace-name", keyspace.GetName()),
 			zap.Error(err),
 		)
 		return nil, err
 	}
+	recordStep(stepEnableKeyspace, stepStart, newID, request.Name)
+
+	// Step 8: Update keyspace group.
+	stepStart = time.Now()
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
+	recordStep(stepUpdateKeyspaceGroup, stepStart, newID, request.Name)
+
+	// Step 9: Attach endpoints (if needed).
 	if assignToMetaServiceGroup {
+		stepStart = time.Now()
 		manager.mgm.AttachEndpoints(keyspace.GetConfig())
+		recordStep(stepAttachEndpoints, stepStart, newID, request.Name)
 	}
-	log.Info("[keyspace] keyspace created",
+
+	log.Info("[create-keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
-		zap.String("name", keyspace.GetName()),
+		zap.String("keyspace-name", keyspace.GetName()),
 	)
 	return keyspace, nil
 }
