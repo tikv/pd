@@ -398,6 +398,13 @@ func (c *serviceBalancer) get() (ret ServiceClient) {
 	return
 }
 
+func (c *serviceBalancer) clean() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = nil
+	c.totalNode = 0
+}
+
 // UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
 type UpdateKeyspaceIDFunc func() error
 
@@ -548,7 +555,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 		}
 		err := bo.Exec(ctx, c.updateMember)
 		if err != nil {
-			log.Warn("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			log.Warn("[pd] failed to update member", zap.Strings("sorted-urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
 }
@@ -579,7 +586,7 @@ func (c *serviceDiscovery) updateServiceModeLoop() {
 		}
 		if err := c.checkServiceModeChanged(); err != nil {
 			log.Warn("[pd] failed to update service mode",
-				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+				zap.Strings("sorted-urls", c.GetServiceURLs()), errs.ZapError(err))
 			c.ScheduleCheckMemberChanged() // check if the leader changed
 		}
 	}
@@ -964,7 +971,7 @@ func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
 	c.urls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
 	c.callbacks.onMembersChanged()
-	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
+	log.Info("[pd] update member urls", zap.Strings("old-sorted-urls", oldURLs), zap.Strings("new-sorted-urls", urls))
 }
 
 func (c *serviceDiscovery) switchLeader(url string) (bool, error) {
@@ -1000,7 +1007,7 @@ func (c *serviceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint
 				// Now we don't apply ServiceClient for TSO Follower Proxy, so just keep the all URLs.
 				followerURLs = append(followerURLs, member.GetClientUrls()...)
 
-				// FIXME: How to safely compare urls(also for leader)? For now, only allows one client url.
+				// FIXME: How to safely compare sortedUrls(also for leader)? For now, only allows one client url.
 				url := tlsutil.PickMatchedURL(member.GetClientUrls(), c.tlsCfg)
 				if client, ok := c.followers.Load(url); ok {
 					if client.(*serviceClient).GetClientConn() == nil {
@@ -1037,7 +1044,7 @@ func (c *serviceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint
 }
 
 func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *pdpb.Member) error {
-	// FIXME: How to safely compare leader urls? For now, only allows one client url.
+	// FIXME: How to safely compare leader sortedUrls? For now, only allows one client url.
 	leaderURL := tlsutil.PickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
 	leaderChanged, err := c.switchLeader(leaderURL)
 	followerChanged := c.updateFollowers(members, leader.GetMemberId(), leaderURL)
