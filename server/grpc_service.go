@@ -968,6 +968,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 	resp.ReplicationStatus = rc.GetReplicationMode().GetReplicationStatus()
 	resp.ClusterVersion = rc.GetClusterVersion()
+	resp.FeatureFlags = uint64(rc.GetClusterFeatureFlags())
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 
 	return resp, nil
