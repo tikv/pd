@@ -1062,6 +1062,14 @@ func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetSt
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetStore(cctx, req)
 	}
 
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetStore(cctx, req)
+	}
+
 	if err = c.respForErr(metrics.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
