@@ -330,10 +330,17 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	defer func() {
 		ThresholdsUpdateInterval = 8 * time.Second
 	}()
+	makeReadDeltaLoads := func(bytes, keys, query float64) []float64 {
+		loads := make([]float64, utils.RegionStatCount)
+		loads[utils.RegionReadBytes] = bytes
+		loads[utils.RegionReadKeys] = keys
+		loads[utils.RegionReadQueryNum] = query
+		return loads
+	}
 
 	// skip interval=0
 	interval := uint64(0)
-	deltaLoads := []float64{0.0, 0.0, 0.0}
+	deltaLoads := makeReadDeltaLoads(0.0, 0.0, 0.0)
 	utils.MinHotThresholds[utils.RegionReadBytes] = 0.0
 	utils.MinHotThresholds[utils.RegionReadKeys] = 0.0
 	utils.MinHotThresholds[utils.RegionReadQueryNum] = 0.0
@@ -343,7 +350,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 	// new peer, interval is larger than report interval, but no hot
 	interval = 10
-	deltaLoads = []float64{0.0, 0.0, 0.0}
+	deltaLoads = makeReadDeltaLoads(0.0, 0.0, 0.0)
 	utils.MinHotThresholds[utils.RegionReadBytes] = 1.0
 	utils.MinHotThresholds[utils.RegionReadKeys] = 1.0
 	utils.MinHotThresholds[utils.RegionReadQueryNum] = 1.0
@@ -352,7 +359,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 	// new peer, interval is less than report interval
 	interval = 4
-	deltaLoads = []float64{60.0, 60.0, 60.0}
+	deltaLoads = makeReadDeltaLoads(60.0, 60.0, 60.0)
 	utils.MinHotThresholds[utils.RegionReadBytes] = 0.0
 	utils.MinHotThresholds[utils.RegionReadKeys] = 0.0
 	utils.MinHotThresholds[utils.RegionReadQueryNum] = 0.0
@@ -361,7 +368,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(0, newItem[0].HotDegree)
 	re.Equal(0, newItem[0].AntiCount)
 	// sum of interval is less than report interval
-	deltaLoads = []float64{60.0, 60.0, 60.0}
+	deltaLoads = makeReadDeltaLoads(60.0, 60.0, 60.0)
 	cache.UpdateStat(newItem[0])
 	newItem = cache.CheckPeerFlow(region, []*metapb.Peer{peer}, deltaLoads, interval)
 	re.Equal(0, newItem[0].HotDegree)
@@ -441,7 +448,8 @@ func testMetrics(ctx context.Context, re *require.Assertions, interval, byteRate
 			if oldItem != nil && oldItem.rollingLoads[utils.ByteDim].isHot(thresholds[utils.ByteDim]) == true {
 				break
 			}
-			loads := []float64{byteRate * interval, 0.0, 0.0}
+			loads := make([]float64, utils.RegionStatCount)
+			loads[utils.RegionReadBytes] = byteRate * interval
 			if oldItem == nil {
 				item = cache.updateNewHotPeerStat(newItem, loads, time.Duration(interval)*time.Second)
 			} else {

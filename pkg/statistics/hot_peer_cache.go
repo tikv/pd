@@ -66,7 +66,7 @@ type thresholds struct {
 	updatedTime time.Time
 	rates       []float64
 	topNLen     int
-	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for total length.
+	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for cpu, 4 is for total length.
 }
 
 // HotPeerCache saves the hot peer's statistics.
@@ -274,6 +274,7 @@ func (f *HotPeerCache) collectMetrics() {
 		thresholds.metrics[utils.ByteDim].Set(thresholds.rates[utils.ByteDim])
 		thresholds.metrics[utils.KeyDim].Set(thresholds.rates[utils.KeyDim])
 		thresholds.metrics[utils.QueryDim].Set(thresholds.rates[utils.QueryDim])
+		thresholds.metrics[utils.CPUDim].Set(thresholds.rates[utils.CPUDim])
 		thresholds.metrics[utils.DimLen].Set(float64(thresholds.topNLen))
 	}
 }
@@ -303,6 +304,7 @@ func (f *HotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 				utils.ByteDim:  hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, kind),
 				utils.KeyDim:   hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, kind),
 				utils.QueryDim: hotCacheStatusGauge.WithLabelValues("query-rate-threshold", store, kind),
+				utils.CPUDim:   hotCacheStatusGauge.WithLabelValues("cpu-rate-threshold", store, kind),
 				utils.DimLen:   hotCacheStatusGauge.WithLabelValues("total_length", store, kind),
 			},
 		}

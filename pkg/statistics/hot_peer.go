@@ -164,7 +164,13 @@ func (stat *HotPeerStat) GetActionType() utils.ActionType {
 // GetLoad returns denoising load if possible.
 func (stat *HotPeerStat) GetLoad(dim int) float64 {
 	if stat.rollingLoads != nil {
-		return math.Round(stat.rollingLoads[dim].get())
+		if dim < len(stat.rollingLoads) && stat.rollingLoads[dim] != nil {
+			return math.Round(stat.rollingLoads[dim].get())
+		}
+		if dim < len(stat.Loads) {
+			return math.Round(stat.Loads[dim])
+		}
+		return 0
 	}
 	return math.Round(stat.Loads[dim])
 }
@@ -172,9 +178,9 @@ func (stat *HotPeerStat) GetLoad(dim int) float64 {
 // GetLoads returns denoising loads if possible.
 func (stat *HotPeerStat) GetLoads() []float64 {
 	if stat.rollingLoads != nil {
-		ret := make([]float64, len(stat.rollingLoads))
+		ret := make([]float64, utils.DimLen)
 		for dim := range ret {
-			ret[dim] = math.Round(stat.rollingLoads[dim].get())
+			ret[dim] = stat.GetLoad(dim)
 		}
 		return ret
 	}

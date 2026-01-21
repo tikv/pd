@@ -33,7 +33,7 @@ type StoreHotPeersInfos struct {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersStat map[uint64]*HotPeersStat
 
-// CollectHotPeerInfos only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
+// CollectHotPeerInfos only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,TotalCPURate,Count
 func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*HotPeerStat) *StoreHotPeersInfos {
 	peerLoadSum := make([]float64, utils.DimLen)
 	collect := func(kind constant.ResourceKind) StoreHotPeersStat {
@@ -57,6 +57,7 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 				TotalBytesRate: peerLoadSum[utils.ByteDim],
 				TotalKeysRate:  peerLoadSum[utils.KeyDim],
 				TotalQueryRate: peerLoadSum[utils.QueryDim],
+				TotalCPURate:   peerLoadSum[utils.CPUDim],
 				Count:          len(peers),
 			}
 		}
@@ -259,6 +260,8 @@ func summaryStoresLoadByEngine(
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.KeyDim])
 		ty = "exp-query-rate-" + rwTy.String() + "-" + kind.String()
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.QueryDim])
+		ty = "exp-cpu-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.CPUDim])
 		ty = "exp-count-rate-" + rwTy.String() + "-" + kind.String()
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectCount)
 		ty = "stddev-byte-rate-" + rwTy.String() + "-" + kind.String()
@@ -267,6 +270,8 @@ func summaryStoresLoadByEngine(
 		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.KeyDim])
 		ty = "stddev-query-rate-" + rwTy.String() + "-" + kind.String()
 		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.QueryDim])
+		ty = "stddev-cpu-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.CPUDim])
 	}
 	expect := StoreLoad{
 		Loads:        expectLoads,
