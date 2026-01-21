@@ -49,7 +49,7 @@ var defaultPrioritiesConfig = prioritiesConfig{
 	writePeer:   []string{utils.BytePriority, utils.KeyPriority},
 }
 
-// because tikv <= 8.5.5 and <= 9.0 does not report cpu information, we will use query and byte as the read priorities
+// because tikv <= 8.5.5 and < 9.0.0-beta.1 does not report cpu information, we will use query and byte as the read priorities
 var queryPrioritiesConfig = prioritiesConfig{
 	read:        []string{utils.QueryPriority, utils.BytePriority},
 	writeLeader: []string{utils.QueryPriority, utils.BytePriority},
@@ -578,7 +578,7 @@ func getWritePeerPriorities(c *prioritiesConfig) []string {
 
 // adjustPrioritiesConfig will adjust config for cluster with low version tikv.
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions.
-// because tikv <= 8.5.5 and <= 9.0 does not report cpu information, we will use query and byte as the read priorities.
+// because tikv <= 8.5.5 and < 9.0.0-beta.1 does not report cpu information, we will use query and byte as the read priorities.
 func adjustPrioritiesConfig(querySupport, cpuSupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
 	withQuery := slice.AnyOf(origins, func(i int) bool {
 		return origins[i] == utils.QueryPriority
