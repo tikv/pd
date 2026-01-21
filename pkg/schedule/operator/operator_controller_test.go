@@ -16,7 +16,6 @@ package operator
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync"
 	"testing"
@@ -36,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	regiontestutil "github.com/tikv/pd/pkg/utils/testutil/region"
 )
 
 type operatorControllerTestSuite struct {
@@ -420,10 +420,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	source := suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source := regiontestutil.NewRegionInfoWithHexKey(re, 101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(source)
-	target := suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target := regiontestutil.NewRegionInfoWithHexKey(re, 102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(target)
 
@@ -506,13 +506,13 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
 	for i := range 10 {
-		left := suite.newRegionInfo(uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		left := regiontestutil.NewRegionInfoWithHexKey(re, uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		left.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(left)
-		middle := suite.newRegionInfo(uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		middle := regiontestutil.NewRegionInfoWithHexKey(re, uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		middle.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(middle)
-		right := suite.newRegionInfo(uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		right := regiontestutil.NewRegionInfoWithHexKey(re, uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		right.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(right)
 		wg := &sync.WaitGroup{}
@@ -552,10 +552,10 @@ func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	source := suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source := regiontestutil.NewRegionInfoWithHexKey(re, 101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(source)
-	target := suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target := regiontestutil.NewRegionInfoWithHexKey(re, 102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(target)
 
@@ -915,29 +915,6 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	}
 }
 
-func (suite *operatorControllerTestSuite) newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
-	re := suite.Require()
-	prs := make([]*metapb.Peer, 0, len(peers))
-	for _, peer := range peers {
-		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
-	}
-	start, err := hex.DecodeString(startKey)
-	re.NoError(err)
-	end, err := hex.DecodeString(endKey)
-	re.NoError(err)
-	return core.NewRegionInfo(
-		&metapb.Region{
-			Id:       id,
-			StartKey: start,
-			EndKey:   end,
-			Peers:    prs,
-		},
-		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
-		core.SetApproximateSize(size),
-		core.SetApproximateKeys(keys),
-	)
-}
-
 func checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Operator) {
 	re.True(oc.RemoveOperator(op))
 	re.True(op.IsEnd())
@@ -956,7 +933,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	addPeerOp := func(i uint64) *Operator {
 		start := fmt.Sprintf("%da", i)
 		end := fmt.Sprintf("%db", i)
-		region := suite.newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
+		region := regiontestutil.NewRegionInfoWithHexKey(re, i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
 		cluster.PutRegion(region)
 		peer := &metapb.Peer{
 			StoreId: 2,
@@ -990,9 +967,9 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re.Equal(1, added)
 	re.NotNil(controller.GetOperator(uint64(100)))
 
-	source := suite.newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	source := regiontestutil.NewRegionInfoWithHexKey(re, 101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(source)
-	target := suite.newRegionInfo(102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := regiontestutil.NewRegionInfoWithHexKey(re, 102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(target)
 
 	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
@@ -1104,16 +1081,16 @@ func (suite *operatorControllerTestSuite) TestMergeOperatorsSynchronousCancellat
 			name:               "OpMerge operators",
 			desc:               "merge-region",
 			kind:               OpMerge,
-			source:             suite.newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
-			target:             suite.newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			source:             regiontestutil.NewRegionInfoWithHexKey(re, 101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			target:             regiontestutil.NewRegionInfoWithHexKey(re, 102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
 			verifyOpMergeCount: false, // OpMerge operators count towards OpMerge
 		},
 		{
 			name:               "OpAffinity merge operators",
 			desc:               "affinity-merge-region",
 			kind:               OpAffinity,
-			source:             suite.newRegionInfo(201, "2a", "2b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
-			target:             suite.newRegionInfo(202, "2b", "2c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			source:             regiontestutil.NewRegionInfoWithHexKey(re, 201, "2a", "2b", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
+			target:             regiontestutil.NewRegionInfoWithHexKey(re, 202, "2b", "2c", 10, 10, []uint64{101, 1}, []uint64{101, 1}),
 			verifyOpMergeCount: true, // OpAffinity operators should NOT count towards OpMerge
 		},
 	}
