@@ -16,6 +16,7 @@ package keyspace_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"

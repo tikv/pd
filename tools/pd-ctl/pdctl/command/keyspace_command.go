@@ -16,20 +16,19 @@ package command
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-<<<<<<< HEAD
-=======
 	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/keyspace"
->>>>>>> 96469389de (tools: isolate keyspace according to the given label (#10121))
 	"github.com/tikv/pd/server/apiv2/handlers"
 )
 
@@ -56,12 +55,9 @@ func NewKeyspaceCommand() *cobra.Command {
 	cmd.AddCommand(newUpdateKeyspaceConfigCommand())
 	cmd.AddCommand(newUpdateKeyspaceStateCommand())
 	cmd.AddCommand(newListKeyspaceCommand())
-<<<<<<< HEAD
-=======
 	cmd.AddCommand(newShowKeyspaceRangeCommand())
 	cmd.AddCommand(newSetPlacementCommand())
 	cmd.AddCommand(newRevertPlacementCommand())
->>>>>>> 96469389de (tools: isolate keyspace according to the given label (#10121))
 	return cmd
 }
 
@@ -330,8 +326,6 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	cmd.Println(resp)
 }
-<<<<<<< HEAD
-=======
 
 func newShowKeyspaceRangeCommand() *cobra.Command {
 	r := &cobra.Command{
@@ -601,4 +595,3 @@ func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 
 	cmd.Printf("Successfully reverted placement rules for keyspace %d\n", keyspaceID)
 }
->>>>>>> 96469389de (tools: isolate keyspace according to the given label (#10121))
