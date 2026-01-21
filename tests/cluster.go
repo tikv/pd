@@ -529,7 +529,7 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 	return createTestCluster(ctx, initialServerCount, nil, nil, opts...)
 }
 
-// NewTestClusterWithHandlers creates a new TestCluster with extra handlers.
+// NewTestClusterWithHandlers creates a new TestCluster with handlers.
 func NewTestClusterWithHandlers(ctx context.Context, initialServerCount int, handlers []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
 	return createTestCluster(ctx, initialServerCount, nil, handlers, opts...)
 }

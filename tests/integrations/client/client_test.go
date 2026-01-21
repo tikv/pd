@@ -1056,6 +1056,7 @@ func (suite *clientTestSuiteImpl) setup() {
 	re := suite.Require()
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
@@ -1105,6 +1106,8 @@ func (suite *clientTestSuiteImpl) setup() {
 }
 
 func (suite *clientTestSuiteImpl) tearDown() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.client.Close()
 	_ = suite.regionHeartbeat.CloseSend()
 	_ = suite.reportBucket.CloseSend()
