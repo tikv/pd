@@ -106,6 +106,7 @@ func (t *timestampOracle) CompareAndSetTSOPhysical(old time.Time, next time.Time
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
+		t.metrics.saveEvent.Inc()
 	}
 }
 
@@ -313,7 +314,6 @@ func (t *timestampOracle) updateTimestamp(pre time.Time, allowSaveStorage bool) 
 
 	t.metrics.tsoPhysicalGauge.Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
 	t.metrics.tsoPhysicalGapGauge.Set(float64(jetLag.Milliseconds()))
-	t.metrics.saveEvent.Inc()
 
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
 		log.Warn("clock offset",
