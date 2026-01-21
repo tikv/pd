@@ -1069,6 +1069,33 @@ func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
 	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
+// GetRawSizeConfig returns the raw size config map.
+func (s *Server) GetRawSizeConfig() map[string]string {
+	return s.persistOptions.GetRawSizeConfig()
+}
+
+// UpdateRawSizeConfig updates the raw size config map and persists it.
+func (s *Server) UpdateRawSizeConfig(raw map[string]string) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	old := s.persistOptions.GetRawSizeConfig()
+	merged := make(map[string]string, len(old)+len(raw))
+	for k, v := range old {
+		merged[k] = v
+	}
+	for k, v := range raw {
+		merged[k] = v
+	}
+	s.persistOptions.SetRawSizeConfig(merged)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetRawSizeConfig(old)
+		log.Error("failed to update raw size config", errs.ZapError(err))
+		return err
+	}
+	return nil
+}
+
 // SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
