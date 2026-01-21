@@ -473,8 +473,8 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	labelPairs := args[1:]
 
 	// Parse keyspace ID
-	var keyspaceID uint64
-	if _, err := fmt.Sscanf(keyspaceIDStr, "%d", &keyspaceID); err != nil {
+	keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+	if err != nil {
 		cmd.PrintErrf("Invalid keyspace ID: %v\n", err)
 		return
 	}
@@ -574,8 +574,8 @@ func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	keyspaceIDStr := args[0]
 
 	// Parse keyspace ID
-	var keyspaceID uint64
-	if _, err := fmt.Sscanf(keyspaceIDStr, "%d", &keyspaceID); err != nil {
+	keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+	if err != nil {
 		cmd.PrintErrf("Invalid keyspace ID: %v\n", err)
 		return
 	}
