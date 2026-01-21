@@ -118,8 +118,6 @@ const (
 	AffinityScheduleLimitKey       = "schedule.affinity-schedule-limit"
 	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	EnableLocationReplacement      = "schedule.enable-location-replacement"
-	DefaultAddPeer                 = "default-add-peer"
-	DefaultRemovePeer              = "default-remove-peer"
 
 	// EnableTiKVSplitRegion is the option to enable tikv split region.
 	// it's related to schedule, but it's not an explicit config

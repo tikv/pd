@@ -115,8 +115,11 @@ func (b *randBuckets) GetOperator() []*Operator {
 			// Merge operation (OpMerge and OpAffinity) has two operators, and thus it should be handled specifically.
 			if bucket.ops[0].HasRelatedMergeRegion() {
 				res = append(res, bucket.ops[1])
+				bucket.ops[0] = nil // avoid memory leak
+				bucket.ops[1] = nil // avoid memory leak
 				bucket.ops = bucket.ops[2:]
 			} else {
+				bucket.ops[0] = nil // avoid memory leak
 				bucket.ops = bucket.ops[1:]
 			}
 			if len(bucket.ops) == 0 {

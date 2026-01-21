@@ -408,6 +408,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		re.NoError(e)
 		err := testutil.CheckPostJSON(tests.TestDialClient, configURL, reqData, testutil.StatusOK(re))
 		re.NoError(err)
+		// Wait for the leader server to update the config
+		testutil.Eventually(re, func() bool {
+			return cluster.GetLeaderServer().GetRaftCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
+		})
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			// wait for the scheduling server to update the config
 			testutil.Eventually(re, func() bool {

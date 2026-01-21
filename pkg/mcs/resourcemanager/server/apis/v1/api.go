@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -78,6 +79,7 @@ func NewService(srv *rmserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	apiHandlerEngine.GET("status", utils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
@@ -87,7 +89,23 @@ func NewService(srv *rmserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterRouter()
+	s.RegisterPrimaryRouter()
 	return s
+}
+
+// getHealth returns the health status of the Resource Manager service.
+func getHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Server)
+	if svr.IsClosed() {
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
+	if svr.GetParticipant().IsPrimaryElected() {
+		c.String(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no primary elected")
 }
 
 // RegisterAdminRouter registers the router of the TSO admin handler.
@@ -114,6 +132,14 @@ func (s *Service) RegisterRouter() {
 	// With keyspace name, it will get/set the service limit of the given keyspace.
 	configEndpoint.POST("/keyspace/service-limit/:keyspace_name", s.setKeyspaceServiceLimit)
 	configEndpoint.GET("/keyspace/service-limit/:keyspace_name", s.getKeyspaceServiceLimit)
+}
+
+// RegisterPrimaryRouter registers the router of the primary handler.
+func (s *Service) RegisterPrimaryRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
+	router := s.root.Group("primary")
+	router.Use(redirector)
+	router.POST("transfer", transferPrimary)
 }
 
 func (s *Service) handler() http.Handler {
@@ -387,4 +413,32 @@ func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Server)
 	config := svr.GetConfig()
 	c.IndentedJSON(http.StatusOK, config)
+}
+
+// transferPrimary transfers the primary member to `new_primary`.
+// @Tags     primary
+// @Summary  Transfer the primary member to `new_primary`.
+// @Produce  json
+// @Param    new_primary body   string  false "new primary name"
+// @Success  200  string  string
+// @Router   /primary/transfer [post]
+func transferPrimary(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Server)
+	var input map[string]string
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	newPrimary := ""
+	if v, ok := input["new_primary"]; ok {
+		newPrimary = v
+	}
+
+	if err := utils.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
+		constant.ResourceManagerServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.String(http.StatusOK, "success")
 }

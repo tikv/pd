@@ -205,6 +205,10 @@ func (suite *routerClientSuite) TestGetPrevRegion() {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			re.NoError(err)
 			if i > 0 && i < regionLen {
+				// In this case, the region must not be nil.
+				if r == nil {
+					return false
+				}
 				return reflect.DeepEqual(peers[0], r.Leader) &&
 					reflect.DeepEqual(regions[i-1], r.Meta)
 			}
