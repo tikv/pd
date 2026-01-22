@@ -440,7 +440,7 @@ func (c *Cli) updateMsConnection(ctx context.Context) {
 	}
 	conns := c.getAllMsClientConns()
 	if len(conns) == 0 {
-		log.Warn("[router] no router service node found")
+		log.Debug("[router] no router service node found")
 		return
 	}
 	// Add the missing router service stream connections.
