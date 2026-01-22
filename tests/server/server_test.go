@@ -308,7 +308,10 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 	defer cancel()
 
 	mockHandler := createMockHandler(re, "127.0.0.1")
-	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{mockHandler})
+	// Repeat registering the same handler should return error.
+	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{mockHandler, mockHandler})
+	re.Error(err)
+	cluster, err = tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{mockHandler})
 	re.NoError(err)
 	defer cluster.Destroy()
 
