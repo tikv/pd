@@ -940,6 +940,7 @@ func (h *RegionHeap) Push(x any) {
 func (h *RegionHeap) Pop() any {
 	pos := len(h.regions) - 1
 	x := h.regions[pos]
+	h.regions[pos] = nil // avoid memory leak
 	h.regions = h.regions[:pos]
 	return x
 }

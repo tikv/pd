@@ -118,7 +118,6 @@ type tsoServerDiscovery struct {
 }
 
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
-
 type tsoServiceDiscovery struct {
 	metacli          metastorage.Client
 	serviceDiscovery ServiceDiscovery
@@ -686,7 +685,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 	}
 
 	if len(t.urls) == 0 || !EqualWithoutOrder(t.urls, urls) {
-		log.Info("update tso server URLs", zap.Strings("urls", urls))
+		log.Info("update tso server URLs", zap.Strings("sorted-urls", urls))
 		t.urls = urls
 		t.selectIdx = 0
 	}
