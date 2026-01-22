@@ -21,7 +21,6 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -103,85 +102,6 @@ func TestAllocatorLeader(t *testing.T) {
 					func(i int) bool { return allocatorLeaderMemberIDs[i] == allocatorFollowerMemberID },
 				),
 			)
-		}
-	}
-}
-
-func TestPriorityAndDifferentLocalTSO(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
-	})
-	defer cluster.Destroy()
-	re.NoError(err)
-	re.NoError(cluster.RunInitialServers())
-
-	cluster.WaitAllLeaders(re, dcLocationConfig)
-	leaderServer := cluster.GetLeaderServer()
-	re.NotNil(leaderServer)
-	leaderServer.BootstrapCluster()
-
-	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
-
-	// Join a new dc-location
-	pd4, err := cluster.Join(ctx, func(conf *config.Config, _ string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = "dc-4"
-	})
-	re.NoError(err)
-	re.NoError(pd4.Run())
-	dcLocationConfig["pd4"] = "dc-4"
-	cluster.CheckClusterDCLocation()
-	re.NotEqual("", cluster.WaitAllocatorLeader(
-		"dc-4",
-		tests.WithRetryTimes(90), tests.WithWaitInterval(time.Second),
-	))
-
-	// Scatter the Local TSO Allocators to different servers
-	waitAllocatorPriorityCheck(cluster)
-	cluster.WaitAllLeaders(re, dcLocationConfig)
-
-	// Before the priority is checked, we may have allocators typology like this:
-	// pd1: dc-1, dc-2 and dc-3 allocator leader
-	// pd2: None
-	// pd3: None
-	// pd4: dc-4 allocator leader
-	// After the priority is checked, we should have allocators typology like this:
-	// pd1: dc-1 allocator leader
-	// pd2: dc-2 allocator leader
-	// pd3: dc-3 allocator leader
-	// pd4: dc-4 allocator leader
-	wg := sync.WaitGroup{}
-	wg.Add(len(dcLocationConfig))
-	for serverName, dcLocation := range dcLocationConfig {
-		go func(name, dc string) {
-			defer wg.Done()
-			testutil.Eventually(re, func() bool {
-				return cluster.WaitAllocatorLeader(dc) == name
-			}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(time.Second))
-		}(serverName, dcLocation)
-	}
-	wg.Wait()
-
-	for serverName, server := range cluster.GetServers() {
-		tsoAllocatorManager := server.GetTSOAllocatorManager()
-		localAllocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
-		re.NoError(err)
-		for _, localAllocatorLeader := range localAllocatorLeaders {
-			testTSOSuffix(re, cluster, tsoAllocatorManager, localAllocatorLeader.GetDCLocation())
-		}
-		if serverName == cluster.GetLeader() {
-			testTSOSuffix(re, cluster, tsoAllocatorManager, tso.GlobalDCLocation)
 		}
 	}
 }

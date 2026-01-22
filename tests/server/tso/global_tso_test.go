@@ -109,9 +109,8 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
