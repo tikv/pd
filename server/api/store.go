@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/response"
@@ -192,6 +193,12 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// EngineKey is set by TiKV/TiFlash and should not be modified by user
+	if _, ok := input[core.EngineKey]; ok {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.Errorf("label key %q is reserved", core.EngineKey)))
+		return
+	}
+
 	labels := make([]*metapb.StoreLabel, 0, len(input))
 	for k, v := range input {
 		labels = append(labels, &metapb.StoreLabel{
@@ -240,6 +247,11 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := sc.ValidateLabelKey(labelKey); err != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		return
+	}
+	// EngineKey is set by TiKV/TiFlash and should not be modified by user
+	if labelKey == core.EngineKey {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.Errorf("can't modify label key %q", core.EngineKey)))
 		return
 	}
 	if err := rc.DeleteStoreLabel(storeID, labelKey); err != nil {

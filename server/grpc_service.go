@@ -820,6 +820,13 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
+	// Validate engine label value
+	if err := core.ValidateStoreEngineKey(store); err != nil {
+		return &pdpb.PutStoreResponse{
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_INVALID_VALUE, err.Error()),
+		}, nil
+	}
+
 	// NOTE: can be removed when placement rules feature is enabled by default.
 	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		return &pdpb.PutStoreResponse{
