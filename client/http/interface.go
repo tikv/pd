@@ -83,6 +83,7 @@ type Client interface {
 	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
 	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
 	DeletePlacementRule(context.Context, string, string) error
+	DeletePlacementRuleBundleByGroup(context.Context, string) error
 	GetAllPlacementRuleGroups(context.Context) ([]*RuleGroup, error)
 	GetPlacementRuleGroupByID(context.Context, string) (*RuleGroup, error)
 	SetPlacementRuleGroup(context.Context, *RuleGroup) error
@@ -704,6 +705,14 @@ func (c *client) DeletePlacementRule(ctx context.Context, group, id string) erro
 	return c.request(ctx, newRequestInfo().
 		WithName(deletePlacementRuleName).
 		WithURI(PlacementRuleByGroupAndID(group, id)).
+		WithMethod(http.MethodDelete))
+}
+
+// DeletePlacementRuleBundleByGroup deletes the placement rule bundle by group.
+func (c *client) DeletePlacementRuleBundleByGroup(ctx context.Context, group string) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deletePlacementRuleBundleByGroupName).
+		WithURI(PlacementRuleBundleByGroup(group)).
 		WithMethod(http.MethodDelete))
 }
 
