@@ -46,8 +46,8 @@ import (
 // This line is to ensure the package `sc` could always be imported so that
 // the swagger could generate the right definitions for the config structs.
 var (
-	_                   *sc.ScheduleConfig = nil
-	controllerConfigURL                    = "/resource-manager/api/v1/config/controller"
+	_                                  *sc.ScheduleConfig = nil
+	resourceManagerControllerConfigURL                    = "/resource-manager/api/v1/config/controller"
 )
 
 type confHandler struct {
@@ -683,14 +683,14 @@ func (h *confHandler) updateControllerConfig(key string, value any) error {
 	}
 	// Don't allow updating child items, only allow updating top-level items.
 	if k != key {
-		return errors.Errorf("can't update controller child item %s", k)
+		return errors.Errorf("can't update controller child item %s, only top-level items are allowed", key)
 	}
 	addrs := h.svr.GetMember().GetServingUrls()
 	if len(addrs) == 0 {
 		return errs.ErrLeaderNil.FastGenByArgs()
 	}
 	addr := addrs[0]
-	url := fmt.Sprintf("%s%s", addr, controllerConfigURL)
+	url := fmt.Sprintf("%s%s", addr, resourceManagerControllerConfigURL)
 
 	body := map[string]any{
 		key: value,
