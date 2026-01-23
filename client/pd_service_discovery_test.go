@@ -138,8 +138,8 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 	go suite.leaderServer.run()
 	go suite.followerServer.run()
 	for range 10 {
-		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))     //nolint:staticcheck
+		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 		if err1 == nil && err2 == nil {
 			suite.followerClient = newPDServiceClient(
 				modifyURLScheme(suite.followerServer.addr, nil),

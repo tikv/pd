@@ -165,7 +165,7 @@ func testTLSReload(
 				CAPath:   testClientTLSInfo.TrustedCAFile,
 				CertPath: testClientTLSInfo.CertFile,
 				KeyPath:  testClientTLSInfo.KeyFile,
-			}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+			}, pd.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 			if err != nil {
 				errc <- err
 				dcancel()
@@ -196,7 +196,7 @@ func testTLSReload(
 		CAPath:   testClientTLSInfo.TrustedCAFile,
 		CertPath: testClientTLSInfo.CertFile,
 		KeyPath:  testClientTLSInfo.KeyFile,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	}, pd.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	re.NoError(err)
 	dcancel()
 	cli.Close()
@@ -209,7 +209,7 @@ func testTLSReload(
 		SSLCABytes:   caData,
 		SSLCertBytes: certData,
 		SSLKEYBytes:  keyData,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	}, pd.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	re.NoError(err)
 	defer cli.Close()
 	cancel1()
@@ -321,7 +321,7 @@ func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInf
 		CAPath:   tls.TrustedCAFile,
 		CertPath: tls.CertFile,
 		KeyPath:  tls.KeyFile,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	}, pd.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	if err != nil {
 		return err
 	}
