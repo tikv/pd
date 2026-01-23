@@ -15260,7 +15260,7 @@
             },
             {
               "exemplar": true,
-              "expr": "rate(go_sched_pauses_stopping_other_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])/rate(go_sched_pauses_stopping_other_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
+              "expr": "rate(go_sched_pauses_stopping_other_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])/rate(go_sched_pauses_stopping_other_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": false,
               "instant": false,
