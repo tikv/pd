@@ -16048,7 +16048,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_frees_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])) by (le,instance,job))",
+              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_frees_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])) by (le,instance,job))",
               "format": "time_series",
               "hide": false,
               "interval": "",
