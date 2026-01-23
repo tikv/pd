@@ -113,6 +113,9 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	case err := <-done:
 		if err != nil {
 			atomic.StoreInt32(&s.closed, 1)
+			if err == io.EOF {
+				return io.EOF
+			}
 		}
 		return errors.WithStack(err)
 	case <-timer.C:
@@ -142,6 +145,9 @@ func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	case req := <-requestCh:
 		if req.err != nil {
 			atomic.StoreInt32(&s.closed, 1)
+			if req.err == io.EOF {
+				return nil, io.EOF
+			}
 			return nil, errors.WithStack(req.err)
 		}
 		return req.request, nil
@@ -174,6 +180,9 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	case err := <-done:
 		if err != nil {
 			atomic.StoreInt32(&s.closed, 1)
+			if err == io.EOF {
+				return io.EOF
+			}
 		}
 		return errors.WithStack(err)
 	case <-timer.C:
@@ -190,6 +199,9 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 	req, err := s.stream.Recv()
 	if err != nil {
 		atomic.StoreInt32(&s.closed, 1)
+		if err == io.EOF {
+			return nil, err
+		}
 		return nil, errors.WithStack(err)
 	}
 	return req, nil
@@ -1030,7 +1042,10 @@ func (b *bucketHeartbeatServer) send(bucket *pdpb.ReportBucketsResponse) error {
 		if err != nil {
 			atomic.StoreInt32(&b.closed, 1)
 		}
-		return err
+		if err == io.EOF {
+			return io.EOF
+		}
+		return errors.WithStack(err)
 	case <-timer.C:
 		atomic.StoreInt32(&b.closed, 1)
 		return errs.ErrSendHeartbeatTimeout
@@ -1044,6 +1059,9 @@ func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 	req, err := b.stream.Recv()
 	if err != nil {
 		atomic.StoreInt32(&b.closed, 1)
+		if err == io.EOF {
+			return nil, io.EOF
+		}
 		return nil, errors.WithStack(err)
 	}
 	return req, nil
@@ -1227,6 +1245,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		}
 	}
 }
+
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
