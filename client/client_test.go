@@ -104,7 +104,7 @@ func TestGRPCDialOption(t *testing.T) {
 		option:            newOption(),
 	}
 	cli.urls.Store([]string{testClientURL})
-	cli.option.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
+	cli.option.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()} //nolint:staticcheck
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)
