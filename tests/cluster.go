@@ -91,7 +91,7 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
+func NewTestServer(ctx context.Context, cfg *config.Config, services []string, handlers ...server.HandlerBuilder) (*TestServer, error) {
 	// use temp dir to ensure test isolation.
 	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
 		tempDir, err := os.MkdirTemp("", "pd_tests")
@@ -113,14 +113,21 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
-	if swaggerserver.Enabled() {
-		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+
+	var serviceBuilders []server.HandlerBuilder
+	if len(handlers) > 0 {
+		serviceBuilders = append(serviceBuilders, handlers...)
+	} else {
+		serviceBuilders = []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
+		if swaggerserver.Enabled() {
+			serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+		}
+		serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+		if !cfg.Microservice.IsResourceManagerFallbackEnabled() {
+			serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
+		}
 	}
-	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	if !cfg.Microservice.IsResourceManagerFallbackEnabled() {
-		serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
-	}
+
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		return nil, err
@@ -527,15 +534,20 @@ func WithGCTuner(enabled bool) ConfigOption {
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, nil, opts...)
+	return createTestCluster(ctx, initialServerCount, nil, nil, opts...)
+}
+
+// NewTestClusterWithHandlers creates a new TestCluster with handlers.
+func NewTestClusterWithHandlers(ctx context.Context, initialServerCount int, handlers []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
+	return createTestCluster(ctx, initialServerCount, nil, handlers, opts...)
 }
 
 // NewTestClusterWithKeyspaceGroup creates a new TestCluster with PD.
 func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
+	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, nil, opts...)
 }
 
-func createTestCluster(ctx context.Context, initialServerCount int, services []string, opts ...ConfigOption) (*TestCluster, error) {
+func createTestCluster(ctx context.Context, initialServerCount int, services []string, handlers []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
@@ -545,7 +557,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		if err != nil {
 			return nil, err
 		}
-		s, err := NewTestServer(ctx, serverConf, services)
+		s, err := NewTestServer(ctx, serverConf, services, handlers...)
 		if err != nil {
 			return nil, err
 		}

@@ -26,11 +26,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -43,45 +39,45 @@ func TestGetVersion(t *testing.T) {
 	re.NoError(err)
 	os.Stdout = temp
 
-	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/memberNil"))
+	}()
+
 	reqCh := make(chan struct{})
 	go func() {
 		<-reqCh
 		time.Sleep(200 * time.Millisecond)
-		addr := cfg.ClientUrls + api.APIPrefix + "/api/v1/version"
+		leader := cluster.GetLeaderServer()
+		if leader == nil {
+			return
+		}
+		addr := leader.GetAddr() + api.APIPrefix + "/api/v1/version"
 		resp, err := tests.TestDialClient.Get(addr)
-		re.NoError(err)
+		if err != nil {
+			return
+		}
 		defer resp.Body.Close()
-		_, err = io.ReadAll(resp.Body)
-		re.NoError(err)
+		_, _ = io.ReadAll(resp.Body)
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	ch := make(chan *server.Server)
-	go func(cfg *config.Config) {
-		s, err := server.CreateServer(ctx, cfg, nil, api.NewHandler)
-		re.NoError(err)
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`))
-		reqCh <- struct{}{}
-		err = s.Run()
-		re.NoError(err)
-		ch <- s
-	}(cfg)
+	reqCh <- struct{}{}
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
 
-	svr := <-ch
-	close(ch)
 	out, err := os.ReadFile(fname)
 	re.NoError(err)
 	re.NotContains(string(out), "PANIC")
 
 	// clean up
-	func() {
-		temp.Close()
-		os.Stdout = old
-		os.RemoveAll(fname)
-		svr.Close()
-		cancel()
-		testutil.CleanServer(cfg.DataDir)
-	}()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/memberNil"))
+	temp.Close()
+	os.Stdout = old
+	os.RemoveAll(fname)
 }
