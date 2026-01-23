@@ -22,15 +22,22 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
+	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 type resourceGroupProxyServer struct {
 	*GrpcServer
+	storage *endpoint.StorageEndpoint
 }
 
 func (s *resourceGroupProxyServer) getResourceManagerDelegateClient(ctx context.Context) (resource_manager.ResourceManagerClient, error) {
@@ -55,6 +62,14 @@ func (s *resourceGroupProxyServer) closeClient(ctx context.Context) {
 		return
 	}
 	s.closeDelegateClient(forwardedHost)
+}
+
+func (s *resourceGroupProxyServer) getStorage() *endpoint.StorageEndpoint {
+	if s.storage != nil {
+		return s.storage
+	}
+	s.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient()), nil)
+	return s.storage
 }
 
 // ListResourceGroups implements the resource_manager.ResourceManagerServer interface.
@@ -87,48 +102,79 @@ func (s *resourceGroupProxyServer) GetResourceGroup(ctx context.Context, req *re
 
 // AddResourceGroup implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) AddResourceGroup(ctx context.Context, req *resource_manager.PutResourceGroupRequest) (*resource_manager.PutResourceGroupResponse, error) {
-	client, err := s.getResourceManagerDelegateClient(ctx)
-	if err != nil {
-		return nil, err
+	group := req.GetGroup()
+	keyspaceID := rmserver.ExtractKeyspaceID(group.GetKeyspaceId())
+	st := s.getStorage()
+	if err := rmserver.EnsureDefaultResourceGroupExists(st, keyspaceID); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
 	}
-	resp, err := client.AddResourceGroup(ctx, req)
-	if err != nil {
-		s.closeClient(ctx)
-		return nil, err
+	if err := rmserver.PersistResourceGroupSettingsAndStates(st, keyspaceID, group); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	return resp, nil
+	return &resource_manager.PutResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // ModifyResourceGroup implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req *resource_manager.PutResourceGroupRequest) (*resource_manager.PutResourceGroupResponse, error) {
-	client, err := s.getResourceManagerDelegateClient(ctx)
-	if err != nil {
-		return nil, err
+	// Keep consistent with existing HTTP behavior: validate and write to storage.
+	group := req.GetGroup()
+	if err := rmserver.ValidateResourceGroupForWrite(group); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	resp, err := client.ModifyResourceGroup(ctx, req)
+	keyspaceID := rmserver.ExtractKeyspaceID(group.GetKeyspaceId())
+	st := s.getStorage()
+	// Load current settings to apply patch semantics.
+	key := keypath.KeyspaceResourceGroupSettingPath(keyspaceID, group.GetName())
+	raw, err := st.Load(key)
 	if err != nil {
-		s.closeClient(ctx)
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return resp, nil
+	if raw == "" {
+		return nil, status.Error(codes.NotFound, errs.ErrResourceGroupNotExists.FastGenByArgs(group.GetName()).Error())
+	}
+	curPB := &resource_manager.ResourceGroup{}
+	if uerr := proto.Unmarshal([]byte(raw), curPB); uerr != nil {
+		return nil, status.Error(codes.Internal, uerr.Error())
+	}
+	cur := rmserver.FromProtoResourceGroup(curPB)
+	if err := cur.PatchSettings(group); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	updated := cur.IntoProtoResourceGroup(keyspaceID)
+	if err := st.SaveResourceGroupSetting(keyspaceID, updated.GetName(), updated); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	return &resource_manager.PutResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // DeleteResourceGroup implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) DeleteResourceGroup(ctx context.Context, req *resource_manager.DeleteResourceGroupRequest) (*resource_manager.DeleteResourceGroupResponse, error) {
-	client, err := s.getResourceManagerDelegateClient(ctx)
-	if err != nil {
-		return nil, err
+	name := req.GetResourceGroupName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "resource group name is empty")
 	}
-	resp, err := client.DeleteResourceGroup(ctx, req)
-	if err != nil {
-		s.closeClient(ctx)
-		return nil, err
+	if name == rmserver.DefaultResourceGroupName {
+		return nil, status.Error(codes.InvalidArgument, "default resource group can't be deleted")
 	}
-	return resp, nil
+	keyspaceID := rmserver.ExtractKeyspaceID(req.GetKeyspaceId())
+	st := s.getStorage()
+	key := keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name)
+	raw, err := st.Load(key)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if raw == "" {
+		return nil, status.Error(codes.NotFound, errs.ErrResourceGroupNotExists.FastGenByArgs(name).Error())
+	}
+	if err := st.DeleteResourceGroupSetting(keyspaceID, name); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	return &resource_manager.DeleteResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // AcquireTokenBuckets implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) AcquireTokenBuckets(stream resource_manager.ResourceManager_AcquireTokenBucketsServer) error {
+	// Keep token-bucket requests delegated to the resource-manager microservice.
 	delegateClient, err := s.getResourceManagerDelegateClient(stream.Context())
 	if err != nil {
 		return err

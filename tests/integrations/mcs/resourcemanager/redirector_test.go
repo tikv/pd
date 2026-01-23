@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -58,6 +59,7 @@ func TestResourceManagerRedirector(t *testing.T) {
 func (suite *resourceManagerRedirectorTestSuite) SetupTest() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastRefreshResourceGroupSettings", "return(true)"))
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.pdCluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1, func(conf *config.Config, _ string) {
@@ -82,6 +84,7 @@ func (suite *resourceManagerRedirectorTestSuite) SetupTest() {
 
 func (suite *resourceManagerRedirectorTestSuite) TearDownTest() {
 	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastRefreshResourceGroupSettings"))
 	suite.cancel()
 	suite.rmCluster.Destroy()
 	suite.pdCluster.Destroy()
@@ -101,8 +104,11 @@ func (suite *resourceManagerRedirectorTestSuite) TestRedirectsConfigRequests() {
 	re := suite.Require()
 	groupName := "redirector_group"
 	suite.createResourceGroupViaPD(groupName, 200)
-	rmGroup := suite.fetchResourceGroup(suite.rmPrimary.GetAddr(), groupName)
-	re.NotNil(rmGroup)
+	var rmGroup *server.ResourceGroup
+	testutil.Eventually(re, func() bool {
+		rmGroup = suite.fetchResourceGroup(suite.rmPrimary.GetAddr(), groupName)
+		return rmGroup != nil && rmGroup.Name == groupName
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 	pdGroup := suite.fetchResourceGroup(
 		suite.pdLeader.GetAddr(),
 		groupName,
@@ -136,10 +142,23 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 			Value: suite.keyspaceID,
 		},
 	}
-	pdResp, err := pdClient.GetResourceGroup(ctx, req)
-	re.NoError(err)
-	rmResp, err := rmClient.GetResourceGroup(ctx, req)
-	re.NoError(err)
+	// Resource group writes are handled locally by pd-server now; the resource-manager
+	// microservice observes them asynchronously via storage refresh.
+	var pdResp, rmResp *rmpb.GetResourceGroupResponse
+	testutil.Eventually(re, func() bool {
+		cctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		var err error
+		pdResp, err = pdClient.GetResourceGroup(cctx, req)
+		if err != nil || pdResp.GetError() != nil || pdResp.GetGroup() == nil {
+			return false
+		}
+		rmResp, err = rmClient.GetResourceGroup(cctx, req)
+		if err != nil || rmResp.GetError() != nil || rmResp.GetGroup() == nil {
+			return false
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 	re.Nil(pdResp.GetError())
 	re.Nil(rmResp.GetError())
 	re.NotNil(pdResp.GetGroup())
@@ -174,15 +193,32 @@ func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name s
 		payload,
 		testutil.StatusOK(re),
 		testutil.StringContain(re, "Success!"),
-		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
 	))
 }
 
 func (suite *resourceManagerRedirectorTestSuite) fetchResourceGroup(addr, groupName string, opts ...func([]byte, int, http.Header)) *server.ResourceGroup {
-	re := suite.Require()
 	querySuffix := fmt.Sprintf("?keyspace_name=%s", suite.keyspaceName)
 	url := fmt.Sprintf("%s%sconfig/group/%s%s", addr, apis.APIPathPrefix, groupName, querySuffix)
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil
+	}
+	resp, err := tests.TestDialClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	for _, opt := range opts {
+		opt(body, resp.StatusCode, resp.Header)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
 	group := &server.ResourceGroup{}
-	re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, url, group, opts...))
+	if err := json.Unmarshal(body, group); err != nil {
+		return nil
+	}
 	return group
 }
