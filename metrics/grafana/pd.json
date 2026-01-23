@@ -1824,7 +1824,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "irate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "irate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1834,7 +1834,7 @@
             },
             {
               "exemplar": true,
-              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "quota-{{job}}-{{instance}}",
@@ -1932,7 +1932,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -1942,49 +1942,49 @@
               "step": 4
             },
             {
-              "expr": "go_memstats_heap_sys_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memstats_heap_sys_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapSys-{{job}}-{{instance}}",
               "refId": "B"
             },
             {
-              "expr": "go_memstats_heap_inuse_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memstats_heap_inuse_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "HeapInuse-{{job}}-{{instance}}",
               "refId": "C"
             },
             {
-              "expr": "go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapAlloc-{{job}}-{{instance}}",
               "refId": "D"
             },
             {
-              "expr": "go_memstats_heap_idle_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memstats_heap_idle_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapIdle-{{job}}-{{instance}}",
               "refId": "E"
             },
             {
-              "expr": "go_memstats_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memstats_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapReleased-{{job}}-{{instance}}",
               "refId": "F"
             },
             {
-              "expr": "go_memstats_next_gc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memstats_next_gc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "GCTrigger-{{job}}-{{instance}}",
               "refId": "G"
             },
             {
-              "expr": "pd_service_memory_quota_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "pd_service_memory_quota_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "quota-{{job}}-{{instance}}",
@@ -2081,7 +2081,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "(time() - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router).*\"})",
+              "expr": "(time() - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"})",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -2180,7 +2180,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "go_goroutines{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_goroutines{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -14250,7 +14250,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "rss-{{instance}}--{{job}}",
@@ -14258,7 +14258,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_memory_classes_heap_objects_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memory_classes_heap_objects_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "heap_inuse-{{instance}}--{{job}}",
@@ -14266,7 +14266,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_memory_classes_heap_stacks_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memory_classes_heap_stacks_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "stack_inuse-{{instance}}--{{job}}",
@@ -14274,7 +14274,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_memory_classes_heap_unused_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memory_classes_heap_unused_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "heap_unused-{{instance}}--{{job}}",
@@ -14282,7 +14282,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_memory_classes_metadata_mcache_free_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}+go_memory_classes_metadata_mcache_inuse_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}+go_memory_classes_metadata_mspan_free_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}+go_memory_classes_metadata_mspan_inuse_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}+go_memory_classes_metadata_other_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memory_classes_metadata_mcache_free_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}+go_memory_classes_metadata_mcache_inuse_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}+go_memory_classes_metadata_mspan_free_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}+go_memory_classes_metadata_mspan_inuse_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}+go_memory_classes_metadata_other_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "go_runtime_metadata-{{instance}}--{{job}}",
@@ -14290,7 +14290,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_memory_classes_os_stacks_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}+go_memory_classes_other_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}+go_memory_classes_profiling_buckets_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memory_classes_os_stacks_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}+go_memory_classes_other_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}+go_memory_classes_profiling_buckets_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "other_memory-{{instance}}--{{job}}",
@@ -14298,7 +14298,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_memory_classes_heap_free_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memory_classes_heap_free_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "free_mem_reserved_by_go-{{instance}}--{{job}}",
@@ -14306,7 +14306,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_memory_classes_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memory_classes_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "returned_to_os-{{instance}}--{{job}}",
@@ -14408,7 +14408,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "go_memstats_heap_objects{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_memstats_heap_objects{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "objects--{{instance}}--{{job}}",
@@ -14509,7 +14509,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "irate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "irate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -14519,14 +14519,14 @@
               "step": 40
             },
             {
-              "expr": "(idelta((go_memstats_gc_cpu_fraction{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"} * (go_memstats_last_gc_time_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"} - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}) * tidb_server_maxprocs{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"})[30s:]) > 0) / 15",
+              "expr": "(idelta((go_memstats_gc_cpu_fraction{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"} * (go_memstats_last_gc_time_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"} - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}) * tidb_server_maxprocs{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"})[30s:]) > 0) / 15",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "gc-cpu--{{instance}}--{{job}}",
               "refId": "C"
             },
             {
-              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
@@ -14629,7 +14629,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "go_gc_duration_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", quantile=\"0\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_gc_duration_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", quantile=\"0\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "min-{{instance}}--{{job}}",
@@ -14637,7 +14637,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_gc_duration_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", quantile!~\"0|1\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_gc_duration_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", quantile!~\"0|1\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "{{quantile}}-{{instance}}--{{job}}",
@@ -14645,7 +14645,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_gc_duration_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", quantile=\"1\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_gc_duration_seconds{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", quantile=\"1\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "max-{{instance}}--{{job}}",
@@ -14752,7 +14752,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": " go_goroutines{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": " go_goroutines{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "goroutines-{{instance}}--{{job}}",
@@ -14760,7 +14760,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_threads{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_threads{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "instant": false,
               "interval": "",
               "legendFormat": "threads-{{instance}}--{{job}}",
@@ -14870,28 +14870,28 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "irate(go_memstats_alloc_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "irate(go_memstats_alloc_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "alloc--{{instance}}--{{job}}",
               "refId": "A"
             },
             {
-              "expr": "irate((go_memstats_alloc_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"} - go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"})[30s:])",
+              "expr": "irate((go_memstats_alloc_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"} - go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"})[30s:])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "sweep--{{instance}}--{{job}}",
               "refId": "B"
             },
             {
-              "expr": "irate(go_memstats_mallocs_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "irate(go_memstats_mallocs_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "alloc-ops--{{instance}}--{{job}}",
               "refId": "C"
             },
             {
-              "expr": "irate(go_memstats_frees_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "irate(go_memstats_frees_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "sweep-ops--{{instance}}--{{job}}",
@@ -15063,7 +15063,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_frees_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])) by (le,instance,job))",
+              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_frees_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])) by (le,instance,job))",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -15073,7 +15073,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_frees_by_size_bytes_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])/increase(go_gc_heap_frees_by_size_bytes_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_frees_by_size_bytes_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])/increase(go_gc_heap_frees_by_size_bytes_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "hide": false,
               "interval": "",
               "legendFormat": "avg free-by-size--{{instance}}--{{job}}",
@@ -15081,7 +15081,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_frees_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_frees_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -15091,7 +15091,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_frees_objects_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_frees_objects_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -15178,7 +15178,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_total_gc_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (le,instance,job))",
+              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_total_gc_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (le,instance,job))",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15190,7 +15190,7 @@
             },
             {
               "exemplar": true,
-              "expr": "rate(go_sched_pauses_total_gc_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s]) / rate(go_sched_pauses_total_gc_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "rate(go_sched_pauses_total_gc_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s]) / rate(go_sched_pauses_total_gc_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15202,7 +15202,7 @@
             },
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_total_other_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (instance,le))",
+              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_total_other_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (instance,le))",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15213,7 +15213,7 @@
             },
             {
               "exemplar": true,
-              "expr": "rate(go_sched_pauses_total_other_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])/rate(go_sched_pauses_total_other_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "rate(go_sched_pauses_total_other_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])/rate(go_sched_pauses_total_other_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15225,7 +15225,7 @@
             },
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_stopping_gc_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (le,instance,job))",
+              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_stopping_gc_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (le,instance,job))",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15237,7 +15237,7 @@
             },
             {
               "exemplar": true,
-              "expr": "rate(go_sched_pauses_stopping_gc_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s]) / rate(go_sched_pauses_stopping_gc_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "rate(go_sched_pauses_stopping_gc_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s]) / rate(go_sched_pauses_stopping_gc_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15249,7 +15249,7 @@
             },
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_stopping_other_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (instance,le))",
+              "expr": "histogram_quantile(0.999,sum(rate(go_sched_pauses_stopping_other_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (instance,le))",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15260,7 +15260,7 @@
             },
             {
               "exemplar": true,
-              "expr": "rate(go_sched_pauses_stopping_other_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])/rate(go_sched_pauses_stopping_other_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "rate(go_sched_pauses_stopping_other_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])/rate(go_sched_pauses_stopping_other_seconds_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15365,7 +15365,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (le, instance,job))",
+              "expr": "histogram_quantile(0.999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (le, instance,job))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "P999--{{instance}}--{{job}}",
@@ -15373,7 +15373,7 @@
               "step": 10
             },
             {
-              "expr": "histogram_quantile(0.9999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (le, instance,job))",
+              "expr": "histogram_quantile(0.9999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (le, instance,job))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "P9999--{{instance}}--{{job}}",
@@ -15381,7 +15381,7 @@
               "step": 10
             },
             {
-              "expr": "histogram_quantile(0.99999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (le, instance,job))",
+              "expr": "histogram_quantile(0.99999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (le, instance,job))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "P99999--{{instance}}--{{job}}",
@@ -15389,7 +15389,7 @@
               "step": 10
             },
             {
-              "expr": "histogram_quantile(0.999999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (le, instance,job))",
+              "expr": "histogram_quantile(0.999999, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (le, instance,job))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "P999999--{{instance}}--{{job}}",
@@ -15397,7 +15397,7 @@
               "step": 10
             },
             {
-              "expr": "histogram_quantile(1, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])) by (le, instance,job))",
+              "expr": "histogram_quantile(1, sum(rate(go_sched_latencies_seconds_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])) by (le, instance,job))",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "max--{{instance}}--{{job}}",
@@ -15555,7 +15555,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "increase(go_gc_cycles_automatic_gc_cycles_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_cycles_automatic_gc_cycles_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15567,7 +15567,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_cycles_forced_gc_cycles_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_cycles_forced_gc_cycles_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15579,7 +15579,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_cycles_total_gc_cycles_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_cycles_total_gc_cycles_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15591,7 +15591,7 @@
             },
             {
               "exemplar": true,
-              "expr": "changes(go_gc_limiter_last_enabled_gc_cycle{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "changes(go_gc_limiter_last_enabled_gc_cycle{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": true,
               "instant": false,
@@ -15692,7 +15692,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "irate(go_sync_mutex_wait_total_seconds_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[30s])",
+              "expr": "irate(go_sync_mutex_wait_total_seconds_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[30s])",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15798,7 +15798,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "go_gc_gogc_percent{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_gc_gogc_percent{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15810,7 +15810,7 @@
             },
             {
               "exemplar": true,
-              "expr": "go_gc_gomemlimit_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}",
+              "expr": "go_gc_gomemlimit_bytes{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}",
               "format": "time_series",
               "hide": false,
               "instant": false,
@@ -15916,7 +15916,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_allocs_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])) by (le,instance,job))",
+              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_allocs_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])) by (le,instance,job))",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -15926,7 +15926,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_allocs_by_size_bytes_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])/increase(go_gc_heap_allocs_by_size_bytes_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_allocs_by_size_bytes_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])/increase(go_gc_heap_allocs_by_size_bytes_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "hide": false,
               "interval": "",
               "legendFormat": "avg alloc-by-size--{{instance}}--{{job}}",
@@ -15934,7 +15934,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_allocs_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_allocs_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -15944,7 +15944,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_allocs_objects_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_allocs_objects_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -16048,7 +16048,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_frees_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])) by (le,instance,job))",
+              "expr": "histogram_quantile(0.999, sum(rate(go_gc_heap_frees_by_size_bytes_bucket{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])) by (le,instance,job))",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -16058,7 +16058,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_frees_by_size_bytes_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])/increase(go_gc_heap_frees_by_size_bytes_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_frees_by_size_bytes_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])/increase(go_gc_heap_frees_by_size_bytes_count{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "hide": false,
               "interval": "",
               "legendFormat": "avg free-by-size--{{instance}}--{{job}}",
@@ -16066,7 +16066,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_frees_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_frees_bytes_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -16076,7 +16076,7 @@
             },
             {
               "exemplar": true,
-              "expr": "increase(go_gc_heap_frees_objects_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router).*\"}[1m])",
+              "expr": "increase(go_gc_heap_frees_objects_total{k8s_cluster=\"$k8s_cluster\",tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\",job=~\".*(pd|tso|scheduling|router|resource-manager).*\"}[1m])",
               "format": "time_series",
               "hide": false,
               "interval": "",
