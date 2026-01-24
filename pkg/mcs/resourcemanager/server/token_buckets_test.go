@@ -87,6 +87,33 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
 }
 
+func TestGroupTokenBucketZeroFillRateGuard(t *testing.T) {
+	re := require.New(t)
+	tbSetting := &rmpb.TokenBucket{
+		Tokens: 10000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 200000,
+		},
+	}
+	gtb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
+	gtb.overrideFillRate = 0
+	gtb.overrideBurstLimit = 0
+
+	now := time.Now()
+	targetPeriodMs := uint64((5 * time.Second) / time.Millisecond)
+	for _, clientID := range []uint64{1, 2} {
+		tb, trickle := gtb.request(now, 1000, targetPeriodMs, clientID)
+		re.NotNil(tb)
+		re.Equal(0.0, tb.Tokens)
+		re.Equal(int64(targetPeriodMs), trickle)
+	}
+	for _, slot := range gtb.tokenSlots {
+		re.False(math.IsInf(slot.curTokenCapacity, 0))
+		re.False(math.IsNaN(slot.curTokenCapacity))
+	}
+}
+
 func TestGroupTokenBucketRequest(t *testing.T) {
 	re := require.New(t)
 	tbSetting := &rmpb.TokenBucket{

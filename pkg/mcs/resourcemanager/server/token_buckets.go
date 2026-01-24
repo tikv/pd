@@ -242,11 +242,24 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		// Create a new slot if the slot is not exist and the required token is not 0.
 		slot = newTokenSlot(clientUniqueID, now)
 		gtb.tokenSlots[clientUniqueID] = slot
+		log.Info("create resource group slot",
+			zap.String("resource-group-name", gtb.resourceGroupName),
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Float64("required-token", requiredToken),
+			zap.Int("slot-len", len(gtb.tokenSlots)),
+		)
 	} else if exist && requiredToken != 0 {
 		// Update the existing slot.
 		slot.lastReqTime = now
 	} else if requiredToken == 0 {
 		// Clean up the slot that required 0.
+		if exist {
+			log.Info("delete resource group slot because required token is 0",
+				zap.String("resource-group-name", gtb.resourceGroupName),
+				zap.Uint64("client-unique-id", clientUniqueID),
+				zap.Int("slot-len", len(gtb.tokenSlots)),
+			)
+		}
 		delete(gtb.tokenSlots, clientUniqueID)
 	}
 	// Clean up the expired slots.
@@ -278,10 +291,17 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	}
 	// If the slot number is 1, just treat it as the whole resource group.
 	if slotNum == 1 {
+		fillRate, burstLimit := gtb.getFillRateAndBurstLimit()
 		for _, slot := range gtb.tokenSlots {
-			slot.curTokenCapacity = gtb.Tokens
-			slot.lastTokenCapacity = gtb.Tokens
-			slot.fillRate, slot.burstLimit = gtb.getFillRateAndBurstLimit()
+			// If fill rate is 0 (e.g. service limit throttled), don't grant any existing tokens.
+			if fillRate == 0 {
+				slot.curTokenCapacity = 0
+				slot.lastTokenCapacity = 0
+			} else {
+				slot.curTokenCapacity = gtb.Tokens
+				slot.lastTokenCapacity = gtb.Tokens
+			}
+			slot.fillRate, slot.burstLimit = fillRate, burstLimit
 		}
 		return
 	}
@@ -294,6 +314,23 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		extraDemandSlots               = make(map[uint64]float64, len(gtb.tokenSlots))
 		extraDemandSum                 = 0.0
 	)
+	if totalFillRate == 0 {
+		log.Info("resource group total fill rate is 0, throttle all slots",
+			zap.String("resource-group-name", gtb.resourceGroupName),
+			zap.Int("slot-len", slotNum),
+			zap.Float64("override-fill-rate", gtb.overrideFillRate),
+			zap.Int64("override-burst-limit", gtb.overrideBurstLimit),
+			zap.Uint64("fill-rate-setting", gtb.Settings.GetFillRate()),
+			zap.Int64("burst-limit-setting", gtb.Settings.GetBurstLimit()),
+		)
+		for _, slot := range gtb.tokenSlots {
+			slot.fillRate = 0
+			slot.burstLimit = 0
+			slot.curTokenCapacity = 0
+			slot.lastTokenCapacity = 0
+		}
+		return
+	}
 	for clientUniqueID := range gtb.tokenSlots {
 		allocation := gtb.grt.getOrCreateRUTracker(clientUniqueID).getRUPerSec()
 		// If the RU demand is greater than the basic fill rate, allocate the basic fill rate first.
@@ -488,6 +525,17 @@ func (gtb *GroupTokenBucket) request(
 			Tokens:   0.0,
 		}, 0
 	}
+	if requiredToken > 0 && slot.fillRate == 0 {
+		log.Info("resource group slot fill rate is 0, reject token request",
+			zap.String("resource-group-name", gtb.resourceGroupName),
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Float64("required-token", requiredToken),
+			zap.Uint64("slot-fill-rate", slot.fillRate),
+			zap.Int64("slot-burst-limit", slot.burstLimit),
+			zap.Float64("bucket-tokens", gtb.Tokens),
+			zap.Int("slot-len", len(gtb.tokenSlots)),
+		)
+	}
 	res, trickleDuration := slot.assignSlotTokens(requiredToken, targetPeriodMs)
 	// Inspect the group token bucket and the assigned token result to catch any anomalies.
 	if isAnomaly := gtb.inspectAnomalies(res, slot, []zap.Field{
@@ -519,6 +567,12 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	// FillRate is used for the token server unavailable in abnormal situation.
 	if requiredToken <= 0 {
 		return res, 0
+	}
+	if ts.fillRate == 0 {
+		// Throttled: avoid granting any existing tokens and keep client retrying in next period.
+		ts.curTokenCapacity = 0
+		ts.lastTokenCapacity = 0
+		return res, int64(targetPeriodMs)
 	}
 	// If the current tokens can directly meet the requirement, returns the need token.
 	if ts.curTokenCapacity >= requiredToken {

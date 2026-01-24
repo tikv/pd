@@ -343,13 +343,20 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64) {
 	rt.Lock()
 	defer rt.Unlock()
 	// Calculate the elapsed duration since the last sample time.
+	prevSampleTime := rt.lastSampleTime
 	var dur time.Duration
-	if !rt.lastSampleTime.IsZero() {
-		dur = now.Sub(rt.lastSampleTime)
+	if !prevSampleTime.IsZero() {
+		dur = now.Sub(prevSampleTime)
 	}
 	rt.lastSampleTime = now
 	// If `dur` is not greater than 0, skip this record.
 	if dur <= 0 {
+		log.Info("skip ru tracker sample due to non-positive duration",
+			zap.Duration("dur", dur),
+			zap.Time("prev-sample-time", prevSampleTime),
+			zap.Time("now", now),
+			zap.Float64("total-ru", totalRU),
+		)
 		return
 	}
 	durSeconds := dur.Seconds()
@@ -359,6 +366,11 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64) {
 	if !rt.initialized {
 		rt.initialized = true
 		rt.lastEMA = ruPerSec
+		log.Info("init ru tracker ema",
+			zap.Float64("ru-per-sec", ruPerSec),
+			zap.Float64("total-ru", totalRU),
+			zap.Duration("dur", dur),
+		)
 		return
 	}
 	// By using e^{-β·Δt} to calculate the decay factor, we can have the following behavior:
@@ -403,6 +415,9 @@ func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracke
 		if rt == nil {
 			rt = newRUTracker(defaultRUTrackerTimeConstant)
 			grt.ruTrackers[clientUniqueID] = rt
+			log.Info("create ru tracker",
+				zap.Uint64("client-unique-id", clientUniqueID),
+			)
 		}
 		grt.Unlock()
 	}
