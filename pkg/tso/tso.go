@@ -90,16 +90,18 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
-// CompareAndSetTSOPhysical sets the TSO's physical part with the given time.
-func (t *timestampOracle) CompareAndSetTSOPhysical(old time.Time, next time.Time, force bool) {
+// setTSOPhysical sets the TSO's physical part with the given time.
+// If the `allowSaveStorage` flag is true, it will always update the physical time.
+// else, it will only update when the logical part is used up.
+func (t *timestampOracle) setTSOPhysical(next time.Time, force bool, allowSaveStorage bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// Do not update the zero physical time if the `force` flag is false.
 	if t.tsoMux.physical.Equal(typeutil.ZeroTime) && !force {
 		return
 	}
-	// If current physical time is bigger than the previous time, it indicates that the physical time has been updated.
-	if typeutil.SubTSOPhysicalByWallClock(t.tsoMux.physical, old) > 0 {
+	// if not allowSaveStorage, only update when logical part is used up
+	if !allowSaveStorage && t.tsoMux.logical < maxLogical {
 		return
 	}
 	// make sure the ts won't fall back
@@ -119,19 +121,18 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 	return t.tsoMux.physical, t.tsoMux.logical
 }
 
-// generateTSO will add the TSO's logical part with the given count and returns the new TSO result with the current physical time for update.
-func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physical int64, logical int64, current time.Time) {
+// generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
+func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physical int64, logical int64) {
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
-		return 0, 0, typeutil.ZeroTime
+		return 0, 0
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.logical += count
 	logical = t.tsoMux.logical
-	current = t.tsoMux.physical
-	return physical, logical, current
+	return physical, logical
 }
 
 func (t *timestampOracle) getLastSavedTime() time.Time {
@@ -208,8 +209,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
 		zap.Time("save", save), zap.Time("next", next))
 	// save into memory
-	current, _ := t.getTSO()
-	t.CompareAndSetTSOPhysical(current, next, true)
+	t.setTSOPhysical(next, true, true)
 	return nil
 }
 
@@ -282,7 +282,6 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 }
 
 // updateTimestamp is used to update the timestamp.
-// pre is the previous physical time before update.
 // allowSaveStorage indicates whether to allow save storage, only allocatorUpdater is true.
 // This function will do two things:
 //  1. When the logical time is going to be used up, increase the current physical time.
@@ -297,7 +296,7 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 //
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
-func (t *timestampOracle) updateTimestamp(pre time.Time, allowSaveStorage bool) error {
+func (t *timestampOracle) updateTimestamp(allowSaveStorage bool) error {
 	if !t.isInitialized() {
 		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
@@ -367,7 +366,7 @@ func (t *timestampOracle) updateTimestamp(pre time.Time, allowSaveStorage bool) 
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
 	// save into memory
-	t.CompareAndSetTSOPhysical(pre, next, false)
+	t.setTSOPhysical(next, false, allowSaveStorage)
 	return nil
 }
 
@@ -375,10 +374,7 @@ var maxRetryCount = 10
 
 func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
-	var (
-		resp    pdpb.Timestamp
-		current time.Time
-	)
+	var resp pdpb.Timestamp
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
@@ -394,7 +390,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical, current = t.generateTSO(ctx, int64(count))
+		resp.Physical, resp.Logical = t.generateTSO(ctx, int64(count))
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -404,7 +400,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
-			if err := t.updateTimestamp(current, false); err != nil {
+			if err := t.updateTimestamp(false); err != nil {
 				log.Warn("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
 			}
 			time.Sleep(t.updatePhysicalInterval)
