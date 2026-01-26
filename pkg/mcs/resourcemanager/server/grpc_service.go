@@ -189,13 +189,20 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			targetPeriodMs = request.GetTargetRequestPeriodMs()
 			clientUniqueID = request.GetClientUniqueId()
 			resps          = &rmpb.TokenBucketsResponse{}
-			logFields      = make([]zap.Field, 2)
+			logFields      = make([]zap.Field, 4)
 		)
+		log.Info("receive token buckets request",
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Uint64("target-period-ms", targetPeriodMs),
+			zap.Int("requests-len", len(request.Requests)),
+		)
+		logFields[0] = zap.Uint64("client-unique-id", clientUniqueID)
+		logFields[1] = zap.Uint64("target-period-ms", targetPeriodMs)
 		for _, req := range request.Requests {
 			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
-			logFields[0] = zap.Uint32("keyspace-id", keyspaceID)
-			logFields[1] = zap.String("resource-group", resourceGroupName)
+			logFields[2] = zap.Uint32("keyspace-id", keyspaceID)
+			logFields[3] = zap.String("resource-group", resourceGroupName)
 			// Get keyspace resource group manager to apply service limit later.
 			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {
@@ -227,6 +234,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
 						requiredToken := re.GetValue()
+						log.Info("process ru token request", append(logFields,
+							zap.Float64("required-token", requiredToken),
+						)...) 
 						// Sample the latest RU demand.
 						grt := krgm.getOrCreateGroupRUTracker(rg.Name)
 						grt.sample(clientUniqueID, now, requiredToken)

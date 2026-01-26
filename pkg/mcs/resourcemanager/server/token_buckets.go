@@ -269,6 +269,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 			log.Info("delete resource group slot because expire",
 				zap.Time("last-req-time", slot.lastReqTime),
 				zap.Duration("expire-timeout", slotExpireTimeout),
+				zap.Uint64("client-unique-id", clientUniqueID),
 				zap.Uint64("del-client-id", clientUniqueID),
 				zap.Int("len", len(gtb.tokenSlots)))
 			continue
@@ -606,9 +607,14 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	if burstLimit > 0 && burstLimit <= int64(fillRate) {
 		loanCoefficient = 1
 	}
-	log.Info("assign slot tokens", zap.Float64("required token", requiredToken), zap.Uint64("target period ms", targetPeriodMs),
-		zap.Uint64("fill rate", fillRate), zap.Int64("burst limit", burstLimit),
-		zap.Int("loan coefficient", loanCoefficient), zap.Float64("current token capacity", ts.curTokenCapacity),
+	log.Info("assign slot tokens",
+		zap.Uint64("client-unique-id", ts.id),
+		zap.Float64("required token", requiredToken),
+		zap.Uint64("target period ms", targetPeriodMs),
+		zap.Uint64("fill rate", fillRate),
+		zap.Int64("burst limit", burstLimit),
+		zap.Int("loan coefficient", loanCoefficient),
+		zap.Float64("current token capacity", ts.curTokenCapacity),
 	)
 	// When there are loan, the allotment will match the fill rate.
 	// We will have k threshold, beyond which the token allocation will be a minimum.

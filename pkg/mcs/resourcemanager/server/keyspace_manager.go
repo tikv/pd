@@ -339,7 +339,7 @@ func newRUTracker(timeConstant time.Duration) *ruTracker {
 // Sample the RU consumption and calculate the real-time RU/s as `lastEMA`.
 // - `now` is the current time point to sample the RU consumption.
 // - `totalRU` is the total RU consumption within the `dur`.
-func (rt *ruTracker) sample(now time.Time, totalRU float64) {
+func (rt *ruTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
 	rt.Lock()
 	defer rt.Unlock()
 	// Calculate the elapsed duration since the last sample time.
@@ -352,6 +352,7 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64) {
 	// If `dur` is not greater than 0, skip this record.
 	if dur <= 0 {
 		log.Info("skip ru tracker sample due to non-positive duration",
+			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Duration("dur", dur),
 			zap.Time("prev-sample-time", prevSampleTime),
 			zap.Time("now", now),
@@ -367,6 +368,7 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64) {
 		rt.initialized = true
 		rt.lastEMA = ruPerSec
 		log.Info("init ru tracker ema",
+			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Float64("ru-per-sec", ruPerSec),
 			zap.Float64("total-ru", totalRU),
 			zap.Duration("dur", dur),
@@ -425,7 +427,7 @@ func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracke
 }
 
 func (grt *groupRUTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
-	grt.getOrCreateRUTracker(clientUniqueID).sample(now, totalRU)
+	grt.getOrCreateRUTracker(clientUniqueID).sample(clientUniqueID, now, totalRU)
 }
 
 func (grt *groupRUTracker) getRUPerSec() float64 {
