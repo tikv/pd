@@ -393,6 +393,12 @@ func (rt *ruTracker) getRUPerSec() float64 {
 	return rt.lastEMA
 }
 
+func (rt *ruTracker) isInitialized() bool {
+	rt.RLock()
+	defer rt.RUnlock()
+	return rt.initialized
+}
+
 // groupRUTracker is used to track the RU consumption of a resource group.
 // It matains a map of RU trackers for each client unique ID.
 type groupRUTracker struct {

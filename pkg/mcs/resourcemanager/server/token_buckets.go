@@ -333,7 +333,8 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		return
 	}
 	for clientUniqueID := range gtb.tokenSlots {
-		allocation := gtb.grt.getOrCreateRUTracker(clientUniqueID).getRUPerSec()
+		ruChecker := gtb.grt.getOrCreateRUTracker(clientUniqueID)
+		allocation := ruChecker.getRUPerSec()
 		// If the RU demand is greater than the basic fill rate, allocate the basic fill rate first.
 		if allocation > basicFillRate {
 			// Record the extra demand for the high demand slots.
@@ -341,6 +342,8 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 			extraDemandSum += extraDemand
 			extraDemandSlots[clientUniqueID] = extraDemand
 			// Allocate the basic fill rate.
+			allocation = basicFillRate
+		} else if !ruChecker.isInitialized() {
 			allocation = basicFillRate
 		}
 		allocationMap[clientUniqueID] = allocation
