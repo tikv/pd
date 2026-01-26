@@ -191,7 +191,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			resps          = &rmpb.TokenBucketsResponse{}
 			logFields      = make([]zap.Field, 4)
 		)
-		log.Info("receive token buckets request",
+		log.Debug("receive token buckets request",
 			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Uint64("target-period-ms", targetPeriodMs),
 			zap.Stringer("requests[0]", request.Requests[0]),
@@ -234,7 +234,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
 						requiredToken := re.GetValue()
-						log.Info("process ru token request", append(logFields,
+						log.Debug("process ru token request", append(logFields,
 							zap.Float64("required-token", requiredToken),
 						)...)
 						// Sample the latest RU demand.

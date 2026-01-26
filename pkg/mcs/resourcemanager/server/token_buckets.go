@@ -242,7 +242,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		// Create a new slot if the slot is not exist and the required token is not 0.
 		slot = newTokenSlot(clientUniqueID, now)
 		gtb.tokenSlots[clientUniqueID] = slot
-		log.Info("create resource group slot",
+		log.Debug("create resource group slot",
 			zap.String("resource-group-name", gtb.resourceGroupName),
 			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Float64("required-token", requiredToken),
@@ -254,7 +254,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	} else if requiredToken == 0 {
 		// Clean up the slot that required 0.
 		if exist {
-			log.Info("delete resource group slot because required token is 0",
+			log.Debug("delete resource group slot because required token is 0",
 				zap.String("resource-group-name", gtb.resourceGroupName),
 				zap.Uint64("client-unique-id", clientUniqueID),
 				zap.Int("slot-len", len(gtb.tokenSlots)),
@@ -316,7 +316,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		extraDemandSum                 = 0.0
 	)
 	if totalFillRate == 0 {
-		log.Info("resource group total fill rate is 0, throttle all slots",
+		log.Debug("resource group total fill rate is 0, throttle all slots",
 			zap.String("resource-group-name", gtb.resourceGroupName),
 			zap.Int("slot-len", slotNum),
 			zap.Float64("override-fill-rate", gtb.overrideFillRate),
@@ -610,7 +610,7 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	if burstLimit > 0 && burstLimit <= int64(fillRate) {
 		loanCoefficient = 1
 	}
-	log.Info("assign slot tokens",
+	log.Debug("assign slot tokens",
 		zap.Uint64("client-unique-id", ts.id),
 		zap.Float64("required token", requiredToken),
 		zap.Uint64("target period ms", targetPeriodMs),
