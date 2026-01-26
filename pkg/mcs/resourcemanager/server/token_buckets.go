@@ -606,6 +606,10 @@ func (ts *tokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	if burstLimit > 0 && burstLimit <= int64(fillRate) {
 		loanCoefficient = 1
 	}
+	log.Info("assign slot tokens", zap.Float64("required token", requiredToken), zap.Uint64("target period ms", targetPeriodMs),
+		zap.Uint64("fill rate", fillRate), zap.Int64("burst limit", burstLimit),
+		zap.Int("loan coefficient", loanCoefficient), zap.Float64("current token capacity", ts.curTokenCapacity),
+	)
 	// When there are loan, the allotment will match the fill rate.
 	// We will have k threshold, beyond which the token allocation will be a minimum.
 	// The threshold unit is `fill rate * target period`.
