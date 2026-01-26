@@ -194,7 +194,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		log.Info("receive token buckets request",
 			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Uint64("target-period-ms", targetPeriodMs),
-			zap.Int("requests-len", len(request.Requests)),
+			zap.Stringer("requests[0]", request.Requests[0]),
 		)
 		logFields[0] = zap.Uint64("client-unique-id", clientUniqueID)
 		logFields[1] = zap.Uint64("target-period-ms", targetPeriodMs)
@@ -236,7 +236,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 						requiredToken := re.GetValue()
 						log.Info("process ru token request", append(logFields,
 							zap.Float64("required-token", requiredToken),
-						)...) 
+						)...)
 						// Sample the latest RU demand.
 						grt := krgm.getOrCreateGroupRUTracker(rg.Name)
 						grt.sample(clientUniqueID, now, requiredToken)
