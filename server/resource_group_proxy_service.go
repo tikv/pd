@@ -37,7 +37,8 @@ import (
 
 type resourceGroupProxyServer struct {
 	*GrpcServer
-	storage *endpoint.StorageEndpoint
+	storage     *endpoint.StorageEndpoint
+	storageOnce sync.Once
 }
 
 func (s *resourceGroupProxyServer) getResourceManagerDelegateClient(ctx context.Context) (resource_manager.ResourceManagerClient, error) {
@@ -65,10 +66,9 @@ func (s *resourceGroupProxyServer) closeClient(ctx context.Context) {
 }
 
 func (s *resourceGroupProxyServer) getStorage() *endpoint.StorageEndpoint {
-	if s.storage != nil {
-		return s.storage
-	}
-	s.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient()), nil)
+	s.storageOnce.Do(func() {
+		s.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient()), nil)
+	})
 	return s.storage
 }
 
@@ -115,7 +115,7 @@ func (s *resourceGroupProxyServer) AddResourceGroup(ctx context.Context, req *re
 }
 
 // ModifyResourceGroup implements the resource_manager.ResourceManagerServer interface.
-func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req *resource_manager.PutResourceGroupRequest) (*resource_manager.PutResourceGroupResponse, error) {
+func (s *resourceGroupProxyServer) ModifyResourceGroup(_ context.Context, req *resource_manager.PutResourceGroupRequest) (*resource_manager.PutResourceGroupResponse, error) {
 	// Keep consistent with existing HTTP behavior: validate and write to storage.
 	group := req.GetGroup()
 	if err := rmserver.ValidateResourceGroupForWrite(group); err != nil {
@@ -148,7 +148,7 @@ func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req 
 }
 
 // DeleteResourceGroup implements the resource_manager.ResourceManagerServer interface.
-func (s *resourceGroupProxyServer) DeleteResourceGroup(ctx context.Context, req *resource_manager.DeleteResourceGroupRequest) (*resource_manager.DeleteResourceGroupResponse, error) {
+func (s *resourceGroupProxyServer) DeleteResourceGroup(_ context.Context, req *resource_manager.DeleteResourceGroupRequest) (*resource_manager.DeleteResourceGroupResponse, error) {
 	name := req.GetResourceGroupName()
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "resource group name is empty")

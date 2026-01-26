@@ -15,9 +15,9 @@
 package server
 
 import (
-	"errors"
-
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+
+	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -25,6 +25,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
+// ResourceGroupWriteStorage defines the storage interface required for resource group write operations.
+// It combines resource group setting/state APIs and basic key-value operations.
 type ResourceGroupWriteStorage interface {
 	endpoint.ResourceGroupStorage
 	kv.Base

@@ -148,12 +148,12 @@ func (s *pdWriteService) putResourceGroup(c *gin.Context) {
 	// Load the current settings and apply patch semantics, then persist back.
 	key := keypath.KeyspaceResourceGroupSettingPath(keyspaceID, patch.GetName())
 	raw, err := st.Load(key)
-	if err != nil || raw == "" {
-		if err == nil {
-			err = errs.ErrResourceGroupNotExists.FastGenByArgs(patch.GetName())
-		}
-		// Keep consistent with microservice handler behavior (it returns 500 for modify failures).
+	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if raw == "" {
+		c.String(http.StatusNotFound, errs.ErrResourceGroupNotExists.FastGenByArgs(patch.GetName()).Error())
 		return
 	}
 	curPB := &rmpb.ResourceGroup{}
