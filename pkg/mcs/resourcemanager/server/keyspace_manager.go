@@ -351,7 +351,7 @@ func (rt *ruTracker) sample(clientUniqueID uint64, now time.Time, totalRU float6
 	rt.lastSampleTime = now
 	// If `dur` is not greater than 0, skip this record.
 	if dur <= 0 {
-		log.Debug("skip ru tracker sample due to non-positive duration",
+		log.Info("skip ru tracker sample due to non-positive duration",
 			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Duration("dur", dur),
 			zap.Time("prev-sample-time", prevSampleTime),
@@ -367,7 +367,7 @@ func (rt *ruTracker) sample(clientUniqueID uint64, now time.Time, totalRU float6
 	if !rt.initialized {
 		rt.initialized = true
 		rt.lastEMA = ruPerSec
-		log.Debug("init ru tracker ema",
+		log.Info("init ru tracker ema",
 			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Float64("ru-per-sec", ruPerSec),
 			zap.Float64("total-ru", totalRU),
@@ -423,7 +423,7 @@ func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracke
 		if rt == nil {
 			rt = newRUTracker(defaultRUTrackerTimeConstant)
 			grt.ruTrackers[clientUniqueID] = rt
-			log.Debug("create ru tracker",
+			log.Info("create ru tracker",
 				zap.Uint64("client-unique-id", clientUniqueID),
 			)
 		}

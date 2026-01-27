@@ -324,6 +324,9 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 			zap.Uint64("fill-rate-setting", gtb.Settings.GetFillRate()),
 			zap.Int64("burst-limit-setting", gtb.Settings.GetBurstLimit()),
 		)
+		gtb.Tokens = 0
+		gtb.reservedBurstTokens = 0
+		gtb.reservedServiceTokens = 0
 		for _, slot := range gtb.tokenSlots {
 			slot.fillRate = 0
 			slot.burstLimit = 0
@@ -332,9 +335,12 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		}
 		return
 	}
+	if gtb.grt == nil {
+		gtb.grt = newGroupRUTracker()
+	}
 	for clientUniqueID := range gtb.tokenSlots {
-		ruChecker := gtb.grt.getOrCreateRUTracker(clientUniqueID)
-		allocation := ruChecker.getRUPerSec()
+		ruTracker := gtb.grt.getOrCreateRUTracker(clientUniqueID)
+		allocation := ruTracker.getRUPerSec()
 		// If the RU demand is greater than the basic fill rate, allocate the basic fill rate first.
 		if allocation > basicFillRate {
 			// Record the extra demand for the high demand slots.
@@ -343,7 +349,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 			extraDemandSlots[clientUniqueID] = extraDemand
 			// Allocate the basic fill rate.
 			allocation = basicFillRate
-		} else if !ruChecker.isInitialized() {
+		} else if !ruTracker.isInitialized() {
 			allocation = basicFillRate
 		}
 		allocationMap[clientUniqueID] = allocation
