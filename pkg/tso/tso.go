@@ -90,19 +90,32 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
+// setTSOOption defines the option type for setTSOPhysical function.
+// if it returns true, it will skip update physical time.
+type setTSOOption func(t *timestampOracle) bool
+
+func withInitialCheck() setTSOOption {
+	return func(t *timestampOracle) bool {
+		return t.tsoMux.physical.Equal(typeutil.ZeroTime)
+	}
+}
+
+func withLogicalOverflowCheck() setTSOOption {
+	return func(t *timestampOracle) bool {
+		return t.tsoMux.logical < maxLogical
+	}
+}
+
 // setTSOPhysical sets the TSO's physical part with the given time.
 // If the `allowSaveStorage` flag is true, it will always update the physical time.
 // else, it will only update when the logical part is used up.
-func (t *timestampOracle) setTSOPhysical(next time.Time, force bool, allowSaveStorage bool) {
+func (t *timestampOracle) setTSOPhysical(next time.Time, opts ...setTSOOption) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	// Do not update the zero physical time if the `force` flag is false.
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) && !force {
-		return
-	}
-	// if not allowSaveStorage, only update when logical part is used up
-	if !allowSaveStorage && t.tsoMux.logical < maxLogical {
-		return
+	for _, opt := range opts {
+		if opt(t) {
+			return
+		}
 	}
 	// make sure the ts won't fall back
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
@@ -209,7 +222,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
 		zap.Time("save", save), zap.Time("next", next))
 	// save into memory
-	t.setTSOPhysical(next, true, true)
+	t.setTSOPhysical(next)
 	return nil
 }
 
@@ -366,7 +379,7 @@ func (t *timestampOracle) updateTimestamp(allowSaveStorage bool) error {
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
 	// save into memory
-	t.setTSOPhysical(next, false, allowSaveStorage)
+	t.setTSOPhysical(next, withInitialCheck(), withLogicalOverflowCheck())
 	return nil
 }
 

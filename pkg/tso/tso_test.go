@@ -25,6 +25,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 type mockElection struct{}
@@ -42,6 +43,40 @@ func (*mockElection) Resign()                             {}
 func (*mockElection) GetServingUrls() []string            { return nil }
 func (*mockElection) GetElectionPath() string             { return "" }
 func (*mockElection) GetLeadership() *election.Leadership { return nil }
+
+func TestSetTSO(t *testing.T) {
+	re := require.New(t)
+	ts := &timestampOracle{
+		tsoMux: &tsoObject{
+			physical: typeutil.ZeroTime,
+			logical:  0,
+		},
+		metrics: newTSOMetrics("test"),
+	}
+	ts.setTSOPhysical(time.Now(), withInitialCheck())
+	physical, _ := ts.getTSO()
+	re.Equal(typeutil.ZeroTime, physical)
+
+	ts.setTSOPhysical(time.Now())
+	physical, _ = ts.getTSO()
+	re.NotEqual(typeutil.ZeroTime, physical)
+
+	current := time.Now().Add(-time.Second)
+	ts = &timestampOracle{
+		tsoMux: &tsoObject{
+			physical: current,
+			logical:  0,
+		},
+		metrics: newTSOMetrics("test"),
+	}
+	ts.setTSOPhysical(time.Now(), withLogicalOverflowCheck())
+	physical, _ = ts.getTSO()
+	re.Equal(current, physical)
+
+	ts.setTSOPhysical(time.Now())
+	physical, _ = ts.getTSO()
+	re.NotEqual(current, physical)
+}
 
 func TestGenerateTSO(t *testing.T) {
 	re := require.New(t)
@@ -96,8 +131,9 @@ func TestCurrentGetTSO(t *testing.T) {
 
 	timestampOracle.lastSavedTime.Store(current.Add(runDuration))
 
-	wg := sync.WaitGroup{}
+	wg := &sync.WaitGroup{}
 	concurrency := 20
+	errCh := make(chan error, concurrency*1000)
 	wg.Add(concurrency)
 	changes := atomic.Int32{}
 	totalTso := atomic.Int32{}
@@ -113,7 +149,12 @@ func TestCurrentGetTSO(t *testing.T) {
 				default:
 					_, err := timestampOracle.getTS(runCtx, 1)
 					totalTso.Add(1)
-					re.NoError(err)
+					if err != nil {
+						select {
+						case errCh <- err:
+						default:
+						}
+					}
 					if i == 0 {
 						physical, _ := timestampOracle.getTSO()
 						if pre != physical {
@@ -127,5 +168,9 @@ func TestCurrentGetTSO(t *testing.T) {
 	}
 
 	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		re.NoError(err)
+	}
 	re.LessOrEqual(changes.Load(), totalTso.Load()/int32(maxLogical)+1)
 }
