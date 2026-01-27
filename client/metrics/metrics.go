@@ -95,6 +95,8 @@ var (
 	QueryRegionBatchSize *prometheus.HistogramVec
 	// QueryRegionBatchSendLatency is the histogram of the latency of sending query region requests.
 	QueryRegionBatchSendLatency prometheus.Histogram
+	// TSOLeaderChangedCounter is the counter of TSO leader changes.
+	TSOLeaderChangedCounter prometheus.Counter
 )
 
 func initMetrics(constLabels prometheus.Labels) {
@@ -205,6 +207,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Current count of ongoing batch tso requests",
 			ConstLabels: constLabels,
 		}, []string{"stream"})
+
 	EstimateTSOLatencyGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace:   "pd_client",
@@ -213,6 +216,16 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Estimated latency of an RTT of getting TSO",
 			ConstLabels: constLabels,
 		}, []string{"stream"})
+
+	TSOLeaderChangedCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "request",
+			Name:        "tso_leader_changed_total",
+			Help:        "Counter of tso leader changed",
+			ConstLabels: constLabels,
+		},
+	)
 
 	CircuitBreakerCounters = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -442,6 +455,7 @@ func registerMetrics() {
 	prometheus.MustRegister(TSOBatchSendLatency)
 	prometheus.MustRegister(RequestForwarded)
 	prometheus.MustRegister(EstimateTSOLatencyGauge)
+	prometheus.MustRegister(TSOLeaderChangedCounter)
 	prometheus.MustRegister(CircuitBreakerCounters)
 	prometheus.MustRegister(QueryRegionBestBatchSize)
 	prometheus.MustRegister(QueryRegionBatchSize)

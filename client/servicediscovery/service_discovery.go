@@ -123,6 +123,11 @@ type ServiceDiscovery interface {
 	GetAllServiceClients() []ServiceClient
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given url.
 	GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error)
+	// RemoveClientConn removes the grpc client connection of the given url from the connection pools.
+	RemoveClientConn(url string)
+	// SetClientConn sets the grpc client connection of the given url in the connection pools.
+	// Only for test purpose.
+	SetClientConn(url string, conn *grpc.ClientConn)
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
@@ -718,6 +723,21 @@ func (c *serviceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
 
+// RemoveClientConn removes the grpc client connection of the given url from the connection pools.
+func (c *serviceDiscovery) RemoveClientConn(url string) {
+	cc, ok := c.clientConns.LoadAndDelete(url)
+	if !ok {
+		return
+	}
+	_ = cc.(*grpc.ClientConn).Close()
+}
+
+// SetClientConn sets the grpc client connection of the given url in the connection pools.
+// Only for test purpose.
+func (c *serviceDiscovery) SetClientConn(url string, conn *grpc.ClientConn) {
+	c.clientConns.Store(url, conn)
+}
+
 // GetServingURL returns the leader url
 func (c *serviceDiscovery) GetServingURL() string {
 	return c.getLeaderURL()
@@ -1072,5 +1092,7 @@ func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *p
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *serviceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+	failpoint.InjectCall("staleDNS")
+	conn, err := grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+	return conn, err
 }
