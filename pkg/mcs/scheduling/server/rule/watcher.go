@@ -240,16 +240,13 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Debug("delete region label rule", zap.String("key", key))
-		err := rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
-		if err == nil {
-			rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
-			if err != nil {
-				log.Warn("marshal label rule failed", zap.Error(err))
-			} else {
-				krs := rule.GetKeyRanges()
-				if krs != nil {
-					suspectKeyRanges = append(suspectKeyRanges, krs...)
-				}
+		id := strings.TrimPrefix(key, rw.regionLabelPathPrefix)
+		rule := rw.regionLabeler.GetLabelRuleLocked(id)
+		err := rw.regionLabeler.DeleteLabelRuleLocked(id)
+		if err == nil && rule != nil {
+			krs := rule.GetKeyRanges()
+			if krs != nil {
+				suspectKeyRanges = append(suspectKeyRanges, krs...)
 			}
 		}
 		return err
