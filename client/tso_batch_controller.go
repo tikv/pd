@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/tikv/pd/client/metrics"
-	"github.com/tikv/pd/client/tsoutil"
 )
 
 type tsoBatchController struct {
@@ -211,12 +210,12 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, streamID string, err error) {
+func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffix uint32, streamID string, err error) {
 	for i := range tbc.collectedRequestCount {
 		tsoReq := tbc.collectedRequests[i]
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx
-		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
+		tsoReq.physical, tsoReq.logical = physical, firstLogical+int64(i)*int64(suffix)
 		tsoReq.streamID = streamID
 		tsoReq.tryDone(err)
 		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()

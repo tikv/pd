@@ -45,6 +45,7 @@ const (
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
+	tsoMaxIndexUpperLimit            = 10
 )
 
 var _ tso.ServiceConfig = (*Config)(nil)
@@ -72,6 +73,10 @@ type Config struct {
 
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	// TSOUniqueIndex is the current TSO unique index.
+	TSOUniqueIndex int64 `toml:"tso-unique-index" json:"tso-unique-index"`
+	// TSOMaxIndex is the current TSO max index, which should be same with how many cluster needs to replicate data.
+	TSOMaxIndex int64 `toml:"tso-max-index" json:"tso-max-index"`
 
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
 	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
@@ -152,6 +157,14 @@ func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
 }
 
+// GetTSOIndex returns the current cluster tso index configuration.
+func (c *Config) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
+	if c.TSOMaxIndex <= 0 {
+		return 1, 0
+	}
+	return c.TSOMaxIndex, c.TSOUniqueIndex
+}
+
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	// Load config file if specified.
@@ -218,6 +231,15 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if c.TSOUpdatePhysicalInterval.Duration != defaultTSOUpdatePhysicalInterval {
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
+	}
+	if c.TSOMaxIndex > tsoMaxIndexUpperLimit {
+		return fmt.Errorf("tso max index:%d should be less than %d", c.TSOMaxIndex, tsoMaxIndexUpperLimit)
+	}
+
+	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
+		log.Warn("tso max index is less than unique index", zap.Int64("max-index", c.TSOMaxIndex),
+			zap.Int64("unique-index", c.TSOUniqueIndex))
+		return fmt.Errorf("tso max index:%d is less than unique index:%d", c.TSOMaxIndex, c.TSOUniqueIndex)
 	}
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {

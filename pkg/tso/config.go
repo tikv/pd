@@ -48,4 +48,6 @@ type Config interface {
 	GetMaxResetTSGap() time.Duration
 	// GetTLSConfig returns the TLS config.
 	GetTLSConfig() *grpcutil.TLSConfig
+	// GetTSOIndex returns the current cluster tso index configuration.
+	GetTSOIndex() (maxIndex int64, uniqueIndex int64)
 }
