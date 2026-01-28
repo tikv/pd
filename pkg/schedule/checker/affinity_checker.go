@@ -81,6 +81,10 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		affinityCheckerPausedCounter.Inc()
 		return nil
 	}
+	if !c.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+		affinityCheckerPlacementRulesDisabledCounter.Inc()
+		return nil
+	}
 
 	// Check region state
 	if region.GetLeader() == nil {
@@ -491,11 +495,6 @@ func (c *AffinityChecker) RecordOpSuccess(op *operator.Operator) {
 }
 
 func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region *core.RegionInfo, isRealRegion bool) bool {
-	// Return false if Placement Rules are not enabled.
-	if c.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
-		return false
-	}
-
 	// Get the RegionFit for the given Region. If the Region is not a real existing Region but a virtual target state,
 	// use FitRegionWithoutCache to bypass the cache.
 	var fit *placement.RegionFit
