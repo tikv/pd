@@ -428,7 +428,7 @@ func (m *RuleManager) IsRegionFitCached(storeSet StoreSet, region *core.RegionIn
 	return isCached
 }
 
-// FitRegionWithoutCache fits a region to the rules it matches. This function does not use or populate the cache,
+// FitRegionWithoutCache fits a region to the rules it matches. This function does not use or save the cache,
 // and the Region being fitted is usually not a real Region.
 func (m *RuleManager) FitRegionWithoutCache(storeSet StoreSet, region *core.RegionInfo) (fit *RegionFit) {
 	regionStores := getStoresByRegion(storeSet, region)
