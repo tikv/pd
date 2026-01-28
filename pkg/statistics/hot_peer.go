@@ -35,9 +35,9 @@ type dimStat struct {
 	lastDelta       float64
 }
 
-func newDimStat(reportInterval time.Duration) *dimStat {
+func newDimStat(reportInterval time.Duration, aotSize int, medianSize int) *dimStat {
 	return &dimStat{
-		rolling:         movingaverage.NewTimeMedian(utils.DefaultAotSize, rollingWindowsSize, reportInterval),
+		rolling:         movingaverage.NewTimeMedian(aotSize, medianSize, reportInterval),
 		lastIntervalSum: 0,
 		lastDelta:       0,
 	}
@@ -200,6 +200,9 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 
 func (stat *HotPeerStat) isHot(thresholds []float64) bool {
 	return slice.AnyOf(stat.rollingLoads, func(i int) bool {
+		if i == utils.CPUDim {
+			return stat.rollingLoads[i].isHot(thresholds[i])
+		}
 		return stat.rollingLoads[i].isLastAverageHot(thresholds[i])
 	})
 }

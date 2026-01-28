@@ -30,6 +30,7 @@ import (
 
 const (
 	storeStatsRollingWindowsSize = 3
+	storeCPUStatsRollingWindowsSize = 5
 
 	// RegionsStatsObserveInterval is the interval for obtaining statistics from RegionTree
 	RegionsStatsObserveInterval = 30 * time.Second
@@ -151,8 +152,8 @@ func newRollingStoreStats() *RollingStoreStats {
 	timeMedians[utils.StoreWriteBytes] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultWriteMfSize, interval)
 	timeMedians[utils.StoreWriteKeys] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultWriteMfSize, interval)
 	timeMedians[utils.StoreWriteQuery] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultWriteMfSize, interval)
-	movingAvgs[utils.StoreReadCPU] = movingaverage.NewMedianFilter(storeStatsRollingWindowsSize)
-	movingAvgs[utils.StoreCPUUsage] = movingaverage.NewMedianFilter(storeStatsRollingWindowsSize)
+	movingAvgs[utils.StoreReadCPU] = movingaverage.NewMedianFilter(storeCPUStatsRollingWindowsSize)
+	movingAvgs[utils.StoreCPUUsage] = movingaverage.NewMedianFilter(storeCPUStatsRollingWindowsSize)
 	movingAvgs[utils.StoreDiskReadRate] = movingaverage.NewMedianFilter(storeStatsRollingWindowsSize)
 	movingAvgs[utils.StoreDiskWriteRate] = movingaverage.NewMedianFilter(storeStatsRollingWindowsSize)
 
