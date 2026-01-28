@@ -604,16 +604,6 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fa
 	}
 }
 
-func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo {
-	var stores []*core.StoreInfo
-	for _, p := range rf.Peers {
-		if s := c.cluster.GetStore(p.GetStoreId()); s != nil {
-			stores = append(stores, s)
-		}
-	}
-	return stores
-}
-
 func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempState bool) {
 	if filterByTempState {
 		c.pendingProcessedRegions.Put(region.GetID(), nil)
