@@ -85,11 +85,14 @@ type RegionInfo struct {
 	queryStats                *pdpb.QueryStats
 	flowRoundDivisor          uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
+	// todo: keep it compatible with previous design, we can remove it later.
 	buckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
+	// bucketMeta is used to store the bucket meta reported by tikv.
+	bucketMeta *metapb.BucketMeta
 }
 
 // RegionSource is the source of region.
@@ -215,6 +218,7 @@ type RegionHeartbeatRequest interface {
 	GetQueryStats() *pdpb.QueryStats
 	GetApproximateSize() uint64
 	GetApproximateKeys() uint64
+	GetBucketMeta() *metapb.BucketMeta
 }
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -243,6 +247,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		queryStats:       heartbeat.GetQueryStats(),
 		source:           Heartbeat,
 		flowRoundDivisor: flowRoundDivisor,
+		bucketMeta:       heartbeat.GetBucketMeta(),
 	}
 
 	// scheduling service doesn't need the following fields.
@@ -281,7 +286,8 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	if bucketEnable && origin != nil && r.buckets == nil {
+	// skip bucket meta update if tikv has report bucket meta.
+	if r.bucketMeta == nil && bucketEnable && origin != nil && r.buckets == nil {
 		r.buckets = origin.buckets
 	}
 }
@@ -316,6 +322,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		replicationStatus:         r.replicationStatus,
 		buckets:                   r.buckets,
 		queryStats:                typeutil.DeepClone(r.queryStats, QueryStatsFactory),
+		bucketMeta:                r.bucketMeta,
 	}
 
 	for _, opt := range opts {
@@ -607,7 +614,15 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 	}
 }
 
-// UpdateBuckets sets the buckets of the region.
+// SetBucketMeta sets the bucket meta of the region, used by region sync.
+func (r *RegionInfo) SetBucketMeta(buckets *metapb.Buckets) {
+	r.bucketMeta = &metapb.BucketMeta{
+		Version: buckets.GetVersion(),
+		Keys:    buckets.GetKeys(),
+	}
+}
+
+// UpdateBuckets sets the buckets of the region, used by bucket report.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 	if buckets == nil {
 		atomic.StorePointer(&r.buckets, nil)
@@ -626,6 +641,13 @@ func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 	if r == nil {
 		return nil
+	}
+	if meta := r.bucketMeta; meta != nil {
+		return &metapb.Buckets{
+			RegionId: r.GetID(),
+			Version:  meta.GetVersion(),
+			Keys:     meta.GetKeys(),
+		}
 	}
 	buckets := atomic.LoadPointer(&r.buckets)
 	return (*metapb.Buckets)(buckets)
@@ -885,9 +907,12 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 				return
 			}
-			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
+			if region.GetBuckets().GetVersion() > origin.GetBuckets().GetVersion() {
 				if log.GetLevel() <= zap.DebugLevel {
-					debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
+					debug("bucket key changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.Uint64("old-bucket-version", origin.GetBuckets().GetVersion()),
+						zap.Uint64("new-bucket-version", region.GetBuckets().GetVersion()))
 				}
 				saveKV, saveCache = true, true
 				return

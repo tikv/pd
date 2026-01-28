@@ -153,6 +153,13 @@ func WithIncVersion() RegionCreateOption {
 	}
 }
 
+// WithBucketMeta sets the bucket meta for the region.
+func WithBucketMeta(bucketMeta *metapb.BucketMeta) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.bucketMeta = bucketMeta
+	}
+}
+
 // WithDecVersion decreases the version of the region.
 func WithDecVersion() RegionCreateOption {
 	return func(region *RegionInfo) {
