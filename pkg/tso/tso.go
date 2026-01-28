@@ -379,7 +379,12 @@ func (t *timestampOracle) updateTimestamp(allowSaveStorage bool) error {
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
 	// save into memory
-	t.setTSOPhysical(next, withInitialCheck(), withLogicalOverflowCheck())
+	if allowSaveStorage {
+		t.setTSOPhysical(next, withInitialCheck())
+	} else {
+		t.setTSOPhysical(next, withInitialCheck(), withLogicalOverflowCheck())
+	}
+
 	return nil
 }
 
