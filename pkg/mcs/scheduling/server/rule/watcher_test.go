@@ -65,7 +65,8 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 
 func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client *clientv3.Client) {
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
+	labelerManager := labeler.NewRegionLabeler(ctx, storage)
+	err := labelerManager.Initialize(time.Hour)
 	re.NoError(err)
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &Watcher{

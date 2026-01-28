@@ -120,7 +120,7 @@ func (sc *schedulingController) initCoordinatorLocked(ctx context.Context, clust
 func (sc *schedulingController) runCoordinator() {
 	defer logutil.LogPanic()
 	defer sc.wg.Done()
-	sc.coordinator.RunUntilStop()
+	sc.coordinator.RunUntilStop(false)
 }
 
 func (sc *schedulingController) runStatsBackgroundJobs() {
