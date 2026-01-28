@@ -69,12 +69,14 @@ type thresholds struct {
 	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for total length.
 }
 
+type isLeader bool
+
 // HotPeerCache saves the hot peer's statistics.
 type HotPeerCache struct {
 	kind              utils.RWType
 	cluster           *core.BasicCluster
 	peersOfStore      map[uint64]*utils.TopN         // storeID -> hot peers
-	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	storesOfRegion    map[uint64]map[uint64]isLeader // regionID -> storeIDs
 	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
 	topNTTL           time.Duration
 	taskQueue         *chanx.UnboundedChan[func(*HotPeerCache)]
@@ -89,7 +91,7 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 		kind:              kind,
 		cluster:           cluster,
 		peersOfStore:      make(map[uint64]*utils.TopN),
-		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
+		storesOfRegion:    make(map[uint64]map[uint64]isLeader),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
 		taskQueue:         chanx.NewUnboundedChan[func(*HotPeerCache)](ctx, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
@@ -155,6 +157,37 @@ func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 				item := f.getOldHotPeerStat(regionID, storeID)
 				if item != nil {
 					item.actionType = utils.Remove
+					items = append(items, item)
+				}
+			}
+		}
+	}
+	return items
+}
+
+// CheckLeaderChange checks whether the leader of the region has changed.
+func (f *HotPeerCache) CheckLeaderChange(region *core.RegionInfo) []*HotPeerStat {
+	if f.kind == utils.Write {
+		return nil
+	}
+	regionID := region.GetID()
+	newLeader := region.GetLeader().GetStoreId()
+	items := make([]*HotPeerStat, 0)
+	if ids, ok := f.storesOfRegion[regionID]; ok {
+		for storeID, isLeader := range ids {
+			if isLeader && newLeader != storeID {
+				item := f.getOldHotPeerStat(regionID, storeID)
+				if item != nil {
+					item.actionType = utils.Update
+					item.isLeader = false
+					item.lastTransferLeaderTime = time.Now()
+					items = append(items, item)
+				}
+				item = f.getOldHotPeerStat(regionID, newLeader)
+				if item != nil {
+					item.actionType = utils.Update
+					item.isLeader = true
+					item.lastTransferLeaderTime = time.Now()
 					items = append(items, item)
 				}
 			}
@@ -514,10 +547,10 @@ func (f *HotPeerCache) putItem(item *HotPeerStat) {
 	peers.Put(item)
 	stores, ok := f.storesOfRegion[item.RegionID]
 	if !ok {
-		stores = make(map[uint64]struct{})
+		stores = make(map[uint64]isLeader)
 		f.storesOfRegion[item.RegionID] = stores
 	}
-	stores[item.StoreID] = struct{}{}
+	stores[item.StoreID] = item.isLeader
 	regions, ok := f.regionsOfStore[item.StoreID]
 	if !ok {
 		regions = make(map[uint64]struct{})
