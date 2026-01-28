@@ -44,6 +44,12 @@ func (*mockElection) GetServingUrls() []string            { return nil }
 func (*mockElection) GetElectionPath() string             { return "" }
 func (*mockElection) GetLeadership() *election.Leadership { return nil }
 
+func TestLogicalOverflow(t *testing.T) {
+	re := require.New(t)
+	re.True(overflowedLogical(maxLogical))
+	re.False(overflowedLogical(maxLogical - 1))
+}
+
 func TestSetTSO(t *testing.T) {
 	re := require.New(t)
 	ts := &timestampOracle{
