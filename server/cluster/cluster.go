@@ -109,8 +109,6 @@ const (
 	persistLimitRetryTimes  = 5
 	persistLimitWaitTime    = 100 * time.Millisecond
 	gcTunerCheckCfgInterval = 10 * time.Second
-	// regionLabelGCInterval is the interval to run region-label's GC work.
-	regionLabelGCInterval = time.Hour
 	// storageSizeCollectorInterval is the interval to run storage size collector.
 	storageSizeCollectorInterval = time.Minute
 
@@ -371,17 +369,8 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("cluster is not bootstrapped")
 		return nil
 	}
-	if c.opt.IsPlacementRulesEnabled() {
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
-		if err != nil {
-			return err
-		}
-	}
 
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
-	if err != nil {
-		return err
-	}
+	c.regionLabeler = labeler.NewRegionLabeler(c.ctx, c.storage)
 
 	// create affinity manager with region labeler for key range validation and rebuild
 	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)

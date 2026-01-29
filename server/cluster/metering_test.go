@@ -47,7 +47,8 @@ func TestCollectStorageSize(t *testing.T) {
 		re.NoError(err)
 	}
 
-	tc.regionLabeler, err = labeler.NewRegionLabeler(ctx, tc.storage, time.Second*5)
+	tc.regionLabeler = labeler.NewRegionLabeler(ctx, tc.storage)
+	err = tc.regionLabeler.Initialize(time.Millisecond * 10)
 	re.NoError(err)
 	keyspaceGroupManager := keyspace.NewKeyspaceGroupManager(ctx, tc.storage, tc.etcdClient)
 	re.NoError(keyspaceGroupManager.Bootstrap(ctx))
