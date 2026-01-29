@@ -119,6 +119,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 			targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
 			if targetRegion == nil || !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isRealRegion */) {
 				c.affinityManager.ExpireAffinityGroup(group.ID)
+				group = c.affinityManager.GetAffinityGroupState(group.ID)
 				needRefetch = true
 			}
 		}
