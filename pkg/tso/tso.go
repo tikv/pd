@@ -76,12 +76,18 @@ type timestampOracle struct {
 	metrics *tsoMetrics
 }
 
+// getStorageTimeout returns the timeout for storage operations.
+// The returned timeout ensures that the storage timeout is at least
+// `config.DefaultTSOSaveInterval - time.Second`, which gives enough buffer
+// for storage operations to complete before hitting the save deadline.
 func (t *timestampOracle) getStorageTimeout() time.Duration {
 	timeout := t.saveInterval
-	if timeout < config.DefaultTSOSaveInterval {
+	switch {
+	case timeout >= config.DefaultTSOSaveInterval:
+		return timeout - time.Second
+	default:
 		return config.DefaultTSOSaveInterval - time.Second
 	}
-	return timeout - time.Second
 }
 
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
@@ -93,12 +99,10 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	// Do not update the zero physical time if the `force` flag is false.
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) && !force {
-		return
-	}
+
 	// make sure the ts won't fall back
-	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
+	if (t.isInitializedLocked() || force) &&
+		typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
 	}
@@ -107,10 +111,13 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
+
+	switch {
+	case t.isInitializedLocked():
+		return t.tsoMux.physical, t.tsoMux.logical
+	default:
 		return typeutil.ZeroTime, 0
 	}
-	return t.tsoMux.physical, t.tsoMux.logical
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
@@ -118,21 +125,25 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physica
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
+
+	switch {
+	case t.isInitializedLocked():
+		physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
+		t.tsoMux.logical += count
+		logical = t.tsoMux.logical
+		return physical, logical
+	default:
 		return 0, 0
 	}
-	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
-	t.tsoMux.logical += count
-	logical = t.tsoMux.logical
-	return physical, logical
 }
 
 func (t *timestampOracle) getLastSavedTime() time.Time {
-	last := t.lastSavedTime.Load()
-	if last == nil {
+	switch last := t.lastSavedTime.Load().(type) {
+	case time.Time:
+		return last
+	default:
 		return typeutil.ZeroTime
 	}
-	return last.(time.Time)
 }
 
 func (t *timestampOracle) syncTimestamp() error {
@@ -151,14 +162,12 @@ func (t *timestampOracle) syncTimestamp() error {
 	// We could skip the synchronization if the following conditions are met:
 	//   1. The timestamp in memory has been initialized.
 	//   2. The last saved timestamp in etcd is not zero.
-	//   3. The last saved timestamp in memory is not zero.
-	//   4. The last saved timestamp in etcd is equal to the last saved timestamp in memory.
-	// 1 is to ensure the timestamp in memory could always be initialized. 2-4 are to ensure
+	//   3. The last saved timestamp in etcd is equal to the last saved timestamp in memory.
+	// 1 is to ensure the timestamp in memory could always be initialized. 2-3 are to ensure
 	// the synchronization could be skipped safely.
 	if t.isInitialized() &&
-		last != typeutil.ZeroTime &&
-		lastSavedTime != typeutil.ZeroTime &&
-		typeutil.SubRealTimeByWallClock(last, lastSavedTime) == 0 {
+		!last.IsZero() &&
+		last.Equal(lastSavedTime) {
 		log.Info("skip sync timestamp",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Time("last", last), zap.Time("last-saved", lastSavedTime))
@@ -173,7 +182,11 @@ func (t *timestampOracle) syncTimestamp() error {
 	failpoint.Inject("systemTimeSlow", func() {
 		next = next.Add(-time.Hour)
 	})
-	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
+	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
+	// i.e., the system time has not elapsed at least `updateTimestampGuard` since the etcd timestamp:
+	// We treat such system time as being too slow.
+	//
+	// To guarantee the monotonicity of allocated timestamps,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < updateTimestampGuard {
 		log.Warn("system time may be incorrect",
@@ -183,6 +196,8 @@ func (t *timestampOracle) syncTimestamp() error {
 			errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(updateTimestampGuard)
 	}
+	// Persist the (possibly etcd-bumped) 'next' timestamp
+	// by saving a future 'save' timestamp to storage.
 	failpoint.Inject("failedToSaveTimestamp", func() {
 		failpoint.Return(errs.ErrEtcdTxnInternal)
 	})
@@ -212,7 +227,13 @@ func (t *timestampOracle) syncTimestamp() error {
 func (t *timestampOracle) isInitialized() bool {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	return t.tsoMux.physical != typeutil.ZeroTime
+	return t.isInitializedLocked()
+}
+
+// isInitializedLocked checks initialization state.
+// Caller must hold t.tsoMux lock (read or write).
+func (t *timestampOracle) isInitializedLocked() bool {
+	return !t.tsoMux.physical.IsZero()
 }
 
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
@@ -221,37 +242,36 @@ func (t *timestampOracle) isInitialized() bool {
 func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if !t.member.IsServing() {
+	switch {
+	case !t.member.IsServing():
 		t.metrics.errLeaseResetTSEvent.Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs(errs.NotLeaderErr)
+	case !t.isInitializedLocked():
+		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
 	var (
 		nextPhysical, nextLogical = tsoutil.ParseTS(tso)
 		logicalDifference         = int64(nextLogical) - t.tsoMux.logical
 		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
 	)
-	// check if the TSO is initialized.
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
-		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
-	}
-	// do not update if next physical time is less/before than prev
-	if physicalDifference < 0 {
+	switch {
+	case physicalDifference < 0:
 		t.metrics.errResetSmallPhysicalTSEvent.Inc()
-		if ignoreSmaller {
+		switch {
+		case ignoreSmaller:
 			return nil
+		default:
+			return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is smaller than now")
 		}
-		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is smaller than now")
-	}
-	// do not update if next logical time is less/before/equal than prev
-	if physicalDifference == 0 && logicalDifference <= 0 {
+	case physicalDifference == 0 && logicalDifference <= 0:
 		t.metrics.errResetSmallLogicalTSEvent.Inc()
-		if ignoreSmaller {
+		switch {
+		case ignoreSmaller:
 			return nil
+		default:
+			return errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
 		}
-		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
-	}
-	// do not update if physical time is too greater than prev
-	if !skipUpperBoundCheck && physicalDifference >= t.maxResetTSGap().Milliseconds() {
+	case !skipUpperBoundCheck && physicalDifference >= t.maxResetTSGap().Milliseconds():
 		t.metrics.errResetLargeTSEvent.Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
