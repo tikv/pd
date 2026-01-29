@@ -118,3 +118,15 @@ func TestSliceHasDupInSorted(t *testing.T) {
 	re.True(slice.HasDupInSorted([]string{"a", "b", "b"}))
 	re.False(slice.HasDupInSorted([]string(nil)))
 }
+
+func TestSliceSplitIntoBatches(t *testing.T) {
+	re := require.New(t)
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 6))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 5))
+	re.Equal([][]int{{1, 2, 3, 4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 4))
+	re.Equal([][]int{{1, 2, 3}, {4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 3))
+	re.Equal([][]int{{1, 2}, {3, 4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 2))
+	re.Equal([][]int{{1}, {2}, {3}, {4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 1))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 0))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, -1))
+}
