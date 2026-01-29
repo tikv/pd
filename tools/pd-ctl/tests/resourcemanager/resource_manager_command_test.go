@@ -98,3 +98,45 @@ func (s *testResourceManagerSuite) TestConfigController() {
 	expectCfg.Controller.RequestUnit.WriteBaseCost = 2
 	checkShow()
 }
+
+func (s *testResourceManagerSuite) TestUpdateConfig() {
+	re := s.Require()
+	expectCfg := server.Config{}
+	expectCfg.Adjust(nil)
+	// Show controller config
+	checkShow := func() {
+		args := []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "show"}
+		output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+		re.NoError(err)
+
+		actualCfg := server.ControllerConfig{}
+		err = json.Unmarshal(output, &actualCfg)
+		re.NoError(err, string(output))
+		re.Equal(expectCfg.Controller, actualCfg)
+	}
+
+	args := []string{"-u", s.pdAddr, "config", "set", "controller.request-unit.write-base-cost", "2"}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "can't update controller child item ")
+
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.write-base-cost", "2"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "can't update controller child item")
+
+	// Set controller config
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.ltb-max-wait-duration", "1h"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	expectCfg.Controller.LTBMaxWaitDuration = typeutil.Duration{Duration: 1 * time.Hour}
+	checkShow()
+
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.enable-controller-trace-log", "true"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	expectCfg.Controller.EnableControllerTraceLog = true
+	checkShow()
+}
