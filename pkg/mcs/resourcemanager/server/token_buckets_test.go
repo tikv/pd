@@ -112,6 +112,40 @@ func TestGroupTokenBucketZeroFillRateGuard(t *testing.T) {
 		re.False(math.IsInf(slot.curTokenCapacity, 0))
 		re.False(math.IsNaN(slot.curTokenCapacity))
 	}
+
+	t.Run("assign-basic-fillrate-to-uninitialized-ru-tracker-slot", func(t *testing.T) {
+		re := require.New(t)
+		gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+			Tokens: 0,
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   100,
+				BurstLimit: 100,
+			},
+		})
+		gtb.grt = newGroupRUTracker()
+
+		now := time.Now()
+		targetPeriodMs := uint64((5 * time.Second) / time.Millisecond)
+		const highDemandClientID uint64 = 1
+		const newClientID uint64 = 2
+
+		// 1) Create the first slot.
+		_, _ = gtb.request(now, 1, targetPeriodMs, highDemandClientID)
+		// 2) Mock the first slot as a high-demand initialized RU tracker.
+		rt := gtb.grt.getOrCreateRUTracker(highDemandClientID)
+		rt.initialized = true
+		rt.lastSampleTime = now
+		rt.lastEMA = 100 // > basicFillRate (100 / 2)
+		// 3) Request for a new slot whose RU tracker isn't initialized yet.
+		tb, trickle := gtb.request(now, 1, targetPeriodMs, newClientID)
+		re.NotNil(tb)
+		re.Equal(1.0, tb.Tokens)
+		re.Equal(int64(targetPeriodMs), trickle)
+
+		// The new slot must get the basic fill rate instead of 0.
+		re.Contains(gtb.tokenSlots, newClientID)
+		re.Equal(uint64(50), gtb.tokenSlots[newClientID].fillRate)
+	})
 }
 
 func TestGroupTokenBucketRequest(t *testing.T) {

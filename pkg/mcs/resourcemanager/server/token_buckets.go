@@ -350,6 +350,8 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 			// Allocate the basic fill rate.
 			allocation = basicFillRate
 		} else if !ruTracker.isInitialized() {
+			// If the RU tracker is not initialized, just allocate the basic fill rate.
+			// This is to avoid that the new slot can't get any fill rate.
 			allocation = basicFillRate
 		}
 		allocationMap[clientUniqueID] = allocation
