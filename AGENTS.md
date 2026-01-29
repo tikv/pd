@@ -2,7 +2,7 @@
 
 - Scope: Governs the entire repository. If another `AGENTS.md` exists deeper, it overrides in its subtree.
 - Cursor rules: none in `.cursor/rules/` or `.cursorrules`.
-- Copilot rules: none in `.github/copilot-instructions.md`.
+- Copilot rules: see `.github/copilot-instructions.md` for GitHub Copilot guidance.
 - Purpose: Give human and agent contributors a concise, reliable playbook.
 
 ## Quick Facts
