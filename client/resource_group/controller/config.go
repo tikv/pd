@@ -25,9 +25,12 @@ const (
 	// If we want a factor of 0.5 per second, this should be:
 	//
 	//	0.5^(1 second / mainLoopUpdateInterval)
-	movingAvgFactor                = 0.5
-	notifyFraction                 = 0.1
-	tokenReserveFraction           = 0.8
+	movingAvgFactor      = 0.5
+	notifyFraction       = 0.1
+	tokenReserveFraction = 0.8
+	// defaultTokenBucketFillRate is used when the resource group doesn't specify a fill rate (0).
+	// Keep it consistent with the default refill rate on the PD resource-manager side.
+	defaultTokenBucketFillRate     = 10000
 	consumptionsReportingThreshold = 100
 	extendedReportingPeriodFactor  = 4
 	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.

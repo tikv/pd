@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -44,6 +45,7 @@ const (
 	persistLoopInterval       = time.Minute
 	metricsCleanupInterval    = time.Minute
 	metricsCleanupTimeout     = 20 * time.Minute
+	refreshSettingsInterval   = 10 * time.Second
 	defaultCollectIntervalSec = 20
 	tickPerSecond             = time.Second
 )
@@ -205,18 +207,141 @@ func (m *Manager) Init(ctx context.Context) error {
 	// This context is derived from the leader/primary context, it will be canceled
 	// from the outside loop when the leader/primary step down.
 	ctx, m.cancel = context.WithCancel(ctx)
-	m.wg.Add(2)
+	m.wg.Add(3)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
 	go func() {
 		defer logutil.LogPanic()
 		m.persistLoop(ctx)
 	}()
+	go func() {
+		defer logutil.LogPanic()
+		m.refreshResourceGroupSettingsLoop(ctx)
+	}()
 	// TODO: Add a goroutine to loadKeyspaceResourceGroups periodically to avoid
 	// the resource group exists gap between PD server and resource manager service
 	// during redirection.
 	log.Info("resource group manager finishes initialization")
 	return nil
+}
+
+func (m *Manager) refreshResourceGroupSettingsLoop(ctx context.Context) {
+	defer m.wg.Done()
+	ticker := time.NewTicker(refreshSettingsInterval)
+	failpoint.Inject("fastRefreshResourceGroupSettings", func() {
+		ticker.Reset(200 * time.Millisecond)
+	})
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.refreshResourceGroupSettingsOnce()
+		}
+	}
+}
+
+func (m *Manager) refreshResourceGroupSettingsOnce() {
+	if m.storage == nil {
+		return
+	}
+	m.refreshControllerConfigOnce()
+	m.refreshServiceLimitsOnce()
+	// desired maps keyspaceID -> groupName -> resource_group proto (settings only).
+	desired := make(map[uint32]map[string]*rmpb.ResourceGroup)
+	err := m.storage.LoadResourceGroupSettings(func(keyspaceID uint32, name string, rawValue string) {
+		if name == "" || rawValue == "" {
+			return
+		}
+		pb := &rmpb.ResourceGroup{}
+		if uerr := proto.Unmarshal([]byte(rawValue), pb); uerr != nil {
+			log.Warn("failed to unmarshal resource group setting", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.Error(uerr))
+			return
+		}
+		m2, ok := desired[keyspaceID]
+		if !ok {
+			m2 = make(map[string]*rmpb.ResourceGroup)
+			desired[keyspaceID] = m2
+		}
+		m2[name] = pb
+	})
+	if err != nil {
+		log.Warn("failed to refresh resource group settings", zap.Error(err))
+		return
+	}
+
+	// Upsert settings.
+	for keyspaceID, groups := range desired {
+		krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+		for _, pb := range groups {
+			if uerr := krgm.upsertResourceGroupSettings(pb); uerr != nil {
+				log.Warn("failed to apply resource group setting", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", pb.GetName()), zap.Error(uerr))
+			}
+		}
+	}
+
+	// Delete groups that no longer exist in storage.
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		keyspaceID := krgm.keyspaceID
+		keep := desired[keyspaceID]
+		for _, name := range krgm.getResourceGroupNames() {
+			if name == DefaultResourceGroupName {
+				continue
+			}
+			if keep != nil {
+				if _, ok := keep[name]; ok {
+					continue
+				}
+			}
+			krgm.deleteResourceGroupInMemory(name)
+		}
+	}
+}
+
+func (m *Manager) refreshControllerConfigOnce() {
+	if m.storage == nil {
+		return
+	}
+	raw, err := m.storage.LoadControllerConfig()
+	if err != nil {
+		log.Warn("failed to load controller config", zap.Error(err))
+		return
+	}
+	if raw == "" {
+		return
+	}
+	var cfg ControllerConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		log.Warn("failed to unmarshal controller config from storage", zap.String("raw", raw), zap.Error(err))
+		return
+	}
+	m.Lock()
+	m.controllerConfig = &cfg
+	m.Unlock()
+}
+
+func (m *Manager) refreshServiceLimitsOnce() {
+	if m.storage == nil {
+		return
+	}
+	desired := make(map[uint32]float64)
+	if err := m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+		desired[keyspaceID] = serviceLimit
+	}); err != nil {
+		log.Warn("failed to refresh service limits", zap.Error(err))
+		return
+	}
+
+	for keyspaceID, serviceLimit := range desired {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
+	}
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		if _, ok := desired[krgm.keyspaceID]; ok {
+			continue
+		}
+		krgm.setServiceLimitFromStorage(0)
+	}
 }
 
 func (m *Manager) loadKeyspaceResourceGroups() error {
@@ -255,7 +380,7 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.initReserved()
 	// Load service limits from the storage after all resource groups are loaded.
 	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimit(serviceLimit)
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	})
 }
 
@@ -275,14 +400,19 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
-	var config any
+	cur := m.controllerConfig
+	if cur == nil {
+		cur = &ControllerConfig{}
+	}
+	updatedConfig := *cur
+	var target any
 	switch kp[0] {
 	case "request-unit":
-		config = &m.controllerConfig.RequestUnit
+		target = &updatedConfig.RequestUnit
 	default:
-		config = m.controllerConfig
+		target = &updatedConfig
 	}
-	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
+	updated, found, err := jsonutil.AddKeyValue(target, kp[len(kp)-1], value)
 	if err != nil {
 		m.Unlock()
 		return err
@@ -292,9 +422,15 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		m.Unlock()
 		return errors.Errorf("config item %s not found", key)
 	}
-	m.Unlock()
+	var cfgToSave *ControllerConfig
 	if updated {
-		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+		m.controllerConfig = &updatedConfig
+		cfgToSave = m.controllerConfig
+	}
+	storage := m.storage
+	m.Unlock()
+	if updated && storage != nil {
+		if err := storage.SaveControllerConfig(cfgToSave); err != nil {
 			log.Error("save controller config failed", zap.Error(err))
 		}
 		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
@@ -517,7 +653,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			consumptionInfo.keyspaceName = keyspaceName
 			m.ruCollector.Collect(consumptionInfo)
-			m.metrics.recordConsumption(consumptionInfo, m.controllerConfig, time.Now())
+			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
 			// TODO: maybe we need to distinguish background ru.
 			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)

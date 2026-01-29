@@ -260,8 +260,10 @@ func TestCleanUpTicker(t *testing.T) {
 	}()
 	err := m.Init(ctx)
 	re.NoError(err)
-	// Ensure the cleanup ticker is triggered.
-	time.Sleep(200 * time.Millisecond)
+	// Wait until the cleanup ticker is triggered.
+	re.Eventually(func() bool {
+		return len(m.metrics.consumptionRecordMap) == 1
+	}, 2*time.Second, 50*time.Millisecond)
 	// Close the manager to avoid the data race.
 	m.close()
 

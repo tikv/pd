@@ -358,13 +358,20 @@ func (gtb *GroupTokenBucket) getFillRateAndBurstLimit() (fillRate uint64, burstL
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(resourceGroupName string, tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
-	if tokenBucket == nil || tokenBucket.Settings == nil {
-		return &GroupTokenBucket{}
+	var (
+		tokens   float64
+		settings *rmpb.TokenLimitSettings
+	)
+	if tokenBucket != nil {
+		tokens = tokenBucket.GetTokens()
+		if tokenBucket.Settings != nil {
+			settings = proto.Clone(tokenBucket.GetSettings()).(*rmpb.TokenLimitSettings)
+		}
 	}
 	return &GroupTokenBucket{
-		Settings: tokenBucket.GetSettings(),
+		Settings: settings,
 		GroupTokenBucketState: GroupTokenBucketState{
-			Tokens:             tokenBucket.GetTokens(),
+			Tokens:             tokens,
 			resourceGroupName:  resourceGroupName,
 			tokenSlots:         make(map[uint64]*tokenSlot),
 			overrideFillRate:   -1,
@@ -389,8 +396,9 @@ func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	if tb == nil {
 		return
 	}
-	if setting := proto.Clone(tb.GetSettings()).(*rmpb.TokenLimitSettings); setting != nil {
-		gtb.Settings = setting
+
+	if settings := tb.GetSettings(); settings != nil {
+		gtb.Settings = proto.Clone(settings).(*rmpb.TokenLimitSettings)
 		gtb.settingChanged = true
 	}
 
