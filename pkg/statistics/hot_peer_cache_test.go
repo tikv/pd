@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"context"
+	"math"
 	"math/rand/v2"
 	"sort"
 	"sync"
@@ -406,7 +407,7 @@ func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	byteRate := utils.MinHotThresholds[utils.RegionReadBytes] * 2
-	expectThreshold := byteRate * HotThresholdRatio
+	expectThreshold := byteRate
 	testMetrics(ctx, re, 120., byteRate, expectThreshold)
 	testMetrics(ctx, re, 60., byteRate, expectThreshold)
 	testMetrics(ctx, re, 30., byteRate, expectThreshold)
@@ -747,7 +748,12 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 			re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(utils.ByteDim).(*HotPeerStat).GetLoad(utils.ByteDim)))
 			re.Equal(32.0, cache.calcHotThresholds(1)[utils.KeyDim]) // no update, threshold still be the value at first times.
 			ThresholdsUpdateInterval = 0
-			re.Equal(3200.0, cache.calcHotThresholds(1)[utils.KeyDim])
+			// TopN contains regions 40-99 with loads [4000, 4100, ..., 9800, 9900] keys/sec
+			// Sorted descending: [9900, 9800, ..., 4100, 4000]
+			// minLoad = 4000, maxLoad = 9900
+			// geometricMean(9900, 4000) = sqrt(39,600,000) ≈ 6292.85
+			expectedThreshold := math.Sqrt(9900.0 * 4000.0)
+			re.True(typeutil.Float64Equal(expectedThreshold, cache.calcHotThresholds(1)[utils.KeyDim]))
 		}
 		ThresholdsUpdateInterval = 8 * time.Second
 	}

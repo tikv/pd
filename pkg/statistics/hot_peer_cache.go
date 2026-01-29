@@ -34,8 +34,6 @@ import (
 const (
 	// TopNN is the threshold which means we can get hot threshold from store.
 	TopNN = 60
-	// HotThresholdRatio is used to calculate hot thresholds
-	HotThresholdRatio = 0.8
 
 	rollingWindowsSize = 5
 
@@ -319,8 +317,19 @@ func (f *HotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 		if t.topNLen < TopNN {
 			return t.rates
 		}
+		// Calculate threshold for each dimension as the geometric mean of
+		// the maximum and minimum loads in the topN peer stats.
 		for i := range t.rates {
-			t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
+			minItem := tn.GetTopNMin(i)
+			maxItem := tn.GetTopNMax(i)
+			if minItem != nil && maxItem != nil {
+				minLoad := minItem.(*HotPeerStat).GetLoad(i)
+				maxLoad := maxItem.(*HotPeerStat).GetLoad(i)
+				if minLoad > 0 && maxLoad > 0 {
+					threshold := math.Sqrt(maxLoad * minLoad)
+					t.rates[i] = math.Max(threshold, t.rates[i])
+				}
+			}
 		}
 	}
 	return t.rates
