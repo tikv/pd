@@ -73,6 +73,42 @@ type keyspaceResourceGroupManager struct {
 	storage    endpoint.ResourceGroupStorage
 }
 
+func (krgm *keyspaceResourceGroupManager) upsertResourceGroupSettings(grouppb *rmpb.ResourceGroup) error {
+	if grouppb == nil || grouppb.GetName() == "" {
+		return errs.ErrInvalidGroup
+	}
+	krgm.Lock()
+	cur, ok := krgm.groups[grouppb.GetName()]
+	if !ok {
+		krgm.groups[grouppb.GetName()] = FromProtoResourceGroup(grouppb)
+		krgm.Unlock()
+		return nil
+	}
+	// PatchSettings updates in-memory settings without persisting.
+	err := cur.PatchSettings(grouppb)
+	krgm.Unlock()
+	return err
+}
+
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroupInMemory(name string) {
+	if name == "" {
+		return
+	}
+	krgm.Lock()
+	delete(krgm.groups, name)
+	krgm.Unlock()
+}
+
+func (krgm *keyspaceResourceGroupManager) getResourceGroupNames() []string {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	names := make([]string, 0, len(krgm.groups))
+	for name := range krgm.groups {
+		names = append(names, name)
+	}
+	return names
+}
+
 func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.ResourceGroupStorage) *keyspaceResourceGroupManager {
 	return &keyspaceResourceGroupManager{
 		groups:          make(map[string]*ResourceGroup),
