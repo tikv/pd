@@ -77,6 +77,12 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupSettings(grouppb *r
 	if grouppb == nil || grouppb.GetName() == "" {
 		return errs.ErrInvalidGroup
 	}
+	// Resource group state is stored separately; ignore any token value in the settings.
+	if ruSettings := grouppb.GetRUSettings(); ruSettings != nil {
+		if tb := ruSettings.GetRU(); tb != nil {
+			tb.Tokens = 0
+		}
+	}
 	krgm.Lock()
 	cur, ok := krgm.groups[grouppb.GetName()]
 	if !ok {
@@ -295,11 +301,22 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 }
 
 func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) {
+	krgm.updateServiceLimit(serviceLimit, true)
+}
+
+func (krgm *keyspaceResourceGroupManager) setServiceLimitFromStorage(serviceLimit float64) {
+	krgm.updateServiceLimit(serviceLimit, false)
+}
+
+func (krgm *keyspaceResourceGroupManager) updateServiceLimit(serviceLimit float64, persist bool) {
+	serviceLimit = math.Max(0, serviceLimit)
 	krgm.RLock()
 	sl := krgm.sl
 	krgm.RUnlock()
-	// Set the new service limit to the limiter.
-	sl.setServiceLimit(serviceLimit)
+	changed := sl.setServiceLimitInternal(serviceLimit, persist)
+	if !changed {
+		return
+	}
 	// Cleanup the overrides if the service limit is set to 0.
 	if serviceLimit <= 0 {
 		krgm.cleanupOverrides()

@@ -40,7 +40,15 @@ func ValidateResourceGroupForWrite(group *rmpb.ResourceGroup) error {
 	if len(group.GetName()) == 0 || len(group.GetName()) > maxGroupNameLength {
 		return errs.ErrInvalidGroup
 	}
+	if group.GetMode() != rmpb.GroupMode_RUMode {
+		return errs.ErrInvalidGroup
+	}
 	if group.GetPriority() > maxPriority {
+		return errs.ErrInvalidGroup
+	}
+	// Allow creating a group without RU settings (it can be configured later via PUT),
+	// but if RU settings are provided they must be well-formed.
+	if group.GetRUSettings() != nil && group.GetRUSettings().GetRU() != nil && group.GetRUSettings().GetRU().GetSettings() == nil {
 		return errs.ErrInvalidGroup
 	}
 	return nil
@@ -85,9 +93,11 @@ func PersistResourceGroupSettingsAndStates(storage endpoint.ResourceGroupStorage
 	if err := ValidateResourceGroupForWrite(group); err != nil {
 		return err
 	}
-	if err := storage.SaveResourceGroupSetting(keyspaceID, group.GetName(), group); err != nil {
+	rg := FromProtoResourceGroup(group)
+	metaGroup := rg.IntoProtoResourceGroup(keyspaceID)
+	if err := storage.SaveResourceGroupSetting(keyspaceID, metaGroup.GetName(), metaGroup); err != nil {
 		return err
 	}
-	states := FromProtoResourceGroup(group).GetGroupStates()
-	return storage.SaveResourceGroupStates(keyspaceID, group.GetName(), states)
+	states := rg.GetGroupStates()
+	return storage.SaveResourceGroupStates(keyspaceID, metaGroup.GetName(), states)
 }

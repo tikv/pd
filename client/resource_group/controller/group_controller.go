@@ -200,17 +200,22 @@ func (gc *groupCostController) initRunState() {
 
 	isBurstable := true
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
-		initialToken := float64(tb.Settings.FillRate)
+		settings := tb.GetSettings()
+		fillRate := settings.GetFillRate()
+		if fillRate == 0 {
+			fillRate = defaultTokenBucketFillRate
+		}
+		initialToken := float64(fillRate)
 		cfg := tokenBucketReconfigureArgs{
 			newTokens: initialToken,
-			newBurst:  tb.Settings.BurstLimit,
+			newBurst:  settings.GetBurstLimit(),
 			// This is to trigger token requests as soon as resource group start consuming tokens.
 			newNotifyThreshold: math.Max(initialToken*tokenReserveFraction, 1),
 		}
 		if cfg.newBurst >= 0 {
 			cfg.newBurst = 0
 		}
-		if tb.Settings.BurstLimit >= 0 {
+		if settings.GetBurstLimit() >= 0 {
 			isBurstable = false
 		}
 		return cfg
@@ -219,11 +224,15 @@ func (gc *groupCostController) initRunState() {
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
 	limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(gc.meta.RUSettings.RU), gc.lowRUNotifyChan)
+	fillRate := gc.meta.RUSettings.RU.GetSettings().GetFillRate()
+	if fillRate == 0 {
+		fillRate = defaultTokenBucketFillRate
+	}
 	counter := &tokenCounter{
 		limiter:     limiter,
 		avgRUPerSec: 0,
 		avgLastTime: now,
-		fillRate:    gc.meta.RUSettings.RU.Settings.FillRate,
+		fillRate:    fillRate,
 	}
 	gc.run.requestUnitTokens = counter
 	gc.burstable.Store(isBurstable)

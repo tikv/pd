@@ -246,6 +246,8 @@ func (m *Manager) refreshResourceGroupSettingsOnce() {
 	if m.storage == nil {
 		return
 	}
+	m.refreshControllerConfigOnce()
+	m.refreshServiceLimitsOnce()
 	// desired maps keyspaceID -> groupName -> resource_group proto (settings only).
 	desired := make(map[uint32]map[string]*rmpb.ResourceGroup)
 	err := m.storage.LoadResourceGroupSettings(func(keyspaceID uint32, name string, rawValue string) {
@@ -297,6 +299,51 @@ func (m *Manager) refreshResourceGroupSettingsOnce() {
 	}
 }
 
+func (m *Manager) refreshControllerConfigOnce() {
+	if m.storage == nil {
+		return
+	}
+	raw, err := m.storage.LoadControllerConfig()
+	if err != nil {
+		log.Warn("failed to load controller config", zap.Error(err))
+		return
+	}
+	if raw == "" {
+		return
+	}
+	var cfg ControllerConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		log.Warn("failed to unmarshal controller config from storage", zap.String("raw", raw), zap.Error(err))
+		return
+	}
+	m.Lock()
+	m.controllerConfig = &cfg
+	m.Unlock()
+}
+
+func (m *Manager) refreshServiceLimitsOnce() {
+	if m.storage == nil {
+		return
+	}
+	desired := make(map[uint32]float64)
+	if err := m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+		desired[keyspaceID] = serviceLimit
+	}); err != nil {
+		log.Warn("failed to refresh service limits", zap.Error(err))
+		return
+	}
+
+	for keyspaceID, serviceLimit := range desired {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
+	}
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		if _, ok := desired[krgm.keyspaceID]; ok {
+			continue
+		}
+		krgm.setServiceLimitFromStorage(0)
+	}
+}
+
 func (m *Manager) loadKeyspaceResourceGroups() error {
 	// Empty the keyspace resource group manager map before the loading.
 	m.Lock()
@@ -333,7 +380,7 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.initReserved()
 	// Load service limits from the storage after all resource groups are loaded.
 	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimit(serviceLimit)
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	})
 }
 
@@ -353,14 +400,19 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
-	var config any
+	cur := m.controllerConfig
+	if cur == nil {
+		cur = &ControllerConfig{}
+	}
+	updatedConfig := *cur
+	var target any
 	switch kp[0] {
 	case "request-unit":
-		config = &m.controllerConfig.RequestUnit
+		target = &updatedConfig.RequestUnit
 	default:
-		config = m.controllerConfig
+		target = &updatedConfig
 	}
-	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
+	updated, found, err := jsonutil.AddKeyValue(target, kp[len(kp)-1], value)
 	if err != nil {
 		m.Unlock()
 		return err
@@ -370,9 +422,15 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		m.Unlock()
 		return errors.Errorf("config item %s not found", key)
 	}
-	m.Unlock()
+	var cfgToSave *ControllerConfig
 	if updated {
-		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+		m.controllerConfig = &updatedConfig
+		cfgToSave = m.controllerConfig
+	}
+	storage := m.storage
+	m.Unlock()
+	if updated && storage != nil {
+		if err := storage.SaveControllerConfig(cfgToSave); err != nil {
 			log.Error("save controller config failed", zap.Error(err))
 		}
 		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
@@ -595,7 +653,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			consumptionInfo.keyspaceName = keyspaceName
 			m.ruCollector.Collect(consumptionInfo)
-			m.metrics.recordConsumption(consumptionInfo, m.controllerConfig, time.Now())
+			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
 			// TODO: maybe we need to distinguish background ru.
 			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)

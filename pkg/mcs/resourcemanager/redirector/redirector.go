@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -43,9 +44,12 @@ import (
 
 // NewHandler creates a new redirector handler for resource manager.
 func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
-	// Write requests must stay on pd-server.
-	// To keep read requests served by the deployed resource-manager microservice,
-	// we only forward GET requests to that microservice.
+	// Resource control writes must stay on pd-server to support resource-manager
+	// microservice deployments that are read-only.
+	//
+	// Config reads (/config/...) also stay on pd-server to provide read-your-writes
+	// semantics for the management APIs. Other reads are forwarded to the
+	// resource-manager microservice.
 	pdWriteHandler := newPDWriteHandler(svr)
 	return negroni.New(
 			serverapi.NewRedirector(svr,
@@ -56,11 +60,22 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 					strings.TrimRight(apis.APIPathPrefix, "/")+"/primary/transfer",
 					constant.ResourceManagerServiceName,
 					[]string{http.MethodPost}),
+				// Exception: admin endpoints are microservice control-plane operations.
+				serverapi.MicroserviceRedirectRule(
+					apis.APIPathPrefix+"admin/log",
+					strings.TrimRight(apis.APIPathPrefix, "/")+"/admin/log",
+					constant.ResourceManagerServiceName,
+					[]string{http.MethodPut}),
 				serverapi.MicroserviceRedirectRule(
 					apis.APIPathPrefix,
 					strings.TrimRight(apis.APIPathPrefix, "/"),
 					constant.ResourceManagerServiceName,
-					[]string{http.MethodGet}),
+					[]string{http.MethodGet},
+					func(r *http.Request) bool {
+						// Let pd-server serve config reads to avoid stale reads
+						// after pd-server writes.
+						return !strings.HasPrefix(r.URL.Path, apis.APIPathPrefix+"config")
+					}),
 			),
 			negroni.Wrap(pdWriteHandler),
 		), apiutil.APIServiceGroup{
@@ -86,14 +101,19 @@ func newPDWriteHandler(svr *server.Server) http.Handler {
 		svr: svr,
 	}
 
-	// Only register write endpoints; reads are forwarded by the redirector.
+	// Register config management endpoints (reads/writes) on pd-server.
 	root := r.Group(apis.APIPathPrefix)
 	config := root.Group("/config")
 	config.POST("/group", s.postResourceGroup)
 	config.PUT("/group", s.putResourceGroup)
+	config.GET("/group/:name", s.getResourceGroup)
+	config.GET("/groups", s.getResourceGroupList)
 	config.DELETE("/group/:name", s.deleteResourceGroup)
+	config.GET("/controller", s.getControllerConfig)
 	config.POST("/controller", s.setControllerConfig)
+	config.GET("/keyspace/service-limit", s.getKeyspaceServiceLimit)
 	config.POST("/keyspace/service-limit", s.setKeyspaceServiceLimit)
+	config.GET("/keyspace/service-limit/:keyspace_name", s.getKeyspaceServiceLimit)
 	config.POST("/keyspace/service-limit/:keyspace_name", s.setKeyspaceServiceLimit)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -191,7 +211,7 @@ func (s *pdWriteService) deleteResourceGroup(c *gin.Context) {
 	}
 	// Keep compatibility: keyspace is encoded in query for delete in some clients.
 	keyspaceName := c.Query("keyspace_name")
-	keyspaceID := uint32(0)
+	keyspaceID := keyspaceconstant.NullKeyspaceID
 	if keyspaceName != "" {
 		meta, err := s.svr.GetKeyspaceManager().LoadKeyspace(keyspaceName)
 		if err != nil {
@@ -215,6 +235,105 @@ func (s *pdWriteService) deleteResourceGroup(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "Success!")
+}
+
+func (s *pdWriteService) getResourceGroup(c *gin.Context) {
+	st := s.svr.GetStorage()
+	if st == nil {
+		c.String(http.StatusInternalServerError, "storage is nil")
+		return
+	}
+	withStats := strings.EqualFold(c.Query("with_stats"), "true")
+	keyspaceName := c.Query("keyspace_name")
+	keyspaceID := keyspaceconstant.NullKeyspaceID
+	if keyspaceName != "" {
+		meta, err := s.svr.GetKeyspaceManager().LoadKeyspace(keyspaceName)
+		if err != nil {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		keyspaceID = meta.GetId()
+	}
+	name := c.Param("name")
+	if name == "" {
+		c.String(http.StatusBadRequest, errs.ErrInvalidGroup.Error())
+		return
+	}
+	key := keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name)
+	raw, err := st.Load(key)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if raw == "" {
+		c.String(http.StatusNotFound, errs.ErrResourceGroupNotExists.FastGenByArgs(name).Error())
+		return
+	}
+	pb := &rmpb.ResourceGroup{}
+	if err := proto.Unmarshal([]byte(raw), pb); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	group := rmserver.FromProtoResourceGroup(pb).Clone(withStats)
+	c.IndentedJSON(http.StatusOK, group)
+}
+
+func (s *pdWriteService) getResourceGroupList(c *gin.Context) {
+	st := s.svr.GetStorage()
+	if st == nil {
+		c.String(http.StatusInternalServerError, "storage is nil")
+		return
+	}
+	withStats := strings.EqualFold(c.Query("with_stats"), "true")
+	keyspaceName := c.Query("keyspace_name")
+	keyspaceID := keyspaceconstant.NullKeyspaceID
+	if keyspaceName != "" {
+		meta, err := s.svr.GetKeyspaceManager().LoadKeyspace(keyspaceName)
+		if err != nil {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
+		keyspaceID = meta.GetId()
+	}
+
+	groups := make([]*rmserver.ResourceGroup, 0)
+	if err := st.LoadResourceGroupSettings(func(ks uint32, name, rawValue string) {
+		if ks != keyspaceID {
+			return
+		}
+		pb := &rmpb.ResourceGroup{}
+		if err := proto.Unmarshal([]byte(rawValue), pb); err != nil {
+			return
+		}
+		groups = append(groups, rmserver.FromProtoResourceGroup(pb).Clone(withStats))
+	}); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, groups)
+}
+
+func (s *pdWriteService) getControllerConfig(c *gin.Context) {
+	st := s.svr.GetStorage()
+	if st == nil {
+		c.String(http.StatusInternalServerError, "storage is nil")
+		return
+	}
+	raw, err := st.LoadControllerConfig()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	var cfg rmserver.ControllerConfig
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		cfg = *s.svr.GetControllerConfig()
+	}
+	c.IndentedJSON(http.StatusOK, &cfg)
 }
 
 func (s *pdWriteService) setControllerConfig(c *gin.Context) {
@@ -278,6 +397,30 @@ func (s *pdWriteService) setControllerConfig(c *gin.Context) {
 	c.String(http.StatusOK, "Success!")
 }
 
+func (s *pdWriteService) getKeyspaceServiceLimit(c *gin.Context) {
+	st := s.svr.GetStorage()
+	if st == nil {
+		c.String(http.StatusInternalServerError, "storage is nil")
+		return
+	}
+	keyspaceName := c.Param("keyspace_name")
+	keyspaceID := keyspaceconstant.NullKeyspaceID
+	if keyspaceName != "" {
+		meta, err := s.svr.GetKeyspaceManager().LoadKeyspace(keyspaceName)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		keyspaceID = meta.GetId()
+	}
+	serviceLimit, err := st.LoadServiceLimit(keyspaceID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &apis.KeyspaceServiceLimitRequest{ServiceLimit: serviceLimit})
+}
+
 func (s *pdWriteService) setKeyspaceServiceLimit(c *gin.Context) {
 	st := s.svr.GetStorage()
 	if st == nil {
@@ -286,7 +429,7 @@ func (s *pdWriteService) setKeyspaceServiceLimit(c *gin.Context) {
 	}
 	keyspaceName := c.Param("keyspace_name")
 	// Without keyspace name, it will get/set the service limit of the null keyspace.
-	keyspaceID := uint32(0)
+	keyspaceID := keyspaceconstant.NullKeyspaceID
 	if keyspaceName != "" {
 		meta, err := s.svr.GetKeyspaceManager().LoadKeyspace(keyspaceName)
 		if err != nil {

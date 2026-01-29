@@ -58,12 +58,24 @@ func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint
 }
 
 func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
+	krl.setServiceLimitInternal(newServiceLimit, true)
+}
+
+func (krl *serviceLimiter) setServiceLimitNoPersist(newServiceLimit float64) bool {
+	return krl.setServiceLimitInternal(newServiceLimit, false)
+}
+
+func (krl *serviceLimiter) setServiceLimitInternal(newServiceLimit float64, persist bool) bool {
 	// The service limit should be non-negative.
 	newServiceLimit = math.Max(0, newServiceLimit)
+	var (
+		storage    endpoint.ResourceGroupStorage
+		keyspaceID uint32
+	)
 	krl.Lock()
-	defer krl.Unlock()
 	if newServiceLimit == krl.ServiceLimit {
-		return
+		krl.Unlock()
+		return false
 	}
 	oldServiceLimit := krl.ServiceLimit
 	krl.ServiceLimit = newServiceLimit
@@ -80,15 +92,20 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 		krl.refillTokensLocked(now)
 	}
 
-	// Persist the service limit to storage
-	if krl.storage != nil {
-		if err := krl.storage.SaveServiceLimit(krl.keyspaceID, newServiceLimit); err != nil {
+	storage = krl.storage
+	keyspaceID = krl.keyspaceID
+	krl.Unlock()
+
+	// Persist the service limit to storage.
+	if persist && storage != nil {
+		if err := storage.SaveServiceLimit(keyspaceID, newServiceLimit); err != nil {
 			log.Error("failed to persist service limit",
-				zap.Uint32("keyspace-id", krl.keyspaceID),
+				zap.Uint32("keyspace-id", keyspaceID),
 				zap.Float64("service-limit", newServiceLimit),
 				zap.Error(err))
 		}
 	}
+	return true
 }
 
 func (krl *serviceLimiter) getServiceLimit() float64 {

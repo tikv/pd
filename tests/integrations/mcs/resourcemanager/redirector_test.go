@@ -112,12 +112,59 @@ func (suite *resourceManagerRedirectorTestSuite) TestRedirectsConfigRequests() {
 	pdGroup := suite.fetchResourceGroup(
 		suite.pdLeader.GetAddr(),
 		groupName,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
 	)
 	re.Equal(rmGroup.Name, pdGroup.Name)
 	re.Equal(rmGroup.Priority, pdGroup.Priority)
 	re.Equal(rmGroup.RUSettings.RU.Settings.FillRate, pdGroup.RUSettings.RU.Settings.FillRate)
 	re.Equal(rmGroup.RUSettings.RU.Settings.BurstLimit, pdGroup.RUSettings.RU.Settings.BurstLimit)
+}
+
+func (suite *resourceManagerRedirectorTestSuite) TestRedirectsAdminRequests() {
+	re := suite.Require()
+	pdPutURL := fmt.Sprintf("%s%sadmin/log", suite.pdLeader.GetAddr(), apis.APIPathPrefix)
+	re.NoError(testutil.CheckPutJSON(
+		tests.TestDialClient,
+		pdPutURL,
+		[]byte(`"debug"`),
+		testutil.StatusOK(re),
+		testutil.StringContain(re, "log level"),
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+	))
+}
+
+func (suite *resourceManagerRedirectorTestSuite) TestSyncsKeyspaceServiceLimitFromPD() {
+	re := suite.Require()
+	serviceLimit := 123.0
+	suite.setKeyspaceServiceLimitViaPD(serviceLimit)
+
+	var rmLimiter, pdLimiter *keyspaceServiceLimit
+	testutil.Eventually(re, func() bool {
+		rmLimiter = suite.fetchKeyspaceServiceLimit(suite.rmPrimary.GetAddr())
+		pdLimiter = suite.fetchKeyspaceServiceLimit(
+			suite.pdLeader.GetAddr(),
+			testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
+		)
+		return rmLimiter != nil && pdLimiter != nil &&
+			rmLimiter.ServiceLimit == serviceLimit && pdLimiter.ServiceLimit == serviceLimit
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
+}
+
+func (suite *resourceManagerRedirectorTestSuite) TestSyncsControllerConfigFromPD() {
+	re := suite.Require()
+	readBaseCost := 123.456
+	suite.updateControllerConfigViaPD("read-base-cost", readBaseCost)
+
+	var rmCfg, pdCfg *controllerConfig
+	testutil.Eventually(re, func() bool {
+		rmCfg = suite.fetchControllerConfig(suite.rmPrimary.GetAddr())
+		pdCfg = suite.fetchControllerConfig(
+			suite.pdLeader.GetAddr(),
+			testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
+		)
+		return rmCfg != nil && pdCfg != nil &&
+			rmCfg.RequestUnit.ReadBaseCost == readBaseCost && pdCfg.RequestUnit.ReadBaseCost == readBaseCost
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 }
 
 func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupRequests() {
@@ -195,6 +242,97 @@ func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name s
 		testutil.StringContain(re, "Success!"),
 		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
 	))
+}
+
+func (suite *resourceManagerRedirectorTestSuite) setKeyspaceServiceLimitViaPD(serviceLimit float64) {
+	re := suite.Require()
+	req := &apis.KeyspaceServiceLimitRequest{ServiceLimit: serviceLimit}
+	payload, err := json.Marshal(req)
+	re.NoError(err)
+	pdPostURL := fmt.Sprintf("%s%sconfig/keyspace/service-limit/%s", suite.pdLeader.GetAddr(), apis.APIPathPrefix, suite.keyspaceName)
+	re.NoError(testutil.CheckPostJSON(
+		tests.TestDialClient,
+		pdPostURL,
+		payload,
+		testutil.StatusOK(re),
+		testutil.StringContain(re, "Success!"),
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
+	))
+}
+
+type keyspaceServiceLimit struct {
+	ServiceLimit float64 `json:"service_limit"`
+}
+
+func (suite *resourceManagerRedirectorTestSuite) fetchKeyspaceServiceLimit(addr string, opts ...func([]byte, int, http.Header)) *keyspaceServiceLimit {
+	url := fmt.Sprintf("%s%sconfig/keyspace/service-limit/%s", addr, apis.APIPathPrefix, suite.keyspaceName)
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil
+	}
+	resp, err := tests.TestDialClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	for _, opt := range opts {
+		opt(body, resp.StatusCode, resp.Header)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	limiter := &keyspaceServiceLimit{}
+	if err := json.Unmarshal(body, limiter); err != nil {
+		return nil
+	}
+	return limiter
+}
+
+func (suite *resourceManagerRedirectorTestSuite) updateControllerConfigViaPD(item string, value any) {
+	re := suite.Require()
+	payload, err := json.Marshal(map[string]any{item: value})
+	re.NoError(err)
+	pdPostURL := fmt.Sprintf("%s%sconfig/controller", suite.pdLeader.GetAddr(), apis.APIPathPrefix)
+	re.NoError(testutil.CheckPostJSON(
+		tests.TestDialClient,
+		pdPostURL,
+		payload,
+		testutil.StatusOK(re),
+		testutil.StringContain(re, "Success!"),
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
+	))
+}
+
+type controllerConfig struct {
+	RequestUnit struct {
+		ReadBaseCost float64 `json:"read-base-cost"`
+	} `json:"request-unit"`
+}
+
+func (suite *resourceManagerRedirectorTestSuite) fetchControllerConfig(addr string, opts ...func([]byte, int, http.Header)) *controllerConfig {
+	url := fmt.Sprintf("%s%sconfig/controller", addr, apis.APIPathPrefix)
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil
+	}
+	resp, err := tests.TestDialClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	for _, opt := range opts {
+		opt(body, resp.StatusCode, resp.Header)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	cfg := &controllerConfig{}
+	if err := json.Unmarshal(body, cfg); err != nil {
+		return nil
+	}
+	return cfg
 }
 
 func (suite *resourceManagerRedirectorTestSuite) fetchResourceGroup(addr, groupName string, opts ...func([]byte, int, http.Header)) *server.ResourceGroup {
