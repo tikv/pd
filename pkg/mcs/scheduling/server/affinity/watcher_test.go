@@ -307,7 +307,7 @@ func TestLabelRuleBeforeGroup(t *testing.T) {
 func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestSingleConfig()
+	cfg := etcdutil.NewTestEtcdConfig()
 	var err error
 	cfg.Dir, err = os.MkdirTemp("", "pd_affinity_watcher_tests")
 	re.NoError(err)
