@@ -18,12 +18,14 @@ import (
 	"context"
 	"math/rand/v2"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -33,9 +35,7 @@ import (
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -55,6 +55,7 @@ type routerClientSuite struct {
 	cluster         *tests.TestCluster
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
+	conn            *grpc.ClientConn
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 	reportBucket    pdpb.PD_ReportBucketsClient
 
@@ -72,7 +73,7 @@ func (suite *routerClientSuite) SetupSuite() {
 
 	re.NotEmpty(suite.cluster.WaitLeader())
 	leader := suite.cluster.GetLeaderServer()
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, leader.GetAddr())
+	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, leader.GetAddr())
 	suite.client = setupCli(suite.ctx, re, endpoints,
 		opt.WithEnableRouterClient(suite.routerClientEnabled),
 		opt.WithEnableFollowerHandle(true))
@@ -89,6 +90,11 @@ func (suite *routerClientSuite) SetupSuite() {
 // TearDownSuite cleans up the test cluster and client.
 func (suite *routerClientSuite) TearDownSuite() {
 	suite.client.Close()
+	_ = suite.regionHeartbeat.CloseSend()
+	_ = suite.reportBucket.CloseSend()
+	if suite.conn != nil {
+		_ = suite.conn.Close()
+	}
 	suite.clean()
 	suite.cluster.Destroy()
 }
@@ -197,6 +203,10 @@ func (suite *routerClientSuite) TestGetPrevRegion() {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			re.NoError(err)
 			if i > 0 && i < regionLen {
+				// In this case, the region must not be nil.
+				if r == nil {
+					return false
+				}
 				return reflect.DeepEqual(peers[0], r.Leader) &&
 					reflect.DeepEqual(regions[i-1], r.Meta)
 			}
@@ -304,6 +314,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegion(ctx, region.GetStartKey())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {
@@ -321,6 +334,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {
@@ -339,6 +355,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegionByID(ctx, region.GetId())
 					}
 					if err != nil {
+						if strings.Contains(err.Error(), "region not found") {
+							return false
+						}
 						re.ErrorContains(err, context.Canceled.Error())
 					}
 					if r == nil {
@@ -422,13 +441,20 @@ func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
 
 func TestRouterClientHeaderError(t *testing.T) {
 	re := require.New(t)
-	srv, cleanup, err := tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
-	re.NoError(err)
-	defer cleanup()
-
-	tests.MustWaitLeader(re, []*server.Server{srv})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	srv := cluster.GetLeaderServer().GetServer()
+
 	client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(true))
 
 	r, err := client.GetRegion(ctx, []byte("a"))

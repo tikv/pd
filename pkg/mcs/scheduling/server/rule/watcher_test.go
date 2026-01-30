@@ -41,8 +41,7 @@ func TestMain(m *testing.M) {
 }
 
 const (
-	clusterID = uint64(20240117)
-	rulesNum  = 16384
+	rulesNum = 16384
 )
 
 func TestLoadLargeRules(t *testing.T) {
@@ -88,7 +87,7 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestSingleConfig()
+	cfg := etcdutil.NewTestEtcdConfig()
 	var err error
 	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
 	re.NoError(err)

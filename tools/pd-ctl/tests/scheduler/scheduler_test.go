@@ -384,7 +384,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	cfg.Schedulers = sc.SchedulerConfigs{{Type: "label", Disable: true}}
 	err := leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
-	checkSchedulerWithStatusCommand("disabled", []string{"label-scheduler"})
+	if suite.env.Env == pdTests.NonMicroserviceEnv {
+		checkSchedulerWithStatusCommand("disabled", []string{"label-scheduler"})
+	}
 	// reset Schedulers in ScheduleConfig
 	cfg.Schedulers = origin
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)

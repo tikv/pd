@@ -439,8 +439,16 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	defer conf.Unlock()
 	rd := render.New(render.Options{IndentJSON: true})
 
-	param := &conf.hotRegionSchedulerParam
-	oldc, _ := json.Marshal(param)
+	// Create a temporary copy to avoid data race during JSON unmarshaling
+	// Marshal the current config first to capture the old state
+	oldc, _ := json.Marshal(&conf.hotRegionSchedulerParam)
+	// Create a new param instance to unmarshal into
+	var param hotRegionSchedulerParam
+	// Deep copy by marshaling and unmarshaling
+	if err := json.Unmarshal(oldc, &param); err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -448,22 +456,18 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		return
 	}
 
-	if err := json.Unmarshal(data, param); err != nil {
+	if err := json.Unmarshal(data, &param); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := param.validateLocked(); err != nil {
-		// revert to old version
-		if err2 := json.Unmarshal(oldc, param); err2 != nil {
-			rd.JSON(w, http.StatusInternalServerError, err2.Error())
-		} else {
-			rd.JSON(w, http.StatusBadRequest, err.Error())
-		}
+		// Validation failed, return error without updating config
+		rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	newc, _ := json.Marshal(param)
+	newc, _ := json.Marshal(&param)
 	if !bytes.Equal(oldc, newc) {
-		conf.hotRegionSchedulerParam = *param
+		conf.hotRegionSchedulerParam = param
 		if err := conf.save(); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
@@ -477,7 +481,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok := reflectutil.FindSameFieldByJSON(param, m)
+	ok := reflectutil.FindSameFieldByJSON(&param, m)
 	if ok {
 		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
 		return

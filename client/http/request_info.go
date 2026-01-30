@@ -70,6 +70,7 @@ const (
 	setPlacementRuleInBatchName             = "SetPlacementRuleInBatch"
 	setPlacementRuleBundlesName             = "SetPlacementRuleBundles"
 	deletePlacementRuleName                 = "DeletePlacementRule"
+	deletePlacementRuleBundleByGroupName    = "DeletePlacementRuleBundleByGroup"
 	getAllPlacementRuleGroupsName           = "GetAllPlacementRuleGroups"
 	getPlacementRuleGroupByIDName           = "GetPlacementRuleGroupByID"
 	setPlacementRuleGroupName               = "SetPlacementRuleGroup"

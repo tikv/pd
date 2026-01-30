@@ -30,12 +30,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -699,7 +702,9 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 		if op != nil {
-			re.Equal(group, op.GetAdditionalInfo("group"))
+			val, exist := op.GetAdditionalInfo("group")
+			re.True(exist)
+			re.Equal(group, val)
 		}
 	}
 }
@@ -857,4 +862,113 @@ func TestRemoveStoreLimit(t *testing.T) {
 			re.True(oc.AddOperator(op))
 		}
 	}
+}
+
+func TestScatterReplace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	// Add stores 1~5.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	// Add regions 1~5.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	for i := uint64(2); i <= 5; i++ {
+		tc.AddLeaderRegion(i, 1, 2, 3)
+	}
+
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+
+	for i := uint64(1); i <= 5; i++ {
+		region := tc.GetRegion(i)
+		if op, err := scatterer.Scatter(region, "", true); op != nil {
+			re.NoError(err)
+			re.True(oc.AddOperator(op))
+		}
+	}
+
+	// same scatter operator should be skipped
+	region := tc.GetRegion(2)
+	op, err := scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.Nil(op)
+
+	// different scatter operator should be rejected
+	region = tc.GetRegion(3)
+	op, err = scatterer.Scatter(region, "test", true)
+	re.Error(err)
+	re.Nil(op)
+
+	// exist lower operator
+	op = oc.GetOperator(1)
+	if op != nil {
+		re.True(oc.RemoveOperator(op))
+	}
+	region = tc.GetRegion(1)
+	op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
+	op.SetPriorityLevel(constant.Low)
+	re.True(oc.AddOperator(op))
+
+	testutil.Eventually(re, func() bool {
+		op, err = scatterer.Scatter(tc.GetRegion(1), "", true)
+		re.NoError(err)
+		return op != nil
+	})
+}
+
+func TestScatterWithAffinity(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	// Add stores 1~5.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+
+	// Add region 1 with leader on store 1
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+
+	// Create affinity manager and group
+	affinityManager := tc.GetAffinityManager()
+	re.NotNil(affinityManager)
+
+	// Create an affinity group for region 1
+	// When LeaderStoreID and VoterStoreIDs are set and the group is available (not expired),
+	// RegularSchedulingAllowed will be false
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+
+	keyRanges := []affinity.GroupKeyRanges{{
+		GroupID: group.ID,
+		KeyRanges: []keyutil.KeyRange{{
+			StartKey: []byte(""),
+			EndKey:   []byte(""),
+		}},
+	}}
+	err := affinityManager.CreateAffinityGroups(keyRanges)
+	re.NoError(err)
+	_, err = affinityManager.UpdateAffinityGroupPeers(group.ID, group.LeaderStoreID, group.VoterStoreIDs)
+	re.NoError(err)
+
+	// Test scatter with affinity (RegularSchedulingAllowed=false)
+	// Should return (nil, nil) to prevent client from retrying
+	region := tc.GetRegion(1)
+	op, err := scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.Nil(op)
 }

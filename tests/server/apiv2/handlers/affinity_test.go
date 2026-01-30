@@ -22,12 +22,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -49,7 +47,7 @@ func TestAffinityHandlerTestSuite(t *testing.T) {
 
 func (suite *affinityHandlerTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
-		conf.Schedule.EnableAffinityScheduling = true
+		conf.Schedule.AffinityScheduleLimit = 4
 	})
 }
 
@@ -378,10 +376,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 		re.Equal(uint64(0), group.LeaderStoreID)
 
 		// Add a store to the cluster.
-		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
-			Header: testutil.NewRequestHeader(leader.GetClusterID()),
-			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
-		})
+		tests.MustPutStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 
 		// Fake a healthy region that matches store 1.
 		region := core.NewRegionInfo(
@@ -402,9 +397,9 @@ func (suite *affinityHandlerTestSuite) TestAffinityFirstRegionWins() {
 			if group == nil {
 				return false
 			}
-			// we need to call ObserveAvailableRegion and GetRegionAffinityGroupState to update the group
+			// we need to call ObserveAvailableRegion and GetAndCacheRegionAffinityGroupState to update the group
 			manager.ObserveAvailableRegion(region, group)
-			state, _ = manager.GetRegionAffinityGroupState(region)
+			state, _ = manager.GetAndCacheRegionAffinityGroupState(region)
 			return state != nil && state.Phase == affinity.PhaseStable
 		})
 		re.Equal(region.GetLeader().GetStoreId(), state.LeaderStoreID)
@@ -527,7 +522,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Duplicate creation should fail.
 		statusCode, _ = doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
+		re.Equal(http.StatusConflict, statusCode)
 
 		// Get non-existent group.
 		statusCode, _ = doGetAffinityGroup(re, serverAddr, "nope")
@@ -535,10 +530,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Make sure the default store is healthy so UpdateAffinityGroupPeers reaches the
 		// "group not found" branch instead of failing on store availability.
-		tests.MustHandleStoreHeartbeat(re, cluster, &pdpb.StoreHeartbeatRequest{
-			Header: testutil.NewRequestHeader(leader.GetClusterID()),
-			Stats:  &pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB},
-		})
+		tests.MustPutStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 
 		// Update peers for non-existent group.
 		updateReq := handlers.UpdateAffinityGroupPeersRequest{
@@ -599,7 +591,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 
 		// Try to create the same group again, should get clear error message.
 		statusCode, errorMsg := doCreateAffinityGroups(re, serverAddr, &createReq)
-		re.Equal(http.StatusBadRequest, statusCode)
+		re.Equal(http.StatusConflict, statusCode)
 
 		// Verify error message is not empty and contains useful information.
 		re.NotEmpty(errorMsg, "Error message should not be empty")

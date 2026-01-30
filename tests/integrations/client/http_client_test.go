@@ -83,7 +83,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
 	cluster, err := tests.NewTestCluster(suite.ctx, 2, func(conf *config.Config, _ string) {
-		conf.Schedule.EnableAffinityScheduling = true
+		conf.Schedule.AffinityScheduleLimit = 4
 	})
 	re.NoError(err)
 
@@ -802,6 +802,29 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 	re.Empty(store.Store.Labels)
 }
 
+func (suite *httpClientTestSuite) TestSetStoreLabelsRejectEngineKey() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	resp, err := client.GetStores(ctx)
+	re.NoError(err)
+	re.NotEmpty(resp.Stores)
+	firstStore := resp.Stores[0]
+
+	// Setting EngineKey should be rejected
+	err = client.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
+		core.EngineKey: "tiflash",
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "reserved")
+
+	err = client.DeleteStoreLabel(ctx, firstStore.Store.ID, core.EngineKey)
+	re.Error(err)
+	re.Contains(err.Error(), "can't modify label key")
+}
+
 func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
 	client := suite.client
 	members, err := client.GetMembers(ctx)
@@ -1243,8 +1266,8 @@ func (suite *httpClientTestSuite) TestGetSiblingsRegions() {
 	re.NoError(err)
 	ops := oc.GetOperators()
 	re.Len(ops, 2)
-	re.NotZero(ops[0].Kind() & operator.OpMerge)
-	re.NotZero(ops[1].Kind() & operator.OpMerge)
+	re.NotZero(ops[0].Kind() & operator.OpAdmin)
+	re.NotZero(ops[1].Kind() & operator.OpAdmin)
 }
 
 func (suite *httpClientTestSuite) TestAffinityGroups() {

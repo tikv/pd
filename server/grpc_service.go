@@ -820,6 +820,13 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
+	// Validate engine label value
+	if err := core.ValidateStoreEngineKey(store); err != nil {
+		return &pdpb.PutStoreResponse{
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_INVALID_VALUE, err.Error()),
+		}, nil
+	}
+
 	// NOTE: can be removed when placement rules feature is enabled by default.
 	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		return &pdpb.PutStoreResponse{
@@ -1530,7 +1537,6 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
-
 	defer func() {
 		grpcutil.RequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
@@ -1590,6 +1596,9 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				continue
 			}
 		}
+		failpoint.Inject("queryRegionMetError", func() {
+			failpoint.Return(errs.ErrNotBootstrapped.FastGenByArgs())
+		})
 		start := time.Now()
 		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)

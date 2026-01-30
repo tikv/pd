@@ -281,10 +281,14 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	if krgm.sl == nil || krgm.sl.ServiceLimit == 0 {
+	if krgm.sl == nil {
 		return 0, false
 	}
-	return krgm.sl.ServiceLimit, true
+	serviceLimit := krgm.sl.getServiceLimit()
+	if serviceLimit == 0 {
+		return 0, false
+	}
+	return serviceLimit, true
 }
 
 func (krgm *keyspaceResourceGroupManager) getOrCreateGroupRUTracker(name string) *groupRUTracker {

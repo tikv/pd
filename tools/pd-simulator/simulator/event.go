@@ -118,6 +118,10 @@ func (er *EventRunner) Tick(tickCount int64) {
 			finishedIndex++
 		}
 	}
+	// avoid memory leak
+	for i := range finishedIndex {
+		er.events[i] = nil
+	}
 	er.events = er.events[finishedIndex:]
 }
 

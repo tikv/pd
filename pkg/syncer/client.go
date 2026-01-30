@@ -131,6 +131,8 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				MinConnectTimeout: 5 * time.Second,
 			}),
 			// WithBlock will block the dial step until success or cancel the context.
+			// TODO: remove grpc.WithBlock to adopt the latest best practices.
+			//nolint:staticcheck
 			grpc.WithBlock())
 		// it means the context is canceled.
 		if conn == nil {
@@ -246,6 +248,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if hasBuckets {
 						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
 							region.UpdateBuckets(buckets[i], old)
+							region.SetBucketMeta(buckets[i])
 						}
 					}
 					if saveKV {

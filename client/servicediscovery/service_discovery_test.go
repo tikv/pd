@@ -147,8 +147,8 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 	go suite.leaderServer.run()
 	go suite.followerServer.run()
 	for range 10 {
-		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))     //nolint:staticcheck
+		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 		if err1 == nil && err2 == nil {
 			suite.followerClient = newPDServiceClient(
 				tlsutil.ModifyURLScheme(suite.followerServer.addr, nil),
@@ -435,7 +435,7 @@ func TestGRPCDialOption(t *testing.T) {
 		option:            opt.NewOption(),
 	}
 	cli.urls.Store([]string{"tmp://test.url:5255"})
-	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
+	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()} //nolint:staticcheck
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)

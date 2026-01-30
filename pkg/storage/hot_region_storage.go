@@ -367,6 +367,7 @@ func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 		if len(it.iters) == 1 {
 			return nil, nil
 		}
+		it.iters[0] = nil // avoid memory leak
 		it.iters = it.iters[1:]
 		iter = it.iters[0]
 	}

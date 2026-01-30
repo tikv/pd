@@ -236,6 +236,7 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 	if *useTSOServerProxy {
 		opts = append(opts, opt.WithTSOServerProxyOption(true))
 	}
+	//nolint:staticcheck
 	opts = append(opts, opt.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    keepaliveTime,

@@ -169,6 +169,7 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 		task := cr.pendingTasks[0]
 		select {
 		case cr.taskChan <- task:
+			cr.pendingTasks[0] = nil // avoid memory leak
 			cr.pendingTasks = cr.pendingTasks[1:]
 			cr.pendingTaskCount[task.name]--
 			delete(cr.existTasks, taskID{id: task.id, name: task.name})

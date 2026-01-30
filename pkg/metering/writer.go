@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !swagger
+
+// Because the swag command line tool doesn't provide a decent way to exclude specific packages from the documentation generation,
+// the build tag above is a workaround to avoid involving unexpected third-party dependencies when building the swagger documentation.
+
 package metering
 
 import (

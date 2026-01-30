@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -59,7 +60,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -503,11 +503,17 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	suite.endpoints = runServer(re, cluster)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	defer conn.Close()
 	suite.regionID = regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(suite.ctx)
-		re.NoError(err)
+		stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+		if err != nil {
+			return false
+		}
+		defer func() {
+			_ = stream.CloseSend()
+		}()
 		region := &metapb.Region{
 			Id: suite.regionID,
 			RegionEpoch: &metapb.RegionEpoch{
@@ -521,9 +527,9 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 			Region: region,
 			Leader: peers[0],
 		}
-		err = regionHeartbeat.Send(req)
+		err = stream.Send(req)
 		re.NoError(err)
-		_, err = regionHeartbeat.Recv()
+		_, err = stream.Recv()
 		return err == nil
 	})
 }
@@ -538,7 +544,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
@@ -558,7 +564,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
@@ -630,7 +636,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
@@ -700,7 +706,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(ctx, re, suite.endpoints)
+	// TODO: enable router client after fixing the issue that router client
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	err := cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
@@ -1032,13 +1039,14 @@ var (
 
 type clientTestSuiteImpl struct {
 	suite.Suite
-	cleanup         testutil.CleanupFunc
 	ctx             context.Context
 	clean           context.CancelFunc
+	cluster         *tests.TestCluster
 	srv             *server.Server
 	grpcSvr         *server.GrpcServer
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
+	conn            *grpc.ClientConn
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 	reportBucket    pdpb.PD_ReportBucketsClient
 }
@@ -1046,15 +1054,23 @@ type clientTestSuiteImpl struct {
 func (suite *clientTestSuiteImpl) setup() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
+	suite.ctx, suite.clean = context.WithCancel(context.Background())
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	suite.srv = suite.cluster.GetLeaderServer().GetServer()
+	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	tests.MustWaitLeader(re, []*server.Server{suite.srv})
 	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
-	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	suite.client = setupCli(suite.ctx, re, suite.srv.GetEndpoints())
 
 	suite.regionHeartbeat, err = suite.grpcPDClient.RegionHeartbeat(suite.ctx)
@@ -1090,9 +1106,16 @@ func (suite *clientTestSuiteImpl) setup() {
 }
 
 func (suite *clientTestSuiteImpl) tearDown() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.client.Close()
+	_ = suite.regionHeartbeat.CloseSend()
+	_ = suite.reportBucket.CloseSend()
+	if suite.conn != nil {
+		_ = suite.conn.Close()
+	}
 	suite.clean()
-	suite.cleanup()
+	suite.cluster.Destroy()
 }
 func newHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
@@ -1784,7 +1807,8 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	bo.SetRetryableChecker(needRetry, true)
 
 	// Initialize the client with context and backoff
-	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
+	// Router client doesn't support the rateLimit failpoint injection yet, so disable it for this test
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{}, opt.WithEnableRouterClient(false))
 	re.NoError(err)
 	defer client.Close()
 
@@ -1833,7 +1857,8 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1888,7 +1913,8 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1936,8 +1962,8 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -2674,14 +2700,15 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.Equal(uint64(10), res.GlobalGCBarriers[0].BarrierTS)
 	re.Equal(time.Duration(math.MaxInt64), res.GlobalGCBarriers[0].TTL)
 
-	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, time.Second)
+	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, 2*time.Second)
 	re.NoError(err)
 	res, err = cli.GetAllKeyspacesGCStates(ctx)
 	re.NoError(err)
 	re.Len(res.GlobalGCBarriers, 2)
 	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
 	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
-	re.Equal(time.Second, res.GlobalGCBarriers[1].TTL)
+	re.Greater(res.GlobalGCBarriers[1].TTL, time.Second)
+	re.LessOrEqual(2*time.Second, res.GlobalGCBarriers[1].TTL)
 
 	cli1 := s.client.GetGCStatesClient(1)
 	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
@@ -2703,7 +2730,8 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.True(ok)
 	re.Equal("b4", state.GCBarriers[0].BarrierID)
 	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
-	re.Equal(3*time.Second, state.GCBarriers[0].TTL)
+	re.Greater(state.GCBarriers[0].TTL, 2*time.Second)
+	re.LessOrEqual(3*time.Second, state.GCBarriers[0].TTL)
 }
 
 func TestDecodeHttpKeyRange(t *testing.T) {

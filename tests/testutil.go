@@ -23,7 +23,6 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
-	"os"
 	"path"
 	"runtime"
 	"strconv"
@@ -34,7 +33,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -56,18 +54,12 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 )
 
 var (
@@ -288,9 +280,10 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)
 	raftCluster.UpdateAllStoreStatus()
-	if tc.GetSchedulingPrimaryServer() != nil {
-		tc.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
-		tc.GetSchedulingPrimaryServer().GetCluster().UpdateAllStoreStatus()
+	sche := tc.GetSchedulingPrimaryServer()
+	if sche != nil {
+		sche.GetCluster().PutStore(newStore)
+		sche.GetCluster().UpdateAllStoreStatus()
 	}
 }
 
@@ -317,25 +310,28 @@ func MustPutRegion(re *require.Assertions, cluster *TestCluster, regionID, store
 func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo *core.RegionInfo) {
 	err := cluster.HandleRegionHeartbeat(regionInfo)
 	re.NoError(err)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(regionInfo)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		err = sche.GetCluster().HandleRegionHeartbeat(regionInfo)
 		re.NoError(err)
 	}
 }
 
 // MustHandleStoreHeartbeat is used for test purpose.
+// When we need to test statistics, we need to forward store heartbeat to scheduling server.
+// If we only test store metadata, we only use store watcher and not need to forward store heartbeat.
 func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
 	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
 	re.NoError(err)
-	if cluster.GetSchedulingPrimaryServer() != nil {
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		hb := &schedulingpb.StoreHeartbeatRequest{
 			Header: &schedulingpb.RequestHeader{
 				ClusterId: heartbeat.Header.ClusterId,
 			},
 			Stats: heartbeat.GetStats(),
 		}
-		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
+		err = sche.GetCluster().HandleStoreHeartbeat(hb)
 		re.NoError(err)
+		sche.GetCluster().UpdateAllStoreStatus()
 	}
 }
 
@@ -718,89 +714,6 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 	return regions
 }
 
-var logOnce sync.Once
-
-// NewTestSingleConfig is only for test to create one pd.
-// Because PD client also needs this, so export here.
-func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
-	schedulers.Register()
-	cfg := &config.Config{
-		Name:       "pd",
-		ClientUrls: tempurl.Alloc(),
-		PeerUrls:   tempurl.Alloc(),
-
-		InitialClusterState: embed.ClusterStateFlagNew,
-
-		LeaderLease:     10,
-		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
-	}
-
-	cfg.AdvertiseClientUrls = cfg.ClientUrls
-	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
-	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
-	cfg.DisableStrictReconfigCheck = true
-	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
-	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
-	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
-	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	c.AssertNil(err)
-	logOnce.Do(func() {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	})
-
-	c.AssertNil(cfg.Adjust(nil, false))
-	cfg.Keyspace.WaitRegionSplit = false
-
-	return cfg
-}
-
-// NewTestMultiConfig is only for test to create multiple pd configurations.
-// Because PD client also needs this, so export here.
-func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
-	cfgs := make([]*config.Config, count)
-
-	clusters := []string{}
-	for i := 1; i <= count; i++ {
-		cfg := NewTestSingleConfig(c)
-		cfg.Name = fmt.Sprintf("pd%d", i)
-
-		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls))
-
-		cfgs[i-1] = cfg
-	}
-
-	initialCluster := strings.Join(clusters, ",")
-	for _, cfg := range cfgs {
-		cfg.InitialCluster = initialCluster
-	}
-
-	return cfgs
-}
-
-// NewServer creates a pd server for testing.
-func NewServer(re *require.Assertions, c *assertutil.Checker) (*server.Server, testutil.CleanupFunc, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cfg := NewTestSingleConfig(c)
-	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	s, err := server.CreateServer(ctx, cfg, nil, mockHandler)
-	if err != nil {
-		cancel()
-		return nil, nil, err
-	}
-	if err = s.Run(); err != nil {
-		cancel()
-		return nil, nil, err
-	}
-
-	cleanup := func() {
-		cancel()
-		s.Close()
-		os.RemoveAll(cfg.DataDir)
-	}
-	return s, cleanup, nil
-}
-
 // MustWaitLeader return the leader until timeout.
 func MustWaitLeader(re *require.Assertions, svrs []*server.Server) *server.Server {
 	var leader *server.Server
@@ -817,24 +730,6 @@ func MustWaitLeader(re *require.Assertions, svrs []*server.Server) *server.Serve
 		return true
 	})
 	return leader
-}
-
-// CreateMockHandler creates a mock handler for test.
-func CreateMockHandler(re *require.Assertions, ip string) server.HandlerBuilder {
-	return func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintln(w, "Hello World")
-			// test getting ip
-			clientIP, _ := apiutil.GetIPPortFromHTTPRequest(r)
-			re.Equal(ip, clientIP)
-		})
-		info := apiutil.APIServiceGroup{
-			Name:    "mock",
-			Version: "v1",
-		}
-		return mux, info, nil
-	}
 }
 
 const (
