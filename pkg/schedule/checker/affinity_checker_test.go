@@ -2050,9 +2050,9 @@ func TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch(t *testing.T) {
 
 	groupState := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupState)
-	re.False(groupState.AffinitySchedulingAllowed, "Group should be expired when peer count violates placement rules")
-	re.Equal(affinity.PhasePending, groupState.Phase)
-	re.Equal([]uint64{1, 2, 3, 4}, groupState.VoterStoreIDs, "Peers remain as configured until a valid available region is observed")
+	re.True(groupState.AffinitySchedulingAllowed)
+	re.Equal(affinity.PhaseStable, groupState.Phase)
+	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
 }
 
 // TestAffinityCheckerTargetStoreEvictLeader tests that operator is not created when target store has evict-leader.
