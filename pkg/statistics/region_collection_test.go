@@ -218,19 +218,29 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 			{"zone": "z1", "host": "h3"},
 		},
 	}
-	res := []string{"rack", "host", "zone", "rack", "none", "rack", "host"}
+	isolationResSet := []string{"rack", "host", "zone", "rack", "none", "rack", "host"}
+	levelResSet := []int{1, 2, 0, 1, -1, 1, 2}
+	satisfiedResSet := []map[string]bool{
+		{"zone": false, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "host": true, "bar": false, "none": true, "": true},
+		{"zone": true, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "host": false, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "host": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "host": true, "bar": false, "none": true, "": true},
+	}
 	counter := map[string]int{"none": 1, "host": 2, "rack": 3, "zone": 1}
 	regionID := 1
-	f := func(labels []map[string]string, res string, locationLabels []string) {
+	f := func(locationLabels []string, storeLabels []map[string]string, isolationRes string, levelRes int, satisfiedRes map[string]bool) {
 		metaStores := []*metapb.Store{
 			{Id: 1, Address: "mock://tikv-1:1"},
 			{Id: 2, Address: "mock://tikv-2:2"},
 			{Id: 3, Address: "mock://tikv-3:3"},
 		}
-		stores := make([]*core.StoreInfo, 0, len(labels))
+		stores := make([]*core.StoreInfo, 0, len(storeLabels))
 		for i, m := range metaStores {
 			var newLabels []*metapb.StoreLabel
-			for k, v := range labels[i] {
+			for k, v := range storeLabels[i] {
 				newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 			}
 			s := core.NewStoreInfo(m, core.SetStoreLabels(newLabels))
@@ -238,14 +248,18 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 			stores = append(stores, s)
 		}
 		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)
-		label, _ := GetRegionLabelIsolation(stores, locationLabels)
+		label, level := GetRegionLabelIsolation(stores, locationLabels)
 		labelLevelStats.Observe(region, stores, locationLabels)
-		re.Equal(res, label)
+		re.Equal(isolationRes, label)
+		re.Equal(levelRes, level)
+		for isolationLevel, res := range satisfiedRes {
+			re.Equal(res, IsRegionLabelIsolationSatisfied(stores, locationLabels, isolationLevel))
+		}
 		regionID++
 	}
 
 	for i, labels := range labelsSet {
-		f(labels, res[i], locationLabels)
+		f(locationLabels, labels, isolationResSet[i], levelResSet[i], satisfiedResSet[i])
 	}
 	for i, res := range counter {
 		re.Equal(res, labelLevelStats.labelCounter[i])
@@ -263,12 +277,22 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	re.Equal(0, level)
 
 	regionID = 1
-	res = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
+	isolationResSet = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
 	counter = map[string]int{"none": 3, "host": 0, "rack": 3, "zone": 1}
 	locationLabels = []string{"zone", "rack"}
+	levelResSet = []int{1, -1, 0, 1, -1, 1, -1}
+	satisfiedResSet = []map[string]bool{
+		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "bar": false, "none": true, "": true},
+		{"zone": true, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
+		{"zone": false, "rack": false, "bar": false, "none": true, "": true},
+	}
 
 	for i, labels := range labelsSet {
-		f(labels, res[i], locationLabels)
+		f(locationLabels, labels, isolationResSet[i], levelResSet[i], satisfiedResSet[i])
 	}
 	for i, res := range counter {
 		re.Equal(res, labelLevelStats.labelCounter[i])
