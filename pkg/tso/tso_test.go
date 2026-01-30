@@ -139,7 +139,7 @@ func TestCurrentGetTSO(t *testing.T) {
 
 	wg := &sync.WaitGroup{}
 	concurrency := 20
-	errCh := make(chan error, concurrency*1000)
+	errCh := make(chan error, 1)
 	wg.Add(concurrency)
 	changes := atomic.Int32{}
 	totalTso := atomic.Int32{}
@@ -158,6 +158,7 @@ func TestCurrentGetTSO(t *testing.T) {
 					if err != nil {
 						select {
 						case errCh <- err:
+							runCancel()
 						default:
 						}
 					}
