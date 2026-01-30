@@ -108,6 +108,11 @@ func (s *testResourceManagerSuite) TestConfigController() {
 	re.NoError(err)
 	re.Contains(string(output), "can't update controller child item")
 
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.write-base-cost1", "2"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "controller config item write-base-cost1 not found")
+
 	// Set controller config
 	args = []string{"-u", s.pdAddr, "config", "set", "controller.ltb-max-wait-duration", "1h"}
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)

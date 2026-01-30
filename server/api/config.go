@@ -625,11 +625,7 @@ func (h *confHandler) getLeaderConfig() (*config.Config, error) {
 	}
 	addr := addrs[0]
 	url := fmt.Sprintf("%s/pd/api/v1/config", addr)
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.GetJSONWithoutBody(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		return nil, err
 	}
@@ -652,11 +648,7 @@ func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 		return nil, errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.GetJSONWithoutBody(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		return nil, err
 	}
@@ -700,13 +692,7 @@ func (h *confHandler) updateControllerConfig(key string, value any) error {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(string(data)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.PostJSON(h.svr.GetHTTPClient(), url, data)
 	if err != nil {
 		return err
 	}
