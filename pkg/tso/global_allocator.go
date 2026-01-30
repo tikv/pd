@@ -123,6 +123,8 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 		dcLocation:             GlobalDCLocation,
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
+		maxIndex:               am.maxIndex,
+		uniqueIndex:            am.uniqueIndex,
 	}
 	return oracle
 }

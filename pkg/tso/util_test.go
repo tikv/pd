@@ -15,6 +15,8 @@
 package tso
 
 import (
+	"context"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -105,4 +107,40 @@ func TestTimeStamp(t *testing.T) {
 	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
 	oracle.saveInterval = config.DefaultTSOSaveInterval - 2*time.Second
 	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
+}
+
+func TestTSOIndex(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for _, ts := range []*timestampOracle{
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			maxIndex:    2,
+			uniqueIndex: 0,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			maxIndex:    2,
+			uniqueIndex: 1,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			maxIndex:    100,
+			uniqueIndex: 1,
+		},
+	} {
+		ts.tsoMux.logical = ts.uniqueIndex
+		for range 10 {
+			count := rand.Int63n(100)
+			_, logical, _ := ts.generateTSO(ctx, count, 0)
+			require.Equal(t, ts.uniqueIndex, logical%ts.maxIndex)
+		}
+	}
 }

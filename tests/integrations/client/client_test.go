@@ -32,8 +32,6 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/opentracing/basictracer-go"
-	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -42,10 +40,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	cb "github.com/tikv/pd/client/circuitbreaker"
-	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -70,6 +66,59 @@ const (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestUniqueIndex(t *testing.T) {
+	re := require.New(t)
+
+	checkUniqueIndex(re, 1)
+	checkUniqueIndex(re, 0)
+}
+
+func TestUniqueIndexWithFollowerHandle(t *testing.T) {
+	re := require.New(t)
+	checkUniqueIndex(re, 1)
+	checkUniqueIndex(re, 0)
+}
+
+func checkUniqueIndex(re *require.Assertions, uniqueIndex int64) {
+	maxIndex := int64(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.TSOMaxIndex = maxIndex
+		conf.TSOUniqueIndex = uniqueIndex
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	endpointsWithWrongURL := append([]string{}, endpoints...)
+	// inject wrong http scheme
+	for i := range endpointsWithWrongURL {
+		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
+	}
+	cli := setupCli(ctx, re, endpointsWithWrongURL)
+	defer cli.Close()
+
+	var l1 int64
+	testutil.Eventually(re, func() bool {
+		_, l1, err = cli.GetTS(ctx)
+		return err == nil
+	})
+	re.Equal(uniqueIndex, l1%maxIndex)
+
+	tsList := make([]pd.TSFuture, 0, 10)
+	for range 10 {
+		ts := cli.GetTSAsync(ctx)
+		tsList = append(tsList, ts)
+	}
+
+	for _, ts := range tsList {
+		_, l1, err = ts.Wait()
+		re.Equal(uniqueIndex, l1%maxIndex)
+	}
 }
 
 func TestClientLeaderChange(t *testing.T) {
@@ -477,132 +526,6 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	}()
 	wg.Wait()
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
-}
-
-// TODO: migrate the Local/Global TSO tests to TSO integration test folder.
-func TestGlobalAndLocalTSO(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
-	})
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
-	defer cli.Close()
-
-	// Wait for all nodes becoming healthy.
-	time.Sleep(time.Second * 5)
-
-	// Join a new dc-location
-	pd4, err := cluster.Join(ctx, func(conf *config.Config, _ string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = "dc-4"
-	})
-	re.NoError(err)
-	err = pd4.Run()
-	re.NoError(err)
-	dcLocationConfig["pd4"] = "dc-4"
-	cluster.CheckClusterDCLocation()
-	cluster.WaitAllLeaders(re, dcLocationConfig)
-
-	// Test a nonexistent dc-location for Local TSO
-	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
-	re.Equal(int64(0), p)
-	re.Equal(int64(0), l, int64(0))
-	re.Error(err)
-	re.Contains(err.Error(), "unknown dc-location")
-
-	wg := &sync.WaitGroup{}
-	requestGlobalAndLocalTSO(re, wg, dcLocationConfig, cli)
-
-	// assert global tso after resign leader
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`))
-	err = cluster.ResignLeader()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
-	_, _, err = cli.GetTS(ctx)
-	re.Error(err)
-	re.True(clierrs.IsLeaderChange(err))
-	_, _, err = cli.GetTS(ctx)
-	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"))
-
-	recorder := basictracer.NewInMemoryRecorder()
-	tracer := basictracer.New(recorder)
-	span := tracer.StartSpan("trace")
-	ctx = opentracing.ContextWithSpan(ctx, span)
-	future := cli.GetLocalTSAsync(ctx, "error-dc")
-	spans := recorder.GetSpans()
-	re.Len(spans, 1)
-	_, _, err = future.Wait()
-	re.Error(err)
-	spans = recorder.GetSpans()
-	re.Len(spans, 1)
-	_, _, err = cli.GetTS(ctx)
-	re.NoError(err)
-	spans = recorder.GetSpans()
-	re.Len(spans, 3)
-
-	// Test the TSO follower proxy while enabling the Local TSO.
-	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
-	// Sleep a while here to prevent from canceling the ongoing TSO request.
-	time.Sleep(time.Millisecond * 50)
-	requestGlobalAndLocalTSO(re, wg, dcLocationConfig, cli)
-	cli.UpdateOption(pd.EnableTSOFollowerProxy, false)
-	time.Sleep(time.Millisecond * 50)
-	requestGlobalAndLocalTSO(re, wg, dcLocationConfig, cli)
-}
-
-func requestGlobalAndLocalTSO(
-	re *require.Assertions,
-	wg *sync.WaitGroup,
-	dcLocationConfig map[string]string,
-	cli pd.Client,
-) {
-	for _, dcLocation := range dcLocationConfig {
-		wg.Add(tsoRequestConcurrencyNumber)
-		for range tsoRequestConcurrencyNumber {
-			go func(dc string) {
-				defer wg.Done()
-				var lastTS uint64
-				for range tsoRequestRound {
-					globalPhysical1, globalLogical1, err := cli.GetTS(context.TODO())
-					// The allocator leader may be changed due to the environment issue.
-					if err != nil {
-						re.ErrorContains(err, errs.NotLeaderErr)
-					}
-					globalTS1 := tsoutil.ComposeTS(globalPhysical1, globalLogical1)
-					localPhysical, localLogical, err := cli.GetLocalTS(context.TODO(), dc)
-					if err != nil {
-						re.ErrorContains(err, errs.NotLeaderErr)
-					}
-					localTS := tsoutil.ComposeTS(localPhysical, localLogical)
-					globalPhysical2, globalLogical2, err := cli.GetTS(context.TODO())
-					if err != nil {
-						re.ErrorContains(err, errs.NotLeaderErr)
-					}
-					globalTS2 := tsoutil.ComposeTS(globalPhysical2, globalLogical2)
-					re.Less(lastTS, globalTS1)
-					re.Less(globalTS1, localTS)
-					re.Less(localTS, globalTS2)
-					lastTS = globalTS2
-				}
-				re.Positive(lastTS)
-			}(dcLocation)
-		}
-	}
-	wg.Wait()
 }
 
 // GetTSOAllocators defines the TSO allocators getter.

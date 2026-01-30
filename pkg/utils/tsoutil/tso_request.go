@@ -86,13 +86,13 @@ func (r *TSOProtoRequest) process(forwardStream stream, count uint32) (tsoResp, 
 // postProcess sends the response back to the sender of the request
 func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
 	count := r.request.GetCount()
-	countSum += int64(count)
+	countSum += int64(count * suffixBits)
 	response := &tsopb.TsoResponse{
 		Header: &tsopb.ResponseHeader{ClusterId: r.request.GetHeader().GetClusterId()},
 		Count:  count,
 		Timestamp: &pdpb.Timestamp{
 			Physical:   physical,
-			Logical:    addLogical(firstLogical, countSum, suffixBits),
+			Logical:    firstLogical + countSum,
 			SuffixBits: suffixBits,
 		},
 	}
@@ -145,16 +145,16 @@ func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, e
 }
 
 // postProcess sends the response back to the sender of the request
-func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
+func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64, suffix uint32) (int64, error) {
 	count := r.request.GetCount()
-	countSum += int64(count)
+	countSum += int64(count * suffix)
 	response := &pdpb.TsoResponse{
 		Header: &pdpb.ResponseHeader{ClusterId: r.request.GetHeader().GetClusterId()},
 		Count:  count,
 		Timestamp: &pdpb.Timestamp{
 			Physical:   physical,
-			Logical:    addLogical(firstLogical, countSum, suffixBits),
-			SuffixBits: suffixBits,
+			Logical:    firstLogical + countSum,
+			SuffixBits: suffix,
 		},
 	}
 	// Send back to the client.
