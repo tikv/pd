@@ -2161,7 +2161,7 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re.NotNil(groupState)
 	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
 
-	//Because the Group’s currently specified Peers are not at the best location,
+	// Because the Group’s currently specified Peers are not at the best location,
 	// they are cleared and replaced with the source Region’s Peers.
 	// In this case, no scheduling is generated, but the Peers are updated.
 	tc.AddLeaderRegion(200, 1, 4, 5)
