@@ -277,9 +277,8 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	re.Equal(0, level)
 
 	regionID = 1
-	isolationResSet = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
-	counter = map[string]int{"none": 3, "host": 0, "rack": 3, "zone": 1}
 	locationLabels = []string{"zone", "rack"}
+	isolationResSet = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
 	levelResSet = []int{1, -1, 0, 1, -1, 1, -1}
 	satisfiedResSet = []map[string]bool{
 		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
@@ -290,6 +289,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 		{"zone": false, "rack": true, "bar": false, "none": true, "": true},
 		{"zone": false, "rack": false, "bar": false, "none": true, "": true},
 	}
+	counter = map[string]int{"none": 3, "host": 0, "rack": 3, "zone": 1}
 
 	for i, labels := range labelsSet {
 		f(locationLabels, labels, isolationResSet[i], levelResSet[i], satisfiedResSet[i])
