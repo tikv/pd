@@ -186,12 +186,12 @@ func renderPlot(name string, data [][3]int, len, minCount, maxCount int) {
 		charts.Grid3DOpts{BoxDepth: 100, BoxWidth: 300},
 	)
 	xAxis := make([]int, 10)
-	for i := 1; i <= 10; i++ {
-		xAxis[i-1] = i
+	for i := range xAxis {
+		xAxis[i] = i + 1
 	}
 	yAxis := make([]int, len)
-	for i := 1; i <= len; i++ {
-		yAxis[i-1] = i
+	for i := range yAxis {
+		yAxis[i] = i + 1
 	}
 	bar3d.AddXYAxis(xAxis, yAxis).AddZAxis("bar3d", data)
 	f, _ := os.Create(name)
