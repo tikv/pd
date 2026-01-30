@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
@@ -523,6 +524,10 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 		// filterByTempState being true means a better placement exists but is temporarily unschedulable.
 		// This is also considered not satisfied.
 		if newStoreID != 0 || filterByTempState {
+			return false
+		}
+		// If the isolation level does not meet the requirement, it is also considered not to be at the best location.
+		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
 			return false
 		}
 	}
