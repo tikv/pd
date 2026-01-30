@@ -238,7 +238,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 			stores = append(stores, s)
 		}
 		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)
-		label := GetRegionLabelIsolation(stores, locationLabels)
+		label, _ := GetRegionLabelIsolation(stores, locationLabels)
 		labelLevelStats.Observe(region, stores, locationLabels)
 		re.Equal(res, label)
 		regionID++
@@ -251,13 +251,16 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 		re.Equal(res, labelLevelStats.labelCounter[i])
 	}
 
-	label := GetRegionLabelIsolation(nil, locationLabels)
+	label, level := GetRegionLabelIsolation(nil, locationLabels)
 	re.Equal(nonIsolation, label)
-	label = GetRegionLabelIsolation(nil, nil)
+	re.Equal(-1, level)
+	label, level = GetRegionLabelIsolation(nil, nil)
 	re.Equal(nonIsolation, label)
+	re.Equal(-1, level)
 	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1:1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
-	label = GetRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
+	label, level = GetRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
 	re.Equal("zone", label)
+	re.Equal(0, level)
 
 	regionID = 1
 	res = []string{"rack", "none", "zone", "rack", "none", "rack", "none"}
