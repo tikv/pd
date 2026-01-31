@@ -511,7 +511,7 @@ func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region 
 	}
 
 	// Check region is satisfied
-	if !fit.IsSatisfied() {
+	if fit == nil || !fit.IsSatisfied() {
 		return false
 	}
 
