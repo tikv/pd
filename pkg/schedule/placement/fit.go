@@ -139,7 +139,7 @@ type RuleFit struct {
 	IsolationScore float64 `json:"isolation-score"`
 	WitnessScore   int     `json:"witness-score"`
 	// Stores is the stores that the peers are placed in.
-	Stores []*core.StoreInfo
+	Stores []*core.StoreInfo `json:"-"`
 }
 
 // IsSatisfied returns if the rule is properly satisfied.
