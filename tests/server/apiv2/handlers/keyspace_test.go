@@ -113,6 +113,132 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	}
 }
 
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditions() {
+	re := suite.Require()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{
+		Name:   "test_keyspace_cas",
+		Config: map[string]string{},
+	})
+	re.NotNil(created)
+
+	currentKey := "current_file_id"
+	nextKey := "next_file_id"
+
+	next := "1000"
+	status, body, meta := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: &next,
+		},
+		Preconditions: map[string]*string{
+			nextKey: nil,
+		},
+	})
+	re.Equal(http.StatusOK, status, body)
+	re.Equal(next, meta.Config[nextKey])
+
+	otherNext := "2000"
+	status, body, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: &otherNext,
+		},
+		Preconditions: map[string]*string{
+			nextKey: nil,
+		},
+	})
+	re.Equal(http.StatusConflict, status)
+	re.Nil(meta)
+	re.Contains(body, "precondition failed")
+
+	status, _, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			currentKey: &next,
+		},
+		Preconditions: map[string]*string{
+			nextKey: &next,
+		},
+	})
+	re.Equal(http.StatusOK, status)
+	re.Equal(next, meta.Config[currentKey])
+	re.Equal(next, meta.Config[nextKey])
+
+	wrongExpected := "999"
+	status, body, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: nil,
+		},
+		Preconditions: map[string]*string{
+			nextKey: &wrongExpected,
+		},
+	})
+	re.Equal(http.StatusConflict, status)
+	re.Nil(meta)
+	re.Contains(body, "expected")
+
+	status, _, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: nil,
+		},
+		Preconditions: map[string]*string{
+			nextKey: &next,
+		},
+	})
+	re.Equal(http.StatusOK, status)
+	re.Equal(next, meta.Config[currentKey])
+	re.NotContains(meta.GetConfig(), nextKey)
+}
+
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditionsConcurrentSetNextIfAbsent() {
+	re := suite.Require()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{
+		Name:   "test_keyspace_cas2",
+		Config: map[string]string{},
+	})
+	re.NotNil(created)
+
+	nextKey := "next_file_id"
+	start := make(chan struct{})
+	results := make(chan int, 2)
+
+	go func() {
+		<-start
+		next := "1000"
+		status, body, _ := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+			Config: map[string]*string{
+				nextKey: &next,
+			},
+			Preconditions: map[string]*string{
+				nextKey: nil,
+			},
+		})
+		if status != http.StatusOK && status != http.StatusConflict {
+			re.FailNow("unexpected status", "status=%d body=%s", status, body)
+		}
+		results <- status
+	}()
+	go func() {
+		<-start
+		next := "2000"
+		status, body, _ := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+			Config: map[string]*string{
+				nextKey: &next,
+			},
+			Preconditions: map[string]*string{
+				nextKey: nil,
+			},
+		})
+		if status != http.StatusOK && status != http.StatusConflict {
+			re.FailNow("unexpected status", "status=%d body=%s", status, body)
+		}
+		results <- status
+	}()
+
+	close(start)
+
+	s1 := <-results
+	s2 := <-results
+	re.ElementsMatch([]int{http.StatusOK, http.StatusConflict}, []int{s1, s2})
+}
+
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)

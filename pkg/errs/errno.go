@@ -247,6 +247,8 @@ var (
 	ErrIllegalOperation = errors.Normalize("unknown operation", errors.RFCCodeText("PD:keyspace:ErrIllegalOperation"))
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
 	ErrUnsupportedOperationInKeyspace = errors.Normalize("it's a unsupported operation", errors.RFCCodeText("PD:keyspace:ErrUnsupportedOperationInKeyspace"))
+	// ErrKeyspaceConfigPreconditionFailed is used to indicate the precondition for updating keyspace config is not met.
+	ErrKeyspaceConfigPreconditionFailed = errors.Normalize("keyspace config precondition failed, %s", errors.RFCCodeText("PD:keyspace:ErrKeyspaceConfigPreconditionFailed"))
 	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
 	ErrKeyspaceGroupPrimaryNotFound = errors.Normalize("primary of keyspace group does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"))
 	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
