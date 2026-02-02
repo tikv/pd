@@ -294,8 +294,18 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 	return nil
 }
 
+type updatePurpose int
+
+const (
+	intervalUpdate updatePurpose = iota
+	overflowUpdate
+)
+
 // updateTimestamp is used to update the timestamp.
-// allowSaveStorage indicates whether to allow save storage, only allocatorUpdater is true.
+// updatePurpose indicates the purpose of this update:
+//   - intervalUpdate: update timestamp due to the periodic interval.
+//   - overflowUpdate: update timestamp due to the logical overflow.
+//
 // This function will do two things:
 //  1. When the logical time is going to be used up, increase the current physical time.
 //  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
@@ -309,7 +319,7 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 //
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
-func (t *timestampOracle) updateTimestamp(allowSaveStorage bool) (bool, error) {
+func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, error) {
 	if !t.isInitialized() {
 		return true, errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
@@ -361,8 +371,9 @@ func (t *timestampOracle) updateTimestamp(allowSaveStorage bool) (bool, error) {
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= updateTimestampGuard {
-		// if need to save into etcd,
-		if !allowSaveStorage {
+		// Only IntervalUpdate is allowed to save timestamp into etcd.
+		// it would be dangerous to save timestamp into etcd when handling overflowUpdate.
+		if updatePurpose != intervalUpdate {
 			t.metrics.notAllowedSaveTimestampEvent.Inc()
 			return true, nil
 		}
@@ -379,8 +390,9 @@ func (t *timestampOracle) updateTimestamp(allowSaveStorage bool) (bool, error) {
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
 	var overflowed bool
-	// save into memory
-	if allowSaveStorage {
+	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
+	// otherwise, we need to check logical overflow to avoid unnecessary physical time update.
+	if updatePurpose == intervalUpdate {
 		overflowed = t.setTSOPhysical(next, withInitialCheck())
 	} else {
 		overflowed = t.setTSOPhysical(next, withInitialCheck(), withLogicalOverflowCheck())
@@ -418,7 +430,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
-			if overflowed, err := t.updateTimestamp(false); err != nil {
+			if overflowed, err := t.updateTimestamp(overflowUpdate); err != nil {
 				log.Info("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
 				time.Sleep(t.updatePhysicalInterval)
 			} else if overflowed {

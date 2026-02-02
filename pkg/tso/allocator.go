@@ -168,7 +168,7 @@ func (a *Allocator) IsInitialize() bool {
 func (a *Allocator) UpdateTSO() (err error) {
 	var overflowed bool
 	for i := range maxUpdateTSORetryCount {
-		overflowed, err = a.timestampOracle.updateTimestamp(true)
+		overflowed, err = a.timestampOracle.updateTimestamp(intervalUpdate)
 		if err == nil {
 			return nil
 		}
