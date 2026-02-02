@@ -19,9 +19,11 @@ package tools
 import (
 	_ "github.com/AlekSi/gocov-xml"
 	_ "github.com/axw/gocov/gocov"
+	_ "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"
 	_ "github.com/mailru/easyjson/easyjson"
 	_ "github.com/pingcap/errors/errdoc-gen"
 	_ "github.com/pingcap/failpoint/failpoint-ctl"
+	_ "github.com/prometheus/prometheus/cmd/promtool"
 	_ "github.com/rleungx/leakcheck/cmd/leakcheck"
 	_ "github.com/swaggo/swag/cmd/swag"
 	_ "golang.org/x/tools/cmd/goimports"
