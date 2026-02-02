@@ -117,6 +117,7 @@ func (m *mockConfig) SetMetaServiceGroupsFallbackRatio(ratio float64) {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
@@ -126,9 +127,9 @@ func (suite *keyspaceTestSuite) SetupTest() {
 		MetaServiceGroups:           mockMetaServiceGroups(),
 	}
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	mgm := NewMetaServiceGroupManager(suite.ctx, store, &cfg)
+	mgm, err := NewMetaServiceGroupManager(suite.ctx, store, &cfg)
+	re.NoError(err)
 	mustEnableMetaServiceGroups(re, mgm, mockMetaServiceGroups())
-	var err error
 	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &cfg, kgm, mgm)
 	re.NoError(err)
 	re.NoError(kgm.Bootstrap(suite.ctx))

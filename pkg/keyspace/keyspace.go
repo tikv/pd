@@ -322,15 +322,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
 		stepStart = time.Now()
-		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
-		if err != nil {
-			log.Error("[create-keyspace] failed to assign keyspace to meta-service group",
-				zap.Uint32("keyspace-id", newID),
-				zap.String("keyspace-name", request.Name),
-				zap.Error(err),
-			)
-			return nil, err
-		}
+		metaServiceGroup := manager.mgm.AssignToGroup(1)
 		if metaServiceGroup != "" {
 			request.Config[MetaServiceGroupIDKey] = metaServiceGroup
 		}
@@ -611,6 +603,11 @@ const (
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
+	var (
+		shouldUpdateMetaServiceGroup bool
+		oldMetaServiceGroup          string
+		newMetaServiceGroup          string
+	)
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// First get KeyspaceID from ID.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -664,12 +661,13 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 			}
 		}
 		// If the assigned meta-service group changed, need to update the meta-service group assignment count.
-		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
-		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
+		oldMetaServiceGroup = oldConfig[MetaServiceGroupIDKey]
+		newMetaServiceGroup = newConfig[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
-			if err := manager.mgm.UpdateAssignment(oldMetaServiceGroup, newMetaServiceGroup); err != nil {
-				return err
+			if newMetaServiceGroup != "" && !manager.mgm.HasGroup(newMetaServiceGroup) {
+				return errUnknownMetaServiceGroup
 			}
+			shouldUpdateMetaServiceGroup = true
 		}
 		// Save the updated keyspace meta.
 		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
@@ -689,6 +687,15 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 			zap.Error(err),
 		)
 		return nil, err
+	}
+	if shouldUpdateMetaServiceGroup && manager.mgm != nil {
+		if err := manager.mgm.UpdateAssignment(oldMetaServiceGroup, newMetaServiceGroup); err != nil {
+			log.Warn("[keyspace] failed to update meta-service group assignment",
+				zap.String("old-group", oldMetaServiceGroup),
+				zap.String("new-group", newMetaServiceGroup),
+				zap.Error(err),
+			)
+		}
 	}
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
@@ -712,6 +719,7 @@ func (manager *Manager) UpdateKeyspaceStateByName(name string, newState keyspace
 		return nil, ErrModifyDefaultKeyspace
 	}
 	var meta *keyspacepb.KeyspaceMeta
+	var removedMetaServiceGroup string
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// First get KeyspaceID from ID.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -732,7 +740,8 @@ func (manager *Manager) UpdateKeyspaceStateByName(name string, newState keyspace
 			return ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = manager.updateKeyspaceState(txn, meta, newState, now); err != nil {
+		removedMetaServiceGroup, err = manager.updateKeyspaceState(meta, newState, now)
+		if err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -745,29 +754,20 @@ func (manager *Manager) UpdateKeyspaceStateByName(name string, newState keyspace
 		)
 		return nil, err
 	}
+	if manager.mgm != nil && removedMetaServiceGroup != "" {
+		if err := manager.mgm.UpdateAssignment(removedMetaServiceGroup, ""); err != nil {
+			log.Warn("[keyspace] failed to update meta-service group assignment",
+				zap.String("old-group", removedMetaServiceGroup),
+				zap.Error(err),
+			)
+		}
+	}
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("ID", meta.GetId()),
 		zap.String("keyspace-id", meta.GetName()),
 		zap.String("new-state", newState.String()),
 	)
 	return meta, nil
-}
-
-func (manager *Manager) removeKeyspaceFromMSGroup(
-	txn kv.Txn,
-	keyspaceMeta *keyspacepb.KeyspaceMeta,
-	oldMetaServiceGroup string,
-	removeMetaServiceGroup string,
-) error {
-	// Remove keyspace config meta-service-group-id.
-	delete(keyspaceMeta.Config, MetaServiceGroupIDKey)
-	// Remove keyspace from meta-service group.
-	if manager.mgm != nil && oldMetaServiceGroup != removeMetaServiceGroup {
-		if err := manager.mgm.UpdateAssignmentWithTxn(txn, oldMetaServiceGroup, removeMetaServiceGroup); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
@@ -782,6 +782,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
+	var removedMetaServiceGroup string
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
@@ -794,7 +795,8 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			return ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = manager.updateKeyspaceState(txn, meta, newState, now); err != nil {
+		removedMetaServiceGroup, err = manager.updateKeyspaceState(meta, newState, now)
+		if err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -807,6 +809,14 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		)
 		return nil, err
 	}
+	if manager.mgm != nil && removedMetaServiceGroup != "" {
+		if err := manager.mgm.UpdateAssignment(removedMetaServiceGroup, ""); err != nil {
+			log.Warn("[keyspace] failed to update meta-service group assignment",
+				zap.String("old-group", removedMetaServiceGroup),
+				zap.Error(err),
+			)
+		}
+	}
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
@@ -816,29 +826,25 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 }
 
 // updateKeyspaceState updates keyspace meta and record the update time.
-func (manager *Manager) updateKeyspaceState(txn kv.Txn, meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+// It returns the removed meta-service group ID (if any) for post-commit updates.
+func (*Manager) updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) (string, error) {
+	var removedMetaServiceGroup string
 	if newState == keyspacepb.KeyspaceState_TOMBSTONE {
-		oldMetaServiceGroup := meta.GetConfig()[MetaServiceGroupIDKey]
-		removeMetaServiceGroup := ""
-		// remove keyspace from meta-service group before set tombstone.
-		err := manager.removeKeyspaceFromMSGroup(txn, meta, oldMetaServiceGroup, removeMetaServiceGroup)
-		if err != nil {
-			return err
-		}
+		removedMetaServiceGroup = meta.GetConfig()[MetaServiceGroupIDKey]
 	}
 
 	// If already in the target state, do nothing and return.
 	if meta.GetState() == newState {
-		return nil
+		return "", nil
 	}
 	// Consult state transition table to check if the operation is legal.
 	if !slice.Contains(stateTransitionTable[meta.GetState()], newState) {
-		return errors.Errorf("cannot change keyspace state from %s to %s", meta.GetState().String(), newState.String())
+		return "", errors.Errorf("cannot change keyspace state from %s to %s", meta.GetState().String(), newState.String())
 	}
 	// If the operation is legal, update keyspace state and change time.
 	meta.State = newState
 	meta.StateChangedAt = now
-	return nil
+	return removedMetaServiceGroup, nil
 }
 
 // LoadRangeKeyspace load up to limit keyspaces starting from keyspace with startID.

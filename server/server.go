@@ -513,7 +513,17 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, &s.cfg.Keyspace)
+	s.metaServiceGroupManager, err = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, &s.cfg.Keyspace)
+	if err != nil {
+		return err
+	}
+	s.metaServiceGroupManager.SetLeaderChecker(s.IsServing)
+	s.AddServiceReadyCallback(func(_ context.Context) error {
+		if s.metaServiceGroupManager == nil {
+			return nil
+		}
+		return s.metaServiceGroupManager.RefreshCache()
+	})
 	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager, s.metaServiceGroupManager)
 	if err != nil {
 		return err

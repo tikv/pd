@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type metaServiceGroupTestSuite struct {
@@ -49,15 +50,19 @@ func (suite *metaServiceGroupTestSuite) SetupTest() {
 		AutoAssignMetaServiceGroups: true,
 		MetaServiceGroups:           mockMetaServiceGroups(),
 	}
-	suite.manager = NewMetaServiceGroupManager(suite.ctx, store, &cfg)
+	var err error
+	suite.manager, err = NewMetaServiceGroupManager(suite.ctx, store, &cfg)
+	suite.Require().NoError(err)
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
 	suite.cancel()
 }
 
+// TestInitialState verifies initial status map and fallback behavior.
 func (suite *metaServiceGroupTestSuite) TestInitialState() {
 	re := suite.Require()
+	// Load status and verify defaults for all groups.
 	statusMap, err := suite.manager.GetStatus()
 	re.NoError(err)
 	for id := range mockMetaServiceGroups() {
@@ -67,22 +72,24 @@ func (suite *metaServiceGroupTestSuite) TestInitialState() {
 		re.False(status.Enabled)
 	}
 	// Assignment should fallback to PD
-	group, err := suite.manager.AssignToGroup(1)
-	re.NoError(err)
+	// Verify assignment returns empty when groups are disabled.
+	group := suite.manager.AssignToGroup(1)
 	re.Empty(group)
 }
 
+// TestAssignToGroup verifies enabled group selection and counts.
 func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 	re := suite.Require()
+	// Enable all groups.
 	for groupID := range mockMetaServiceGroups() {
 		enable := true
 		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
 			Enabled: &enable,
 		}))
 	}
+	// Assign a request and capture selection.
 	request := 5
-	assigned, err := suite.manager.AssignToGroup(request)
-	re.NoError(err)
+	assigned := suite.manager.AssignToGroup(request)
 	re.NotEmpty(assigned)
 
 	// Verify the returned group is one of the mockMetaServiceGroups keys.
@@ -105,14 +112,17 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 	}
 }
 
+// TestUpdateAssignment verifies moving assignments between groups.
 func (suite *metaServiceGroupTestSuite) TestUpdateAssignment() {
 	re := suite.Require()
+	// Enable all groups for assignment updates.
 	for groupID := range mockMetaServiceGroups() {
 		enable := true
 		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
 			Enabled: &enable,
 		}))
 	}
+	// Assign from empty to group-0 and validate counts.
 	err := suite.manager.UpdateAssignment("", "etcd-group-0")
 	re.NoError(err)
 	statusMap, err := suite.manager.GetStatus()
@@ -121,6 +131,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateAssignment() {
 	re.Equal(0, statusMap["etcd-group-1"].AssignmentCount)
 	re.Equal(0, statusMap["etcd-group-2"].AssignmentCount)
 
+	// Move assignment from group-0 to group-1.
 	err = suite.manager.UpdateAssignment("etcd-group-0", "etcd-group-1")
 	re.NoError(err)
 
@@ -131,33 +142,96 @@ func (suite *metaServiceGroupTestSuite) TestUpdateAssignment() {
 	re.Equal(0, statusMap["etcd-group-2"].AssignmentCount)
 }
 
+// TestUpdateAssignmentUnknownNewGroup returns error for unknown target.
 func (suite *metaServiceGroupTestSuite) TestUpdateAssignmentUnknownNewGroup() {
 	re := suite.Require()
+	// Update to unknown group should fail.
 	err := suite.manager.UpdateAssignment("", "nonexistent")
 	re.Equal(errUnknownMetaServiceGroup, err)
 }
 
+// TestRefreshCacheLoadsFromStorage verifies cache reloads from storage.
+func (suite *metaServiceGroupTestSuite) TestRefreshCacheLoadsFromStorage() {
+	re := suite.Require()
+	// Seed storage with status for group-0.
+	status := &endpoint.MetaServiceGroupStatus{
+		AssignmentCount: 10,
+		Enabled:         true,
+	}
+	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.store.SaveMetaServiceGroupStatus(txn, "etcd-group-0", status)
+	})
+	re.NoError(err)
+
+	// Refresh cache and verify values.
+	re.NoError(suite.manager.RefreshCache())
+	statusMap, err := suite.manager.GetStatus()
+	re.NoError(err)
+	re.Equal(10, statusMap["etcd-group-0"].AssignmentCount)
+	re.True(statusMap["etcd-group-0"].Enabled)
+}
+
+// TestFlushAfterWriteThreshold verifies flush after threshold writes.
+func (suite *metaServiceGroupTestSuite) TestFlushAfterWriteThreshold() {
+	re := suite.Require()
+	// Enable all groups for assignment.
+	for groupID := range mockMetaServiceGroups() {
+		enable := true
+		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
+			Enabled: &enable,
+		}))
+	}
+
+	// Trigger threshold assignment.
+	assigned := suite.manager.AssignToGroup(1000)
+	re.NotEmpty(assigned)
+
+	// Eventually verify storage was flushed.
+	testutil.Eventually(re, func() bool {
+		var (
+			statusMap map[string]*endpoint.MetaServiceGroupStatus
+			err       error
+		)
+		err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			statusMap, err = suite.manager.store.LoadMetaServiceGroupStatus(txn, mockMetaServiceGroups())
+			return err
+		})
+		if err != nil {
+			return false
+		}
+		status := statusMap[assigned]
+		if status == nil {
+			return false
+		}
+		return status.AssignmentCount == 1000
+	})
+}
+
+// TestAttachEndpoints verifies endpoints are filled by group ID.
 func (suite *metaServiceGroupTestSuite) TestAttachEndpoints() {
 	re := suite.Require()
+	// Attach endpoints for an existing group.
 	keyspaceConfig := map[string]string{
 		MetaServiceGroupIDKey: "etcd-group-1",
 	}
 	suite.manager.AttachEndpoints(keyspaceConfig)
 
+	// Validate endpoint value matches config.
 	expected := mockMetaServiceGroups()["etcd-group-1"]
 	actual := keyspaceConfig[MetaServiceGroupAddressesKey]
 	re.Equal(expected, actual, "AttachEndpoints should set the metaServiceGroups value")
 }
 
+// TestAttachEndpointsMissingGroup verifies no endpoints when group missing.
 func (suite *metaServiceGroupTestSuite) TestAttachEndpointsMissingGroup() {
 	re := suite.Require()
-	// MetaServiceGroupIDKey missing
+	// Missing group ID should not set endpoint.
 	configA := map[string]string{}
 	suite.manager.AttachEndpoints(configA)
 	_, existsA := configA[MetaServiceGroupAddressesKey]
 	re.False(existsA, "should not set metaServiceGroups if MetaServiceGroupIDKey is missing")
 
-	// MetaServiceGroupIDKey empty
+	// Empty group ID should not set endpoint.
 	configB := map[string]string{MetaServiceGroupIDKey: ""}
 	suite.manager.AttachEndpoints(configB)
 	valB, existsB := configB[MetaServiceGroupAddressesKey]
@@ -165,8 +239,10 @@ func (suite *metaServiceGroupTestSuite) TestAttachEndpointsMissingGroup() {
 	re.Equal("", valB, "value must be empty if metaServiceGroups key somehow exists")
 }
 
+// TestUpdateEndpoints verifies endpoints use updated config map.
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpoints() {
 	re := suite.Require()
+	// Update config map and verify attach uses it.
 	newMap := map[string]string{
 		"foo": "foo.bar.local",
 	}
@@ -176,24 +252,25 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpoints() {
 	re.Equal("foo.bar.local", config[MetaServiceGroupAddressesKey], "should read from updated metaServiceGroups map")
 }
 
+// TestUpdateEndpointsAndUpdateAssignment verifies new group assignment.
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment() {
 	re := suite.Require()
+	// Enable all groups for assignment.
 	for groupID := range mockMetaServiceGroups() {
 		enable := true
 		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
 			Enabled: &enable,
 		}))
 	}
-	// Assign to some existing group
-	assigned, err := suite.manager.AssignToGroup(1)
-	re.NoError(err)
+	// Create an initial assignment.
+	assigned := suite.manager.AssignToGroup(1)
 	re.NotEmpty(assigned, "expected AssignToGroup to return a non-empty group")
 	statusMap, err := suite.manager.GetStatus()
 	re.NoError(err)
 	re.Contains(statusMap, assigned, "assigned group should be in status map")
 	re.Equal(1, statusMap[assigned].AssignmentCount, "assigned group should have count 1")
 
-	// Add a new group "etcd-group-3"
+	// Extend config with a new group.
 	newMap := mockMetaServiceGroups()
 	newMap["etcd-group-3"] = "etcd-group-3.tidb-serverless.cluster.svc.local"
 	suite.manager.updateConfig(true, newMap, 0)
@@ -218,8 +295,10 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 	}
 }
 
+// TestFallbackRatio verifies probabilistic fallback behavior.
 func (suite *metaServiceGroupTestSuite) TestFallbackRatio() {
 	re := suite.Require()
+	// Enable all groups for assignment.
 	for groupID := range mockMetaServiceGroups() {
 		enable := true
 		re.NoError(suite.manager.PatchStatus(groupID, &MetaServiceGroupStatusPatch{
@@ -228,8 +307,7 @@ func (suite *metaServiceGroupTestSuite) TestFallbackRatio() {
 	}
 	// Fallback ratio defaults to 0, all keyspace should be assigned to a group.
 	for range 10 {
-		assigned, err := suite.manager.AssignToGroup(1)
-		re.NoError(err)
+		assigned := suite.manager.AssignToGroup(1)
 		re.NotEmpty(assigned, "expected AssignToGroup to return a non-empty group")
 	}
 	// Fallback ratio set to 0.5, some keyspace should be assigned to a group, some should fallback.
@@ -238,8 +316,7 @@ func (suite *metaServiceGroupTestSuite) TestFallbackRatio() {
 	suite.manager.fallbackRatio = expectedFallbackRatio
 	totalFallback := 0
 	for range batchSize {
-		assigned, err := suite.manager.AssignToGroup(1)
-		re.NoError(err)
+		assigned := suite.manager.AssignToGroup(1)
 		if assigned == "" {
 			totalFallback++
 		}
@@ -250,8 +327,7 @@ func (suite *metaServiceGroupTestSuite) TestFallbackRatio() {
 	suite.manager.fallbackRatio = 1.0
 	totalFallback = 0
 	for range batchSize {
-		assigned, err := suite.manager.AssignToGroup(1)
-		re.NoError(err)
+		assigned := suite.manager.AssignToGroup(1)
 		if assigned == "" {
 			totalFallback++
 		}

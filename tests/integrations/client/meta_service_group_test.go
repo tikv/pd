@@ -19,9 +19,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -126,23 +129,19 @@ func (suite *MetaServiceGroupIntegrationTestSuite) setupConcurrentAssignTest() {
 	}
 }
 
-// runConcurrentAssignToGroup concurrently calls AssignToGroup and returns results and errors.
-func (suite *MetaServiceGroupIntegrationTestSuite) runConcurrentAssignToGroup(concurrentCount, assignCount int) ([]string, []error) {
+// runConcurrentAssignToGroup concurrently calls AssignToGroup and returns results.
+func (suite *MetaServiceGroupIntegrationTestSuite) runConcurrentAssignToGroup(concurrentCount, assignCount int) []string {
 	var wg sync.WaitGroup
 	results := make([]string, concurrentCount)
-	errors := make([]error, concurrentCount)
-
 	for i := range concurrentCount {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			assigned, err := suite.manager.AssignToGroup(assignCount)
-			results[index] = assigned
-			errors[index] = err
+			results[index] = suite.manager.AssignToGroup(assignCount)
 		}(i)
 	}
 	wg.Wait()
-	return results, errors
+	return results
 }
 
 // getTotalAssignedCount returns the total assignment count from all meta-service groups.
@@ -159,7 +158,7 @@ func (suite *MetaServiceGroupIntegrationTestSuite) getTotalAssignedCount() (int,
 }
 
 // TestAssignToGroupConcurrent tests that concurrent calls to AssignToGroup
-// are serialized to avoid etcd txn conflicts.
+// keep in-memory assignment counts consistent.
 func (suite *MetaServiceGroupIntegrationTestSuite) TestAssignToGroupConcurrent() {
 	re := suite.Require()
 	suite.setupConcurrentAssignTest()
@@ -167,12 +166,11 @@ func (suite *MetaServiceGroupIntegrationTestSuite) TestAssignToGroupConcurrent()
 	// Concurrently call AssignToGroup multiple times
 	concurrentCount := 50
 	assignCount := 1
-	results, errors := suite.runConcurrentAssignToGroup(concurrentCount, assignCount)
-
-	// Verify all calls succeeded
-	for i, err := range errors {
-		re.NoError(err, "AssignToGroup should succeed for concurrent call %d", i)
-		re.NotEmpty(results[i], "AssignToGroup should return a group for concurrent call %d", i)
+	results := suite.runConcurrentAssignToGroup(concurrentCount, assignCount)
+	// All result should be from mockMetaServiceGroups
+	for _, result := range results {
+		_, ok := mockMetaServiceGroups()[result]
+		re.True(ok, "result should be from mockMetaServiceGroups")
 	}
 
 	// Verify the total assignment count is correct
@@ -182,38 +180,115 @@ func (suite *MetaServiceGroupIntegrationTestSuite) TestAssignToGroupConcurrent()
 		"total assignment count should equal the sum of all concurrent assignments")
 }
 
-// TestAssignToGroupConcurrentWithRLock tests that concurrent calls to AssignToGroup
-// with RLock (via failpoint) will cause etcd txn conflicts and some calls will fail.
-func (suite *MetaServiceGroupIntegrationTestSuite) TestAssignToGroupConcurrentWithRLock() {
+// TestRefreshCacheReloadsFromStorage verifies cache reload uses storage data.
+func (suite *MetaServiceGroupIntegrationTestSuite) TestRefreshCacheReloadsFromStorage() {
 	re := suite.Require()
+	// Enable groups and set initial in-memory status.
 	suite.setupConcurrentAssignTest()
 
-	// Enable failpoint to use RLock instead of Lock
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/useRLockInAssignToGroup", "return()"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/useRLockInAssignToGroup"))
-	}()
+	assignedCount := 1
+	disabled := false
+	// Set initial status for group-0 in cache.
+	re.NoError(suite.manager.PatchStatus("etcd-group-0", &keyspace.MetaServiceGroupStatusPatch{
+		AssignedCount: &assignedCount,
+		Enabled:       &disabled,
+	}))
 
-	// Concurrently call AssignToGroup multiple times
-	concurrentCount := 50
-	assignCount := 1
-	_, errors := suite.runConcurrentAssignToGroup(concurrentCount, assignCount)
+	// Overwrite status in storage.
+	storage := suite.pdLeader.GetServer().GetStorage()
+	expected := &endpoint.MetaServiceGroupStatus{
+		AssignmentCount: 7,
+		Enabled:         true,
+	}
+	err := storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return storage.SaveMetaServiceGroupStatus(txn, "etcd-group-0", expected)
+	})
+	re.NoError(err)
 
-	// Verify that some calls failed due to etcd txn conflicts
-	failedCount := 0
-	for _, err := range errors {
-		if err != nil {
-			failedCount++
-		}
+	// Refresh cache and verify it reflects storage.
+	re.NoError(suite.manager.RefreshCache())
+	statusMap, err := suite.manager.GetStatus()
+	re.NoError(err)
+	re.Equal(expected.AssignmentCount, statusMap["etcd-group-0"].AssignmentCount)
+	re.Equal(expected.Enabled, statusMap["etcd-group-0"].Enabled)
+}
+
+// TestRefreshCacheAfterLeaderTransfer verifies cache loads after leadership change.
+func TestRefreshCacheAfterLeaderTransfer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start a two-node cluster and bootstrap leader.
+	cluster, err := tests.NewTestAPICluster(ctx, 2)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetServer(leaderName)
+	re.NoError(leaderServer.BootstrapCluster())
+
+	// Configure meta-service groups on the leader.
+	srv := leaderServer.GetServer()
+	keyspaceCfg := srv.GetConfig().Keyspace
+	keyspaceCfg.MetaServiceGroups = mockMetaServiceGroups()
+	keyspaceCfg.AutoAssignMetaServiceGroups = true
+	keyspaceCfg.MetaServiceGroupsFallbackRatio = 0
+	re.NoError(srv.SetKeyspaceConfig(keyspaceCfg))
+
+	// Enable all groups for assignment updates.
+	for groupID := range mockMetaServiceGroups() {
+		enable := true
+		re.NoError(srv.GetMetaServiceGroupManager().PatchStatus(groupID, &keyspace.MetaServiceGroupStatusPatch{
+			Enabled: &enable,
+		}))
 	}
 
-	// With RLock, concurrent etcd txn operations should cause conflicts
-	// We expect at least some failures (etcd txn conflicts)
-	re.Positive(failedCount, "with RLock, some AssignToGroup calls should fail due to etcd txn conflicts")
+	// Seed storage with expected status on leader.
+	storage := srv.GetStorage()
+	expected := &endpoint.MetaServiceGroupStatus{
+		AssignmentCount: 7,
+		Enabled:         true,
+	}
+	re.NoError(storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveMetaServiceGroupStatus(txn, "etcd-group-0", expected)
+	}))
 
-	// Verify the total assignment count is less than expected due to conflicts
-	totalAssigned, err := suite.getTotalAssignedCount()
+	// Pick a follower and verify it does not yet see expected status.
+	followerName := ""
+	for name := range cluster.GetServers() {
+		if name != leaderName {
+			followerName = name
+			break
+		}
+	}
+	re.NotEmpty(followerName)
+	followerServer := cluster.GetServer(followerName).GetServer()
+	followerStatus, err := followerServer.GetMetaServiceGroupManager().GetStatus()
 	re.NoError(err)
-	re.Less(totalAssigned, concurrentCount*assignCount,
-		"total assignment count should be less than expected due to etcd txn conflicts when using RLock")
+	if status, ok := followerStatus["etcd-group-0"]; ok && status != nil {
+		re.NotEqual(expected.AssignmentCount, status.AssignmentCount)
+	}
+
+	// Transfer leadership and wait for cache refresh on new leader.
+	re.NoError(leaderServer.ResignLeader())
+	newLeaderName := cluster.WaitLeader()
+	re.NotEmpty(newLeaderName)
+	re.NotEqual(leaderName, newLeaderName)
+	newLeaderServer := cluster.GetServer(newLeaderName).GetServer()
+
+	// Eventually the new leader should load expected status.
+	testutil.Eventually(re, func() bool {
+		statusMap, err := newLeaderServer.GetMetaServiceGroupManager().GetStatus()
+		if err != nil {
+			return false
+		}
+		status := statusMap["etcd-group-0"]
+		if status == nil {
+			return false
+		}
+		return status.AssignmentCount == expected.AssignmentCount && status.Enabled == expected.Enabled
+	})
 }
