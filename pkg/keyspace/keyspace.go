@@ -569,26 +569,10 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	})
 }
 
-// rollbackMetaServiceGroupAssignment decrements the assignment count that
-// PickGroup incremented for a keyspace whose creation failed before its metadata
-// was persisted, keeping the persisted counter in sync with actual keyspaces.
-func (manager *Manager) rollbackMetaServiceGroupAssignment(groupID string) {
-	if manager.mgm == nil || groupID == "" {
-		return
-	}
-	if err := manager.mgm.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		return manager.mgm.updateAssignmentTxn(txn, groupID, "")
-	}); err != nil {
-		log.Warn("[keyspace] failed to roll back meta-service group assignment count",
-			zap.String("meta-service-group", groupID),
-			zap.Error(err))
-	}
-}
-
 // assignGroupAndSaveKeyspace assigns a meta-service group to the keyspace (when
 // assign is true) and persists the keyspace metadata while holding the
-// meta-service group manager's read lock across both steps. This keeps the
-// selection and the persisted assignment atomic with respect to group deletion:
+// meta-service group manager's lock across both steps. This keeps the
+// selection and the cached assignment atomic with respect to group deletion:
 // UpdateGroupsSafely takes the write lock, so a group cannot be removed in the
 // window between assignment and the keyspace being saved, which would otherwise
 // leave the keyspace referencing a non-existent group. config must point to
@@ -597,8 +581,8 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 	if !assign {
 		return manager.saveNewKeyspace(keyspace)
 	}
-	manager.mgm.RLock()
-	defer manager.mgm.RUnlock()
+	manager.mgm.Lock()
+	defer manager.mgm.Unlock()
 	// Re-check under the lock: the pre-lock check may be stale if a concurrent
 	// PATCH deleted the last group in the meantime. In that case create the
 	// keyspace without a meta-service group instead of failing the creation.
@@ -622,9 +606,9 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 	keyspace.Config = *config
 	if err := manager.saveNewKeyspace(keyspace); err != nil {
 		// Roll back the reservation made by pickGroupLocked. This only performs
-		// store operations and does not take the mgm lock, so it is safe to call
-		// while still holding the read lock.
-		manager.rollbackMetaServiceGroupAssignment(groupID)
+		if rollbackErr := manager.mgm.updateAssignmentLockedTxn(nil, groupID, ""); rollbackErr != nil {
+			log.Error("failed to revert meta-service group assignment", zap.Error(rollbackErr))
+		}
 		return err
 	}
 	return nil
@@ -877,14 +861,14 @@ func applyKeyspaceConfigMutations(config map[string]string, mutations []*Mutatio
 }
 
 // runTxnWithMetaGroupLock runs f inside a storage transaction while holding the
-// meta-service group manager's read lock for the whole transaction. This keeps
-// keyspace assignment validation and the persisted assignment count update
+// meta-service group manager's lock for the whole transaction. This keeps
+// keyspace assignment validation and the cached assignment count update
 // atomic with respect to MetaServiceGroupManager.UpdateGroupsSafely, which takes
 // the write lock before deleting a group.
 func (manager *Manager) runTxnWithMetaGroupLock(f func(txn kv.Txn) error) error {
 	if manager.mgm != nil {
-		manager.mgm.RLock()
-		defer manager.mgm.RUnlock()
+		manager.mgm.Lock()
+		defer manager.mgm.Unlock()
 	}
 	return manager.store.RunInTxn(manager.ctx, f)
 }
@@ -892,6 +876,8 @@ func (manager *Manager) runTxnWithMetaGroupLock(f func(txn kv.Txn) error) error 
 func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *keyspacepb.KeyspaceMeta) error) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
+	var oldMetaServiceGroup, newMetaServiceGroup string
+	metaServiceGroupReassigned := false
 	txnFunc := func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -933,14 +919,15 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		// txn doesn't commit), while UpdateKeyspaceGroup persists immediately. Doing
 		// the fallible meta-service validation first avoids leaving the TSO group move
 		// persisted but unreverted when the meta-service reassignment fails.
-		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
-		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
+		oldMetaServiceGroup = oldConfig[MetaServiceGroupIDKey]
+		newMetaServiceGroup = newConfig[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
-			// The read lock held by runTxnWithMetaGroupLock keeps this validation and
+			// The lock held by runTxnWithMetaGroupLock keeps this validation and
 			// the assignment update atomic with respect to UpdateGroupsSafely.
 			if err := manager.mgm.reassignKeyspaceLocked(txn, oldMetaServiceGroup, newMetaServiceGroup); err != nil {
 				return err
 			}
+			metaServiceGroupReassigned = true
 		}
 		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
 		newUserKind := endpoint.StringUserKind(newConfig[UserKindKey])
@@ -965,6 +952,11 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 	}
 	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if err != nil {
+		if metaServiceGroupReassigned {
+			if rollbackErr := manager.mgm.updateAssignmentTxn(nil, newMetaServiceGroup, oldMetaServiceGroup); rollbackErr != nil {
+				log.Error("failed to revert meta-service group assignment", zap.Error(rollbackErr))
+			}
+		}
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Uint32("keyspace-id", meta.GetId()),
 			zap.String("name", meta.GetName()),
@@ -1059,10 +1051,10 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	}
 	manager.keyspaceNameLookup.Delete(id)
 	manager.keyspaceStateLookup.Delete(id)
-	// Decrement the meta-service group assignment count in the same txn so the
-	// persisted counter stays in sync with the keyspaces actually referencing the
-	// group. Without this, removed keyspaces leak count and could permanently
-	// block deleting an otherwise-empty group.
+	// Decrement the meta-service group assignment count so the cached counter
+	// stays in sync with the keyspaces actually referencing the group. Without
+	// this, removed keyspaces leak count and could permanently block deleting an
+	// otherwise-empty group in tests without the authoritative keyspace scanner.
 	if manager.mgm != nil {
 		if groupID := meta.GetConfig()[MetaServiceGroupIDKey]; groupID != "" {
 			if err := manager.mgm.updateAssignmentTxn(txn, groupID, ""); err != nil {

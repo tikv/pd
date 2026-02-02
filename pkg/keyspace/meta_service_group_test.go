@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -46,7 +47,9 @@ func mockMetaServiceGroups() map[string]string {
 func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewMetaServiceGroupManager(store, mockMetaServiceGroups())
+	var err error
+	suite.manager, err = NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	suite.Require().NoError(err)
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
@@ -282,6 +285,42 @@ func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 		return suite.manager.reassignKeyspaceLocked(txn, "", "etcd-group-0")
 	})
 	re.NoError(err)
+}
+
+func (suite *metaServiceGroupTestSuite) TestRefreshCacheLoadsFromStorage() {
+	re := suite.Require()
+	status := &endpoint.MetaServiceGroupStatus{
+		AssignmentCount: 10,
+		Enabled:         true,
+	}
+	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.store.SaveMetaServiceGroupStatus(txn, "etcd-group-0", status)
+	})
+	re.NoError(err)
+
+	re.NoError(suite.manager.RefreshCache())
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.Equal(10, statusMap["etcd-group-0"].AssignmentCount)
+	re.True(statusMap["etcd-group-0"].Enabled)
+}
+
+func (suite *metaServiceGroupTestSuite) TestFlushAfterWriteThreshold() {
+	re := suite.Require()
+	suite.enableAllGroups()
+	assigned, err := suite.manager.AssignToGroup(suite.ctx, flushThreshold)
+	re.NoError(err)
+	re.NotEmpty(assigned)
+
+	re.Eventually(func() bool {
+		var statusMap map[string]*endpoint.MetaServiceGroupStatus
+		err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			var err error
+			statusMap, err = suite.manager.store.LoadMetaServiceGroupStatus(txn, mockMetaServiceGroups())
+			return err
+		})
+		return err == nil && statusMap[assigned] != nil && statusMap[assigned].AssignmentCount == flushThreshold
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func (suite *metaServiceGroupTestSuite) enableAllGroups() {

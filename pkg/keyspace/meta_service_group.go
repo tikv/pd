@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -29,8 +30,14 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
+const (
+	flushInterval  = 5 * time.Minute
+	flushThreshold = 1000
+)
+
 // MetaServiceGroupManager manages external meta-service groups.
 type MetaServiceGroupManager struct {
+	ctx   context.Context
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
 	// metaServiceGroups is the available external meta-service groups.
@@ -41,6 +48,10 @@ type MetaServiceGroupManager struct {
 	// the authoritative source for the delete guard so a stale persisted counter
 	// cannot permanently block removing an actually-empty group.
 	keyspaceAssignmentCounter func(groupIDs map[string]struct{}) (map[string]int, error)
+	cachedStatus              map[string]*endpoint.MetaServiceGroupStatus
+	dirtyCount                int
+	flushCh                   chan struct{}
+	isLeader                  func() bool
 }
 
 // SetKeyspaceAssignmentCounter sets the authoritative keyspace assignment
@@ -50,30 +61,101 @@ func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(grou
 	m.keyspaceAssignmentCounter = counter
 }
 
-// NewMetaServiceGroupManager creates a new MetaServiceGroupManager.
-func NewMetaServiceGroupManager(
-	store endpoint.MetaServiceGroupStorage,
-	metaServiceGroups map[string]string,
-) *MetaServiceGroupManager {
-	return &MetaServiceGroupManager{
-		store:             store,
-		metaServiceGroups: metaServiceGroups,
-	}
+// SetLeaderChecker sets a function to determine leader ownership.
+func (m *MetaServiceGroupManager) SetLeaderChecker(isLeader func() bool) {
+	m.Lock()
+	defer m.Unlock()
+	m.isLeader = isLeader
 }
 
-// GetStatus returns the status of each meta-service group.
-func (m *MetaServiceGroupManager) GetStatus(ctx context.Context) (map[string]*endpoint.MetaServiceGroupStatus, error) {
-	m.RLock()
-	defer m.RUnlock()
+// NewMetaServiceGroupManager creates a new MetaServiceGroupManager.
+func NewMetaServiceGroupManager(
+	ctx context.Context,
+	store endpoint.MetaServiceGroupStorage,
+	metaServiceGroups map[string]string,
+) (*MetaServiceGroupManager, error) {
+	m := &MetaServiceGroupManager{
+		ctx:               ctx,
+		store:             store,
+		metaServiceGroups: metaServiceGroups,
+		flushCh:           make(chan struct{}, 1),
+	}
+	if err := m.RefreshCache(); err != nil {
+		return nil, err
+	}
+	go m.flushLoop()
+	return m, nil
+}
+
+// RefreshCache loads the current status from storage into memory.
+func (m *MetaServiceGroupManager) RefreshCache() error {
+	m.Lock()
+	defer m.Unlock()
 	var (
 		err       error
 		statusMap map[string]*endpoint.MetaServiceGroupStatus
 	)
-	err = m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+	if err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		statusMap, err = m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
 		return err
-	})
-	return statusMap, err
+	}); err != nil {
+		log.Error("[keyspace] failed to load meta-service group status from storage", zap.Error(err))
+		return err
+	}
+	m.cachedStatus = statusMap
+	m.dirtyCount = 0
+	log.Info("[keyspace] meta-service group status loaded from storage", zap.Any("meta-service-group-status", statusMap))
+	return nil
+}
+
+func (m *MetaServiceGroupManager) flushLoop() {
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			if err := m.flushToStorage(); err != nil {
+				log.Error("[keyspace] failed to flush meta-service group status to storage", zap.Error(err))
+			}
+		case <-m.flushCh:
+			if err := m.flushToStorage(); err != nil {
+				log.Error("[keyspace] failed to flush meta-service group status to storage", zap.Error(err))
+			}
+		}
+	}
+}
+
+func (m *MetaServiceGroupManager) flushToStorage() error {
+	m.Lock()
+	defer m.Unlock()
+	if m.isLeader != nil && !m.isLeader() {
+		return nil
+	}
+	if m.dirtyCount == 0 {
+		return nil
+	}
+	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		for id, status := range m.cachedStatus {
+			if err := m.store.SaveMetaServiceGroupStatus(txn, id, status); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	m.dirtyCount = 0
+	return nil
+}
+
+// GetStatus returns the status of each meta-service group.
+func (m *MetaServiceGroupManager) GetStatus(ctx context.Context) (map[string]*endpoint.MetaServiceGroupStatus, error) {
+	_ = ctx
+	m.RLock()
+	defer m.RUnlock()
+	return copyStatusMap(m.cachedStatus), nil
 }
 
 // GetAssignmentCounts returns the count of each meta-service group.
@@ -90,6 +172,19 @@ func (m *MetaServiceGroupManager) GetAssignmentCounts(ctx context.Context) (map[
 	return counts, nil
 }
 
+func copyStatusMap(statusMap map[string]*endpoint.MetaServiceGroupStatus) map[string]*endpoint.MetaServiceGroupStatus {
+	statuses := make(map[string]*endpoint.MetaServiceGroupStatus, len(statusMap))
+	for groupID, status := range statusMap {
+		if status == nil {
+			statuses[groupID] = &endpoint.MetaServiceGroupStatus{}
+			continue
+		}
+		copiedStatus := *status
+		statuses[groupID] = &copiedStatus
+	}
+	return statuses
+}
+
 // MetaServiceGroupStatusPatch represents a patch operation for a meta-service group.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MetaServiceGroupStatusPatch struct {
@@ -102,38 +197,35 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	if patch.AssignmentCount != nil && *patch.AssignmentCount < 0 {
 		return ErrInvalidAssignmentCount
 	}
-	m.RLock()
-	defer m.RUnlock()
-	// Validate existence against the in-memory group set under the lock, then
-	// touch only the target group's status in the txn. Loading every group would
-	// widen the etcd compare set so an unrelated concurrent assignment could make
-	// this patch fail with a spurious txn conflict.
+	m.Lock()
+	defer m.Unlock()
 	if _, ok := m.metaServiceGroups[groupID]; !ok {
 		return ErrUnknownMetaServiceGroup
 	}
-	return m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		status, err := m.loadGroupStatus(txn, groupID)
-		if err != nil {
-			return err
-		}
-		if patch.AssignmentCount != nil {
-			status.AssignmentCount = *patch.AssignmentCount
-		}
-		if patch.Enabled != nil {
-			status.Enabled = *patch.Enabled
-		}
-		return m.store.SaveMetaServiceGroupStatus(txn, groupID, status)
-	})
+	currentStatus := m.cachedStatus[groupID]
+	if currentStatus == nil {
+		currentStatus = &endpoint.MetaServiceGroupStatus{}
+	}
+	newStatus := *currentStatus
+	if patch.AssignmentCount != nil {
+		newStatus.AssignmentCount = *patch.AssignmentCount
+	}
+	if patch.Enabled != nil {
+		newStatus.Enabled = *patch.Enabled
+	}
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return m.store.SaveMetaServiceGroupStatus(txn, groupID, &newStatus)
+	}); err != nil {
+		return err
+	}
+	m.cachedStatus[groupID] = &newStatus
+	return nil
 }
 
-func (m *MetaServiceGroupManager) findMinMetaGroup(txn kv.Txn) (string, error) {
-	statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
-	if err != nil {
-		return "", err
-	}
+func (m *MetaServiceGroupManager) findMinMetaGroupLocked() (string, error) {
 	minCount := math.MaxInt
 	var assignedGroup string
-	for currentGroup, status := range statusMap {
+	for currentGroup, status := range m.cachedStatus {
 		if status.Enabled && status.AssignmentCount < minCount {
 			minCount = status.AssignmentCount
 			assignedGroup = currentGroup
@@ -146,32 +238,31 @@ func (m *MetaServiceGroupManager) findMinMetaGroup(txn kv.Txn) (string, error) {
 }
 
 // PickGroup returns the meta-service group with the least assigned keyspaces
-// without updating the persisted assignment count.
+// and updates the cached assignment count.
 func (m *MetaServiceGroupManager) PickGroup(ctx context.Context) (string, error) {
-	m.RLock()
-	defer m.RUnlock()
+	_ = ctx
+	m.Lock()
+	defer m.Unlock()
 	return m.pickGroupLocked(ctx)
 }
 
 // hasGroupsLocked reports whether any meta-service group is currently available.
-// The caller must hold the read lock.
+// The caller must hold the lock.
 func (m *MetaServiceGroupManager) hasGroupsLocked() bool {
 	return len(m.metaServiceGroups) > 0
 }
 
-// pickGroupLocked is PickGroup with the read lock already held by the caller.
+// pickGroupLocked is PickGroup with the lock already held by the caller.
 // Callers that need group selection and the subsequent keyspace metadata save to
 // be atomic with respect to group deletion (which takes the write lock) must
-// hold the read lock across both, e.g. via Manager.assignGroupAndSaveKeyspace.
+// hold the lock across both, e.g. via Manager.assignGroupAndSaveKeyspace.
 func (m *MetaServiceGroupManager) pickGroupLocked(ctx context.Context) (string, error) {
-	var assignedGroup string
-	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		var err error
-		if assignedGroup, err = m.findMinMetaGroup(txn); err != nil {
-			return err
-		}
-		return m.updateAssignmentTxn(txn, "", assignedGroup)
-	}); err != nil {
+	_ = ctx
+	assignedGroup, err := m.findMinMetaGroupLocked()
+	if err != nil {
+		return "", err
+	}
+	if err := m.updateAssignmentLockedTxn(nil, "", assignedGroup); err != nil {
 		return "", err
 	}
 	return assignedGroup, nil
@@ -181,36 +272,26 @@ func (m *MetaServiceGroupManager) pickGroupLocked(ctx context.Context) (string, 
 // It returns the assigned meta-service group and an error if any.
 // only used for testing now, as it doesn't guarantee the atomicity of select and update. UpdateAssignment should be used in production code instead.
 func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) (string, error) {
+	_ = ctx
 	if count < 0 {
 		return "", ErrInvalidAssignmentCount
 	}
-	m.RLock()
-	defer m.RUnlock()
-	var assignedGroup string
-	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		var err error
-		assignedGroup, err = m.findMinMetaGroup(txn)
-		if err != nil {
-			return err
-		}
-		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
-		if err != nil {
-			return err
-		}
-		status := statusMap[assignedGroup]
-		status.AssignmentCount += count
-		return m.store.SaveMetaServiceGroupStatus(txn, assignedGroup, status)
-	}); err != nil {
+	m.Lock()
+	defer m.Unlock()
+	assignedGroup, err := m.findMinMetaGroupLocked()
+	if err != nil {
 		return "", err
 	}
+	m.cachedStatus[assignedGroup].AssignmentCount += count
+	m.markDirtyLocked(count)
 	return assignedGroup, nil
 }
 
 // reassignKeyspaceLocked validates that newGroupID (if any) still exists and
 // moves a single keyspace assignment from oldGroupID to newGroupID within txn.
-// The caller must hold the read lock for the whole enclosing transaction so a
+// The caller must hold the lock for the whole enclosing transaction so a
 // concurrent UpdateGroupsSafely cannot delete a group between this validation
-// and the persisted assignment count update.
+// and the cached assignment count update.
 func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID, newGroupID string) error {
 	if newGroupID != "" {
 		if _, ok := m.metaServiceGroups[newGroupID]; !ok {
@@ -218,60 +299,51 @@ func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID,
 		}
 		// Disabled groups are skipped by automatic assignment, so reject moving a
 		// keyspace into one to keep manual reassignment consistent with it.
-		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, map[string]string{newGroupID: ""})
-		if err != nil {
-			return err
-		}
-		if status := statusMap[newGroupID]; status == nil || !status.Enabled {
+		if status := m.cachedStatus[newGroupID]; status == nil || !status.Enabled {
 			return ErrMetaServiceGroupDisabled
 		}
 	}
-	return m.updateAssignmentTxn(txn, oldGroupID, newGroupID)
+	return m.updateAssignmentLockedTxn(txn, oldGroupID, newGroupID)
 }
 
 func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
-	// Load only the affected groups instead of the whole m.metaServiceGroups map:
-	// some callers (e.g. RemoveKeyspace) reach this without holding the
-	// meta-service group lock, so reading the shared map here would race with
-	// UpdateGroupsSafely.
+	m.Lock()
+	defer m.Unlock()
+	return m.updateAssignmentLockedTxn(txn, oldGroupID, newGroupID)
+}
+
+func (m *MetaServiceGroupManager) updateAssignmentLockedTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
+	_ = txn
+	dirtyCount := 0
 	if oldGroupID != "" {
-		status, err := m.loadGroupStatus(txn, oldGroupID)
-		if err != nil {
-			return err
-		}
-		// Only persist a decrement when the group still has assignments. A deleted
-		// group's status key is already removed, so skipping avoids recreating a
-		// stale zero-value status; a count of 0 needs no change anyway. This also
-		// guards against underflow after a manual reset via PatchStatus, which
-		// would otherwise make findMinMetaGroup prefer the group.
-		if status.AssignmentCount > 0 {
+		if status := m.cachedStatus[oldGroupID]; status != nil && status.AssignmentCount > 0 {
 			status.AssignmentCount--
-			if err := m.store.SaveMetaServiceGroupStatus(txn, oldGroupID, status); err != nil {
-				return err
-			}
+			dirtyCount++
 		}
 	}
 	if newGroupID != "" {
-		status, err := m.loadGroupStatus(txn, newGroupID)
-		if err != nil {
-			return err
+		status := m.cachedStatus[newGroupID]
+		if status == nil {
+			return ErrUnknownMetaServiceGroup
 		}
 		status.AssignmentCount++
-		if err := m.store.SaveMetaServiceGroupStatus(txn, newGroupID, status); err != nil {
-			return err
-		}
+		dirtyCount++
+	}
+	if dirtyCount > 0 {
+		m.markDirtyLocked(dirtyCount)
 	}
 	return nil
 }
 
-// loadGroupStatus loads the persisted status of a single meta-service group
-// within txn, without touching the shared m.metaServiceGroups map.
-func (m *MetaServiceGroupManager) loadGroupStatus(txn kv.Txn, groupID string) (*endpoint.MetaServiceGroupStatus, error) {
-	statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, map[string]string{groupID: ""})
-	if err != nil {
-		return nil, err
+func (m *MetaServiceGroupManager) markDirtyLocked(count int) {
+	m.dirtyCount += count
+	if m.dirtyCount < flushThreshold {
+		return
 	}
-	return statusMap[groupID], nil
+	select {
+	case m.flushCh <- struct{}{}:
+	default:
+	}
 }
 
 // AttachEndpoints append potential meta-service group endpoint to the given keyspace config map.
@@ -321,7 +393,7 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 
 // persistGroupsLocked performs the delete-guard check and persists the new
 // groups while holding the write lock, which blocks concurrent keyspace
-// assignment (AssignToGroup/PickGroup/reassign all take the read lock).
+// assignment (AssignToGroup/PickGroup/reassign all take the lock).
 func (m *MetaServiceGroupManager) persistGroupsLocked(
 	ctx context.Context,
 	metaServiceGroups map[string]string,
@@ -345,12 +417,20 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 		return err
 	}
 	m.metaServiceGroups = metaServiceGroups
+	for groupID := range metaServiceGroups {
+		if m.cachedStatus[groupID] == nil {
+			m.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{}
+		}
+	}
 	// Clear the persisted status for deleted groups so re-adding a group with
 	// the same ID does not inherit a stale assignment count or enabled state,
 	// which would skew list output and PickGroup balancing. Best-effort: the
 	// config deletion is already persisted and the delete guard relies on
 	// actual keyspace scans, not this counter.
 	if len(deletedGroups) > 0 {
+		for _, id := range deletedGroups {
+			delete(m.cachedStatus, id)
+		}
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 			for _, id := range deletedGroups {
 				if err := m.store.RemoveMetaServiceGroupStatus(txn, id); err != nil {
@@ -368,9 +448,9 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 
 // assignedKeyspaceCounts returns the number of keyspaces assigned to each of the
 // given groups. It prefers the authoritative keyspace scan (immune to counter
-// drift) and falls back to the persisted counter when no scanner is configured,
+// drift) and falls back to the cached counter when no scanner is configured,
 // e.g. in unit tests without a keyspace manager.
-func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, groupIDs []string) (map[string]int, error) {
+func (m *MetaServiceGroupManager) assignedKeyspaceCounts(_ context.Context, groupIDs []string) (map[string]int, error) {
 	if m.keyspaceAssignmentCounter != nil {
 		set := make(map[string]struct{}, len(groupIDs))
 		for _, id := range groupIDs {
@@ -378,22 +458,14 @@ func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, gr
 		}
 		return m.keyspaceAssignmentCounter(set)
 	}
-	// Fallback path: derive counts from the persisted status. The caller holds
+	// Fallback path: derive counts from the cached status. The caller holds
 	// the write lock, so m.metaServiceGroups is accessed without an extra read
 	// lock (which would deadlock against the held write lock).
-	var counts map[string]int
-	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
-		if err != nil {
-			return err
-		}
-		counts = make(map[string]int, len(statusMap))
-		for id, status := range statusMap {
+	counts := make(map[string]int, len(groupIDs))
+	for _, id := range groupIDs {
+		if status := m.cachedStatus[id]; status != nil {
 			counts[id] = status.AssignmentCount
 		}
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 	return counts, nil
 }
@@ -403,4 +475,14 @@ func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]stri
 	m.Lock()
 	defer m.Unlock()
 	m.metaServiceGroups = metaServiceGroups
+	for groupID := range metaServiceGroups {
+		if m.cachedStatus[groupID] == nil {
+			m.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{}
+		}
+	}
+	for groupID := range m.cachedStatus {
+		if _, ok := metaServiceGroups[groupID]; !ok {
+			delete(m.cachedStatus, groupID)
+		}
+	}
 }
