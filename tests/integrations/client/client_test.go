@@ -60,7 +60,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -1040,9 +1039,9 @@ var (
 
 type clientTestSuiteImpl struct {
 	suite.Suite
-	cleanup         testutil.CleanupFunc
 	ctx             context.Context
 	clean           context.CancelFunc
+	cluster         *tests.TestCluster
 	srv             *server.Server
 	grpcSvr         *server.GrpcServer
 	client          pd.Client
@@ -1055,15 +1054,23 @@ type clientTestSuiteImpl struct {
 func (suite *clientTestSuiteImpl) setup() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
+	suite.ctx, suite.clean = context.WithCancel(context.Background())
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	suite.srv = suite.cluster.GetLeaderServer().GetServer()
 	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	tests.MustWaitLeader(re, []*server.Server{suite.srv})
 	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
-	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	suite.client = setupCli(suite.ctx, re, suite.srv.GetEndpoints())
 
 	suite.regionHeartbeat, err = suite.grpcPDClient.RegionHeartbeat(suite.ctx)
@@ -1099,6 +1106,8 @@ func (suite *clientTestSuiteImpl) setup() {
 }
 
 func (suite *clientTestSuiteImpl) tearDown() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.client.Close()
 	_ = suite.regionHeartbeat.CloseSend()
 	_ = suite.reportBucket.CloseSend()
@@ -1106,7 +1115,7 @@ func (suite *clientTestSuiteImpl) tearDown() {
 		_ = suite.conn.Close()
 	}
 	suite.clean()
-	suite.cleanup()
+	suite.cluster.Destroy()
 }
 func newHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{

@@ -32,10 +32,8 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -379,26 +377,30 @@ func TestGetLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	done := make(chan bool)
-	svr, err := server.CreateServer(ctx, cfg, nil, tests.CreateMockHandler(re, "127.0.0.1"))
+
+	err = cluster.RunInitialServers()
 	re.NoError(err)
-	defer svr.Close()
-	re.NoError(svr.Run())
+
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+
 	// Send requests after server has started.
-	go sendRequest(re, wg, done, cfg.ClientUrls)
+	go sendRequest(re, wg, done, leaderServer.GetAddr())
 	time.Sleep(100 * time.Millisecond)
 
-	tests.MustWaitLeader(re, []*server.Server{svr})
-
-	re.NotNil(svr.GetLeader())
+	re.NotNil(leaderServer.GetLeader())
 
 	done <- true
 	wg.Wait()
-
-	testutil.CleanServer(cfg.DataDir)
 }
 
 func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, addr string) {

@@ -82,6 +82,10 @@ func (req *Request) wait() (*Region, error) {
 // GetRegion implements the Client interface.
 func (c *Cli) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error) {
 	req := c.newRequest(ctx, opts...)
+	// handle nil key as empty key
+	if key == nil {
+		key = []byte{}
+	}
 	req.key = key
 
 	c.requestCh <- req
@@ -91,6 +95,10 @@ func (c *Cli) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOp
 // GetPrevRegion implements the Client interface.
 func (c *Cli) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error) {
 	req := c.newRequest(ctx, opts...)
+	// handle nil key as empty key
+	if key == nil {
+		key = []byte{}
+	}
 	req.prevKey = key
 
 	c.requestCh <- req

@@ -35,9 +35,7 @@ import (
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -443,13 +441,20 @@ func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
 
 func TestRouterClientHeaderError(t *testing.T) {
 	re := require.New(t)
-	srv, cleanup, err := tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
-	re.NoError(err)
-	defer cleanup()
-
-	tests.MustWaitLeader(re, []*server.Server{srv})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	srv := cluster.GetLeaderServer().GetServer()
+
 	client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(true))
 
 	r, err := client.GetRegion(ctx, []byte("a"))
