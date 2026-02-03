@@ -338,18 +338,37 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
+	cleanup := func() {
+		etcd.Close()
+		if s.client != nil {
+			if cerr := s.client.Close(); cerr != nil {
+				log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
+			}
+		}
+		if s.electionClient != nil {
+			if cerr := s.electionClient.Close(); cerr != nil {
+				log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
+			}
+		}
+		if s.httpClient != nil {
+			s.httpClient.CloseIdleConnections()
+		}
+	}
 
 	// Check cluster ID
 	urlMap, err := etcdtypes.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
+		cleanup()
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
 	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
+		cleanup()
 		return err
 	}
 
 	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlMap, tlsConfig); err != nil {
+		cleanup()
 		return err
 	}
 
@@ -357,16 +376,19 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
 	case <-newCtx.Done():
+		cleanup()
 		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
 	// Start the etcd and HTTP clients, then init the member.
 	err = s.startClient()
 	if err != nil {
+		cleanup()
 		return err
 	}
 	err = s.initMember(newCtx, etcd)
 	if err != nil {
+		cleanup()
 		return err
 	}
 
