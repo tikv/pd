@@ -97,3 +97,69 @@ max-gap-reset-ts = "1h"
 	re.Equal(time.Duration(100)*time.Millisecond, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(time.Duration(1)*time.Hour, cfg.MaxResetTSGap.Duration)
 }
+
+func TestTSOIndexConfig(t *testing.T) {
+	re := require.New(t)
+
+	// Test case 1: max-index less than unique-index (should fail)
+	cfgData := `
+tso-max-index = 2
+tso-unique-index = 3
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta)
+	re.Error(err)
+	re.Contains(err.Error(), "tso max index:2 is less than unique index:3")
+
+	// Test case 2: max-index equal to unique-index (should fail)
+	cfgData = `
+tso-max-index = 3
+tso-unique-index = 3
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta)
+	re.Error(err)
+	re.Contains(err.Error(), "tso max index:3 is less than unique index:3")
+
+	// Test case 3: max-index greater than tsoMaxIndexUpperLimit (should fail)
+	cfgData = `
+tso-max-index = 11
+tso-unique-index = 1
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta)
+	re.Error(err)
+	re.Contains(err.Error(), "tso max index:11 should be less than 10")
+
+	// Test case 4: valid configuration (max-index > unique-index and max-index <= tsoMaxIndexUpperLimit)
+	cfgData = `
+tso-max-index = 5
+tso-unique-index = 2
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta)
+	re.NoError(err)
+	re.Equal(int64(5), cfg.TSOMaxIndex)
+	re.Equal(int64(2), cfg.TSOUniqueIndex)
+
+	// Test case 5: max-index at upper limit (should succeed)
+	cfgData = `
+tso-max-index = 10
+tso-unique-index = 5
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta)
+	re.NoError(err)
+	re.Equal(int64(10), cfg.TSOMaxIndex)
+	re.Equal(int64(5), cfg.TSOUniqueIndex)
+}
