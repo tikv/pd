@@ -137,7 +137,9 @@ const (
 type StoreFeatureFlags uint64
 
 const (
-	FEATURE_FLAGS_IN_MEMORY_PESSIMISTIC_LOCKS_NEXT_GEN StoreFeatureFlags = 1 << iota
+	// FeatureFlagInMemoryPessimisticLocksNextGen is the flag representing the feature in-memory pessimistic
+	// locks for next gen or TiDB-X clusters.
+	FeatureFlagInMemoryPessimisticLocksNextGen StoreFeatureFlags = 1 << iota
 )
 
 // Server is the interface for cluster.
@@ -2117,7 +2119,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 func (*RaftCluster) calcClusterFeatureFlags(stores []*core.StoreInfo) StoreFeatureFlags {
 	var res StoreFeatureFlags
 	// Add conjunction flags, and exclude it later if some of the nodes does not satisfy.
-	res |= FEATURE_FLAGS_IN_MEMORY_PESSIMISTIC_LOCKS_NEXT_GEN
+	res |= FeatureFlagInMemoryPessimisticLocksNextGen
 
 	for _, store := range stores {
 		if store.IsRemoved() {
@@ -2126,8 +2128,8 @@ func (*RaftCluster) calcClusterFeatureFlags(stores []*core.StoreInfo) StoreFeatu
 
 		nodeFeatureFlags := StoreFeatureFlags(store.GetMeta().GetFeatureFlags())
 		// In-memory pessimistic lock can be enabled if all TiKV nodes supports it,
-		if store.IsTiKV() && nodeFeatureFlags&FEATURE_FLAGS_IN_MEMORY_PESSIMISTIC_LOCKS_NEXT_GEN == 0 {
-			res &= ^FEATURE_FLAGS_IN_MEMORY_PESSIMISTIC_LOCKS_NEXT_GEN
+		if store.IsTiKV() && nodeFeatureFlags&FeatureFlagInMemoryPessimisticLocksNextGen == 0 {
+			res &= ^FeatureFlagInMemoryPessimisticLocksNextGen
 		}
 	}
 
