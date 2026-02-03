@@ -110,3 +110,15 @@ func TestSliceEqualWithoutOrder(t *testing.T) {
 	re.False(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b"}))
 	re.False(slice.EqualWithoutOrder([]string{"a"}, []string{"b", "c"}))
 }
+
+func TestSliceSplitIntoBatches(t *testing.T) {
+	re := require.New(t)
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 6))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 5))
+	re.Equal([][]int{{1, 2, 3, 4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 4))
+	re.Equal([][]int{{1, 2, 3}, {4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 3))
+	re.Equal([][]int{{1, 2}, {3, 4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 2))
+	re.Equal([][]int{{1}, {2}, {3}, {4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 1))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 0))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, -1))
+}
