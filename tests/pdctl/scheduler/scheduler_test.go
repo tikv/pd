@@ -17,6 +17,7 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/tikv/pd/server/api"
 	"testing"
 	"time"
 
@@ -615,6 +616,24 @@ func TestEvictLeaderScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	re.False(false, leaderServer.GetRaftCluster().GetStore(2).AllowLeaderTransfer())
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "2"}...)
+	re.NoError(err)
+	storeInfo := new(api.StoreInfo)
+	re.NoError(json.Unmarshal(output, &storeInfo))
+	re.True(storeInfo.Status.PauseLeaderTransferIn)
+	re.True(storeInfo.Status.PauseLeaderTransferOut)
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "store", "2"}...)
+	re.NoError(err)
+	storeInfo1 := new(api.StoreInfo)
+	re.NoError(json.Unmarshal(output, &storeInfo1))
+	re.False(storeInfo1.Status.PauseLeaderTransferIn)
+	re.False(storeInfo1.Status.PauseLeaderTransferOut)
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 
 	failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr", "return(true)")
 	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
