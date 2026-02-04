@@ -17,6 +17,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"testing"
@@ -105,6 +106,9 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 	suite.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	suite.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
+
+	err = tu.CheckDelete(testDialClient, suite.urlPrefix+"rule/no-exist", tu.Status(re, http.StatusNotFound))
+	suite.NoError(err)
 }
 
 func makeKeyRanges(keys ...string) []interface{} {
