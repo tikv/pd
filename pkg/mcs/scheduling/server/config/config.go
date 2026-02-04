@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/gctuner"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -80,6 +81,7 @@ type Config struct {
 
 	Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
 	Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
+	Server      sc.ServerConfig      `toml:"pd-server" json:"pd-server"`
 }
 
 // NewConfig creates a new config.
@@ -144,7 +146,10 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
 	}
-	return c.Replication.Adjust(configMetaData.Child("replication"))
+	if err := c.Replication.Adjust(configMetaData.Child("replication")); err != nil {
+		return err
+	}
+	return c.Server.Adjust(configMetaData.Child("server"))
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
@@ -199,6 +204,8 @@ type PersistConfig struct {
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
 	// Store as `chan<- struct{}`.
 	schedulersUpdatingNotifier atomic.Value
+	// serverConfig stores the server configuration from local config.
+	serverConfig atomic.Value
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
@@ -207,6 +214,7 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
+	o.serverConfig.Store(&cfg.Server)
 	// storeConfig will be fetched from TiKV by PD,
 	// so we just set an empty value here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
@@ -289,6 +297,11 @@ func (o *PersistConfig) SetStoreConfig(cfg *sc.StoreConfig) {
 	// so we need to adjust it here before storing it.
 	cfg.Adjust()
 	o.storeConfig.Store(cfg)
+}
+
+func (o *PersistConfig) setServerConfig(cfg *sc.ServerConfig) {
+	// Some of the fields won't be persisted and watched,
+	o.serverConfig.Store(cfg)
 }
 
 // GetStoreConfig returns the TiKV store configuration.
@@ -762,4 +775,15 @@ func (o *PersistConfig) GetTTLData(key string) (string, bool) {
 		return result.(string), ok
 	}
 	return "", false
+}
+
+// GetGCTunerConfig returns the GC tuner configuration.
+func (o *PersistConfig) GetGCTunerConfig() *gctuner.Config {
+	cfg := o.serverConfig.Load().(*sc.ServerConfig)
+	return &gctuner.Config{
+		EnableGOGCTuner:            cfg.EnableGOGCTuner,
+		GCTunerThreshold:           cfg.GCTunerThreshold,
+		ServerMemoryLimit:          cfg.ServerMemoryLimit,
+		ServerMemoryLimitGCTrigger: cfg.ServerMemoryLimitGCTrigger,
+	}
 }
