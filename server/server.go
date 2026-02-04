@@ -339,7 +339,14 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 	cleanup := func() {
-		etcd.Close()
+		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths
+		// (e.g. when starting a removed member that can never become ready). Avoid
+		// blocking the caller (tests may wait for the start error) by stopping the
+		// server synchronously and closing the embedded etcd in background.
+		if etcd.Server != nil {
+			etcd.Server.Stop()
+		}
+		go etcd.Close()
 		if s.client != nil {
 			if cerr := s.client.Close(); cerr != nil {
 				log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
