@@ -831,6 +831,8 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Duration("cost", time.Since(start)),
 	)
 
+	c.updateClusterFeatureFlags(c.GetStores())
+
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
@@ -2096,21 +2098,23 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	failpoint.Inject("versionChangeConcurrency", func() {
 		time.Sleep(500 * time.Millisecond)
 	})
-	if minVersion == nil || clusterVersion.Equal(*minVersion) {
-		return
+	if minVersion != nil && !clusterVersion.Equal(*minVersion) {
+		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
+			log.Error("cluster version changed by API at the same time")
+		}
+		err := c.opt.Persist(c.storage)
+		if err != nil {
+			log.Error("persist cluster version meet error", errs.ZapError(err))
+		}
+		log.Info("cluster version changed",
+			zap.Stringer("old-cluster-version", clusterVersion),
+			zap.Stringer("new-cluster-version", minVersion))
 	}
 
-	if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
-		log.Error("cluster version changed by API at the same time")
-	}
-	err := c.opt.Persist(c.storage)
-	if err != nil {
-		log.Error("persist cluster version meet error", errs.ZapError(err))
-	}
-	log.Info("cluster version changed",
-		zap.Stringer("old-cluster-version", clusterVersion),
-		zap.Stringer("new-cluster-version", minVersion))
+	c.updateClusterFeatureFlags(stores)
+}
 
+func (c *RaftCluster) updateClusterFeatureFlags(stores []*core.StoreInfo) {
 	newFeatureFlags := c.calcClusterFeatureFlags(stores)
 	c.clusterFeatureFlags.Store(uint64(newFeatureFlags))
 }
