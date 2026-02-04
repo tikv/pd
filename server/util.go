@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"net/http/pprof"
 	"path/filepath"
 	"strings"
 
@@ -136,7 +135,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 
 	// fix issue https://github.com/tikv/pd/issues/7253
 	// FIXME: remove me after upgrade
-	userHandlers["/debug/pprof/trace"] = http.HandlerFunc(pprof.Trace)
+	// userHandlers["/debug/pprof/trace"] = http.HandlerFunc(pprof.Trace)
 	return userHandlers, nil
 }
 
