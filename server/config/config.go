@@ -712,7 +712,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.InitialCluster = c.InitialCluster
 	cfg.ClusterState = c.InitialClusterState
 	cfg.InitialClusterToken = c.InitialClusterToken
-	cfg.EnablePprof = true
+	cfg.EnablePprof = false
 	cfg.PreVote = c.PreVote
 	cfg.StrictReconfigCheck = !c.DisableStrictReconfigCheck
 	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
