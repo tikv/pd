@@ -1083,6 +1083,202 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 // This constant is public for test purposes.
 const IteratorLoadingBatchSize int = 100
 
+// StartRotationRequest represents arguments needed to start a key rotation.
+type StartRotationRequest struct {
+	KeyspaceID    uint32
+	CurrentFileID uint64
+	NextFileID    uint64
+}
+
+// RotationMeta represents the rotation state returned by APIs.
+type RotationMeta struct {
+	KeyspaceID    uint32 `json:"keyspace_id"`
+	CurrentFileID uint64 `json:"current_file_id"`
+	NextFileID    uint64 `json:"next_file_id"`
+	StartedAt     int64  `json:"started_at"`
+}
+
+// StartRotation starts a key rotation for the specified keyspace.
+func (manager *Manager) StartRotation(req *StartRotationRequest) (*RotationMeta, error) {
+	// Validate next_file_id
+	if req.NextFileID == 0 {
+		return nil, rotationBadRequest("next_file_id must be non-zero")
+	}
+	if req.NextFileID <= req.CurrentFileID {
+		return nil, rotationBadRequest("next_file_id (%d) must be greater than current_file_id (%d)",
+			req.NextFileID, req.CurrentFileID)
+	}
+
+	manager.metaLock.Lock(req.KeyspaceID)
+	defer manager.metaLock.Unlock(req.KeyspaceID)
+
+	var result *RotationMeta
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		existing, err := manager.store.LoadKeyspaceRotation(txn, req.KeyspaceID)
+		if err != nil {
+			return err
+		}
+
+		if existing != nil {
+			if existing.CurrentFileID != req.CurrentFileID {
+				return rotationConflict("current_file_id mismatch: expected %d, got %d",
+					req.CurrentFileID, existing.CurrentFileID)
+			}
+			if existing.NextFileID != 0 {
+				return rotationConflict("rotation already in progress, next_file_id=%d",
+					existing.NextFileID)
+			}
+		}
+		// Note: When no existing record, we allow any current_file_id for bootstrap.
+		// This supports the case where encryption was enabled with a non-zero file_id.
+
+		meta := &endpoint.KeyspaceRotationMeta{
+			KeyspaceID:    req.KeyspaceID,
+			CurrentFileID: req.CurrentFileID,
+			NextFileID:    req.NextFileID,
+			StartedAt:     time.Now().Unix(),
+		}
+		if err := manager.store.SaveKeyspaceRotation(txn, meta); err != nil {
+			return err
+		}
+
+		result = &RotationMeta{
+			KeyspaceID:    meta.KeyspaceID,
+			CurrentFileID: meta.CurrentFileID,
+			NextFileID:    meta.NextFileID,
+			StartedAt:     meta.StartedAt,
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Warn("[keyspace] failed to start rotation",
+			zap.Uint32("keyspace-id", req.KeyspaceID),
+			zap.Uint64("current-file-id", req.CurrentFileID),
+			zap.Uint64("next-file-id", req.NextFileID),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	log.Info("[keyspace] rotation started",
+		zap.Uint32("keyspace-id", req.KeyspaceID),
+		zap.Uint64("current-file-id", req.CurrentFileID),
+		zap.Uint64("next-file-id", req.NextFileID),
+	)
+	return result, nil
+}
+
+// GetRotationStatus returns the current rotation status for the specified keyspace.
+func (manager *Manager) GetRotationStatus(keyspaceID uint32) (*RotationMeta, error) {
+	var result *RotationMeta
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		meta, err := manager.store.LoadKeyspaceRotation(txn, keyspaceID)
+		if err != nil {
+			return err
+		}
+		if meta != nil {
+			result = &RotationMeta{
+				KeyspaceID:    meta.KeyspaceID,
+				CurrentFileID: meta.CurrentFileID,
+				NextFileID:    meta.NextFileID,
+				StartedAt:     meta.StartedAt,
+			}
+		} else {
+			// Return empty rotation meta if no rotation has ever been started
+			result = &RotationMeta{
+				KeyspaceID:    keyspaceID,
+				CurrentFileID: 0,
+				NextFileID:    0,
+				StartedAt:     0,
+			}
+		}
+		return nil
+	})
+	return result, err
+}
+
+// CompleteRotationRequest represents arguments needed to complete a key rotation.
+type CompleteRotationRequest struct {
+	KeyspaceID    uint32
+	CurrentFileID uint64
+	NextFileID    uint64
+}
+
+// CompleteRotation completes a key rotation for the specified keyspace.
+// It performs CAS check to ensure:
+// 1. stored.current_file_id == request.current_file_id
+// 2. stored.next_file_id == request.next_file_id
+// After verification, it sets current_file_id = next_file_id and next_file_id = 0.
+func (manager *Manager) CompleteRotation(req *CompleteRotationRequest) (*RotationMeta, error) {
+	// Validate next_file_id
+	if req.NextFileID == 0 {
+		return nil, rotationBadRequest("next_file_id must be non-zero")
+	}
+	if req.NextFileID <= req.CurrentFileID {
+		return nil, rotationBadRequest("next_file_id (%d) must be greater than current_file_id (%d)",
+			req.NextFileID, req.CurrentFileID)
+	}
+
+	manager.metaLock.Lock(req.KeyspaceID)
+	defer manager.metaLock.Unlock(req.KeyspaceID)
+
+	var result *RotationMeta
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		existing, err := manager.store.LoadKeyspaceRotation(txn, req.KeyspaceID)
+		if err != nil {
+			return err
+		}
+
+		if existing == nil {
+			return rotationConflict("no rotation in progress for keyspace %d", req.KeyspaceID)
+		}
+
+		if existing.CurrentFileID != req.CurrentFileID {
+			return rotationConflict("current_file_id mismatch: expected %d, got %d",
+				req.CurrentFileID, existing.CurrentFileID)
+		}
+		if existing.NextFileID != req.NextFileID {
+			return rotationConflict("next_file_id mismatch: expected %d, got %d",
+				req.NextFileID, existing.NextFileID)
+		}
+
+		meta := &endpoint.KeyspaceRotationMeta{
+			KeyspaceID:    req.KeyspaceID,
+			CurrentFileID: req.NextFileID, // current = next
+			NextFileID:    0,              // next = 0
+			StartedAt:     0,              // reset started_at
+		}
+		if err := manager.store.SaveKeyspaceRotation(txn, meta); err != nil {
+			return err
+		}
+
+		result = &RotationMeta{
+			KeyspaceID:    meta.KeyspaceID,
+			CurrentFileID: meta.CurrentFileID,
+			NextFileID:    meta.NextFileID,
+			StartedAt:     meta.StartedAt,
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Warn("[keyspace] failed to complete rotation",
+			zap.Uint32("keyspace-id", req.KeyspaceID),
+			zap.Uint64("current-file-id", req.CurrentFileID),
+			zap.Uint64("next-file-id", req.NextFileID),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	log.Info("[keyspace] rotation completed",
+		zap.Uint32("keyspace-id", req.KeyspaceID),
+		zap.Uint64("new-current-file-id", req.NextFileID),
+	)
+	return result, nil
+}
+
 // Iterator iterates over all keyspaces.
 // Create this using keyspace.Manager.IterateKeyspaces, and use Next method for iteration.
 type Iterator struct {
