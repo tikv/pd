@@ -90,18 +90,39 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
-func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
+// setTSOOption defines the option type for setTSOPhysical function.
+// if it returns true, it will skip update physical time.
+type setTSOOption func(t *timestampOracle) bool
+
+func withInitialCheck() setTSOOption {
+	return func(t *timestampOracle) bool {
+		return t.tsoMux.physical.Equal(typeutil.ZeroTime)
+	}
+}
+
+func withLogicalOverflowCheck() setTSOOption {
+	return func(t *timestampOracle) bool {
+		return !overflowedLogical(t.tsoMux.logical)
+	}
+}
+
+// setTSOPhysical sets the TSO's physical part with the given time.
+// It returns true if the TSO's logical part is overflowed.
+func (t *timestampOracle) setTSOPhysical(next time.Time, opts ...setTSOOption) bool {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	// Do not update the zero physical time if the `force` flag is false.
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) && !force {
-		return
+	for _, opt := range opts {
+		if opt(t) {
+			return overflowedLogical(t.tsoMux.logical)
+		}
 	}
 	// make sure the ts won't fall back
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
+		t.metrics.saveEvent.Inc()
 	}
+	return overflowedLogical(t.tsoMux.logical)
 }
 
 func (t *timestampOracle) getTSO() (time.Time, int64) {
@@ -201,7 +222,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
 		zap.Time("save", save), zap.Time("next", next))
 	// save into memory
-	t.setTSOPhysical(next, true)
+	t.setTSOPhysical(next)
 	return nil
 }
 
@@ -273,7 +294,18 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 	return nil
 }
 
+type updatePurpose int
+
+const (
+	intervalUpdate updatePurpose = iota
+	overflowUpdate
+)
+
 // updateTimestamp is used to update the timestamp.
+// updatePurpose indicates the purpose of this update:
+//   - intervalUpdate: update timestamp due to the periodic interval.
+//   - overflowUpdate: update timestamp due to the logical overflow.
+//
 // This function will do two things:
 //  1. When the logical time is going to be used up, increase the current physical time.
 //  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
@@ -287,9 +319,9 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 //
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
-func (t *timestampOracle) updateTimestamp() error {
+func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, error) {
 	if !t.isInitialized() {
-		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
+		return true, errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
 	prevPhysical, prevLogical := t.getTSO()
 
@@ -304,7 +336,6 @@ func (t *timestampOracle) updateTimestamp() error {
 
 	t.metrics.tsoPhysicalGauge.Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
 	t.metrics.tsoPhysicalGapGauge.Set(float64(jetLag.Milliseconds()))
-	t.metrics.saveEvent.Inc()
 
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
 		log.Warn("clock offset",
@@ -334,12 +365,18 @@ func (t *timestampOracle) updateTimestamp() error {
 	} else {
 		// It will still use the previous physical time to alloc the timestamp.
 		t.metrics.skipSaveEvent.Inc()
-		return nil
+		return false, nil
 	}
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= updateTimestampGuard {
+		// Only IntervalUpdate is allowed to save timestamp into etcd.
+		// it would be dangerous to save timestamp into etcd when handling overflowUpdate.
+		if updatePurpose != intervalUpdate {
+			t.metrics.notAllowedSaveTimestampEvent.Inc()
+			return true, nil
+		}
 		save := next.Add(t.saveInterval)
 		start := time.Now()
 		if err := t.saveTimestamp(save); err != nil {
@@ -347,15 +384,20 @@ func (t *timestampOracle) updateTimestamp() error {
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.Error(err))
 			t.metrics.errSaveUpdateTSEvent.Inc()
-			return err
+			return true, err
 		}
 		t.lastSavedTime.Store(save)
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
-	// save into memory
-	t.setTSOPhysical(next, false)
-
-	return nil
+	var overflowed bool
+	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
+	// otherwise, we need to check logical overflow to avoid unnecessary physical time update.
+	if updatePurpose == intervalUpdate {
+		overflowed = t.setTSOPhysical(next, withInitialCheck())
+	} else {
+		overflowed = t.setTSOPhysical(next, withInitialCheck(), withLogicalOverflowCheck())
+	}
+	return overflowed, nil
 }
 
 var maxRetryCount = 10
@@ -382,13 +424,18 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
-		if resp.GetLogical() >= maxLogical {
+		if overflowedLogical(resp.GetLogical()) {
 			log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
-			time.Sleep(t.updatePhysicalInterval)
+			if overflowed, err := t.updateTimestamp(overflowUpdate); err != nil {
+				log.Info("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
+				time.Sleep(t.updatePhysicalInterval)
+			} else if overflowed {
+				time.Sleep(t.updatePhysicalInterval)
+			}
 			continue
 		}
 		// In case lease expired after the first check.
@@ -408,4 +455,8 @@ func (t *timestampOracle) resetTimestamp() {
 	t.tsoMux.physical = typeutil.ZeroTime
 	t.tsoMux.logical = 0
 	t.lastSavedTime.Store(typeutil.ZeroTime)
+}
+
+func overflowedLogical(logical int64) bool {
+	return logical >= maxLogical
 }
