@@ -132,8 +132,10 @@ func (suite *serviceLimitTestSuite) TestKeyspaceServiceLimit() {
 	// Acquire token buckets after setting the service limit.
 	time.Sleep(time.Second)
 	token = suite.acquireTokenBuckets(ctx, re, tokenBucketRequest)
-	// Due to the service limit has a 5-second burst limit, the returned tokens might be slightly exceed the service limit..
-	re.InDelta(serviceLimit, token.GetTokens(), serviceLimit*0.1)
+	// Due to the service limit has a 5-second burst limit, the returned tokens might be slightly exceed the service limit.
+	// Though we only sleep for 1 second, the returned tokens might be slightly exceed the service limit.
+	// So we allow a 15% delta here.
+	re.InDelta(serviceLimit, token.GetTokens(), serviceLimit*0.15)
 	re.Equal(int64(serviceLimit), token.GetSettings().GetBurstLimit())
 	// Set the service limit to a larger value.
 	serviceLimit = requestRU * 2

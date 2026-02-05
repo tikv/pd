@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -332,7 +333,7 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 
 	// Prepare the keyspace for later test.
 	leaderServer := suite.cluster.GetLeaderServer()
-	_, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
+	keyspaceMeta, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
 		&keyspace.CreateKeyspaceRequest{
 			Name: "test_keyspace",
 		},
@@ -371,6 +372,18 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
 	re.Equal(http.StatusBadRequest, statusCode)
 	re.Equal(0.0, limit)
+	// Get service limit by keyspace ID.
+	limit, statusCode = tryToGetKeyspaceServiceLimitByID(re, leaderAddr, keyspaceMeta.GetId())
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal(1.0, limit)
+	// Get service limit with invalid keyspace ID.
+	limit, statusCode = tryToGetKeyspaceServiceLimitByIDString(re, leaderAddr, "invalid")
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal(0.0, limit)
+	// Get service limit with a non-existing keyspace ID.
+	limit, statusCode = tryToGetKeyspaceServiceLimitByID(re, leaderAddr, keyspaceMeta.GetId()+1)
+	re.Equal(http.StatusNotFound, statusCode)
+	re.Equal(0.0, limit)
 }
 
 func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
@@ -397,6 +410,22 @@ func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 		},
 	)
 	return string(bodyBytes), statusCode
+}
+
+func tryToGetKeyspaceServiceLimitByID(re *require.Assertions, leaderAddr string, keyspaceID uint32) (float64, int) {
+	return tryToGetKeyspaceServiceLimitByIDString(re, leaderAddr, strconv.FormatUint(uint64(keyspaceID), 10))
+}
+
+func tryToGetKeyspaceServiceLimitByIDString(re *require.Assertions, leaderAddr, keyspaceID string) (float64, int) {
+	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodGet, "/config/keyspace/service-limit/id/"+keyspaceID, nil, nil)
+	if statusCode != http.StatusOK {
+		return 0.0, statusCode
+	}
+	var limiter struct {
+		ServiceLimit float64 `json:"service_limit"`
+	}
+	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
+	return limiter.ServiceLimit, statusCode
 }
 
 // resourceManagerForwardingTestSuite is a test suite for testing the forwarding behavior of Resource Manager APIs.
