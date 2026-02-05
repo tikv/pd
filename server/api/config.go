@@ -48,6 +48,7 @@ import (
 var (
 	_                                  *sc.ScheduleConfig = nil
 	resourceManagerControllerConfigURL                    = "/resource-manager/api/v1/config/controller"
+	onlineConfigTags                                      = reflectutil.GetAllOnlineConfigTags(reflect.TypeOf(config.Config{}))
 )
 
 type confHandler struct {
@@ -165,7 +166,11 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	offlineItems := make([]string, 0)
 	for k, v := range conf {
+		if _, ok := onlineConfigTags[k]; !ok {
+			offlineItems = append(offlineItems, k)
+		}
 		if s := strings.Split(k, "."); len(s) > 1 {
 			if err := h.updateConfig(cfg, k, v); err != nil {
 				h.rd.JSON(w, http.StatusBadRequest, err.Error())
@@ -183,8 +188,12 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	h.rd.JSON(w, http.StatusOK, "The config is updated.")
+	if len(offlineItems) > 0 {
+		warning := strings.Join(offlineItems, ", ")
+		h.rd.JSON(w, http.StatusOK, fmt.Sprintf("The config is updated. Please restart PD to make %s take effect.", warning))
+	} else {
+		h.rd.JSON(w, http.StatusOK, "The config is updated.")
+	}
 }
 
 func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) error {
