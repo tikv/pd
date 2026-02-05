@@ -347,7 +347,7 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 		pivotItem            = &regionItem{&RegionInfo{meta: &metapb.Region{}}}
 		region               *RegionInfo
 		regions              = make([]*RegionInfo, 0, n)
-		rangeLen, curLen     = len(ranges), len(regions)
+		curLen               = len(regions)
 		// setStartEndIndices is a helper function to set `startIndex` and `endIndex`
 		// according to the `startKey` and `endKey` and check if the range is invalid
 		// to skip the iteration.
@@ -388,8 +388,8 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 		}
 	)
 	// This is a fast path to reduce the unnecessary iterations when we only have one range.
-	if rangeLen <= 1 {
-		if rangeLen == 1 {
+	if len(ranges) <= 1 {
+		if len(ranges) == 1 {
 			startKey, endKey = ranges[0].StartKey, ranges[0].EndKey
 			if setAndCheckStartEndIndices() {
 				return regions
@@ -413,7 +413,7 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 	// keep retrying until we get enough regions.
 	for curLen < n {
 		// Shuffle the ranges to increase the randomness.
-		for _, i := range rand.Perm(rangeLen) {
+		for _, i := range rand.Perm(len(ranges)) {
 			startKey, endKey = ranges[i].StartKey, ranges[i].EndKey
 			if setAndCheckStartEndIndices() {
 				continue
