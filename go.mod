@@ -43,7 +43,7 @@ require (
 	github.com/pingcap/tidb-dashboard v0.0.0-20250711083036-63f7c16a6fb2
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.55.0
-	github.com/sasha-s/go-deadlock v0.3.5
+	github.com/sasha-s/go-deadlock v0.3.6
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99
 	github.com/soheilhy/cmux v0.1.5
@@ -308,7 +308,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oleiade/reflections v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
-	github.com/petermattis/goid v0.0.0-20240813172612-4fcff4a6cae7 // indirect
+	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
