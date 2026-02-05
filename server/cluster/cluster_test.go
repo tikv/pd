@@ -4365,9 +4365,12 @@ func TestGetClusterFeatureFlags(t *testing.T) {
 	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, c.GetClusterFeatureFlags())
 
 	// Add a TiKV without the flag - cluster flags should be cleared.
-	// If
 	re.NoError(c.PutMetaStore(&metapb.Store{
 		Id: 5, Address: "tikv4", Version: "8.5.0", FeatureFlags: 0,
 	}))
 	re.Equal(StoreFeatureFlags(0), c.GetClusterFeatureFlags())
+
+	// Bury the store without flag - cluster flags should be set again.
+	re.NoError(c.BuryStore(5, true))
+	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, c.GetClusterFeatureFlags())
 }
