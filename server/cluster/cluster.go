@@ -2115,12 +2115,12 @@ func (c *RaftCluster) OnStoreVersionChange() {
 }
 
 func (c *RaftCluster) updateClusterFeatureFlags(stores []*core.StoreInfo) {
-	newFeatureFlags := c.calcClusterFeatureFlags(stores)
+	newFeatureFlags := calcClusterFeatureFlags(stores)
 	c.clusterFeatureFlags.Store(uint64(newFeatureFlags))
 }
 
 // calcClusterFeatureFlags merges feature flags of all stores and outputs feature flags of the whole cluster.
-func (*RaftCluster) calcClusterFeatureFlags(stores []*core.StoreInfo) StoreFeatureFlags {
+func calcClusterFeatureFlags(stores []*core.StoreInfo) StoreFeatureFlags {
 	var res StoreFeatureFlags
 	// Add conjunction flags, and exclude it later if some of the nodes does not satisfy.
 	res |= FeatureFlagInMemoryPessimisticLocksNextGen
