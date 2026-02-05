@@ -645,6 +645,68 @@ const (
 // UpdateKeyspaceConfig changes target keyspace's config in the order specified in mutations.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
+	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+		for _, mutation := range mutations {
+			switch mutation.Op {
+			case OpPut:
+				meta.Config[mutation.Key] = mutation.Value
+			case OpDel:
+				delete(meta.Config, mutation.Key)
+			default:
+				return errs.ErrIllegalOperation
+			}
+		}
+		return nil
+	})
+}
+
+// UpdateKeyspaceConfigWithPreconditions changes target keyspace's config in the order specified in mutations if the
+// given preconditions are satisfied.
+// Preconditions use a JSON-merge-patch-like encoding:
+// - key -> null means the key must be absent.
+// - key -> "value" means the key must exist and equal "value".
+func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutations []*Mutation, preconditions map[string]*string) (*keyspacepb.KeyspaceMeta, error) {
+	if len(preconditions) == 0 {
+		return manager.UpdateKeyspaceConfig(name, mutations)
+	}
+	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
+			return err
+		}
+		for _, mutation := range mutations {
+			switch mutation.Op {
+			case OpPut:
+				meta.Config[mutation.Key] = mutation.Value
+			case OpDel:
+				delete(meta.Config, mutation.Key)
+			default:
+				return errs.ErrIllegalOperation
+			}
+		}
+		return nil
+	})
+}
+
+func checkKeyspaceConfigPreconditions(config map[string]string, preconditions map[string]*string) error {
+	for k, expected := range preconditions {
+		actual, exists := config[k]
+		if expected == nil {
+			if exists {
+				return errs.ErrKeyspaceConfigPreconditionFailed.FastGenByArgs(k + " must be absent")
+			}
+			continue
+		}
+		if !exists {
+			return errs.ErrKeyspaceConfigPreconditionFailed.FastGenByArgs(k + " does not exist")
+		}
+		if actual != *expected {
+			return errs.ErrKeyspaceConfigPreconditionFailed.FastGenByArgs("key=" + k + " expected=" + *expected + " actual=" + actual)
+		}
+	}
+	return nil
+}
+
+func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *keyspacepb.KeyspaceMeta) error) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -677,16 +739,9 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		for k, v := range meta.GetConfig() {
 			oldConfig[k] = v
 		}
-		// Update keyspace config according to mutations.
-		for _, mutation := range mutations {
-			switch mutation.Op {
-			case OpPut:
-				meta.Config[mutation.Key] = mutation.Value
-			case OpDel:
-				delete(meta.Config, mutation.Key)
-			default:
-				return errs.ErrIllegalOperation
-			}
+		// Update keyspace config.
+		if err := update(meta); err != nil {
+			return err
 		}
 		newConfig := meta.GetConfig()
 		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
