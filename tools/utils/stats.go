@@ -18,15 +18,146 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/influxdata/tdigest"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 var latencyTDigest *tdigest.TDigest = tdigest.New()
+
+const tsoBatchSizeMetricName = "pd_client_request_handle_tso_batch_size"
+
+type histogramSnapshot struct {
+	count   uint64
+	sum     float64
+	buckets map[float64]uint64 // upperBound => cumulativeCount
+}
+
+func gatherHistogramSnapshot(metricName string) (histogramSnapshot, bool, error) {
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		return histogramSnapshot{}, false, err
+	}
+
+	for _, mf := range mfs {
+		if mf.GetName() != metricName {
+			continue
+		}
+		if mf.GetType() != dto.MetricType_HISTOGRAM {
+			return histogramSnapshot{}, false, fmt.Errorf("metric %q is not a histogram", metricName)
+		}
+
+		snap := histogramSnapshot{
+			buckets: make(map[float64]uint64),
+		}
+		for _, m := range mf.GetMetric() {
+			h := m.GetHistogram()
+			if h == nil {
+				continue
+			}
+			snap.count += h.GetSampleCount()
+			snap.sum += h.GetSampleSum()
+			for _, b := range h.GetBucket() {
+				snap.buckets[b.GetUpperBound()] += b.GetCumulativeCount()
+			}
+		}
+		return snap, true, nil
+	}
+
+	return histogramSnapshot{}, false, nil
+}
+
+func diffHistogramSnapshot(cur, prev histogramSnapshot) histogramSnapshot {
+	if cur.count < prev.count {
+		// Metrics got reset/re-registered, treat as starting from zero.
+		return cur
+	}
+
+	delta := histogramSnapshot{
+		count:   cur.count - prev.count,
+		sum:     cur.sum - prev.sum,
+		buckets: make(map[float64]uint64, len(cur.buckets)),
+	}
+	for upperBound, curCum := range cur.buckets {
+		prevCum := prev.buckets[upperBound]
+		if curCum < prevCum {
+			// Unexpected, but keep it safe.
+			delta.buckets[upperBound] = 0
+			continue
+		}
+		delta.buckets[upperBound] = curCum - prevCum
+	}
+	return delta
+}
+
+// histogramQuantile approximates a quantile from a Prometheus histogram, using the same linear interpolation
+// assumption as PromQL's histogram_quantile.
+func histogramQuantile(q float64, count uint64, buckets map[float64]uint64) float64 {
+	if math.IsNaN(q) || q < 0 || q > 1 {
+		return math.NaN()
+	}
+	if count == 0 || len(buckets) == 0 {
+		return math.NaN()
+	}
+
+	upperBounds := make([]float64, 0, len(buckets))
+	for ub := range buckets {
+		upperBounds = append(upperBounds, ub)
+	}
+	sort.Float64s(upperBounds)
+
+	rank := q * float64(count)
+
+	var (
+		prevCum   uint64
+		prevBound float64
+	)
+	for i, ub := range upperBounds {
+		cum := buckets[ub]
+		if float64(cum) < rank {
+			prevCum = cum
+			prevBound = ub
+			continue
+		}
+
+		lowerBound := prevBound
+		if i == 0 && ub > 0 {
+			// For the first bucket, PromQL assumes a lower bound of 0.
+			lowerBound = 0
+			prevCum = 0
+		}
+		if math.IsInf(ub, 1) {
+			return lowerBound
+		}
+
+		bucketCount := cum - prevCum
+		if bucketCount == 0 {
+			return lowerBound
+		}
+		pos := (rank - float64(prevCum)) / float64(bucketCount)
+		return lowerBound + (ub-lowerBound)*pos
+	}
+
+	// Should be unreachable if +Inf bucket exists; return the largest finite upper bound as a fallback.
+	return upperBounds[len(upperBounds)-1]
+}
+
+func printBatchSizeStats(prefix string, snap histogramSnapshot) {
+	if snap.count == 0 {
+		fmt.Printf("batch-size(%s): count=0\n", prefix)
+		return
+	}
+	avg := snap.sum / float64(snap.count)
+	p99 := histogramQuantile(0.99, snap.count, snap.buckets)
+	fmt.Printf("batch-size(%s): count=%d avg=%.3f p99=%.3f\n", prefix, snap.count, avg, p99)
+}
 
 // ShowStats shows the current stats and updates them with the given duration.
 func ShowStats(
@@ -45,12 +176,32 @@ func ShowStats(
 
 	s, total := NewStats(), NewStats()
 	fmt.Println("start stats collecting")
+
+	var (
+		baseBatchSnap histogramSnapshot
+		prevBatchSnap histogramSnapshot
+		hasBatchSnap  bool
+	)
+	if verbose {
+		if snap, ok, err := gatherHistogramSnapshot(tsoBatchSizeMetricName); err == nil && ok {
+			baseBatchSnap, prevBatchSnap, hasBatchSnap = snap, snap, true
+		}
+	}
 	for {
 		select {
 		case <-ticker.C:
 			// runtime.GC()
 			if verbose {
 				fmt.Println(s.counter())
+				// Print batch-size stats for the latest interval.
+				if !hasBatchSnap {
+					if snap, ok, err := gatherHistogramSnapshot(tsoBatchSizeMetricName); err == nil && ok {
+						baseBatchSnap, prevBatchSnap, hasBatchSnap = snap, snap, true
+					}
+				} else if cur, ok, err := gatherHistogramSnapshot(tsoBatchSizeMetricName); err == nil && ok {
+					printBatchSizeStats("interval", diffHistogramSnapshot(cur, prevBatchSnap))
+					prevBatchSnap = cur
+				}
 			}
 			total.merge(s)
 			s = NewStats()
@@ -64,6 +215,17 @@ func ShowStats(
 			fmt.Printf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms\n\n",
 				latencyTDigest.Quantile(0.5), latencyTDigest.Quantile(0.8), latencyTDigest.Quantile(0.9), latencyTDigest.Quantile(0.99))
 			if verbose {
+				// Print batch-size stats for the whole run.
+				if !hasBatchSnap {
+					if snap, ok, err := gatherHistogramSnapshot(tsoBatchSizeMetricName); err == nil && ok {
+						baseBatchSnap, hasBatchSnap = snap, true
+					}
+				}
+				if hasBatchSnap {
+					if cur, ok, err := gatherHistogramSnapshot(tsoBatchSizeMetricName); err == nil && ok {
+						printBatchSizeStats("total", diffHistogramSnapshot(cur, baseBatchSnap))
+					}
+				}
 				fmt.Println(collectMetrics(promServer))
 			}
 			return
