@@ -15,7 +15,7 @@
 package tso
 
 import (
-	"fmt"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -214,16 +214,16 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 
 // SetKeyspaceListLength sets the keyspace list length metric for the given keyspace group.
 func (m *keyspaceGroupMetrics) SetKeyspaceListLength(groupID uint32, length float64) {
-	m.keyspaceListLengthGauge.WithLabelValues(fmt.Sprintf("%d", groupID)).Set(length)
+	m.keyspaceListLengthGauge.WithLabelValues(strconv.FormatUint(uint64(groupID), 10)).Set(length)
 }
 
 // DeleteKeyspaceListLength removes the keyspace list length metric for the given keyspace group.
 func (m *keyspaceGroupMetrics) DeleteKeyspaceListLength(groupID uint32) {
-	m.keyspaceListLengthGauge.DeleteLabelValues(fmt.Sprintf("%d", groupID))
+	m.keyspaceListLengthGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
 }
 
 // SetKeyspaceGroupKeyspaceCountGauge sets the keyspace list length metric for the given keyspace group.
 // It is used by PD API service when saveKeyspaceGroups is executed.
 func SetKeyspaceGroupKeyspaceCountGauge(groupID uint32, length float64) {
-	keyspaceGroupKeyspaceCountGauge.WithLabelValues(fmt.Sprintf("%d", groupID)).Set(length)
+	keyspaceGroupKeyspaceCountGauge.WithLabelValues(strconv.FormatUint(uint64(groupID), 10)).Set(length)
 }
