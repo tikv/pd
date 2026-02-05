@@ -80,7 +80,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	flagSet := flag.NewFlagSet("api-bench", flag.ContinueOnError)
-	flagSet.ParseErrorsWhitelist.UnknownFlags = true
+	flagSet.ParseErrorsAllowlist.UnknownFlags = true
 	flagSet.Int64Var(&qps, "qps", 1, "qps")
 	flagSet.Int64Var(&burst, "burst", 1, "burst")
 	flagSet.StringVar(&httpCases, "http-cases", "", "http api cases")
