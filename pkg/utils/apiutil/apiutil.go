@@ -238,6 +238,15 @@ func GetJSON(client *http.Client, url string, data []byte) (*http.Response, erro
 	return client.Do(req)
 }
 
+// GetJSONWithoutBody is used to do get request without body
+func GetJSONWithoutBody(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
 // PatchJSON is used to do patch request
 func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))

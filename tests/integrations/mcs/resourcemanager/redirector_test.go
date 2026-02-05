@@ -130,15 +130,15 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 
 	pdClient := rmpb.NewResourceManagerClient(pdConn)
 	rmClient := rmpb.NewResourceManagerClient(rmConn)
-	req := &rmpb.GetResourceGroupRequest{
+	getReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: groupName,
 		KeyspaceId: &rmpb.KeyspaceIDValue{
 			Value: suite.keyspaceID,
 		},
 	}
-	pdResp, err := pdClient.GetResourceGroup(ctx, req)
+	pdResp, err := pdClient.GetResourceGroup(ctx, getReq)
 	re.NoError(err)
-	rmResp, err := rmClient.GetResourceGroup(ctx, req)
+	rmResp, err := rmClient.GetResourceGroup(ctx, getReq)
 	re.NoError(err)
 	re.Nil(pdResp.GetError())
 	re.Nil(rmResp.GetError())
@@ -150,6 +150,79 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 	pdSettings := pdResp.GetGroup().GetRUSettings().GetRU().GetSettings()
 	re.Equal(rmSettings.GetFillRate(), pdSettings.GetFillRate())
 	re.Equal(rmSettings.GetBurstLimit(), pdSettings.GetBurstLimit())
+
+	addGroupName := "redirector_grpc_add_group"
+	addGroup := &rmpb.ResourceGroup{
+		Name:     addGroupName,
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 7,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   400,
+					BurstLimit: 600,
+				},
+			},
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+	}
+	addResp, err := pdClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
+	re.NoError(err)
+	re.Nil(addResp.GetError())
+	re.Equal("Success!", addResp.GetBody())
+
+	addGetReq := &rmpb.GetResourceGroupRequest{
+		ResourceGroupName: addGroupName,
+		KeyspaceId: &rmpb.KeyspaceIDValue{
+			Value: suite.keyspaceID,
+		},
+	}
+	pdAddGetResp, err := pdClient.GetResourceGroup(ctx, addGetReq)
+	re.NoError(err)
+	re.Nil(pdAddGetResp.GetError())
+	re.Equal(addGroupName, pdAddGetResp.GetGroup().GetName())
+
+	rmAddGetResp, err := rmClient.GetResourceGroup(ctx, addGetReq)
+	re.NoError(err)
+	re.Nil(rmAddGetResp.GetError())
+	re.Equal(addGroupName, rmAddGetResp.GetGroup().GetName())
+	re.Equal(pdAddGetResp.GetGroup().GetPriority(), rmAddGetResp.GetGroup().GetPriority())
+	re.Equal(pdAddGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate(), rmAddGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
+
+	addGroup.Priority = 9
+	addGroup.RUSettings.RU.Settings.FillRate = 800
+	addGroup.RUSettings.RU.Settings.BurstLimit = 900
+	modifyResp, err := pdClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
+	re.NoError(err)
+	re.Nil(modifyResp.GetError())
+	re.Equal("Success!", modifyResp.GetBody())
+
+	pdModifyGetResp, err := pdClient.GetResourceGroup(ctx, addGetReq)
+	re.NoError(err)
+	re.Nil(pdModifyGetResp.GetError())
+	re.Equal(uint32(9), pdModifyGetResp.GetGroup().GetPriority())
+	re.Equal(uint64(800), pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
+	re.Equal(int64(900), pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
+
+	rmModifyGetResp, err := rmClient.GetResourceGroup(ctx, addGetReq)
+	re.NoError(err)
+	re.Nil(rmModifyGetResp.GetError())
+	re.Equal(pdModifyGetResp.GetGroup().GetPriority(), rmModifyGetResp.GetGroup().GetPriority())
+	re.Equal(pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate(), rmModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
+	re.Equal(pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit(), rmModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
+
+	deleteResp, err := pdClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
+		ResourceGroupName: addGroupName,
+		KeyspaceId: &rmpb.KeyspaceIDValue{
+			Value: suite.keyspaceID,
+		},
+	})
+	re.NoError(err)
+	re.Nil(deleteResp.GetError())
+	re.Equal("Success!", deleteResp.GetBody())
+
+	_, err = rmClient.GetResourceGroup(ctx, addGetReq)
+	re.ErrorContains(err, "resource group does not exist")
 }
 
 func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name string, fillRate uint64) {
