@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 // Request is an interface wrapping tsopb.TsoRequest and pdpb.TsoRequest so
@@ -58,6 +58,16 @@ func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, reques
 	return tsoRequest
 }
 
+// getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
+// It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
+// create an import cycle: keyspace -> tso -> tsoutil -> keyspace).
+func getBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
+
 // getForwardedHost returns the forwarded host
 func (r *PDProtoRequest) getForwardedHost() string {
 	return r.forwardedHost
@@ -76,7 +86,7 @@ func (r *PDProtoRequest) getCount() uint32 {
 // process sends request and receive response via stream.
 // count defines the count of timestamps to retrieve.
 func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
-	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	keyspaceID := getBootstrapKeyspaceID()
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		keyspaceID, constant.DefaultKeyspaceGroupID)
 }

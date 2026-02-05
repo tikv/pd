@@ -54,6 +54,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -66,6 +67,16 @@ const (
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
 	groupPatrolInterval                 = time.Minute
 )
+
+// getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
+// It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
+// create an import cycle with keyspace importing pkg/tso for SetKeyspaceGroupKeyspaceCountGauge).
+func getBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
 
 type state struct {
 	syncutil.RWMutex
@@ -901,7 +912,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				j++
 			}
 		}
-		keyspaceID := keyspace.GetBootstrapKeyspaceID()
+		keyspaceID := getBootstrapKeyspaceID()
 		kgm.checkReserveKeyspace(newGroup, newKeyspaces, keyspaceID)
 	}
 	// Check the split state.
@@ -989,7 +1000,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 }
 
 func (kgm *KeyspaceGroupManager) genDefaultKeyspaceGroupMeta() *endpoint.KeyspaceGroup {
-	keyspaces := []uint32{keyspace.GetBootstrapKeyspaceID()}
+	keyspaces := []uint32{getBootstrapKeyspaceID()}
 	return &endpoint.KeyspaceGroup{
 		ID: constant.DefaultKeyspaceGroupID,
 		Members: []endpoint.KeyspaceGroupMember{{
