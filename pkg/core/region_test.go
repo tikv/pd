@@ -1488,3 +1488,80 @@ func TestGetBucketMeta(t *testing.T) {
 	// Inherit false if region
 	re.Equal(uint64(1), region.GetBuckets().GetVersion())
 }
+
+func BenchmarkQueryRegions(b *testing.B) {
+	regionSizes := []int{100, 1000, 10000, 100000}
+	querySizes := []int{10, 50, 100, 500, 1000}
+
+	for _, regionSize := range regionSizes {
+		regions := NewRegionsInfo()
+		var regionIDs []uint64
+		var keys [][]byte
+		var prevKeys [][]byte
+
+		for i := range regionSize {
+			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+			startKey := []byte(fmt.Sprintf("%20d", i*10))
+			endKey := []byte(fmt.Sprintf("%20d", (i+1)*10))
+			region := NewRegionInfo(&metapb.Region{
+				Id:       uint64(i + 1),
+				Peers:    []*metapb.Peer{peer},
+				StartKey: startKey,
+				EndKey:   endKey,
+			}, peer)
+			regions.CheckAndPutRegion(region)
+			regionIDs = append(regionIDs, uint64(i+1))
+			keys = append(keys, startKey)
+			prevKeys = append(prevKeys, endKey)
+		}
+
+		for _, querySize := range querySizes {
+			if querySize > regionSize {
+				continue
+			}
+
+			queryIDs := make([]uint64, querySize)
+			queryKeys := make([][]byte, querySize)
+			queryPrevKeys := make([][]byte, querySize)
+			step := regionSize / querySize
+			for i := range querySize {
+				idx := i * step
+				queryIDs[i] = regionIDs[idx]
+				queryKeys[i] = keys[idx]
+				queryPrevKeys[i] = prevKeys[idx]
+			}
+
+			b.Run(fmt.Sprintf("QueryByKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(queryKeys, nil, nil, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryByPrevKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(nil, queryPrevKeys, nil, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryByIDs_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(nil, nil, queryIDs, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryMixed_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				halfSize := querySize / 2
+				mixedKeys := queryKeys[:halfSize]
+				mixedPrevKeys := queryPrevKeys[:halfSize]
+				mixedIDs := queryIDs[:halfSize]
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(mixedKeys, mixedPrevKeys, mixedIDs, false)
+				}
+			})
+		}
+	}
+}

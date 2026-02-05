@@ -235,6 +235,11 @@ func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 func (l *RegionLabeler) GetLabelRule(id string) *LabelRule {
 	l.RLock()
 	defer l.RUnlock()
+	return l.GetLabelRuleLocked(id)
+}
+
+// GetLabelRuleLocked returns the Rule with the same ID.
+func (l *RegionLabeler) GetLabelRuleLocked(id string) *LabelRule {
 	rule, ok := l.labelRules[id]
 	if !ok {
 		return nil
