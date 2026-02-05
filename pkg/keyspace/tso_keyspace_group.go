@@ -342,7 +342,7 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 // saveKeyspaceGroups will try to save the given keyspace groups into the storage.
 // If any keyspace group already exists and `overwrite` is false, it will return ErrKeyspaceGroupExists.
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup, overwrite bool) error {
-	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for _, keyspaceGroup := range keyspaceGroups {
 			// Check if keyspace group has already existed.
 			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
@@ -368,10 +368,18 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 			if err != nil {
 				return err
 			}
-			tso.SetKeyspaceGroupKeyspaceCountGauge(newKG.ID, float64(len(newKG.Keyspaces)))
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	// Update metrics only after the transaction has committed, so that gauges
+	// never reflect a state that was not persisted (e.g. after a rollback).
+	for _, kg := range keyspaceGroups {
+		tso.SetKeyspaceGroupKeyspaceCountGauge(kg.ID, float64(len(kg.Keyspaces)))
+	}
+	return nil
 }
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
