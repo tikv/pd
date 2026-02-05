@@ -149,7 +149,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	if err := c.Replication.Adjust(configMetaData.Child("replication")); err != nil {
 		return err
 	}
-	return c.Server.Adjust(configMetaData.Child("server"))
+	return c.Server.Adjust(configMetaData.Child("pd-server"))
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {

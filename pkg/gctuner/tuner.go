@@ -269,10 +269,10 @@ func (s *State) UpdateIfNeeded(cfg *Config) bool {
 	}
 
 	// Check and update memory limit tuner
-	if newMemoryLimitBytes != s.MemoryLimitBytes || newMemoryLimitGCTriggerBytes != s.MemoryLimitGCTriggerBytes {
+	if newMemoryLimitBytes != s.MemoryLimitBytes || newMemoryLimitGCTriggerRatio != s.MemoryLimitGCTriggerRatio {
 		s.MemoryLimitBytes = newMemoryLimitBytes
-		s.MemoryLimitGCTriggerBytes = newMemoryLimitGCTriggerBytes
 		s.MemoryLimitGCTriggerRatio = newMemoryLimitGCTriggerRatio
+		s.MemoryLimitGCTriggerBytes = newMemoryLimitGCTriggerBytes
 		memory.ServerMemoryLimit.Store(s.MemoryLimitBytes)
 		GlobalMemoryLimitTuner.SetPercentage(s.MemoryLimitGCTriggerRatio)
 		GlobalMemoryLimitTuner.UpdateMemoryLimit()

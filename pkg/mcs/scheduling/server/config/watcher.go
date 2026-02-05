@@ -28,6 +28,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	pkgerrors "github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -93,7 +94,7 @@ func NewWatcher(
 	totalMem, err := memory.MemTotal()
 	if err != nil {
 		cancel()
-		return nil, errors.New("fail to get total memory: " + err.Error())
+		return nil, pkgerrors.Wrap(err, "fail to get total memory")
 	}
 	log.Info("memory info", zap.Uint64("total-mem", totalMem))
 

@@ -21,6 +21,8 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/memory"
 )
 
 var testHeap []byte
@@ -128,7 +130,13 @@ func testGetGOGC(re *require.Assertions) {
 
 func TestInitGCTuner(t *testing.T) {
 	re := require.New(t)
-
+	prevEnable := EnableGOGCTuner.Load()
+	prevMemLimit := memory.ServerMemoryLimit.Load()
+	t.Cleanup(func() {
+		EnableGOGCTuner.Store(prevEnable)
+		memory.ServerMemoryLimit.Store(prevMemLimit)
+		Tuning(0)
+	})
 	// Test initialization
 	totalMem := uint64(1000000000) // 1GB
 	cfg := &Config{
@@ -137,9 +145,7 @@ func TestInitGCTuner(t *testing.T) {
 		ServerMemoryLimit:          0.8,
 		ServerMemoryLimitGCTrigger: 0.7,
 	}
-
 	state := InitGCTuner(totalMem, cfg)
-
 	re.NotNil(state)
 	re.True(state.EnableGCTuner)
 	re.Equal(uint64(800000000), state.MemoryLimitBytes) // 1GB * 0.8
@@ -147,9 +153,6 @@ func TestInitGCTuner(t *testing.T) {
 	re.Equal(0.7, state.MemoryLimitGCTriggerRatio)
 	re.Equal(uint64(560000000), state.MemoryLimitGCTriggerBytes) // 800MB * 0.7
 	re.True(EnableGOGCTuner.Load())
-
-	// Cleanup
-	Tuning(0)
 }
 
 func TestInitGCTunerWithZeroMemoryLimit(t *testing.T) {
@@ -211,6 +214,17 @@ func TestUpdateIfNeeded(t *testing.T) {
 	updated = state.UpdateIfNeeded(cfg)
 	re.True(updated)
 	re.Equal(uint64(900000000), state.MemoryLimitBytes) // 1GB * 0.9
+
+	// Test ratio-only change (when bytes might be the same due to rounding)
+	// Set up a scenario where ratio changes but computed bytes are the same
+	cfg.ServerMemoryLimitGCTrigger = 0.8
+	updated = state.UpdateIfNeeded(cfg)
+	re.True(updated)
+	re.Equal(0.8, state.MemoryLimitGCTriggerRatio)
+
+	// Test no change when ratio is the same
+	updated = state.UpdateIfNeeded(cfg)
+	re.False(updated)
 
 	// Cleanup
 	Tuning(0)
