@@ -161,6 +161,7 @@ func testTLSReload(
 	go func() {
 		for {
 			dctx, dcancel := context.WithTimeout(ctx, time.Second)
+			// nolint:staticcheck
 			cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
 				CAPath:   testClientTLSInfo.TrustedCAFile,
 				CertPath: testClientTLSInfo.CertFile,
@@ -192,6 +193,7 @@ func testTLSReload(
 
 	// 6. new requests should trigger listener to reload valid certs
 	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
+	// nolint:staticcheck
 	cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
 		CAPath:   testClientTLSInfo.TrustedCAFile,
 		CertPath: testClientTLSInfo.CertFile,
@@ -205,6 +207,7 @@ func testTLSReload(
 	caData, certData, keyData := loadTLSContent(re,
 		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
+	// nolint:staticcheck
 	cli, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
 		SSLCABytes:   caData,
 		SSLCertBytes: certData,
@@ -317,6 +320,7 @@ func TestMultiCN(t *testing.T) {
 func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInfo) error {
 	ctx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel1()
+	// nolint:staticcheck
 	cli, err := pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
 		CAPath:   tls.TrustedCAFile,
 		CertPath: tls.CertFile,

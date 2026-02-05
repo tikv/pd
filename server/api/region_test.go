@@ -635,7 +635,7 @@ func TestRegionsInfoMarshal(t *testing.T) {
 func BenchmarkHexRegionKey(b *testing.B) {
 	key := []byte("region_number_infinity")
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = core.HexRegionKey(key)
 	}
 }
@@ -643,7 +643,7 @@ func BenchmarkHexRegionKey(b *testing.B) {
 func BenchmarkHexRegionKeyStr(b *testing.B) {
 	key := []byte("region_number_infinity")
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = core.HexRegionKeyStr(key)
 	}
 }
@@ -673,7 +673,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	resp.Body.Close()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		resp, _ := apiutil.GetJSON(testDialClient, url, nil)
 		resp.Body.Close()
 	}

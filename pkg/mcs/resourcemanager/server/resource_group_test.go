@@ -63,7 +63,7 @@ func resetSizeCacheRecursive(value reflect.Value) {
 }
 
 func TestClone(t *testing.T) {
-	for i := 0; i <= 10; i++ {
+	for range 11 {
 		var rg ResourceGroup
 		gofakeit.Struct(&rg)
 		// hack to reset XXX_sizecache, gofakeit will random set this field but proto clone will not copy this field.

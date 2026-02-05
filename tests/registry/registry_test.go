@@ -80,6 +80,7 @@ func TestRegistryService(t *testing.T) {
 	leader := cluster.GetLeaderServer()
 
 	// Test registered GRPC Service
+	// nolint:staticcheck
 	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	defer cc.Close()

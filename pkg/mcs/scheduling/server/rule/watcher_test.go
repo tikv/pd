@@ -53,7 +53,7 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		runWatcherLoadLabelRule(ctx, re, client)
 	}
 }

@@ -171,8 +171,8 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 
 	re.Equal("Profile", resp.Header.Get("service-label"))
-	re.Equal("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
-	re.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
+	re.JSONEq("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
+	re.JSONEq("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	re.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
 	re.Equal("127.0.0.1", resp.Header.Get("ip"))
@@ -209,7 +209,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -516,7 +516,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -538,7 +538,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithPrometheus(leader)
 	}
 	cancel()
@@ -560,7 +560,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()

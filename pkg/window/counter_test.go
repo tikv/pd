@@ -162,7 +162,7 @@ func BenchmarkRollingCounterReduce(b *testing.B) {
 		BucketDuration: bucketDuration,
 	}
 	r := NewRollingCounter(opts)
-	for i := 0; i <= 10; i++ {
+	for range 11 {
 		r.Add(1)
 		time.Sleep(time.Millisecond * 500)
 	}

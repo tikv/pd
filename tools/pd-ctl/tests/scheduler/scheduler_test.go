@@ -192,10 +192,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 				return store.GetId() == changedStores[i]
 			}) {
 				re.True(isStorePaused,
-					fmt.Sprintf("store %d should be %s with %s", store.GetId(), status, schedulerName))
+					"store %d should be %s with %s", store.GetId(), status, schedulerName)
 			} else {
 				re.False(isStorePaused,
-					fmt.Sprintf("store %d should not be %s with %s", store.GetId(), status, schedulerName))
+					"store %d should not be %s with %s", store.GetId(), status, schedulerName)
 			}
 			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 				re.Equal(isStorePaused, !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransfer())
