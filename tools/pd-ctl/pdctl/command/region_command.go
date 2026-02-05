@@ -37,9 +37,9 @@ import (
 
 	"github.com/tikv/pd/client/clients/router"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-ctl/helper/mok"
-	"github.com/tikv/pd/tools/pd-ctl/helper/tidb/codec"
 )
 
 var (
@@ -78,6 +78,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionsByKeysCommand())
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 	r.AddCommand(NewInvalidTiFlashKeyCommand())
+	r.AddCommand(NewRegionsByKeyspaceTableIDCommand())
 
 	topRead := &cobra.Command{
 		Use:   `topread [byte|query] <limit> [--jq="<query string>"]`,
@@ -413,6 +414,71 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+// NewRegionsByKeyspaceTableIDCommand returns regions with keyspace and tableID subcommand of regionCmd.
+func NewRegionsByKeyspaceTableIDCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   `keyspace-id <keyspace_id> [table-id <table_id>] [<limit>] [--jq="<query string>"]`,
+		Short: "show regions for keyspace or table",
+		Run:   showRegionsByKeyspaceTableIDCommandFunc,
+	}
+
+	r.Flags().String("jq", "", "jq query")
+	return r
+}
+
+func showRegionsByKeyspaceTableIDCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 || len(args) > 4 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	keyspaceID, err := strconv.ParseInt(args[0], 10, 32)
+	if err != nil {
+		cmd.Println("Error: ", "keyspace-id should be a number")
+		return
+	}
+	startKey := []byte{'x', byte(keyspaceID >> 16), byte(keyspaceID >> 8), byte(keyspaceID)}
+	nextKeyspaceID := keyspaceID + 1
+	endKey := []byte{'x', byte(nextKeyspaceID >> 16), byte(nextKeyspaceID >> 8), byte(nextKeyspaceID)}
+	if len(args) >= 3 {
+		if args[1] != "table-id" {
+			cmd.Println("Error: ", "table-id is required")
+			return
+		}
+		tableID, err := strconv.ParseInt(args[2], 10, 64)
+		if err != nil {
+			cmd.Println("Error: ", "table-id should be a number")
+			return
+		}
+		nextTableID := tableID + 1
+		startKey = append(startKey, 't')
+		startKey = codec.EncodeInt(startKey, tableID)
+		endKey = append(startKey, 't')
+		endKey = codec.EncodeInt(endKey, nextTableID)
+	}
+
+	encodedStartKey := codec.EncodeBytes(startKey)
+	encodedEndKey := codec.EncodeBytes(endKey)
+	prefix := regionsKeyPrefix + "?key=" + url.QueryEscape(string(encodedStartKey)) + "&end_key=" + url.QueryEscape(string(encodedEndKey))
+	if len(args) == 2 || len(args) == 4 {
+		limit, err := strconv.Atoi(args[len(args)-1])
+		if err != nil {
+			cmd.Println("Error: ", "limit should be a number")
+			return
+		}
+		prefix += "&limit=" + strconv.Itoa(limit)
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get region: %s\n", err)
+		return
+	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
 		return
 	}
 	cmd.Println(r)
