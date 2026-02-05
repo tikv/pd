@@ -886,7 +886,7 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 	for i := range kgm.kgs {
 		kg := kgm.kgs[i]
 		if kg == nil {
-			re.Nil(kgm.ams[i], fmt.Sprintf("ksg is nil but am is not nil for id %d", i))
+			re.Nil(kgm.ams[i], "ksg is nil but am is not nil for id %d", i)
 		} else {
 			am := kgm.ams[i]
 			if am != nil {
@@ -977,7 +977,7 @@ func verifyLocalKeyspaceLookupTable(
 	re *require.Assertions, keyspaceLookupTable map[uint32]struct{}, newKeyspaces []uint32,
 ) {
 	re.Equal(len(newKeyspaces), len(keyspaceLookupTable),
-		fmt.Sprintf("%v %v", newKeyspaces, keyspaceLookupTable))
+		"%v %v", newKeyspaces, keyspaceLookupTable)
 	for _, keyspace := range newKeyspaces {
 		_, ok := keyspaceLookupTable[keyspace]
 		re.True(ok)

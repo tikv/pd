@@ -305,7 +305,7 @@ func BenchmarkObserve(b *testing.B) {
 
 	b.ResetTimer()
 	// Run the Observe function b.N times
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		regionStats.Observe(regions[i%int(regionNum)], stores)
 	}
 }

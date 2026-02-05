@@ -634,7 +634,7 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 func BenchmarkUpdateBuckets(b *testing.B) {
 	region := NewTestRegionInfo(1, 1, []byte{}, []byte{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
 		region.UpdateBuckets(buckets, region.GetBuckets())
 	}
@@ -659,13 +659,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.randLeaderRegion(1, nil)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
@@ -674,13 +674,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -692,13 +692,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -721,7 +721,7 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 		items = append(items, region)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		item := items[i%len(items)]
 		item.approximateKeys = int64(200000)
 		item.approximateSize = int64(20)
@@ -780,7 +780,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 			time.Sleep(time.Millisecond)
 		}
 	}()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		item := items[i%len(items)]
 		item.approximateKeys = int64(200000)
 		origin, overlaps, rangeChanged := regions.SetRegion(item)
@@ -873,7 +873,7 @@ func BenchmarkAddRegion(b *testing.B) {
 	idAllocator := mockid.NewIDAllocator()
 	items := generateRegionItems(idAllocator, 10000000)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
 		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
 	}
@@ -887,7 +887,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// Update the subtrees from an empty `*RegionsInfo`.
 		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -898,7 +898,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// which means the regions are completely non-overlapped.
 		b.Run(fmt.Sprintf("from non-overlapped regions with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -910,7 +910,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
 			items = generateRegionItems(idAllocator, size)
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -954,7 +954,7 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 	}
 	flowRoundDivisor := 3
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	}
 }
@@ -983,10 +983,10 @@ func TestUpdateRegionEquivalence(t *testing.T) {
 		checkRegions(re, regionsNew)
 
 		for _, r := range regionsOld.GetRegions() {
-			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+			re.Equal(int32(2), r.GetRef(), "inconsistent region %d", r.GetID())
 		}
 		for _, r := range regionsNew.GetRegions() {
-			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+			re.Equal(int32(2), r.GetRef(), "inconsistent region %d", r.GetID())
 		}
 
 		for i := 1; i <= storeNums; i++ {

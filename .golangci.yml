@@ -90,7 +90,7 @@ linters-settings:
         exclude: [""]
       - name: confusing-results
         severity: warning
-        disabled: false
+        disabled: true
         exclude: [""]
       - name: context-as-argument
         severity: warning

@@ -106,6 +106,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
+	// nolint:staticcheck
 	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	cc.Close()
