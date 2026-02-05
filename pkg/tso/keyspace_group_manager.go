@@ -38,7 +38,6 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -975,6 +974,9 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			}
 		}
 		kgm.kgs[groupID] = nil
+		if kgm.metrics != nil {
+			kgm.metrics.DeleteKeyspaceListLength(groupID)
+		}
 	}
 
 	allocator := kgm.allocators[groupID]

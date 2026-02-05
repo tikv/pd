@@ -14,7 +14,11 @@
 
 package tso
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 const (
 	pdNamespace  = "pd"
@@ -83,6 +87,15 @@ var (
 			Help:      "Bucketed histogram of processing time(s) of the Keyspace Group operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{typeLabel})
+
+	// keyspaceGroupKeyspaceCountGauge records the keyspace list length of each keyspace group.
+	keyspaceGroupKeyspaceCountGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: tsoNamespace,
+			Subsystem: "keyspace_group",
+			Name:      "keyspace_list_length",
+			Help:      "The length of keyspace list in each TSO keyspace group.",
+		}, []string{groupLabel})
 )
 
 func init() {
@@ -93,6 +106,7 @@ func init() {
 	prometheus.MustRegister(tsoAllocatorRole)
 	prometheus.MustRegister(keyspaceGroupStateGauge)
 	prometheus.MustRegister(keyspaceGroupOpDuration)
+	prometheus.MustRegister(keyspaceGroupKeyspaceCountGauge)
 }
 
 type tsoMetrics struct {
@@ -176,6 +190,9 @@ type keyspaceGroupMetrics struct {
 	finishSplitDuration     prometheus.Observer
 	finishMergeSendDuration prometheus.Observer
 	finishMergeDuration     prometheus.Observer
+
+	// keyspaceListLengthGauge records the keyspace list length per keyspace group.
+	keyspaceListLengthGauge *prometheus.GaugeVec
 }
 
 func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
@@ -190,5 +207,23 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 		finishSplitDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-split"),
 		finishMergeSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
 		finishMergeDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
+
+		keyspaceListLengthGauge: keyspaceGroupKeyspaceCountGauge,
 	}
+}
+
+// SetKeyspaceListLength sets the keyspace list length metric for the given keyspace group.
+func (m *keyspaceGroupMetrics) SetKeyspaceListLength(groupID uint32, length float64) {
+	m.keyspaceListLengthGauge.WithLabelValues(fmt.Sprintf("%d", groupID)).Set(length)
+}
+
+// DeleteKeyspaceListLength removes the keyspace list length metric for the given keyspace group.
+func (m *keyspaceGroupMetrics) DeleteKeyspaceListLength(groupID uint32) {
+	m.keyspaceListLengthGauge.DeleteLabelValues(fmt.Sprintf("%d", groupID))
+}
+
+// SetKeyspaceGroupKeyspaceCountGauge sets the keyspace list length metric for the given keyspace group.
+// It is used by PD API service when saveKeyspaceGroups is executed.
+func SetKeyspaceGroupKeyspaceCountGauge(groupID uint32, length float64) {
+	keyspaceGroupKeyspaceCountGauge.WithLabelValues(fmt.Sprintf("%d", groupID)).Set(length)
 }
