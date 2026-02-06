@@ -317,6 +317,14 @@ func WithOutputMustContainAllKeyRange() GetRegionOption {
 	return func(op *GetRegionOp) { op.OutputMustContainAllKeyRange = true }
 }
 
+// WithPDLeaderOnly means the request must be handled by PD leader.
+func WithPDLeaderOnly() GetRegionOption {
+	return func(op *GetRegionOp) {
+		op.AllowRouterServiceHandle = false
+		op.AllowFollowerHandle = false
+	}
+}
+
 // MetaStorageOp represents available options when using meta storage client.
 type MetaStorageOp struct {
 	RangeEnd         []byte
