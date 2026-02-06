@@ -261,6 +261,13 @@ func WithAllowRouterServiceHandleStoreRequest() GetStoreOption {
 	return func(op *GetStoreOp) { op.AllowRouterServiceHandle = true }
 }
 
+// WithPDLeaderOnlyStoreRequest means the store request must be handled by PD leader.
+func WithPDLeaderOnlyStoreRequest() GetStoreOption {
+	return func(op *GetStoreOp) {
+		op.AllowRouterServiceHandle = false
+	}
+}
+
 // RegionsOp represents available options when operate regions
 type RegionsOp struct {
 	Group          string

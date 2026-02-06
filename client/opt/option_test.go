@@ -112,7 +112,7 @@ func TestDynamicOptionChange(t *testing.T) {
 	ensureNoNotification(t, o.EnableRouterClientCh)
 }
 
-func TestGetRegionOptions(t *testing.T) {
+func TestOptions(t *testing.T) {
 	re := require.New(t)
 	op := GetRegionOp{}
 	re.False(op.AllowFollowerHandle)
@@ -123,6 +123,13 @@ func TestGetRegionOptions(t *testing.T) {
 	WithPDLeaderOnly()(&op)
 	re.False(op.AllowFollowerHandle)
 	re.False(op.AllowRouterServiceHandle)
+
+	storeOp := GetStoreOp{}
+	re.False(storeOp.AllowRouterServiceHandle)
+	WithAllowRouterServiceHandleStoreRequest()(&storeOp)
+	re.True(storeOp.AllowRouterServiceHandle)
+	WithPDLeaderOnlyStoreRequest()(&storeOp)
+	re.False(storeOp.AllowRouterServiceHandle)
 }
 
 // clearChannel drains any pending events from the channel.
