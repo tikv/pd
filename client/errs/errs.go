@@ -24,6 +24,16 @@ import (
 	"github.com/pingcap/errors"
 )
 
+// ShouldRedial determines whether the client should redial to the server forcing a DNS resolution.
+func ShouldRedial(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, NotLeaderErr) ||
+		strings.Contains(errMsg, NotPrimaryErr)
+}
+
 // IsLeaderChange will determine whether there is a leader/primary change.
 func IsLeaderChange(err error) bool {
 	if err == nil {

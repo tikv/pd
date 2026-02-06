@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -199,8 +200,16 @@ func getValueFromMetadata(ctx context.Context, key string, f func(context.Contex
 func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string, tlsCfg *tls.Config, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
 	conn, ok := clientConns.Load(url)
 	if ok {
-		// TODO: check the connection state.
-		return conn.(*grpc.ClientConn), nil
+		cc := conn.(*grpc.ClientConn)
+		// Check the connection state. If it's shutting down or shutdown, remove it and create a new one.
+		state := cc.GetState()
+		if state == connectivity.Shutdown {
+			log.Debug("connection is shutdown, remove it and create a new one", zap.String("url", url))
+			clientConns.Delete(url)
+			cc.Close()
+		} else {
+			return cc, nil
+		}
 	}
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
