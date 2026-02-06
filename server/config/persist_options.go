@@ -56,6 +56,7 @@ type PersistOptions struct {
 	microservice    atomic.Value
 	storeConfig     atomic.Value
 	clusterVersion  unsafe.Pointer
+	rawSizeConfig   atomic.Value
 }
 
 // NewPersistOptions creates a new PersistOptions instance.
@@ -72,6 +73,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	// set it to an empty config here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
 	o.SetClusterVersion(&cfg.ClusterVersion)
+	o.rawSizeConfig.Store(map[string]string{})
 	o.ttl = nil
 	return o
 }
@@ -154,6 +156,20 @@ func (o *PersistOptions) GetStoreConfig() *sc.StoreConfig {
 // SetStoreConfig sets the store configuration.
 func (o *PersistOptions) SetStoreConfig(cfg *sc.StoreConfig) {
 	o.storeConfig.Store(cfg)
+}
+
+// GetRawSizeConfig returns the raw size config map.
+func (o *PersistOptions) GetRawSizeConfig() map[string]string {
+	raw, ok := o.rawSizeConfig.Load().(map[string]string)
+	if !ok || raw == nil {
+		return map[string]string{}
+	}
+	return cloneRawSizeConfig(raw)
+}
+
+// SetRawSizeConfig sets the raw size config map.
+func (o *PersistOptions) SetRawSizeConfig(cfg map[string]string) {
+	o.rawSizeConfig.Store(cloneRawSizeConfig(cfg))
 }
 
 // GetClusterVersion returns the cluster version.
@@ -760,7 +776,8 @@ func (o *PersistOptions) DeleteLabelProperty(typ, labelKey, labelValue string) {
 type persistedConfig struct {
 	*Config
 	// StoreConfig is injected into Config to avoid breaking the original API.
-	StoreConfig sc.StoreConfig `json:"store"`
+	StoreConfig   sc.StoreConfig     `json:"store"`
+	RawSizeConfig map[string]string `json:"raw-size-config,omitempty"`
 }
 
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
@@ -782,7 +799,8 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 			Microservice:    *o.GetMicroserviceConfig(),
 			ClusterVersion:  *o.GetClusterVersion(),
 		},
-		StoreConfig: *o.GetStoreConfig(),
+		StoreConfig:   *o.GetStoreConfig(),
+		RawSizeConfig: o.GetRawSizeConfig(),
 	}
 	failpoint.Inject("persistFail", func() {
 		failpoint.Return(errors.New("fail to persist"))
@@ -815,8 +833,20 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.microservice.Store(&cfg.Microservice)
 		o.storeConfig.Store(&cfg.StoreConfig)
 		o.SetClusterVersion(&cfg.ClusterVersion)
+		o.SetRawSizeConfig(cfg.RawSizeConfig)
 	}
 	return nil
+}
+
+func cloneRawSizeConfig(raw map[string]string) map[string]string {
+	if raw == nil {
+		return map[string]string{}
+	}
+	clone := make(map[string]string, len(raw))
+	for k, v := range raw {
+		clone[k] = v
+	}
+	return clone
 }
 
 func adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {

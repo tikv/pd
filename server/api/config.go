@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/unrolled/render"
 
 	"github.com/pingcap/errcode"
@@ -39,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -80,7 +82,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		mergedCfg := localCfg
 		mergedCfg.Replication = leaderCfg.Replication
 		mergedCfg.Schedule = leaderCfg.Schedule
-		h.rd.JSON(w, http.StatusOK, mergedCfg)
+		h.renderConfigWithRawSize(w, mergedCfg)
 		return
 	}
 	cfg := h.svr.GetConfig()
@@ -96,7 +98,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	} else {
 		cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	}
-	h.rd.JSON(w, http.StatusOK, cfg)
+	h.renderConfigWithRawSize(w, cfg)
 }
 
 // GetDefaultConfig gets the default config.
@@ -165,26 +167,126 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rawSizeUpdates := make(map[string]string)
 	for k, v := range conf {
+		fullKey := k
 		if s := strings.Split(k, "."); len(s) > 1 {
 			if err := h.updateConfig(cfg, k, v); err != nil {
 				h.rd.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			continue
+		} else {
+			key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
+			if key == "" {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
+				return
+			}
+			fullKey = key
+			if err := h.updateConfig(cfg, key, v); err != nil {
+				h.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
-		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
-		if key == "" {
-			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
-			return
-		}
-		if err := h.updateConfig(cfg, key, v); err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
+		if rawValue, ok := parseRawSizeValue(fullKey, v); ok {
+			rawSizeUpdates[fullKey] = rawValue
 		}
 	}
 
+	if err := h.svr.UpdateRawSizeConfig(rawSizeUpdates); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
+}
+
+func (h *confHandler) renderConfigWithRawSize(w http.ResponseWriter, cfg *config.Config) {
+	raw := h.svr.GetRawSizeConfig()
+	if len(raw) == 0 {
+		h.rd.JSON(w, http.StatusOK, cfg)
+		return
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var output map[string]any
+	if err := json.Unmarshal(data, &output); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	applyRawSizeConfig(output, raw)
+	h.rd.JSON(w, http.StatusOK, output)
+}
+
+func applyRawSizeConfig(config map[string]any, raw map[string]string) {
+	for path, rawValue := range raw {
+		segments := strings.Split(path, ".")
+		if len(segments) == 0 {
+			continue
+		}
+		cursor := config
+		for i, segment := range segments {
+			isLast := i == len(segments)-1
+			if isLast {
+				if current, ok := cursor[segment]; ok && rawSizeMatches(current, rawValue) {
+					cursor[segment] = rawValue
+				}
+				break
+			}
+			next, ok := cursor[segment].(map[string]any)
+			if !ok {
+				break
+			}
+			cursor = next
+		}
+	}
+}
+
+func rawSizeMatches(current any, rawValue string) bool {
+	rawBytes, err := units.RAMInBytes(rawValue)
+	if err != nil {
+		return false
+	}
+	switch value := current.(type) {
+	case string:
+		currentBytes, err := units.RAMInBytes(value)
+		if err != nil {
+			return false
+		}
+		return currentBytes == rawBytes
+	case float64:
+		return int64(value) == rawBytes
+	default:
+		return false
+	}
+}
+
+func parseRawSizeValue(key string, value any) (string, bool) {
+	if !isByteSizeConfigKey(key) {
+		return "", false
+	}
+	rawValue, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	if _, err := units.RAMInBytes(rawValue); err != nil {
+		return "", false
+	}
+	return rawValue, true
+}
+
+func isByteSizeConfigKey(path string) bool {
+	tags := strings.Split(path, ".")
+	field := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.Config{}), tags)
+	if field == nil {
+		return false
+	}
+	if field.Kind() == reflect.Ptr {
+		field = field.Elem()
+	}
+	return field == reflect.TypeOf(typeutil.ByteSize(0))
 }
 
 func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) error {
