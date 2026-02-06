@@ -125,6 +125,23 @@ const (
 	syncRegionTaskRunner = "sync-region-async"
 )
 
+// StoreFeatureFlags represents a set of flags indicating whether a feature of stores is available in a cluster.
+// This type is used for internally deciding whether a feature can be safely enabled. This is used to manages
+// features that:
+//
+//   - a single store node cannot enable it without confirming that the whole cluster has supported it otherwise there
+//     would be compatibility issue;
+//   - the feature gate based on version number is for some reason not applicable.
+//
+// This type directly equals to the field `metapb.Store.FeatureFlags`.
+type StoreFeatureFlags uint64
+
+const (
+	// FeatureFlagInMemoryPessimisticLocksNextGen is the flag representing the feature in-memory pessimistic
+	// locks for next gen or TiDB-X clusters.
+	FeatureFlagInMemoryPessimisticLocksNextGen StoreFeatureFlags = 1 << iota
+)
+
 // Server is the interface for cluster.
 type Server interface {
 	GetAllocator() id.Allocator
@@ -200,6 +217,12 @@ type RaftCluster struct {
 	logRunner ratelimit.Runner
 	// syncRegionRunner is used to sync region asynchronously.
 	syncRegionRunner ratelimit.Runner
+
+	clusterVersionUpdateMu syncutil.Mutex
+	// clusterFeatureFlags is the current feature flags indicating what features (in a specific set) can be safely
+	// enabled in the cluster.
+	// This field is only updated with clusterVersionUpdateMu acquired.
+	clusterFeatureFlags atomic.Uint64
 }
 
 // Status saves some state information.
@@ -807,6 +830,8 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Int("count", c.GetStoreCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
+
+	c.updateClusterFeatureFlags(c.GetStores())
 
 	start = time.Now()
 
@@ -1464,6 +1489,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		opts = append(opts,
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
+			core.SetStoreFeatureFlags(store.FeatureFlags),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
 			core.SetStoreDeployPath(store.DeployPath))
@@ -2051,6 +2077,9 @@ func (*RaftCluster) resetHealthStatus() {
 
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
+	c.clusterVersionUpdateMu.Lock()
+	defer c.clusterVersionUpdateMu.Unlock()
+
 	var minVersion *semver.Version
 	stores := c.GetStores()
 	for _, s := range stores {
@@ -2069,20 +2098,46 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	failpoint.Inject("versionChangeConcurrency", func() {
 		time.Sleep(500 * time.Millisecond)
 	})
-	if minVersion == nil || clusterVersion.Equal(*minVersion) {
-		return
+	if minVersion != nil && !clusterVersion.Equal(*minVersion) {
+		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
+			log.Error("cluster version changed by API at the same time")
+		}
+		err := c.opt.Persist(c.storage)
+		if err != nil {
+			log.Error("persist cluster version meet error", errs.ZapError(err))
+		}
+		log.Info("cluster version changed",
+			zap.Stringer("old-cluster-version", clusterVersion),
+			zap.Stringer("new-cluster-version", minVersion))
 	}
 
-	if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
-		log.Error("cluster version changed by API at the same time")
+	c.updateClusterFeatureFlags(stores)
+}
+
+func (c *RaftCluster) updateClusterFeatureFlags(stores []*core.StoreInfo) {
+	newFeatureFlags := calcClusterFeatureFlags(stores)
+	c.clusterFeatureFlags.Store(uint64(newFeatureFlags))
+}
+
+// calcClusterFeatureFlags merges feature flags of all stores and outputs feature flags of the whole cluster.
+func calcClusterFeatureFlags(stores []*core.StoreInfo) StoreFeatureFlags {
+	var res StoreFeatureFlags
+	// Add conjunction flags, and exclude it later if some of the nodes does not satisfy.
+	res |= FeatureFlagInMemoryPessimisticLocksNextGen
+
+	for _, store := range stores {
+		if store.IsRemoved() {
+			continue
+		}
+
+		nodeFeatureFlags := StoreFeatureFlags(store.GetMeta().GetFeatureFlags())
+		// In-memory pessimistic lock can be enabled if all TiKV nodes supports it,
+		if store.IsTiKV() && nodeFeatureFlags&FeatureFlagInMemoryPessimisticLocksNextGen == 0 {
+			res &= ^FeatureFlagInMemoryPessimisticLocksNextGen
+		}
 	}
-	err := c.opt.Persist(c.storage)
-	if err != nil {
-		log.Error("persist cluster version meet error", errs.ZapError(err))
-	}
-	log.Info("cluster version changed",
-		zap.Stringer("old-cluster-version", clusterVersion),
-		zap.Stringer("new-cluster-version", minVersion))
+
+	return res
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
@@ -2470,6 +2525,11 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 // GetClusterVersion returns the current cluster version.
 func (c *RaftCluster) GetClusterVersion() string {
 	return c.opt.GetClusterVersion().String()
+}
+
+// GetClusterFeatureFlags returns the current cluster feature flags.
+func (c *RaftCluster) GetClusterFeatureFlags() StoreFeatureFlags {
+	return StoreFeatureFlags(c.clusterFeatureFlags.Load())
 }
 
 // GetEtcdClient returns the current etcd client
