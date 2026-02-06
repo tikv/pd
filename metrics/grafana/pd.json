@@ -11003,7 +11003,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum(rate(pd_client_request_handle_tso_batch_size_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_server_handle_tso_batch_size_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (le))",
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
@@ -11012,7 +11012,7 @@
             },
             {
               "exemplar": true,
-              "expr": "histogram_quantile(0.90, sum(rate(pd_client_request_handle_tso_batch_size_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (le))",
+              "expr": "histogram_quantile(0.90, sum(rate(pd_server_handle_tso_batch_size_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (le))",
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
@@ -11021,7 +11021,7 @@
             },
             {
               "exemplar": true,
-              "expr": "sum(rate(pd_client_request_handle_tso_batch_size_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) / sum(rate(pd_client_request_handle_tso_batch_size_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m]))",
+              "expr": "sum(rate(pd_server_handle_tso_batch_size_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) / sum(rate(pd_server_handle_tso_batch_size_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m]))",
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
