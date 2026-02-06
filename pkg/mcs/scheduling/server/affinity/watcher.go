@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,13 +39,12 @@ import (
 //   - Value: affinity.Group
 //
 // regionLabelPathPrefix:
-//   - Key:
+//   - Key: /pd/{cluster_id}/region_label/affinity_group/{group_id}
 //   - Value: labeler.LabelRule
 //   - Filtered to only process rules with ID prefix "affinity_group/"
 type Watcher struct {
-	ctx        context.Context
 	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	wg         *sync.WaitGroup
 	etcdClient *clientv3.Client
 
 	// affinityManager is used to manage the affinity groups in the scheduling server.
@@ -63,17 +62,17 @@ func NewWatcher(
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	w := &Watcher{
-		ctx:             ctx,
 		cancel:          cancel,
+		wg:              &sync.WaitGroup{},
 		etcdClient:      etcdClient,
 		affinityManager: affinityManager,
 	}
-	err := w.initializeGroupWatcher()
+	err := w.initializeGroupWatcher(ctx)
 	if err != nil {
 		w.Close()
 		return nil, err
 	}
-	err = w.initializeAffinityLabelWatcher()
+	err = w.initializeAffinityLabelWatcher(ctx)
 	if err != nil {
 		w.Close()
 		return nil, err
@@ -82,7 +81,7 @@ func NewWatcher(
 }
 
 // initializeGroupWatcher initializes the watcher for affinity group changes.
-func (w *Watcher) initializeGroupWatcher() error {
+func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("update affinity group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		group := &affinity.Group{}
@@ -103,7 +102,7 @@ func (w *Watcher) initializeGroupWatcher() error {
 	}
 
 	w.groupWatcher = etcdutil.NewLoopWatcher(
-		w.ctx, &w.wg,
+		ctx, w.wg,
 		w.etcdClient,
 		"scheduling-affinity-group-watcher",
 		strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "/"),
@@ -118,12 +117,9 @@ func (w *Watcher) initializeGroupWatcher() error {
 
 // initializeAffinityLabelWatcher initializes the watcher for affinity label rule changes.
 // It watches the region_label path but only processes rules with affinity group prefix.
-func (w *Watcher) initializeAffinityLabelWatcher() error {
+func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 	// Note: labelWatcher does not need preEventsFn/postEventsFn locking
 	// because the sync methods will handle locking internally
-	preEventsFn := func([]*clientv3.Event) error {
-		return nil
-	}
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -144,18 +140,14 @@ func (w *Watcher) initializeAffinityLabelWatcher() error {
 		return nil
 	}
 
-	postEventsFn := func([]*clientv3.Event) error {
-		return nil
-	}
-
 	w.labelWatcher = etcdutil.NewLoopWatcher(
-		w.ctx, &w.wg,
+		ctx, w.wg,
 		w.etcdClient,
 		"scheduling-affinity-label-watcher",
 		strings.TrimSuffix(keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), "/"), // Filter: only process affinity group label rules
-		preEventsFn,
+		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
-		postEventsFn,
+		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
 	w.labelWatcher.StartWatchLoop()
@@ -164,6 +156,10 @@ func (w *Watcher) initializeAffinityLabelWatcher() error {
 
 // Close closes the watcher.
 func (w *Watcher) Close() {
-	w.cancel()
-	w.wg.Wait()
+	if w.cancel != nil {
+		w.cancel()
+	}
+	if w.wg != nil {
+		w.wg.Wait()
+	}
 }

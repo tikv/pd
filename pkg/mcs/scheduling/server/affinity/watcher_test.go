@@ -147,11 +147,10 @@ func TestOnlyProcessAffinityGroupLabelRules(t *testing.T) {
 	_, err = client.Put(ctx, labelKey, string(labelValue))
 	re.NoError(err)
 
-	time.Sleep(100 * time.Millisecond)
-
-	groupState := affinityManager.GetAffinityGroupState(testGroup.ID)
-	re.NotNil(groupState)
-	re.Equal(0, groupState.RangeCount)
+	testutil.Eventually(re, func() bool {
+		groupState := affinityManager.GetAffinityGroupState(testGroup.ID)
+		return groupState != nil && groupState.RangeCount == 0
+	})
 
 	affinityRule := makeTestLabelRule(testGroup.ID, "7480000000000000ff2000000000000000f8", "7480000000000000ff3000000000000000f8")
 	re.NoError(putLabelRule(ctx, client, affinityRule))
@@ -229,7 +228,7 @@ func TestConcurrentLabelRuleUpdates(t *testing.T) {
 	})
 
 	// Step 2: Concurrently create label rules for all groups
-	var wg sync.WaitGroup
+	wg := &sync.WaitGroup{}
 	for i := range groupCount {
 		wg.Add(1)
 		go func(idx int) {
@@ -308,7 +307,7 @@ func TestLabelRuleBeforeGroup(t *testing.T) {
 func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestSingleConfig()
+	cfg := etcdutil.NewTestEtcdConfig()
 	var err error
 	cfg.Dir, err = os.MkdirTemp("", "pd_affinity_watcher_tests")
 	re.NoError(err)

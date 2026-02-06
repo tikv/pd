@@ -77,7 +77,7 @@ type Manager struct {
 	keyRanges map[string]GroupKeyRanges // {group_id} -> key ranges
 	// labelRuleBuffer is a buffer used during etcd synchronization.
 	// When synchronizing via etcd, LabelRule information may arrive earlier than group information.
-	labelRuleBuffer map[string]*labeler.LabelRule
+	labelRuleBuffer map[string]*labeler.LabelRule // {group_id} -> labelRule
 }
 
 // NewManager creates a new affinity Manager.
@@ -482,8 +482,6 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 		if labelRule == nil {
 			labelRule = m.labelRuleBuffer[group.ID]
 		}
-		// Once group created, the buffer must be deleted.
-		delete(m.labelRuleBuffer, group.ID)
 
 		if labelRule != nil {
 			gkr, labelErr = extractKeyRangesFromLabelRule(labelRule)
@@ -501,8 +499,10 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 				log.Warn("failed to attach existing label rule to new affinity group",
 					zap.String("group-id", group.ID),
 					zap.Error(labelErr))
+				delete(m.labelRuleBuffer, group.ID)
 				return
 			}
+			// Attach only non-empty label rules to avoid marking the group as having ranges when it does not.
 			if len(gkr.KeyRanges) > 0 {
 				// Pass the rangeCount directly instead of letting updateGroupLabelRuleLocked calculate it
 				// because labelRule.Data might be []any (from watcher) instead of []*labeler.KeyRangeRule
@@ -510,6 +510,8 @@ func (m *Manager) SyncGroupFromEtcd(group *Group) {
 				m.updateGroupLabelRuleLockedWithCount(group.ID, labelRule, len(gkr.KeyRanges), false)
 			}
 		}
+		// Once group created, the buffer must be deleted.
+		delete(m.labelRuleBuffer, group.ID)
 	} else {
 		changed := false
 		if groupInfo.LeaderStoreID != group.LeaderStoreID {
@@ -566,7 +568,12 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if _, exists := m.groups[groupID]; !exists && len(gkr.KeyRanges) > 0 {
+	// Only buffer non-empty rules
+	if _, exists := m.groups[groupID]; !exists {
+		if len(gkr.KeyRanges) == 0 {
+			delete(m.labelRuleBuffer, groupID)
+			return nil
+		}
 		// Store LabelRule information in the buffer when it is synchronized before the group.
 		m.labelRuleBuffer[groupID] = labelRule
 		return nil
@@ -574,6 +581,7 @@ func (m *Manager) SyncKeyRangesFromEtcd(labelRule *labeler.LabelRule) error {
 	// Once group created, the buffer must be deleted.
 	delete(m.labelRuleBuffer, groupID)
 
+	// Keep cache in sync: store when ranges exist, clear when they do not.
 	if len(gkr.KeyRanges) > 0 {
 		m.keyRanges[groupID] = gkr
 	} else {
