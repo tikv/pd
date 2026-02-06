@@ -302,6 +302,11 @@ func (s *Server) GetControllerConfig() *ControllerConfig {
 	return &s.cfg.Controller
 }
 
+// GetResourceGroupWriteRole returns the manager write role for the resource manager service.
+func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
+	return ResourceGroupWriteRoleLegacyAll
+}
+
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	return !s.IsClosed() && s.participant.IsServing()
