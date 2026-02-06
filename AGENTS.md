@@ -52,10 +52,11 @@
 
 ## Failpoints Discipline
 - Keep failpoints enabled only for tests; disable immediately after (`make failpoint-disable` or `make clean-test`) to avoid polluting the codebase.
-- Prefer make targets that auto-enable/disable failpoints (recommended: `make gotest ...`, `make test`, `make basic-test`). If you must run `go test` manually, always bracket it with:
-  - `make failpoint-enable`
-  - `go test ...`
-  - `make failpoint-disable`
+- Prefer make targets that auto-enable/disable failpoints (recommended: `make gotest ...`, `make test`, `make basic-test`).
+- If you must run `go test` manually, use this rule:
+  - Target uses failpoints (for example imports `github.com/pingcap/failpoint`): `make failpoint-enable` -> `go test ...` -> `make failpoint-disable`.
+  - Target does not use failpoints: run `go test ...` directly.
+- Never edit code or run non-test commands while failpoints are enabled. If unsure about state, run `make failpoint-disable` before continuing.
 - Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
 - If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
 
