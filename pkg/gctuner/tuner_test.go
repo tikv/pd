@@ -109,6 +109,9 @@ func testGetGOGC(re *require.Assertions) {
 		gt := globalTuner.Load()
 		re.Nil(gt)
 	}()
+	re.Nil(globalTuner.Load())
+	Tuning(0)
+	re.Nil(globalTuner.Load())
 	re.Equal(defaultGCPercent, GetGOGCPercent())
 	// init tuner
 	threshold := uint64(units.GiB)

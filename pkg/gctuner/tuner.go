@@ -65,10 +65,12 @@ func init() {
 // When Tuning, the env GOGC will not be take effect.
 // threshold: disable tuning if threshold == 0
 func Tuning(threshold uint64) {
-	// disable gc tuner if percent is zero
 	if t := globalTuner.Load(); t == nil {
-		t1 := newTuner(threshold)
-		globalTuner.CompareAndSwap(nil, &t1)
+		// init gc tuner only when threshold > 0, otherwise do nothing
+		if threshold > 0 {
+			t1 := newTuner(threshold)
+			globalTuner.CompareAndSwap(nil, &t1)
+		}
 	} else {
 		if threshold <= 0 {
 			(*t).stop()
