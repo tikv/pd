@@ -59,6 +59,7 @@ import (
 const (
 	Initial int32 = iota
 	Running
+	Starting
 	Stop
 	Destroy
 )
@@ -142,14 +143,27 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
 	s.Lock()
-	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
+		s.Unlock()
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
+	s.state = Starting
+	s.Unlock()
+
 	if err := s.server.Run(); err != nil {
+		s.Lock()
+		if s.state == Starting {
+			s.state = Stop
+		}
+		s.Unlock()
 		return err
 	}
-	s.state = Running
+
+	s.Lock()
+	if s.state == Starting {
+		s.state = Running
+	}
+	s.Unlock()
 	return nil
 }
 
@@ -157,7 +171,7 @@ func (s *TestServer) Run() error {
 func (s *TestServer) Stop() error {
 	s.Lock()
 	defer s.Unlock()
-	if s.state != Running {
+	if s.state != Running && s.state != Starting {
 		return errors.Errorf("server(state%d) cannot stop", s.state)
 	}
 	s.server.Close()
@@ -169,7 +183,7 @@ func (s *TestServer) Stop() error {
 func (s *TestServer) Destroy() error {
 	s.Lock()
 	defer s.Unlock()
-	if s.state == Running {
+	if s.state == Running || s.state == Starting {
 		s.server.Close()
 	}
 	if err := os.RemoveAll(s.server.GetConfig().DataDir); err != nil {
@@ -699,7 +713,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 
 			// Stop and destroy all servers
 			for _, s := range servers {
-				if s.State() == Running {
+				if state := s.State(); state == Running || state == Starting {
 					_ = s.Stop()
 				}
 				_ = s.Destroy()
@@ -738,7 +752,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 		case strings.Contains(errMsg, "ErrStartEtcd"):
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			for _, s := range servers {
-				if s.State() == Running {
+				if state := s.State(); state == Running || state == Starting {
 					_ = s.Stop()
 				}
 			}
@@ -767,7 +781,7 @@ func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			// Stop any partially started servers before retrying
 			for _, s := range servers {
-				if s.State() == Running {
+				if state := s.State(); state == Running || state == Starting {
 					_ = s.Stop()
 				}
 			}
