@@ -71,15 +71,25 @@ type keyspaceResourceGroupManager struct {
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
+	writeRole  ResourceGroupWriteRole
 }
 
-func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.ResourceGroupStorage) *keyspaceResourceGroupManager {
+func newKeyspaceResourceGroupManager(
+	keyspaceID uint32,
+	storage endpoint.ResourceGroupStorage,
+	writeRoles ...ResourceGroupWriteRole,
+) *keyspaceResourceGroupManager {
+	writeRole := ResourceGroupWriteRoleLegacyAll
+	if len(writeRoles) > 0 {
+		writeRole = writeRoles[0]
+	}
 	return &keyspaceResourceGroupManager{
 		groups:          make(map[string]*ResourceGroup),
 		groupRUTrackers: make(map[string]*groupRUTracker),
 		keyspaceID:      keyspaceID,
 		storage:         storage,
-		sl:              newServiceLimiter(keyspaceID, 0, storage),
+		writeRole:       writeRole,
+		sl:              newServiceLimiter(keyspaceID, 0, storage, writeRole),
 	}
 }
 
@@ -147,11 +157,15 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.Resourc
 	group := FromProtoResourceGroup(grouppb)
 	krgm.Lock()
 	defer krgm.Unlock()
-	if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
-		return err
+	if krgm.writeRole.AllowsMetadataWrite() {
+		if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
+			return err
+		}
 	}
-	if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
-		return err
+	if krgm.writeRole.AllowsStateWrite() {
+		if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
+			return err
+		}
 	}
 	krgm.groups[group.Name] = group
 	return nil
@@ -172,6 +186,9 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 	if err != nil {
 		return err
 	}
+	if !krgm.writeRole.AllowsMetadataWrite() {
+		return nil
+	}
 	return curGroup.persistSettings(krgm.keyspaceID, krgm.storage)
 }
 
@@ -185,8 +202,10 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 	if !ok {
 		return errs.ErrResourceGroupNotExists.FastGenByArgs(name)
 	}
-	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
-		return err
+	if krgm.writeRole.AllowsMetadataWrite() {
+		if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
+			return err
+		}
 	}
 	krgm.Lock()
 	delete(krgm.groups, name)
@@ -236,6 +255,9 @@ func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats, includ
 }
 
 func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
+	if !krgm.writeRole.AllowsStateWrite() {
+		return
+	}
 	krgm.RLock()
 	keys := make([]string, 0, len(krgm.groups))
 	for k := range krgm.groups {
@@ -259,11 +281,23 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 }
 
 func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) {
+	krgm.updateServiceLimit(serviceLimit, true)
+}
+
+func (krgm *keyspaceResourceGroupManager) setServiceLimitFromStorage(serviceLimit float64) {
+	krgm.updateServiceLimit(serviceLimit, false)
+}
+
+func (krgm *keyspaceResourceGroupManager) updateServiceLimit(serviceLimit float64, persist bool) {
 	krgm.RLock()
 	sl := krgm.sl
 	krgm.RUnlock()
 	// Set the new service limit to the limiter.
-	sl.setServiceLimit(serviceLimit)
+	if persist {
+		sl.setServiceLimit(serviceLimit)
+	} else {
+		sl.setServiceLimitNoPersist(serviceLimit)
+	}
 	// Cleanup the overrides if the service limit is set to 0.
 	if serviceLimit <= 0 {
 		krgm.cleanupOverrides()
