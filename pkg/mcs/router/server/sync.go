@@ -122,13 +122,6 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 	defer ticker.Stop()
 	var curLeader uint64
 	for {
-		select {
-		case <-s.serverCtx.Done():
-			log.Info("server is closed, exit update member loop")
-			return
-		case <-ticker.C:
-		case <-s.checkMembershipCh:
-		}
 		members, err := etcdutil.ListEtcdMembers(s.serverCtx, s.getClient())
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
@@ -156,6 +149,13 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 				curLeader = ep.ID
 				break
 			}
+		}
+		select {
+		case <-s.serverCtx.Done():
+			log.Info("server is closed, exit update member loop")
+			return
+		case <-ticker.C:
+		case <-s.checkMembershipCh:
 		}
 	}
 }
