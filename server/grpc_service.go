@@ -569,6 +569,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 				return errs.ErrUnknown(err)
 			}
+			tsoBatchSize.Observe(float64(request.GetCount()))
 			tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
 			if tsoStreamErr != nil {
 				return tsoStreamErr
@@ -584,6 +585,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
+		tsoBatchSize.Observe(float64(count))
 		ctx, task := trace.NewTask(ctx, "tso")
 		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
 		task.End()
