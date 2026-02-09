@@ -107,7 +107,9 @@ func withLogicalOverflowCheck() setTSOOption {
 }
 
 // setTSOPhysical sets the TSO's physical part with the given time.
-// It returns true if the TSO's logical part is overflowed.
+// It returns true if the TSO's logical part is overflowed, the caller should wait for the next physical tick.
+// It accepts some options to control the update behavior, for example, withInitialCheck will check whether the TSO in memory has been initialized,
+// and withLogicalOverflowCheck will check whether the logical part is overflowed before updating physical time.
 func (t *timestampOracle) setTSOPhysical(next time.Time, opts ...setTSOOption) bool {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
@@ -317,11 +319,15 @@ const (
 // 2. The physical time is monotonically increasing.
 // 3. The physical time is always less than the saved timestamp.
 //
+// The first returns a boolean indicates whether the logical time is overflowed, and the second returns an error if any error occurs.
+// When met logical overflow, the caller should wait for the next physical tick to retry allocating TSO, which may cause more clock offset issues and etcd load,
+// so we want to avoid it as much as possible by updating physical time in advance.
+//
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
 func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, error) {
 	if !t.isInitialized() {
-		return true, errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
+		return false, errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
 	prevPhysical, prevLogical := t.getTSO()
 
@@ -372,7 +378,8 @@ func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, er
 	// The time window needs to be updated and saved to etcd.
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= updateTimestampGuard {
 		// Only IntervalUpdate is allowed to save timestamp into etcd.
-		// it would be dangerous to save timestamp into etcd when handling overflowUpdate.
+		// It would be dangerous to save timestamp into etcd when handling overflowUpdate.
+		// We don't want to update the physical time too frequently because of logical overflow, which may cause more clock offset issues and etcd load.
 		if updatePurpose != intervalUpdate {
 			t.metrics.notAllowedSaveTimestampEvent.Inc()
 			return true, nil
@@ -384,14 +391,15 @@ func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, er
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.Error(err))
 			t.metrics.errSaveUpdateTSEvent.Inc()
-			return true, err
+			return false, err
 		}
 		t.lastSavedTime.Store(save)
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
 	var overflowed bool
 	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
-	// otherwise, we need to check logical overflow to avoid unnecessary physical time update.
+	// Otherwise, the caller met logical overflow, so it will allocate physical time to alloc more timestamp in concurrent.
+	// So we need to check logical overflow before updating physical time to avoid allocating too much physical time due to logical overflow.
 	if updatePurpose == intervalUpdate {
 		overflowed = t.setTSOPhysical(next, withInitialCheck())
 	} else {
