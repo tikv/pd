@@ -330,7 +330,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	return s, nil
 }
 
-func (s *Server) startEtcd(ctx context.Context) error {
+func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	newCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
 	defer cancel()
 
@@ -342,7 +342,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths
 		// (e.g. when starting a removed member that can never become ready). Avoid
 		// blocking the caller (tests may wait for the start error) by stopping the
-		// server synchronously and closing the embedded etcd in background.
+		// server synchronously and closing the embedded etcd asynchronously.
 		if etcd.Server != nil {
 			etcd.Server.Stop()
 		}
@@ -361,21 +361,23 @@ func (s *Server) startEtcd(ctx context.Context) error {
 			s.httpClient.CloseIdleConnections()
 		}
 	}
+	defer func() {
+		if retErr != nil {
+			cleanup()
+		}
+	}()
 
 	// Check cluster ID
 	urlMap, err := etcdtypes.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
-		cleanup()
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
 	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
-		cleanup()
 		return err
 	}
 
 	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlMap, tlsConfig); err != nil {
-		cleanup()
 		return err
 	}
 
@@ -383,19 +385,16 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
 	case <-newCtx.Done():
-		cleanup()
 		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
 	// Start the etcd and HTTP clients, then init the member.
 	err = s.startClient()
 	if err != nil {
-		cleanup()
 		return err
 	}
 	err = s.initMember(newCtx, etcd)
 	if err != nil {
-		cleanup()
 		return err
 	}
 
