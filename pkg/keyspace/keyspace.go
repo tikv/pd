@@ -646,17 +646,7 @@ const (
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
 	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
-		for _, mutation := range mutations {
-			switch mutation.Op {
-			case OpPut:
-				meta.Config[mutation.Key] = mutation.Value
-			case OpDel:
-				delete(meta.Config, mutation.Key)
-			default:
-				return errs.ErrIllegalOperation
-			}
-		}
-		return nil
+		return applyKeyspaceConfigMutations(meta.Config, mutations)
 	})
 }
 
@@ -673,17 +663,7 @@ func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutat
 		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
 			return err
 		}
-		for _, mutation := range mutations {
-			switch mutation.Op {
-			case OpPut:
-				meta.Config[mutation.Key] = mutation.Value
-			case OpDel:
-				delete(meta.Config, mutation.Key)
-			default:
-				return errs.ErrIllegalOperation
-			}
-		}
-		return nil
+		return applyKeyspaceConfigMutations(meta.Config, mutations)
 	})
 }
 
@@ -701,6 +681,20 @@ func checkKeyspaceConfigPreconditions(config map[string]string, preconditions ma
 		}
 		if actual != *expected {
 			return errs.ErrKeyspaceConfigPreconditionFailed.FastGenByArgs("key=" + k + " expected=" + *expected + " actual=" + actual)
+		}
+	}
+	return nil
+}
+
+func applyKeyspaceConfigMutations(config map[string]string, mutations []*Mutation) error {
+	for _, mutation := range mutations {
+		switch mutation.Op {
+		case OpPut:
+			config[mutation.Key] = mutation.Value
+		case OpDel:
+			delete(config, mutation.Key)
+		default:
+			return errs.ErrIllegalOperation
 		}
 	}
 	return nil
