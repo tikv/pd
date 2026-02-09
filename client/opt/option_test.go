@@ -120,7 +120,7 @@ func TestOptions(t *testing.T) {
 	WithAllowRouterServiceHandle()(&op)
 	re.True(op.AllowFollowerHandle)
 	re.True(op.AllowRouterServiceHandle)
-	WithPDLeaderOnly()(&op)
+	WithAllowPDLeaderOnly()(&op)
 	re.False(op.AllowFollowerHandle)
 	re.False(op.AllowRouterServiceHandle)
 
@@ -128,7 +128,7 @@ func TestOptions(t *testing.T) {
 	re.False(storeOp.AllowRouterServiceHandle)
 	WithAllowRouterServiceHandleStoreRequest()(&storeOp)
 	re.True(storeOp.AllowRouterServiceHandle)
-	WithPDLeaderOnlyStoreRequest()(&storeOp)
+	WithPDLeaderHandleStoreRequestOnly()(&storeOp)
 	re.False(storeOp.AllowRouterServiceHandle)
 }
 

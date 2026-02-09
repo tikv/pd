@@ -261,8 +261,8 @@ func WithAllowRouterServiceHandleStoreRequest() GetStoreOption {
 	return func(op *GetStoreOp) { op.AllowRouterServiceHandle = true }
 }
 
-// WithPDLeaderOnlyStoreRequest means the store request must be handled by PD leader.
-func WithPDLeaderOnlyStoreRequest() GetStoreOption {
+// WithPDLeaderHandleStoreRequestOnly means the store request must be handled by PD leader.
+func WithPDLeaderHandleStoreRequestOnly() GetStoreOption {
 	return func(op *GetStoreOp) {
 		op.AllowRouterServiceHandle = false
 	}
@@ -324,8 +324,8 @@ func WithOutputMustContainAllKeyRange() GetRegionOption {
 	return func(op *GetRegionOp) { op.OutputMustContainAllKeyRange = true }
 }
 
-// WithPDLeaderOnly means the request must be handled by PD leader.
-func WithPDLeaderOnly() GetRegionOption {
+// WithAllowPDLeaderOnly means the request must be handled by PD leader.
+func WithAllowPDLeaderOnly() GetRegionOption {
 	return func(op *GetRegionOp) {
 		op.AllowRouterServiceHandle = false
 		op.AllowFollowerHandle = false
