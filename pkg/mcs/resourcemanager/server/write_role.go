@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,3 +39,8 @@ func (r ResourceGroupWriteRole) AllowsStateWrite() bool {
 }
 
 var errMetadataWriteDisabled = errors.New("metadata write is disabled")
+
+// IsMetadataWriteDisabledError reports whether err is a metadata-write-disabled error.
+func IsMetadataWriteDisabledError(err error) bool {
+	return errors.ErrorEqual(err, errMetadataWriteDisabled)
+}

@@ -376,7 +376,11 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	if err := s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit); err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		if rmserver.IsMetadataWriteDisabledError(err) {
+			c.String(http.StatusForbidden, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.String(http.StatusOK, "Success!")
