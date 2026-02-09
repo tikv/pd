@@ -57,6 +57,16 @@ func MicroserviceRedirector(rules ...serverapi.RedirectRule) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrURLParse.Wrap(err).GenWithStackByCause().Error())
 			return
 		}
+		forwardedIP, forwardedPort := apiutil.GetIPPortFromHTTPRequest(c.Request)
+		if len(forwardedIP) > 0 {
+			c.Request.Header.Add(apiutil.XForwardedForHeader, forwardedIP)
+		} else {
+			// Fallback if GetIPPortFromHTTPRequest failed to get the IP.
+			c.Request.Header.Add(apiutil.XForwardedForHeader, c.Request.RemoteAddr)
+		}
+		if len(forwardedPort) > 0 {
+			c.Request.Header.Add(apiutil.XForwardedPortHeader, forwardedPort)
+		}
 		c.Writer.Header().Add(apiutil.XForwardedToMicroserviceHeader, "true")
 		apiutil.NewCustomReverseProxies(client, []url.URL{*u}).ServeHTTP(c.Writer, c.Request)
 		c.Abort()
