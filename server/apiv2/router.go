@@ -56,7 +56,13 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	root.Use(middlewares.Redirector())
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
+<<<<<<< HEAD
 	handlers.RegisterMicroService(root)
+=======
+	handlers.RegisterMicroservice(root)
+	handlers.RegisterMaintenance(root)
+	root.Use(middlewares.AffinityMicroserviceRedirector())
+>>>>>>> 31fc48f714 (mcs: add affinity redirect and scheduling watcher  (#10042))
 	handlers.RegisterAffinity(root)
 	return router, group, nil
 }

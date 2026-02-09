@@ -112,13 +112,11 @@ func (l *RegionLabeler) loadRules() error {
 	err := l.storage.LoadRegionRules(func(k, v string) {
 		r, err := NewLabelRuleFromJSON([]byte(v))
 		if err != nil {
-			log.Error("failed to unmarshal label rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
-			toDelete = append(toDelete, k)
-			return
-		}
-		err = r.checkAndAdjust()
-		if err != nil {
-			log.Error("failed to adjust label rule", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(err))
+			if errs.ErrRegionRuleContent.Equal(err) {
+				log.Warn("failed to adjust label rule", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(err))
+			} else {
+				log.Warn("failed to unmarshal label rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			}
 			toDelete = append(toDelete, k)
 			return
 		}
@@ -261,11 +259,10 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 
 // SetLabelRuleLocked inserts or updates a LabelRule but not buildRangeList.
 // It updates the in-memory states and storage at the same time.
+// Callers must have already validated/adjusted the rule (checkAndAdjust or
+// NewLabelRuleFromJSON), because this method does not re-validate.
 // It should be used in watcher.
 func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
-	if err := rule.checkAndAdjust(); err != nil {
-		return err
-	}
 	if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
 		return l.storage.SaveRegionRule(txn, rule.ID, rule)
 	}); err != nil {
