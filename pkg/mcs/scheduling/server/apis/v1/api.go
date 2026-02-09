@@ -37,6 +37,7 @@ import (
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -83,6 +84,11 @@ type server struct {
 	*scheserver.Server
 }
 
+// AffinityGroupsResponse defines the response payload for listing affinity groups.
+type AffinityGroupsResponse struct {
+	AffinityGroups map[string]*affinity.GroupState `json:"affinity_groups"`
+}
+
 // GetCluster returns the cluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.Server.GetCluster()
@@ -124,6 +130,7 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterRegionsRouter()
 	s.RegisterStoresRouter()
 	s.RegisterPrimaryRouter()
+	s.RegisterAffinityRouter()
 	return s
 }
 
@@ -254,6 +261,33 @@ func (s *Service) RegisterPrimaryRouter() {
 	router.POST("transfer", transferPrimary)
 }
 
+<<<<<<< HEAD
+=======
+// RegisterAffinityRouter registers affinity routes to the v1 API group.
+func (s *Service) RegisterAffinityRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
+	router := s.root.Group("affinity-groups")
+	router.Use(redirector)
+	router.GET("", getAllAffinityGroups)
+	router.GET("/:group_id", getAffinityGroup)
+}
+
+// getHealth returns the health status of the TSO service.
+func getHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
+	if svr.GetParticipant().IsPrimaryElected() {
+		c.String(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no primary elected")
+}
+
+>>>>>>> 31fc48f714 (mcs: add affinity redirect and scheduling watcher  (#10042))
 // @Tags     admin
 // @Summary  Change the log level.
 // @Produce  json
@@ -1574,4 +1608,73 @@ func transferPrimary(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, "success")
+}
+
+func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrServerNotStarted.FastGenByArgs().Error())
+		return nil, false
+	}
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return nil, false
+	}
+	manager := cluster.GetAffinityManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrAffinityInternal.FastGenByArgs().Error())
+		return nil, false
+	}
+	return manager, true
+}
+
+// @Tags     affinity-groups
+// @Summary  List all affinity groups.
+// @Produce  json
+// @Success  200  {object}  AffinityGroupsResponse
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /affinity-groups [get]
+func getAllAffinityGroups(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+	allGroupStates := manager.GetAllAffinityGroupStates()
+	resp := AffinityGroupsResponse{
+		AffinityGroups: make(map[string]*affinity.GroupState, len(allGroupStates)),
+	}
+	for _, state := range allGroupStates {
+		resp.AffinityGroups[state.ID] = state
+	}
+	c.IndentedJSON(http.StatusOK, resp)
+}
+
+// @Tags     affinity-groups
+// @Summary  Get an affinity group by group id.
+// @Param    group_id  path  string  true  "The group id of the affinity group"
+// @Produce  json
+// @Success  200  {object}  *affinity.GroupState
+// @Failure  404  {string}  string  "Affinity group not found."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /affinity-groups/{group_id} [get]
+func getAffinityGroup(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+	groupID := c.Param("group_id")
+	groupState, err := manager.CheckAndGetAffinityGroupState(groupID)
+	if err != nil {
+		switch {
+		case errs.ErrInvalidGroupID.Equal(err):
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		case errs.ErrAffinityGroupNotFound.Equal(err):
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		default:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	c.IndentedJSON(http.StatusOK, groupState)
 }
