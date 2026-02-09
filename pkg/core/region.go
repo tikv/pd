@@ -907,7 +907,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 				return
 			}
-			if region.GetBuckets().GetVersion() > origin.GetBuckets().GetVersion() {
+			// If bucket version increased, will update both kv and cache.
+			// If bucket version is 0 but previously is not, which means tikv has disabled bucket, will also update both kv and cache to be compatible.
+			if region.GetBuckets().GetVersion() > origin.GetBuckets().GetVersion() || (region.GetBuckets().GetVersion() == 0 && origin.GetBuckets().GetVersion() > 0) {
 				if log.GetLevel() <= zap.DebugLevel {
 					debug("bucket key changed",
 						zap.Uint64("region-id", region.GetID()),
