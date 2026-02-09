@@ -52,8 +52,11 @@ make clean-test         # Remove /tmp/pd_tests*, test cache, UT binaries
 ### Failpoints
 
 Tests use failpoints which must be enabled/disabled properly:
-- `make failpoint-enable` / `make failpoint-disable`
-- Make targets auto-enable/disable; if running `go test` manually, bracket with enable/disable
+- Prefer make targets that auto-enable/disable failpoints (`make gotest ...`, `make test`, `make basic-test`).
+- If running `go test` manually:
+  - Target uses failpoints: `make failpoint-enable` -> `go test ...` -> `make failpoint-disable`
+  - Target does not use failpoints: run `go test ...` directly
+- Never edit code or run non-test commands while failpoints are enabled. If unsure, run `make failpoint-disable` first.
 - Never commit with failpoints enabled; verify `git status` is clean before pushing
 
 ## Linting
