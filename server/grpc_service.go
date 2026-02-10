@@ -569,7 +569,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 				return errs.ErrUnknown(err)
 			}
-			tsoBatchSize.Observe(float64(request.GetCount()))
 			tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
 			if tsoStreamErr != nil {
 				return tsoStreamErr
