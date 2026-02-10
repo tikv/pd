@@ -94,13 +94,14 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 // if it returns true, it will skip update physical time.
 type setTSOOption func(t *timestampOracle) bool
 
-func withInitialCheck() setTSOOption {
+func skipIfNotInitialized() setTSOOption {
 	return func(t *timestampOracle) bool {
 		return t.tsoMux.physical.Equal(typeutil.ZeroTime)
 	}
 }
 
-func withLogicalOverflowCheck() setTSOOption {
+// skipIfNotOverflow is used to check whether the logical part is overflowed before updating physical time.
+func skipIfNotOverflow() setTSOOption {
 	return func(t *timestampOracle) bool {
 		return !overflowedLogical(t.tsoMux.logical)
 	}
@@ -108,8 +109,9 @@ func withLogicalOverflowCheck() setTSOOption {
 
 // setTSOPhysical sets the TSO's physical part with the given time.
 // It returns true if the TSO's logical part is overflowed, the caller should wait for the next physical tick.
-// It accepts some options to control the update behavior, for example, withInitialCheck will check whether the TSO in memory has been initialized,
-// and withLogicalOverflowCheck will check whether the logical part is overflowed before updating physical time.
+// It accepts some options to control the update behavior, for example,
+// skipIfNotInitialized will check whether the TSO in memory has been initialized,
+// and skipIfNotOverflow will check whether the logical part is overflowed before updating physical time.
 func (t *timestampOracle) setTSOPhysical(next time.Time, opts ...setTSOOption) bool {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
@@ -325,7 +327,7 @@ const (
 //
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
-func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, error) {
+func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 	if !t.isInitialized() {
 		return false, errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
@@ -380,7 +382,7 @@ func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, er
 		// Only IntervalUpdate is allowed to save timestamp into etcd.
 		// It would be dangerous to save timestamp into etcd when handling overflowUpdate.
 		// We don't want to update the physical time too frequently because of logical overflow, which may cause more clock offset issues and etcd load.
-		if updatePurpose != intervalUpdate {
+		if purpose != intervalUpdate {
 			t.metrics.notAllowedSaveTimestampEvent.Inc()
 			return true, nil
 		}
@@ -400,10 +402,10 @@ func (t *timestampOracle) updateTimestamp(updatePurpose updatePurpose) (bool, er
 	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
 	// Otherwise, the caller met logical overflow, so it will allocate physical time to alloc more timestamp in concurrent.
 	// So we need to check logical overflow before updating physical time to avoid allocating too much physical time due to logical overflow.
-	if updatePurpose == intervalUpdate {
-		overflowed = t.setTSOPhysical(next, withInitialCheck())
+	if purpose == intervalUpdate {
+		overflowed = t.setTSOPhysical(next, skipIfNotInitialized())
 	} else {
-		overflowed = t.setTSOPhysical(next, withInitialCheck(), withLogicalOverflowCheck())
+		overflowed = t.setTSOPhysical(next, skipIfNotInitialized(), skipIfNotOverflow())
 	}
 	return overflowed, nil
 }
@@ -439,7 +441,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
 			if overflowed, err := t.updateTimestamp(overflowUpdate); err != nil {
-				log.Info("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
+				log.Warn("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
 				time.Sleep(t.updatePhysicalInterval)
 			} else if overflowed {
 				time.Sleep(t.updatePhysicalInterval)

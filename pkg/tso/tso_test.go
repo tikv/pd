@@ -59,7 +59,7 @@ func TestSetTSO(t *testing.T) {
 		},
 		metrics: newTSOMetrics("test"),
 	}
-	ts.setTSOPhysical(time.Now(), withInitialCheck())
+	ts.setTSOPhysical(time.Now(), skipIfNotInitialized())
 	physical, _ := ts.getTSO()
 	re.Equal(typeutil.ZeroTime, physical)
 
@@ -75,7 +75,7 @@ func TestSetTSO(t *testing.T) {
 		},
 		metrics: newTSOMetrics("test"),
 	}
-	ts.setTSOPhysical(time.Now(), withLogicalOverflowCheck())
+	ts.setTSOPhysical(time.Now(), skipIfNotOverflow())
 	physical, _ = ts.getTSO()
 	re.Equal(current, physical)
 
@@ -143,17 +143,15 @@ func TestCurrentGetTSO(t *testing.T) {
 	wg.Add(concurrency)
 	changes := atomic.Int32{}
 	totalTso := atomic.Int32{}
-	for i := range concurrency {
-		go func(i int) {
-			pre, _ := timestampOracle.getTSO()
-
+	for range concurrency {
+		go func() {
 			defer wg.Done()
 			for {
 				select {
 				case <-runCtx.Done():
 					return
 				default:
-					_, err := timestampOracle.getTS(runCtx, 1)
+					ts, err := timestampOracle.getTS(runCtx, 1)
 					totalTso.Add(1)
 					if err != nil {
 						select {
@@ -162,16 +160,12 @@ func TestCurrentGetTSO(t *testing.T) {
 						default:
 						}
 					}
-					if i == 0 {
-						physical, _ := timestampOracle.getTSO()
-						if pre != physical {
-							changes.Add(1)
-							pre = physical
-						}
+					if ts.Logical == 1 {
+						changes.Add(1)
 					}
 				}
 			}
-		}(i)
+		}()
 	}
 
 	wg.Wait()
@@ -180,4 +174,5 @@ func TestCurrentGetTSO(t *testing.T) {
 		re.NoError(err)
 	}
 	re.LessOrEqual(changes.Load(), totalTso.Load()/int32(maxLogical)+1)
+	re.True(false)
 }
