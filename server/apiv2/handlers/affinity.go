@@ -17,6 +17,7 @@ package handlers
 import (
 	"bytes"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -102,6 +103,7 @@ type UpdateAffinityGroupPeersRequest struct {
 // @Summary  Create or delete affinity groups.
 // @Description Create affinity groups (default), or delete multiple groups if ?delete query parameter is present. When delete parameter is absent, expects CreateAffinityGroupsRequest in body. When delete parameter is present, expects BatchDeleteAffinityGroupsRequest in body.
 // @Param    delete  query  string  false  "If present, triggers batch deletion instead of creation"
+// @Param    skip_exist_check  query  bool  false  "If true, skip existing groups and create the rest"
 // @Param    body    body    object  true   "Request body (type depends on delete parameter)"
 // @Produce  json
 // @Success  200  {object}  AffinityGroupsResponse  "Response for create or delete operation"
@@ -138,6 +140,16 @@ func createAffinityGroups(c *gin.Context) {
 		return
 	}
 
+	skipExistCheck := false
+	if rawValue, ok := c.GetQuery("skip_exist_check"); ok {
+		parsed, err := strconv.ParseBool(rawValue)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+			return
+		}
+		skipExistCheck = parsed
+	}
+
 	groups := make([]affinity.GroupKeyRanges, 0, len(req.AffinityGroups))
 	for groupID, input := range req.AffinityGroups {
 		if err := affinity.ValidateGroupID(groupID); err != nil {
@@ -145,6 +157,9 @@ func createAffinityGroups(c *gin.Context) {
 			return
 		}
 		if manager.IsGroupExist(groupID) {
+			if skipExistCheck {
+				continue
+			}
 			c.AbortWithStatusJSON(http.StatusConflict, errs.ErrAffinityGroupExist.GenWithStackByArgs(groupID).Error())
 			return
 		}
@@ -172,7 +187,11 @@ func createAffinityGroups(c *gin.Context) {
 
 	// Create affinity groups with their key ranges
 	// The manager will handle storage persistence, label creation, and in-memory updates atomically
-	err = manager.CreateAffinityGroups(groups)
+	if skipExistCheck {
+		err = manager.CreateAffinityGroupsIfNotExists(groups)
+	} else {
+		err = manager.CreateAffinityGroups(groups)
+	}
 	if handleAffinityError(c, err) {
 		return
 	}
@@ -187,6 +206,18 @@ func createAffinityGroups(c *gin.Context) {
 			state = &affinity.GroupState{}
 		}
 		resp.AffinityGroups[group.GroupID] = state
+	}
+	if skipExistCheck {
+		for groupID := range req.AffinityGroups {
+			if _, ok := resp.AffinityGroups[groupID]; ok {
+				continue
+			}
+			state := manager.GetAffinityGroupState(groupID)
+			if state == nil {
+				state = &affinity.GroupState{}
+			}
+			resp.AffinityGroups[groupID] = state
+		}
 	}
 	c.IndentedJSON(http.StatusOK, resp)
 }
@@ -408,8 +439,10 @@ func DeleteAffinityGroup(c *gin.Context) {
 // GetAllAffinityGroups lists affinity groups, with optional range details.
 // @Tags     affinity-groups
 // @Summary  List all affinity groups.
+// @Param    ids  query  string  false  "Repeated affinity group IDs (ids=a&ids=b)"
 // @Produce  json
 // @Success  200  {object}  AffinityGroupsResponse
+// @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /affinity-groups [get]
 func GetAllAffinityGroups(c *gin.Context) {
@@ -420,12 +453,22 @@ func GetAllAffinityGroups(c *gin.Context) {
 		return
 	}
 
-	allGroupStates := manager.GetAllAffinityGroupStates()
-	response := AffinityGroupsResponse{
-		AffinityGroups: make(map[string]*affinity.GroupState, len(allGroupStates)),
+	rawIDs := c.QueryArray("ids")
+	var (
+		groupStates map[string]*affinity.GroupState
+	)
+	if len(rawIDs) == 0 {
+		groupStates = affinity.CollectAllGroupStates(manager)
+	} else {
+		groupStates, err = affinity.CollectGroupStates(manager, rawIDs)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	for _, info := range allGroupStates {
-		response.AffinityGroups[info.ID] = info
+
+	response := AffinityGroupsResponse{
+		AffinityGroups: groupStates,
 	}
 	c.IndentedJSON(http.StatusOK, response)
 }

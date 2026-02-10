@@ -1635,8 +1635,10 @@ func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
 
 // @Tags     affinity-groups
 // @Summary  List all affinity groups.
+// @Param    ids  query  string  false  "Repeated affinity group IDs (ids=a&ids=b)"
 // @Produce  json
 // @Success  200  {object}  AffinityGroupsResponse
+// @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /affinity-groups [get]
 func getAllAffinityGroups(c *gin.Context) {
@@ -1644,12 +1646,24 @@ func getAllAffinityGroups(c *gin.Context) {
 	if !ok {
 		return
 	}
-	allGroupStates := manager.GetAllAffinityGroupStates()
-	resp := AffinityGroupsResponse{
-		AffinityGroups: make(map[string]*affinity.GroupState, len(allGroupStates)),
+
+	rawIDs := c.QueryArray("ids")
+	var (
+		groupStates map[string]*affinity.GroupState
+		err         error
+	)
+	if len(rawIDs) == 0 {
+		groupStates = affinity.CollectAllGroupStates(manager)
+	} else {
+		groupStates, err = affinity.CollectGroupStates(manager, rawIDs)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	for _, state := range allGroupStates {
-		resp.AffinityGroups[state.ID] = state
+
+	resp := AffinityGroupsResponse{
+		AffinityGroups: groupStates,
 	}
 	c.IndentedJSON(http.StatusOK, resp)
 }
