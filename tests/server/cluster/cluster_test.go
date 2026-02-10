@@ -2160,3 +2160,61 @@ func TestFollowerExitSyncTime(t *testing.T) {
 	// Assert that the sync exit time is within expected range
 	re.Less(elapsedTime, time.Second)
 }
+
+func TestPutStoreInvalidEngineLabel(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
+	clusterID := leaderServer.GetClusterID()
+
+	// Bootstrap cluster first
+	bootstrapCluster(re, clusterID, grpcPDClient)
+
+	testCases := []struct {
+		name        string
+		engineValue string
+		expectError bool
+	}{
+		{"empty engine label", "", false},
+		{"tikv engine", core.EngineTiKV, false},
+		{"tiflash engine", core.EngineTiFlash, false},
+		{"tiflash_compute engine", core.EngineTiFlashCompute, false},
+		{"invalid engine value", "invalid_engine", true},
+		{"case sensitive TiKV", "TiKV", true},
+		{"case sensitive TiFlash", "TiFlash", true},
+	}
+
+	for i, tc := range testCases {
+		t.Run(tc.name, func(_ *testing.T) {
+			store := &metapb.Store{
+				Id:      uint64(100 + i),
+				Address: fmt.Sprintf("mock://tikv-%d:%d", 100+i, 100+i),
+				Version: "2.0.1",
+			}
+			if tc.engineValue != "" {
+				store.Labels = []*metapb.StoreLabel{
+					{Key: core.EngineKey, Value: tc.engineValue},
+				}
+			}
+
+			resp, err := putStore(grpcPDClient, clusterID, store)
+			re.NoError(err)
+			if tc.expectError {
+				re.NotNil(resp.GetHeader().GetError())
+				re.Contains(resp.GetHeader().GetError().GetMessage(), "invalid store engine label value")
+			} else {
+				re.Nil(resp.GetHeader().GetError())
+			}
+		})
+	}
+}

@@ -418,22 +418,22 @@ func TestRUTracker(t *testing.T) {
 
 	rt := newRUTracker(time.Second)
 	now := time.Now()
-	rt.sample(now, 100)
+	rt.sample(0, now, 100)
 	re.Zero(rt.getRUPerSec())
 	now = now.Add(time.Second)
-	rt.sample(now, 100)
+	rt.sample(0, now, 100)
 	re.Equal(100.0, rt.getRUPerSec())
 	now = now.Add(time.Second)
-	rt.sample(now, 100)
+	rt.sample(0, now, 100)
 	re.InDelta(100.0, rt.getRUPerSec(), floatDelta)
 	now = now.Add(time.Second)
-	rt.sample(now, 200)
+	rt.sample(0, now, 200)
 	re.InDelta(150.0, rt.getRUPerSec(), floatDelta)
 	// EMA should eventually converge to 10000 RU/s.
 	const targetRUPerSec = 10000.0
 	testutil.Eventually(re, func() bool {
 		now = now.Add(time.Second)
-		rt.sample(now, targetRUPerSec)
+		rt.sample(0, now, targetRUPerSec)
 		return math.Abs(rt.getRUPerSec()-targetRUPerSec) < floatDelta
 	})
 }

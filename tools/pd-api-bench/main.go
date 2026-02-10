@@ -385,6 +385,7 @@ func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 			CertPath: cfg.CertPath,
 			KeyPath:  cfg.KeyPath,
 		},
+		//nolint:staticcheck
 		opt.WithGRPCDialOptions(
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    keepaliveTime,

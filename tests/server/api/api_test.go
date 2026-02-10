@@ -444,8 +444,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	re.NoError(err)
 	resp.Body.Close()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
-	timeUnix := time.Now().Unix() - 20
-	req, err = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
+	req, err = http.NewRequest(http.MethodGet, leader.GetAddr()+"/pd/api/v1/version", http.NoBody)
 	re.NoError(err)
 	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
@@ -461,7 +460,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetVersion\"} 1")
 
 	// resign to test persist config
 	oldLeaderName := leader.GetServer().Name()
@@ -474,8 +473,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 
-	timeUnix = time.Now().Unix() - 20
-	req, err = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
+	req, err = http.NewRequest(http.MethodGet, leader.GetAddr()+"/pd/api/v1/version", http.NoBody)
 	re.NoError(err)
 	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
@@ -491,7 +489,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	output = string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetVersion\"} 2")
 
 	input = map[string]any{
 		"enable-audit": "false",
@@ -640,8 +638,7 @@ func doTestRequestWithLogAudit(srv *tests.TestServer) error {
 }
 
 func doTestRequestWithPrometheus(srv *tests.TestServer) error {
-	timeUnix := time.Now().Unix() - 20
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), http.NoBody)
+	req, err := http.NewRequest(http.MethodGet, srv.GetAddr()+"/pd/api/v1/version", http.NoBody)
 	if err != nil {
 		return err
 	}

@@ -1119,8 +1119,6 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 
 // TestAffinityForwardedHeader verifies microservice forwarding sets the header.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
-	// TODO: remove this test when mcs support affinity
-	suite.T().Skip("wait mcs support")
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()

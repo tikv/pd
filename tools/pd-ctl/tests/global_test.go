@@ -26,8 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -59,18 +57,20 @@ func TestSendAndGetComponent(t *testing.T) {
 		}
 		return mux, info, nil
 	}
-	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := server.CreateServer(ctx, cfg, nil, handler)
+	defer cancel()
+
+	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
 	re.NoError(err)
-	err = svr.Run()
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
 	re.NoError(err)
-	pdAddr := svr.GetAddr()
-	defer func() {
-		cancel()
-		svr.Close()
-		testutil.CleanServer(svr.GetConfig().DataDir)
-	}()
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
 
 	cmd := cmd.GetRootCmd()
 	args := []string{"-u", pdAddr, "cluster"}

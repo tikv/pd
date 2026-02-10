@@ -2,7 +2,7 @@
 
 - Scope: Governs the entire repository. If another `AGENTS.md` exists deeper, it overrides in its subtree.
 - Cursor rules: none in `.cursor/rules/` or `.cursorrules`.
-- Copilot rules: none in `.github/copilot-instructions.md`.
+- Copilot rules: see `.github/copilot-instructions.md`.
 - Purpose: Give human and agent contributors a concise, reliable playbook.
 
 ## Quick Facts
@@ -42,6 +42,7 @@
 ## Test Matrix
 - Full suite: `make test` (tags deadlock, CGO=1, race, cover; auto failpoints).
 - Basic fast: `make basic-test` (no tests/ packages, no race; failpoints enabled).
+- Targeted (single pkg/test): `make gotest GOTEST_ARGS='./pkg/foo -run TestBar -count=1'` (auto failpoints).
 - UT binary: `make ut` -> `./bin/pd-ut run --ignore tests --race --junitfile ./junitfile`.
 - CI shard: `make ci-test-job JOB_INDEX=N` (needs dashboard-ui + pd-ut built).
 - TSO function: `make test-tso-function` (tags `without_dashboard,deadlock`, race on).
@@ -51,7 +52,11 @@
 
 ## Failpoints Discipline
 - Keep failpoints enabled only for tests; disable immediately after (`make failpoint-disable` or `make clean-test`) to avoid polluting the codebase.
-- Prefer make targets that auto-enable/disable failpoints; if running `go test` manually, bracket with enable/disable.
+- Prefer make targets that auto-enable/disable failpoints (recommended: `make gotest ...`, `make test`, `make basic-test`).
+- If you must run `go test` manually, use this rule:
+  - Target uses failpoints (for example imports `github.com/pingcap/failpoint`): `make failpoint-enable` -> `go test ...` -> `make failpoint-disable`.
+  - Target does not use failpoints: run `go test ...` directly.
+- Never edit code or run non-test commands while failpoints are enabled. If unsure about state, run `make failpoint-disable` before continuing.
 - Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
 - If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
 

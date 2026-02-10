@@ -360,7 +360,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: "unknown_engine",
 			},
-			expectedTiKV:           true,
+			expectedTiKV:           false,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: false,
 		},
@@ -369,7 +369,7 @@ func TestStoreInfoIsTiFlash(t *testing.T) {
 			labels: map[string]string{
 				EngineKey: "TiFlash", // uppercase, should not match
 			},
-			expectedTiKV:           true,
+			expectedTiKV:           false,
 			expectedTiFlashWrite:   false,
 			expectedTiFlashCompute: false,
 		},

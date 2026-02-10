@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/clients/gc"
@@ -60,7 +61,7 @@ type RPCClient interface {
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
-	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
+	GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error)
 	// GetAllStores gets all stores from pd.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -155,6 +156,7 @@ type serviceModeKeeper struct {
 	tsoSvcDiscovery          sd.ServiceDiscovery
 	routerClient             *router.Cli
 	resourceManagerDiscovery *sd.ResourceManagerDiscovery
+	msDiscovery              sd.ServiceDiscovery
 }
 
 func (k *serviceModeKeeper) close() {
@@ -168,6 +170,10 @@ func (k *serviceModeKeeper) close() {
 		k.resourceManagerDiscovery.Close()
 		k.resourceManagerDiscovery = nil
 	}
+	if k.msDiscovery != nil {
+		k.msDiscovery.Close()
+	}
+
 	k.tsoClient.Close()
 }
 
@@ -715,22 +721,30 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if routerClient := c.getRouterClient(); routerClient != nil {
 		return routerClient.GetRegion(ctx, key, opts...)
 	}
-
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	req := &pdpb.GetRegionRequest{
 		Header:      c.requestHeader(),
 		RegionKey:   key,
-		NeedBuckets: options.NeedBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
-	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(ctx,
-		options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
+	var (
+		resp *pdpb.GetRegionResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+	}
+
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -760,21 +774,28 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 		return routerClient.GetPrevRegion(ctx, key, opts...)
 	}
 
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	req := &pdpb.GetRegionRequest{
 		Header:      c.requestHeader(),
 		RegionKey:   key,
-		NeedBuckets: options.NeedBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
-	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(ctx,
-		options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
+	var (
+		resp *pdpb.GetRegionResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	}
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -804,22 +825,30 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 		return routerClient.GetRegionByID(ctx, regionID, opts...)
 	}
 
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	req := &pdpb.GetRegionByIDRequest{
 		Header:      c.requestHeader(),
 		RegionId:    regionID,
-		NeedBuckets: options.NeedBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
-	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(ctx,
-		options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
+	var (
+		resp *pdpb.GetRegionResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	}
+
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -849,26 +878,30 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		scanCtx, cancel = context.WithTimeout(ctx, c.inner.option.Timeout)
 		defer cancel()
 	}
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
+
 	req := &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
-	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(scanCtx,
-		options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
+	var (
+		serviceClient sd.ServiceClient
+		cctx          context.Context
+	)
+	// the scan region api is not supported by the router service, so we need to use the leader client.
+	option.AllowRouterServiceHandle = false
+	serviceClient, cctx, _ = c.inner.getServiceClient(scanCtx, option)
+
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 	//nolint:staticcheck
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
-	failpoint.Inject("responseNil", func() {
-		resp = nil
-	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(scanCtx)
 		if protoClient == nil {
@@ -900,9 +933,9 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 		scanCtx, cancel = context.WithTimeout(ctx, c.inner.option.Timeout)
 		defer cancel()
 	}
-	options := &opt.GetRegionOp{}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	pbRanges := make([]*pdpb.KeyRange, 0, len(ranges))
 	for _, r := range ranges {
@@ -910,17 +943,26 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 	}
 	req := &pdpb.BatchScanRegionsRequest{
 		Header:             c.requestHeader(),
-		NeedBuckets:        options.NeedBuckets,
+		NeedBuckets:        option.NeedBuckets,
 		Ranges:             pbRanges,
 		Limit:              int32(limit),
-		ContainAllKeyRange: options.OutputMustContainAllKeyRange,
+		ContainAllKeyRange: option.OutputMustContainAllKeyRange,
 	}
-	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(scanCtx,
-		options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
+	var (
+		resp *pdpb.BatchScanRegionsResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(scanCtx, option)
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
+
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
+	}
+
 	failpoint.Inject("responseNil", func() {
 		resp = nil
 	})
@@ -986,7 +1028,7 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*router.Region {
 }
 
 // GetStore implements the RPCClient interface.
-func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
+func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1000,11 +1042,33 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		Header:  c.requestHeader(),
 		StoreId: storeID,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
+	var (
+		resp *pdpb.GetStoreResponse
+		err  error
+	)
+	option := &opt.GetStoreOp{}
+	for _, opt := range opts {
+		opt(option)
+	}
+
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetStore(ctx, req)
+
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetStore(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetStore(cctx, req)
+	}
+
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetStore(cctx, req)
+	}
 
 	if err = c.respForErr(metrics.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1025,30 +1089,39 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 
 // GetAllStores implements the RPCClient interface.
 func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) ([]*metapb.Store, error) {
-	// Applies options
-	options := &opt.GetStoreOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
+	// Applies option
+	option := &opt.GetStoreOp{}
+	for _, opt := range opts {
+		opt(option)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.GetAllStoresRequest{
 		Header:                 c.requestHeader(),
-		ExcludeTombstoneStores: options.ExcludeTombstone,
+		ExcludeTombstoneStores: option.ExcludeTombstone,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
+
+	var (
+		resp *pdpb.GetAllStoresResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
+
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetAllStores(ctx, req)
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
+	}
 
 	if err = c.respForErr(metrics.CmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
 		return nil, err

@@ -281,10 +281,14 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	if krgm.sl == nil || krgm.sl.ServiceLimit == 0 {
+	if krgm.sl == nil {
 		return 0, false
 	}
-	return krgm.sl.ServiceLimit, true
+	serviceLimit := krgm.sl.getServiceLimit()
+	if serviceLimit == 0 {
+		return 0, false
+	}
+	return serviceLimit, true
 }
 
 func (krgm *keyspaceResourceGroupManager) getOrCreateGroupRUTracker(name string) *groupRUTracker {
@@ -335,17 +339,25 @@ func newRUTracker(timeConstant time.Duration) *ruTracker {
 // Sample the RU consumption and calculate the real-time RU/s as `lastEMA`.
 // - `now` is the current time point to sample the RU consumption.
 // - `totalRU` is the total RU consumption within the `dur`.
-func (rt *ruTracker) sample(now time.Time, totalRU float64) {
+func (rt *ruTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
 	rt.Lock()
 	defer rt.Unlock()
 	// Calculate the elapsed duration since the last sample time.
+	prevSampleTime := rt.lastSampleTime
 	var dur time.Duration
-	if !rt.lastSampleTime.IsZero() {
-		dur = now.Sub(rt.lastSampleTime)
+	if !prevSampleTime.IsZero() {
+		dur = now.Sub(prevSampleTime)
 	}
 	rt.lastSampleTime = now
 	// If `dur` is not greater than 0, skip this record.
 	if dur <= 0 {
+		log.Info("skip ru tracker sample due to non-positive duration",
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Duration("dur", dur),
+			zap.Time("prev-sample-time", prevSampleTime),
+			zap.Time("now", now),
+			zap.Float64("total-ru", totalRU),
+		)
 		return
 	}
 	durSeconds := dur.Seconds()
@@ -355,6 +367,12 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64) {
 	if !rt.initialized {
 		rt.initialized = true
 		rt.lastEMA = ruPerSec
+		log.Info("init ru tracker ema",
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Float64("ru-per-sec", ruPerSec),
+			zap.Float64("total-ru", totalRU),
+			zap.Duration("dur", dur),
+		)
 		return
 	}
 	// By using e^{-β·Δt} to calculate the decay factor, we can have the following behavior:
@@ -373,6 +391,12 @@ func (rt *ruTracker) getRUPerSec() float64 {
 	rt.RLock()
 	defer rt.RUnlock()
 	return rt.lastEMA
+}
+
+func (rt *ruTracker) isInitialized() bool {
+	rt.RLock()
+	defer rt.RUnlock()
+	return rt.initialized
 }
 
 // groupRUTracker is used to track the RU consumption of a resource group.
@@ -399,6 +423,9 @@ func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracke
 		if rt == nil {
 			rt = newRUTracker(defaultRUTrackerTimeConstant)
 			grt.ruTrackers[clientUniqueID] = rt
+			log.Info("create ru tracker",
+				zap.Uint64("client-unique-id", clientUniqueID),
+			)
 		}
 		grt.Unlock()
 	}
@@ -406,7 +433,7 @@ func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracke
 }
 
 func (grt *groupRUTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
-	grt.getOrCreateRUTracker(clientUniqueID).sample(now, totalRU)
+	grt.getOrCreateRUTracker(clientUniqueID).sample(clientUniqueID, now, totalRU)
 }
 
 func (grt *groupRUTracker) getRUPerSec() float64 {

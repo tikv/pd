@@ -244,7 +244,8 @@ func WithEnableFollowerHandle(enable bool) ClientOption {
 
 // GetStoreOp represents available options when getting stores.
 type GetStoreOp struct {
-	ExcludeTombstone bool
+	ExcludeTombstone         bool
+	AllowRouterServiceHandle bool
 }
 
 // GetStoreOption configures GetStoreOp.
@@ -253,6 +254,11 @@ type GetStoreOption func(*GetStoreOp)
 // WithExcludeTombstone excludes tombstone stores from the result.
 func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.ExcludeTombstone = true }
+}
+
+// WithAllowRouterServiceHandleStoreRequest means that client can use router service to handle this store request.
+func WithAllowRouterServiceHandleStoreRequest() GetStoreOption {
+	return func(op *GetStoreOp) { op.AllowRouterServiceHandle = true }
 }
 
 // RegionsOp represents available options when operate regions
@@ -285,6 +291,7 @@ type GetRegionOp struct {
 	NeedBuckets                  bool
 	AllowFollowerHandle          bool
 	OutputMustContainAllKeyRange bool
+	AllowRouterServiceHandle     bool
 }
 
 // GetRegionOption configures GetRegionOp.
@@ -298,6 +305,11 @@ func WithBuckets() GetRegionOption {
 // WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
 func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.AllowFollowerHandle = true }
+}
+
+// WithAllowRouterServiceHandle means that client can use router service to handle this request.
+func WithAllowRouterServiceHandle() GetRegionOption {
+	return func(op *GetRegionOp) { op.AllowRouterServiceHandle = true }
 }
 
 // WithOutputMustContainAllKeyRange means the output must contain all key ranges.
