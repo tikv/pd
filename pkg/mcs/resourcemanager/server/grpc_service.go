@@ -189,23 +189,35 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			targetPeriodMs = request.GetTargetRequestPeriodMs()
 			clientUniqueID = request.GetClientUniqueId()
 			resps          = &rmpb.TokenBucketsResponse{}
-			logFields      = make([]zap.Field, 2)
+			logFields      = make([]zap.Field, 0, 5)
 		)
+		logFields = append(logFields,
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Uint64("target-period-ms", targetPeriodMs),
+		)
+		if len(request.Requests) > 0 {
+			logFields = append(logFields, zap.Stringer("requests[0]", request.Requests[0]))
+		} else {
+			logFields = append(logFields, zap.Int("requests-len", 0))
+		}
+		log.Debug("receive token buckets request", logFields...)
 		for _, req := range request.Requests {
 			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
-			logFields[0] = zap.Uint32("keyspace-id", keyspaceID)
-			logFields[1] = zap.String("resource-group", resourceGroupName)
+			requestFields := append(logFields,
+				zap.Uint32("keyspace-id", keyspaceID),
+				zap.String("resource-group", resourceGroupName),
+			)
 			// Get keyspace resource group manager to apply service limit later.
 			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {
-				log.Warn("keyspace resource group manager not found", append(logFields, zap.Error(err))...)
+				log.Warn("keyspace resource group manager not found", append(requestFields, zap.Error(err))...)
 				continue
 			}
 			// Get the resource group from manager to acquire token buckets.
 			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
 			if rg == nil {
-				log.Warn("resource group not found", append(logFields, zap.Error(err))...)
+				log.Warn("resource group not found", append(requestFields, zap.Error(err))...)
 				continue
 			}
 			// Send the consumption to update the metrics.
@@ -227,6 +239,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
 						requiredToken := re.GetValue()
+						log.Debug("process ru token request", append(requestFields,
+							zap.Float64("required-token", requiredToken),
+						)...)
 						// Sample the latest RU demand.
 						grt := krgm.getOrCreateGroupRUTracker(rg.Name)
 						grt.sample(clientUniqueID, now, requiredToken)
@@ -240,10 +255,10 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				}
 			case rmpb.GroupMode_RawMode:
 				log.Warn("not supports the resource type",
-					append(logFields, zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))...)
+					append(requestFields, zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))...)
 				continue
 			}
-			log.Debug("finish token request from", logFields...)
+			log.Debug("finish token request from", requestFields...)
 			resps.Responses = append(resps.Responses, resp)
 		}
 		if err := stream.Send(resps); err != nil {
