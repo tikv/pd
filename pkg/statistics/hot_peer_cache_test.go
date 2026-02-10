@@ -421,6 +421,37 @@ func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 	testMetrics(ctx, re, 1., byteRate, expectThreshold)
 }
 
+func TestHotPeerStatIsHotUsesCPURolling(t *testing.T) {
+	re := require.New(t)
+	interval := time.Duration(utils.StoreHeartBeatReportInterval) * time.Second
+	threshold := 10.0
+	highDelta := threshold * interval.Seconds()
+
+	cpuStat := newDimStat(interval, utils.DefaultAotSize, cpuRollingWindowsSize)
+	for i := 0; i < cpuRollingWindowsSize-1; i++ {
+		cpuStat.add(highDelta, interval)
+		cpuStat.clearLastAverage()
+	}
+	cpuStat.add(0, interval)
+
+	re.False(cpuStat.isLastAverageHot(threshold))
+	re.True(cpuStat.isHot(threshold))
+
+	lowStat := newDimStat(interval, utils.DefaultAotSize, rollingWindowsSize)
+	lowStat.add(0, interval)
+
+	stat := &HotPeerStat{
+		rollingLoads: []*dimStat{
+			lowStat,
+			lowStat.clone(),
+			lowStat.clone(),
+			cpuStat,
+		},
+	}
+	thresholds := []float64{threshold, threshold, threshold, threshold}
+	re.True(stat.isHot(thresholds))
+}
+
 func testMetrics(ctx context.Context, re *require.Assertions, interval, byteRate, expectThreshold float64) {
 	cluster := core.NewBasicCluster()
 	cache := NewHotPeerCache(ctx, cluster, utils.Read)

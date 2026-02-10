@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,4 +32,16 @@ func TestStoreReadCPUUsage(t *testing.T) {
 	re.InDelta(88.0, StoreReadCPUUsage(cpuUsages, 40, 100), 0.0001)
 	re.Equal(80.0, StoreReadCPUUsage(cpuUsages, 0, 100))
 	re.Equal(80.0, StoreReadCPUUsage(cpuUsages, 40, 0))
+}
+
+func TestRegionReadCPUUsage(t *testing.T) {
+	re := require.New(t)
+	peerStat := &pdpb.PeerStat{}
+	re.Equal(0.0, RegionReadCPUUsage(peerStat, 100, 10, 100))
+
+	cpuStats := &pdpb.CPUStats{}
+	cpuStats.UnifiedRead = 80
+	peerStat.CpuStats = cpuStats
+	re.InDelta(88.0, RegionReadCPUUsage(peerStat, 20, 40, 100), 0.0001)
+	re.Equal(80.0, RegionReadCPUUsage(peerStat, 20, 40, 0))
 }

@@ -2317,7 +2317,7 @@ func TestCompatibilityConfig(t *testing.T) {
 		ConfigSliceDecoder(types.BalanceHotRegionScheduler, []string{"read-priorities=byte,query"}))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
-		{utils.ByteDim, utils.QueryDim},
+		{utils.QueryDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
 		{utils.ByteDim, utils.KeyDim},
 	})

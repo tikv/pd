@@ -30,6 +30,8 @@ import (
 
 const (
 	storeStatsRollingWindowsSize = 3
+	// It is used to moving average CPU usage,
+	// and the window size is larger than other dimensions to make the CPU usage more stable.
 	storeCPUStatsRollingWindowsSize = 5
 
 	// RegionsStatsObserveInterval is the interval for obtaining statistics from RegionTree

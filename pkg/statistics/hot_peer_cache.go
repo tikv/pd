@@ -38,6 +38,8 @@ const (
 	HotThresholdRatio = 0.8
 
 	rollingWindowsSize = 5
+	// It is used to moving average CPU usage,
+	// and the window size is larger than other dimensions to make the CPU usage more stable.
 	cpuRollingWindowsSize = 9
 
 	// HotRegionReportMinInterval is used for the simulator and test
