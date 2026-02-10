@@ -428,7 +428,7 @@ func TestHotPeerStatIsHotUsesCPURolling(t *testing.T) {
 	highDelta := threshold * interval.Seconds()
 
 	cpuStat := newDimStat(interval, utils.DefaultAotSize, cpuRollingWindowsSize)
-	for i := 0; i < cpuRollingWindowsSize-1; i++ {
+	for range cpuRollingWindowsSize - 1 {
 		cpuStat.add(highDelta, interval)
 		cpuStat.clearLastAverage()
 	}
