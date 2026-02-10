@@ -1136,9 +1136,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			regionCPU := float64(0)
 			if cpuStats := peerStat.GetCpuStats(); cpuStats != nil {
 				regionCPU = float64(cpuStats.GetUnifiedRead())
-			}
-			if storeTotalQuery > 0 {
-				regionCPU += float64(storeGRPCCPU) * float64(readQueryNum) / float64(storeTotalQuery)
+				if storeTotalQuery > 0 {
+					regionCPU += float64(storeGRPCCPU) * float64(readQueryNum) / float64(storeTotalQuery)
+				}
 			}
 			loads := []float64{
 				utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
