@@ -59,7 +59,6 @@ import (
 const (
 	Initial int32 = iota
 	Running
-	Starting
 	Stop
 	Destroy
 )
@@ -87,7 +86,6 @@ type TestServer struct {
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
-	runDone    chan struct{}
 }
 
 var zapLogOnce sync.Once
@@ -144,80 +142,40 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
 	s.Lock()
+	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
-		s.Unlock()
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	done := make(chan struct{})
-	s.runDone = done
-	s.state = Starting
-	s.Unlock()
-	defer close(done)
-
-	// Keep the server startup out of this lock to avoid blocking concurrent
-	// state checks in retry/cleanup paths.
 	if err := s.server.Run(); err != nil {
-		s.Lock()
-		if s.state == Starting {
-			s.state = Stop
-		}
-		s.Unlock()
 		return err
 	}
-
-	needClose := false
-	s.Lock()
-	if s.state == Starting {
-		s.state = Running
-	} else {
-		// Stop/Destroy may be requested while startup is in progress. If so, close
-		// the server here because an early Stop can be a no-op before isRunning=1.
-		needClose = true
-	}
-	s.Unlock()
-	if needClose {
-		s.server.Close()
-	}
+	s.state = Running
 	return nil
 }
 
 // Stop is used to stop a TestServer.
 func (s *TestServer) Stop() error {
 	s.Lock()
-	if s.state != Running && s.state != Starting {
-		s.Unlock()
+	defer s.Unlock()
+	if s.state != Running {
 		return errors.Errorf("server(state%d) cannot stop", s.state)
 	}
-	waitRunDone := s.state == Starting
-	runDone := s.runDone
-	s.state = Stop
-	s.Unlock()
-
 	s.server.Close()
-	if waitRunDone && runDone != nil {
-		<-runDone
-	}
+	s.state = Stop
 	return nil
 }
 
 // Destroy is used to destroy a TestServer.
 func (s *TestServer) Destroy() error {
 	s.Lock()
-	waitRunDone := s.state == Starting
-	runDone := s.runDone
-	shouldClose := s.state == Running || s.state == Starting
-	s.state = Destroy
-	s.Unlock()
-
-	if shouldClose {
+	defer s.Unlock()
+	if s.state == Running {
 		s.server.Close()
-	}
-	if waitRunDone && runDone != nil {
-		<-runDone
 	}
 	if err := os.RemoveAll(s.server.GetConfig().DataDir); err != nil {
 		return err
 	}
+	s.state = Destroy
 	return nil
 }
 
@@ -741,7 +699,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 
 			// Stop and destroy all servers
 			for _, s := range servers {
-				if state := s.State(); state == Running || state == Starting {
+				if s.State() == Running {
 					_ = s.Stop()
 				}
 				_ = s.Destroy()
@@ -780,7 +738,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 		case strings.Contains(errMsg, "ErrStartEtcd"):
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			for _, s := range servers {
-				if state := s.State(); state == Running || state == Starting {
+				if s.State() == Running {
 					_ = s.Stop()
 				}
 			}
@@ -809,7 +767,7 @@ func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			// Stop any partially started servers before retrying
 			for _, s := range servers {
-				if state := s.State(); state == Running || state == Starting {
+				if s.State() == Running {
 					_ = s.Stop()
 				}
 			}
