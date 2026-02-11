@@ -53,6 +53,11 @@ const (
 	allocNodesToKeyspaceGroupsInterval = 1 * time.Second
 	allocNodesTimeout                  = 1 * time.Second
 	allocNodesInterval                 = 10 * time.Millisecond
+	// defaultKeyspaceCountSplitThreshold is the keyspace count threshold for auto-splitting
+	// a keyspace group. When a group's keyspace count exceeds this value, a new group will be split automatically.
+	defaultKeyspaceCountSplitThreshold = 80000
+	// autoSplitKeyspaceGroupPatrolInterval is the interval for patrolling keyspace group size for auto-split.
+	autoSplitKeyspaceGroupPatrolInterval = 5 * time.Minute
 )
 
 const (
@@ -151,6 +156,8 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	if m.client != nil {
 		m.wg.Add(1)
 		go m.allocNodesToAllKeyspaceGroups(ctx)
+		m.wg.Add(1)
+		go m.patrolKeyspaceGroupSizeForAutoSplit(ctx)
 	}
 	return nil
 }
@@ -218,6 +225,99 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 				group.Members = nodes
 			}
 		}
+	}
+}
+
+// patrolKeyspaceGroupSizeForAutoSplit periodically checks all tso keyspace groups.
+// If a group's keyspace count exceeds defaultKeyspaceCountSplitThreshold (80k),
+// it automatically splits a new group and moves about half of the keyspaces to the new group.
+func (m *GroupManager) patrolKeyspaceGroupSizeForAutoSplit(ctx context.Context) {
+	defer logutil.LogPanic()
+	defer m.wg.Done()
+	ticker := time.NewTicker(autoSplitKeyspaceGroupPatrolInterval)
+	defer ticker.Stop()
+	log.Info("start to patrol keyspace group size for auto-split")
+	for {
+		select {
+		case <-m.ctx.Done():
+			log.Info("server is closed, stop patrolling keyspace group size for auto-split")
+			return
+		case <-ctx.Done():
+			log.Info("the raftcluster is closed, stop patrolling keyspace group size for auto-split")
+			return
+		case <-ticker.C:
+			m.doPatrolKeyspaceGroupSizeForAutoSplit()
+		}
+	}
+}
+
+// doPatrolKeyspaceGroupSizeForAutoSplit checks once and performs at most one auto-split.
+func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit() {
+	groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	if err != nil {
+		log.Error("failed to load keyspace groups for auto-split patrol", zap.Error(err))
+		return
+	}
+	if len(groups) == 0 {
+		return
+	}
+	var maxID uint32
+	for _, g := range groups {
+		if g.ID > maxID {
+			maxID = g.ID
+		}
+	}
+	nextID := maxID + 1
+	if nextID > constant.MaxKeyspaceGroupCountInUse {
+		log.Warn("no available keyspace group id for auto-split, max id reached",
+			zap.Uint32("max-keyspace-group-count-in-use", constant.MaxKeyspaceGroupCountInUse))
+		return
+	}
+	threshold := defaultKeyspaceCountSplitThreshold
+	failpoint.Inject("autoSplitKeyspaceGroupThreshold", func() {
+		threshold = 5
+	})
+
+	for _, group := range groups {
+		if group.IsSplitting() || group.IsMerging() {
+			continue
+		}
+		count := len(group.Keyspaces)
+		if count <= threshold {
+			continue
+		}
+		// Split about half of the keyspaces to the new group (excluding default keyspace).
+		splitIdx := count / 2
+		keyspacesToMove := make([]uint32, 0, count-splitIdx)
+		for i := splitIdx; i < count; i++ {
+			kid := group.Keyspaces[i]
+			if kid == constant.DefaultKeyspaceID {
+				continue
+			}
+			keyspacesToMove = append(keyspacesToMove, kid)
+		}
+		if len(keyspacesToMove) == 0 {
+			log.Warn("no keyspaces to move for auto-split, skip",
+				zap.Uint32("keyspace-group-id", group.ID),
+				zap.Int("keyspace-count", count))
+			continue
+		}
+		err := m.SplitKeyspaceGroupByID(group.ID, nextID, keyspacesToMove)
+		if err != nil {
+			log.Error("failed to auto-split keyspace group by keyspace count",
+				zap.Uint32("source-id", group.ID),
+				zap.Uint32("target-id", nextID),
+				zap.Int("keyspace-count", count),
+				zap.Int("keyspaces-to-move", len(keyspacesToMove)),
+				zap.Error(err))
+			return
+		}
+		log.Info("auto-split keyspace group by keyspace count",
+			zap.Uint32("source-id", group.ID),
+			zap.Uint32("target-id", nextID),
+			zap.Int("keyspace-count", count),
+			zap.Int("keyspaces-moved", len(keyspacesToMove)))
+		return
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -691,6 +692,44 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			re.Equal(expectedNew, new, "test case %d", idx)
 		}
 	}
+}
+
+// TestDoPatrolKeyspaceGroupSizeForAutoSplit tests the auto-split patrol logic:
+// when a group's keyspace count exceeds the threshold (5 when failpoint is enabled),
+// it splits about half of the keyspaces into a new group.
+func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplit() {
+	re := suite.Require()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	// Create default keyspace group with 10 keyspaces and 2 members (without Bootstrap).
+	err := store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		kg := &endpoint.KeyspaceGroup{
+			ID:        constant.DefaultKeyspaceGroupID,
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: []uint32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+			Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
+		}
+		return store.SaveKeyspaceGroup(txn, kg)
+	})
+	re.NoError(err)
+	// Enable failpoint so threshold becomes 5 (otherwise 80000).
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/autoSplitKeyspaceGroupThreshold", "return(true)"))
+	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/autoSplitKeyspaceGroupThreshold")) }()
+	// Run one round of patrol; should split group 0 into 0 and 1.
+	kgm.doPatrolKeyspaceGroupSizeForAutoSplit()
+	// After split: default group keeps first half [0,1,2,3,4], new group 1 gets [5,6,7,8,9].
+	kg0, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(kg0)
+	re.Len(kg0.Keyspaces, 5)
+	re.Equal([]uint32{0, 1, 2, 3, 4}, kg0.Keyspaces)
+	kg1, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.NotNil(kg1)
+	re.Len(kg1.Keyspaces, 5)
+	re.Equal([]uint32{5, 6, 7, 8, 9}, kg1.Keyspaces)
+	re.True(kg1.IsSplitTarget())
+	re.Equal(constant.DefaultKeyspaceGroupID, kg1.SplitSource())
 }
 
 func TestParsePrimaryName(t *testing.T) {
