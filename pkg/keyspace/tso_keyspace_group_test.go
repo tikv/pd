@@ -714,7 +714,9 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplit()
 	re.NoError(err)
 	// Enable failpoint so threshold becomes 5 (otherwise 80000).
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/autoSplitKeyspaceGroupThreshold", "return(true)"))
-	defer func() { re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/autoSplitKeyspaceGroupThreshold")) }()
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/autoSplitKeyspaceGroupThreshold"))
+	}()
 	// Run one round of patrol; should split group 0 into 0 and 1.
 	kgm.doPatrolKeyspaceGroupSizeForAutoSplit()
 	// After split: default group keeps first half [0,1,2,3,4], new group 1 gets [5,6,7,8,9].
