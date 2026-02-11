@@ -241,7 +241,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if hasBuckets {
 						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
 							region.UpdateBuckets(buckets[i], old)
-							region.SetBucketMeta(buckets[i])
 						}
 					}
 					if saveKV {

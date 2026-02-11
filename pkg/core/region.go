@@ -614,14 +614,6 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 	}
 }
 
-// SetBucketMeta sets the bucket meta of the region, used by region sync.
-func (r *RegionInfo) SetBucketMeta(buckets *metapb.Buckets) {
-	r.bucketMeta = &metapb.BucketMeta{
-		Version: buckets.GetVersion(),
-		Keys:    buckets.GetKeys(),
-	}
-}
-
 // UpdateBuckets sets the buckets of the region, used by bucket report.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 	if buckets == nil {

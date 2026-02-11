@@ -1457,6 +1457,6 @@ func TestGetBucketMeta(t *testing.T) {
 		Keys:    [][]byte{[]byte("a"), []byte("b"), []byte("d")},
 	}
 	region.Inherit(origin, true)
-	// Inherit false if region
+	// Inherit should not override buckets when region already has bucketMeta
 	re.Equal(uint64(1), region.GetBuckets().GetVersion())
 }
