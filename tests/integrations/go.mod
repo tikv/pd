@@ -3,7 +3,6 @@ module github.com/tikv/pd/tests/integrations
 go 1.25.6
 
 replace (
-	github.com/pingcap/kvproto => github.com/lhy1024/kvproto v0.0.0-20260120125427-b27f7093ef5f
 	github.com/tikv/pd => ../../
 	github.com/tikv/pd/client => ../../client
 	github.com/tikv/pd/tests/integrations/mcs => ./mcs
@@ -15,7 +14,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20260106110113-438649d89ee7
+	github.com/pingcap/kvproto v0.0.0-20260211115010-c5ab144dc6c7
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
