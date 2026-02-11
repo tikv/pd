@@ -87,6 +87,7 @@ type TestServer struct {
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
+	runDone    chan struct{}
 }
 
 var zapLogOnce sync.Once
@@ -147,9 +148,14 @@ func (s *TestServer) Run() error {
 		s.Unlock()
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
+	done := make(chan struct{})
+	s.runDone = done
 	s.state = Starting
 	s.Unlock()
+	defer close(done)
 
+	// Keep the server startup out of this lock to avoid blocking concurrent
+	// state checks in retry/cleanup paths.
 	if err := s.server.Run(); err != nil {
 		s.Lock()
 		if s.state == Starting {
@@ -159,37 +165,59 @@ func (s *TestServer) Run() error {
 		return err
 	}
 
+	needClose := false
 	s.Lock()
 	if s.state == Starting {
 		s.state = Running
+	} else {
+		// Stop/Destroy may be requested while startup is in progress. If so, close
+		// the server here because an early Stop can be a no-op before isRunning=1.
+		needClose = true
 	}
 	s.Unlock()
+	if needClose {
+		s.server.Close()
+	}
 	return nil
 }
 
 // Stop is used to stop a TestServer.
 func (s *TestServer) Stop() error {
 	s.Lock()
-	defer s.Unlock()
 	if s.state != Running && s.state != Starting {
+		s.Unlock()
 		return errors.Errorf("server(state%d) cannot stop", s.state)
 	}
-	s.server.Close()
+	waitRunDone := s.state == Starting
+	runDone := s.runDone
 	s.state = Stop
+	s.Unlock()
+
+	s.server.Close()
+	if waitRunDone && runDone != nil {
+		<-runDone
+	}
 	return nil
 }
 
 // Destroy is used to destroy a TestServer.
 func (s *TestServer) Destroy() error {
 	s.Lock()
-	defer s.Unlock()
-	if s.state == Running || s.state == Starting {
+	waitRunDone := s.state == Starting
+	runDone := s.runDone
+	shouldClose := s.state == Running || s.state == Starting
+	s.state = Destroy
+	s.Unlock()
+
+	if shouldClose {
 		s.server.Close()
+	}
+	if waitRunDone && runDone != nil {
+		<-runDone
 	}
 	if err := os.RemoveAll(s.server.GetConfig().DataDir); err != nil {
 		return err
 	}
-	s.state = Destroy
 	return nil
 }
 
