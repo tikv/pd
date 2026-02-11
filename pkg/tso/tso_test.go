@@ -59,7 +59,7 @@ func TestSetTSO(t *testing.T) {
 		},
 		metrics: newTSOMetrics("test"),
 	}
-	ts.setTSOPhysical(time.Now(), skipIfNotInitialized())
+	ts.setTSOPhysical(time.Now(), mustInitialized())
 	physical, _ := ts.getTSO()
 	re.Equal(typeutil.ZeroTime, physical)
 
@@ -75,7 +75,7 @@ func TestSetTSO(t *testing.T) {
 		},
 		metrics: newTSOMetrics("test"),
 	}
-	ts.setTSOPhysical(time.Now(), skipIfNotOverflow())
+	ts.setTSOPhysical(time.Now(), mustOverflowed())
 	physical, _ = ts.getTSO()
 	re.Equal(current, physical)
 
@@ -174,5 +174,4 @@ func TestCurrentGetTSO(t *testing.T) {
 		re.NoError(err)
 	}
 	re.LessOrEqual(changes.Load(), totalTso.Load()/int32(maxLogical)+1)
-	re.True(false)
 }

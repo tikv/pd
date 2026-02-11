@@ -90,33 +90,35 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
-// setTSOOption defines the option type for setTSOPhysical function.
-// if it returns true, it will skip update physical time.
-type setTSOOption func(t *timestampOracle) bool
+// setTSOCondition is the condition for updating physical time.
+// if it returns false, the physical time will not be updated.
+type setTSOCondition func(t *timestampOracle) bool
 
-func skipIfNotInitialized() setTSOOption {
+// mustInitialized is used to check whether the TSO in memory has been initialized before updating physical time.
+func mustInitialized() setTSOCondition {
 	return func(t *timestampOracle) bool {
-		return t.tsoMux.physical.Equal(typeutil.ZeroTime)
+		return !t.tsoMux.physical.Equal(typeutil.ZeroTime)
 	}
 }
 
-// skipIfNotOverflow is used to check whether the logical part is overflowed before updating physical time.
-func skipIfNotOverflow() setTSOOption {
+// mustOverflowed is used to check whether the TSO in memory has been overflowed before updating physical time.
+func mustOverflowed() setTSOCondition {
 	return func(t *timestampOracle) bool {
-		return !overflowedLogical(t.tsoMux.logical)
+		return overflowedLogical(t.tsoMux.logical)
 	}
 }
 
 // setTSOPhysical sets the TSO's physical part with the given time.
 // It returns true if the TSO's logical part is overflowed, the caller should wait for the next physical tick.
-// It accepts some options to control the update behavior, for example,
-// skipIfNotInitialized will check whether the TSO in memory has been initialized,
-// and skipIfNotOverflow will check whether the logical part is overflowed before updating physical time.
-func (t *timestampOracle) setTSOPhysical(next time.Time, opts ...setTSOOption) bool {
+// It must satisfy all the following conditions before updating physical time.
+// If not met, it will skip updating physical time and return whether the logical part is overflowed.
+func (t *timestampOracle) setTSOPhysical(next time.Time, conditions ...setTSOCondition) bool {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	for _, opt := range opts {
-		if opt(t) {
+	// check all conditions before updating physical time, if any condition is not met,
+	// skip updating physical time and return whether the logical part is overflowed.
+	for _, condition := range conditions {
+		if !condition(t) {
 			return overflowedLogical(t.tsoMux.logical)
 		}
 	}
@@ -403,9 +405,9 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 	// Otherwise, the caller met logical overflow, so it will allocate physical time to alloc more timestamp in concurrent.
 	// So we need to check logical overflow before updating physical time to avoid allocating too much physical time due to logical overflow.
 	if purpose == intervalUpdate {
-		overflowed = t.setTSOPhysical(next, skipIfNotInitialized())
+		overflowed = t.setTSOPhysical(next, mustInitialized())
 	} else {
-		overflowed = t.setTSOPhysical(next, skipIfNotInitialized(), skipIfNotOverflow())
+		overflowed = t.setTSOPhysical(next, mustInitialized(), mustOverflowed())
 	}
 	return overflowed, nil
 }
