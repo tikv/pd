@@ -187,12 +187,17 @@ func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
+	grt *groupRUTracker,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
 
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
+	}
+	// Inject the group RU tracker into the resource group.
+	if rg.RUSettings.RU.grt == nil {
+		rg.RUSettings.RU.grt = grt
 	}
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
 	if tb == nil {
