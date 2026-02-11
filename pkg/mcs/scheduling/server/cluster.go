@@ -355,6 +355,10 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
+			// Skip the scheduler if it is disabled.
+			if scheduler.Disable {
+				continue
+			}
 			schedulerType, ok := types.ConvertOldStrToType[scheduler.Type]
 			if !ok {
 				log.Error("scheduler not found", zap.String("type", scheduler.Type))
@@ -392,13 +396,14 @@ func (c *Cluster) updateScheduler() {
 				zap.String("scheduler-name", name),
 				zap.Strings("scheduler-args", scheduler.Args))
 		}
-		// Remove the deleted schedulers.
+		// Remove the deleted schedulers or disabled schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
 			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
-			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
-				return latestSchedulersConfig[i].Type == oldType
-			}) {
+			shouldKeep := slice.AnyOf(latestSchedulersConfig, func(i int) bool {
+				return latestSchedulersConfig[i].Type == oldType && !latestSchedulersConfig[i].Disable
+			})
+			if shouldKeep {
 				continue
 			}
 			if err := schedulersController.RemoveScheduler(name); err != nil {

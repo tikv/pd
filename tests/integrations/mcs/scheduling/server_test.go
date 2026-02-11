@@ -146,6 +146,12 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
 	expectedSchedulerCount := len(types.DefaultSchedulers)
+	// Wait for the cluster to be ready and set it as prepared
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
@@ -157,6 +163,13 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
+	// Wait for the cluster to be ready
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	// Set the cluster as prepared so that the coordinator can start running schedulers
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
@@ -314,6 +327,8 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the PD.
@@ -378,15 +393,16 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String())
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// The default scheduler could not be deleted, it could only be disabled.
 	defaultSchedulerNames := []string{
 		types.BalanceLeaderScheduler.String(),
 		types.BalanceRegionScheduler.String(),
 		types.BalanceHotRegionScheduler.String(),
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
-		re.NotNil(schedulersController.GetScheduler(name), name)
 		testutil.Eventually(re, func() bool {
+			if schedulersController.GetScheduler(name) == nil {
+				return false
+			}
 			disabled, err := schedulersController.IsSchedulerDisabled(name)
 			re.NoError(err, name)
 			return disabled == shouldDisabled
@@ -395,10 +411,15 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, false)
 		tests.MustDeleteScheduler(re, suite.backendEndpoints, name)
-		checkDisabled(name, true)
 	}
+
 	for _, name := range defaultSchedulerNames {
-		checkDisabled(name, true)
+		testutil.Eventually(re, func() bool {
+			return schedulersController.GetScheduler(name) == nil
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
 		tests.MustAddScheduler(re, suite.backendEndpoints, name, nil)
 		checkDisabled(name, false)
 	}
@@ -426,6 +447,51 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 		return len(evictStoreIDs) == len(expected)
 	})
 	re.ElementsMatch(evictStoreIDs, expected)
+}
+
+func (suite *serverTestSuite) TestRemoveScheduler() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+
+	// Check the default schedulers exist.
+	defaultSchedulerNames := []string{
+		types.BalanceLeaderScheduler.String(),
+		types.BalanceRegionScheduler.String(),
+		types.BalanceHotRegionScheduler.String(),
+		types.EvictSlowStoreScheduler.String(),
+	}
+	checkSchedulerExist := func(name string, shouldExist bool) {
+		testutil.Eventually(re, func() bool {
+			exist := schedulersController.GetScheduler(name) != nil
+			return exist == shouldExist
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
+		checkSchedulerExist(name, true)
+	}
+
+	// Disable evict-slow-store-scheduler by calling DELETE API.
+	// For the scheduling cluster, when a default scheduler is marked as disabled in config,
+	// the updateScheduler goroutine will detect this and remove the scheduler from the controller.
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String())
+
+	// Wait and verify the scheduler is removed from the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), false)
+
+	// Re-enable the scheduler by calling ADD API.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String(), nil)
+
+	// Verify the scheduler exists again in the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
 }
 
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
