@@ -236,13 +236,18 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						// no limit for followers.
 					}
 					saveKV, _, _, _ := regionGuide(cctx, region, origin)
-					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {
 						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
 							region.UpdateBuckets(buckets[i], old)
+							meta := &metapb.BucketMeta{
+								Version: buckets[i].GetVersion(),
+								Keys:    buckets[i].GetKeys(),
+							}
+							region = region.Clone(core.WithBucketMeta(meta))
 						}
 					}
+					overlaps := bc.PutRegion(region)
 					if saveKV {
 						err = regionStorage.SaveRegion(r)
 					}
