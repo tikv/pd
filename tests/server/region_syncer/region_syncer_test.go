@@ -181,7 +181,7 @@ func TestRegionSyncer(t *testing.T) {
 		re.Equal(region.GetMeta(), r.GetMeta())
 		re.Equal(region.GetStat(), r.GetStat())
 		re.Equal(region.GetLeader(), r.GetLeader())
-		re.Equal(region.GetBuckets(), r.GetBuckets())
+		re.Equal(region.GetBuckets(), r.GetBuckets(), region.GetID())
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))

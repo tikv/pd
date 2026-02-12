@@ -240,7 +240,14 @@ func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 // SetBuckets sets the buckets for the region, only use test and region syncer.
 func SetBuckets(buckets *metapb.Buckets) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		if buckets != nil {
+			region.bucketMeta = &metapb.BucketMeta{
+				Version: buckets.GetVersion(),
+				Keys:    buckets.GetKeys(),
+			}
+		} else {
+			region.bucketMeta = &metapb.BucketMeta{}
+		}
 	}
 }
 
