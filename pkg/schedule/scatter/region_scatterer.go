@@ -377,7 +377,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
 		for _, peer := range peers {
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
-				if allowLeader(oldFit, peer) {
+				if allowLeader(r.cluster, oldFit, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
 				}
 				// It is both sourcePeer and targetPeer itself, no need to select.
@@ -398,7 +398,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
 					selectedStores[peer.GetStoreId()] = struct{}{}
-					if allowLeader(oldFit, peer) {
+					if allowLeader(r.cluster, oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
@@ -453,7 +453,10 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	return op, nil
 }
 
-func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
+// allowLeader checks if a peer can become a leader candidate.
+// When placement rules are disabled, it uses fallback logic to allow all voter peers.
+// When placement rules are enabled but no rules match, it returns false (no fallback).
+func allowLeader(cluster sche.SharedCluster, fit *placement.RegionFit, peer *metapb.Peer) bool {
 	switch peer.GetRole() {
 	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
 		return false
@@ -461,8 +464,34 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 	if peer.IsWitness {
 		return false
 	}
+
+	// Check if placement rules are enabled
+	isPlacementRulesEnabled := cluster.GetSharedConfig().IsPlacementRulesEnabled()
+
+	// If no placement rules match this region (RuleFits is empty)
+	if fit == nil || len(fit.RuleFits) == 0 {
+		// Only use fallback when placement rules are disabled
+		// When placement rules are enabled but no rules match, it usually means
+		// the region spans across multiple rule boundaries and should be split instead
+		if !isPlacementRulesEnabled {
+			// Fallback: allow all non-learner, non-witness peers to be leader candidates
+			return true
+		}
+		// Placement rules enabled but no match - return false (no fallback)
+		return false
+	}
+
 	peerFit := fit.GetRuleFit(peer.GetId())
-	if peerFit == nil || peerFit.Rule == nil || peerFit.Rule.IsWitness {
+	if peerFit == nil || peerFit.Rule == nil {
+		// If peer is not in any rule fit
+		if !isPlacementRulesEnabled {
+			// Fallback when placement rules disabled
+			return true
+		}
+		// Placement rules enabled but peer not in any rule - return false
+		return false
+	}
+	if peerFit.Rule.IsWitness {
 		return false
 	}
 	switch peerFit.Rule.Role {
