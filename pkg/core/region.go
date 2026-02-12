@@ -286,9 +286,14 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	// skip bucket meta update if tikv has report bucket meta.
-	if r.bucketMeta == nil && bucketEnable && origin != nil && r.buckets == nil {
-		r.buckets = origin.buckets
+	if bucket := r.GetBuckets(); bucketEnable && bucket == nil && origin != nil {
+		originBucket := origin.GetBuckets()
+		if originBucket != nil {
+			r.bucketMeta = &metapb.BucketMeta{
+				Version: originBucket.GetVersion(),
+				Keys:    originBucket.GetKeys(),
+			}
+		}
 	}
 }
 

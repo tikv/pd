@@ -697,12 +697,9 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 			region.UpdateBuckets(buckets, region.GetBuckets())
 			regions = append(regions, region)
 		} else {
-			meta := &metapb.BucketMeta{}
-			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat), core.WithBucketMeta(meta))
-			region.UpdateBuckets(&metapb.Buckets{}, region.GetBuckets())
+			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 			regions = append(regions, region)
 		}
-
 	}
 	return regions
 }
