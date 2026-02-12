@@ -153,6 +153,13 @@ func WithIncVersion() RegionCreateOption {
 	}
 }
 
+// WithBucketMeta sets the bucket meta for the region.
+func WithBucketMeta(bucketMeta *metapb.BucketMeta) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.bucketMeta = bucketMeta
+	}
+}
+
 // WithDecVersion decreases the version of the region.
 func WithDecVersion() RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -230,10 +237,18 @@ func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 	}
 }
 
-// SetBuckets sets the buckets for the region, only use test.
+// SetBuckets sets the buckets for the region, only use test and region syncer.
 func SetBuckets(buckets *metapb.Buckets) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		// if buckets version less than 1, it means the buckets is just avoid nil panic.
+		if buckets != nil && buckets.GetVersion() > 0 {
+			region.bucketMeta = &metapb.BucketMeta{
+				Version: buckets.GetVersion(),
+				Keys:    buckets.GetKeys(),
+			}
+		} else {
+			region.bucketMeta = nil
+		}
 	}
 }
 
