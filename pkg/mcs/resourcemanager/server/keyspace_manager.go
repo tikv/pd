@@ -67,7 +67,7 @@ type keyspaceResourceGroupManager struct {
 	syncutil.RWMutex
 	groups          map[string]*ResourceGroup
 	groupRUTrackers map[string]*groupRUTracker
-	sl              *serviceLimiter
+	serviceLimiter  *serviceLimiter
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
@@ -89,7 +89,7 @@ func newKeyspaceResourceGroupManager(
 		keyspaceID:      keyspaceID,
 		storage:         storage,
 		writeRole:       writeRole,
-		sl:              newServiceLimiter(keyspaceID, 0, storage, writeRole),
+		serviceLimiter:  newServiceLimiter(keyspaceID, 0, storage, writeRole),
 	}
 }
 
@@ -181,13 +181,12 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 	if !ok {
 		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
-
+	if !krgm.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
 	err := curGroup.PatchSettings(group)
 	if err != nil {
 		return err
-	}
-	if !krgm.writeRole.AllowsMetadataWrite() {
-		return nil
 	}
 	return curGroup.persistSettings(krgm.keyspaceID, krgm.storage)
 }
@@ -202,10 +201,11 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 	if !ok {
 		return errs.ErrResourceGroupNotExists.FastGenByArgs(name)
 	}
-	if krgm.writeRole.AllowsMetadataWrite() {
-		if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
-			return err
-		}
+	if !krgm.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
+	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
+		return err
 	}
 	krgm.Lock()
 	delete(krgm.groups, name)
@@ -290,13 +290,13 @@ func (krgm *keyspaceResourceGroupManager) setServiceLimitFromStorage(serviceLimi
 
 func (krgm *keyspaceResourceGroupManager) updateServiceLimit(serviceLimit float64, persist bool) {
 	krgm.RLock()
-	sl := krgm.sl
+	serviceLimiter := krgm.serviceLimiter
 	krgm.RUnlock()
 	// Set the new service limit to the limiter.
 	if persist {
-		sl.setServiceLimit(serviceLimit)
+		serviceLimiter.setServiceLimit(serviceLimit)
 	} else {
-		sl.setServiceLimitNoPersist(serviceLimit)
+		serviceLimiter.setServiceLimitNoPersist(serviceLimit)
 	}
 	// Cleanup the overrides if the service limit is set to 0.
 	if serviceLimit <= 0 {
@@ -309,16 +309,16 @@ func (krgm *keyspaceResourceGroupManager) updateServiceLimit(serviceLimit float6
 func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	return krgm.sl
+	return krgm.serviceLimiter
 }
 
 func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	if krgm.sl == nil {
+	if krgm.serviceLimiter == nil {
 		return 0, false
 	}
-	serviceLimit := krgm.sl.getServiceLimit()
+	serviceLimit := krgm.serviceLimiter.getServiceLimit()
 	if serviceLimit == 0 {
 		return 0, false
 	}

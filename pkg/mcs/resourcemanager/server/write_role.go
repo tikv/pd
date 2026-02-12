@@ -14,7 +14,11 @@
 
 package server
 
-import "github.com/pingcap/errors"
+import (
+	stderrors "errors"
+
+	"github.com/pingcap/errors"
+)
 
 // ResourceGroupWriteRole controls which type of data is allowed to be persisted.
 type ResourceGroupWriteRole uint8
@@ -42,5 +46,5 @@ var errMetadataWriteDisabled = errors.New("metadata write is disabled")
 
 // IsMetadataWriteDisabledError reports whether err is a metadata-write-disabled error.
 func IsMetadataWriteDisabledError(err error) bool {
-	return errors.ErrorEqual(err, errMetadataWriteDisabled)
+	return stderrors.Is(err, errMetadataWriteDisabled)
 }
