@@ -400,16 +400,14 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 		t.lastSavedTime.Store(save)
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 	}
-	var overflowed bool
 	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
 	// Otherwise, the caller met logical overflow, so it will allocate physical time to alloc more timestamp in concurrent.
 	// So we need to check logical overflow before updating physical time to avoid allocating too much physical time due to logical overflow.
-	if purpose == intervalUpdate {
-		overflowed = t.setTSOPhysical(next, mustInitialized())
-	} else {
-		overflowed = t.setTSOPhysical(next, mustInitialized(), mustOverflowed())
+	conditions := []setTSOCondition{mustInitialized()}
+	if purpose != intervalUpdate {
+		conditions = append(conditions, mustOverflowed())
 	}
-	return overflowed, nil
+	return t.setTSOPhysical(next, conditions...), nil
 }
 
 var maxRetryCount = 10
@@ -443,7 +441,10 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
 			if overflowed, err := t.updateTimestamp(overflowUpdate); err != nil {
-				log.Warn("update timestamp failed", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0), zap.Error(err))
+				log.Warn("update timestamp failed",
+					logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+					zap.Bool("overflowed", overflowed),
+					zap.Error(err))
 				time.Sleep(t.updatePhysicalInterval)
 			} else if overflowed {
 				time.Sleep(t.updatePhysicalInterval)
