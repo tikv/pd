@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
-	"path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -734,7 +733,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	re *require.Assertions,
 	numberOfKeyspaceGroupsToAdd int,
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
-	probabilityAssignToMe int, // percentage of assigning keyspace groups to this host/pod
+	probabilityAssignToMe int,         // percentage of assigning keyspace groups to this host/pod
 ) {
 	expectedGroupIDs := []uint32{}
 	mgr := suite.newUniqueKeyspaceGroupManager(loadKeyspaceGroupsBatchSize)
@@ -1226,14 +1225,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
 	keypath.SetClusterID(clusterID)
 
-	legacySvcRootPath := path.Join("/pd", clusterIDStr)
-	tsoSvcRootPath := path.Join(constant.MicroserviceRootPath, clusterIDStr, "tso")
 	electionNamePrefix := "tso-server-" + clusterIDStr
 	groupID := uint32(1)
 
+	//kgm := NewKeyspaceGroupManager(
+	//	suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
+	//	legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+
 	kgm := NewKeyspaceGroupManager(
-		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix, suite.cfg)
 	defer kgm.Close()
 	re.NoError(kgm.Initialize())
 
