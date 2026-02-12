@@ -390,11 +390,7 @@ func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	if tb == nil {
 		return
 	}
-	if settings := tb.GetSettings(); settings != nil {
-		setting := proto.Clone(settings).(*rmpb.TokenLimitSettings)
-		gtb.Settings = setting
-		gtb.settingChanged = true
-	}
+	gtb.applySettings(tb)
 
 	// The settings in token is delta of the last update and now.
 	gtb.Tokens += tb.GetTokens()
