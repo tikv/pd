@@ -584,6 +584,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
+		tsoBatchSize.Observe(float64(count))
 		ctx, task := trace.NewTask(ctx, "tso")
 		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
 		task.End()
