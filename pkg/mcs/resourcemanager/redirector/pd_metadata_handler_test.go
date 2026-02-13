@@ -50,13 +50,13 @@ func TestShouldHandlePDMetadataLocally(t *testing.T) {
 		path   string
 		expect bool
 	}{
-		{http.MethodPost, "/resource-manager/api/v1/config/group", true},
-		{http.MethodPut, "/resource-manager/api/v1/config/group", true},
-		{http.MethodGet, "/resource-manager/api/v1/config/groups", true},
-		{http.MethodGet, "/resource-manager/api/v1/config/group/test", true},
-		{http.MethodDelete, "/resource-manager/api/v1/config/group/test", true},
-		{http.MethodPost, "/resource-manager/api/v1/config/keyspace/service-limit", true},
-		{http.MethodGet, "/resource-manager/api/v1/config/keyspace/service-limit/test", true},
+		{http.MethodPost, "/resource-manager/api/v1/config/group", false},
+		{http.MethodPut, "/resource-manager/api/v1/config/group", false},
+		{http.MethodGet, "/resource-manager/api/v1/config/groups", false},
+		{http.MethodGet, "/resource-manager/api/v1/config/group/test", false},
+		{http.MethodDelete, "/resource-manager/api/v1/config/group/test", false},
+		{http.MethodPost, "/resource-manager/api/v1/config/keyspace/service-limit", false},
+		{http.MethodGet, "/resource-manager/api/v1/config/keyspace/service-limit/test", false},
 		{http.MethodGet, "/resource-manager/api/v1/config", false},
 		{http.MethodPut, "/resource-manager/api/v1/admin/log", false},
 	}

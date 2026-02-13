@@ -17,7 +17,6 @@ package redirector
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/urfave/negroni/v3"
 
@@ -64,28 +63,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 }
 
 func shouldHandlePDMetadataLocally(r *http.Request) bool {
-	path := strings.TrimRight(r.URL.Path, "/")
-	if len(path) == 0 {
-		path = "/"
-	}
-	prefix := strings.TrimRight(apis.APIPathPrefix, "/")
-	switch r.Method {
-	case http.MethodPost:
-		return path == prefix+"/config/group" ||
-			path == prefix+"/config/controller" ||
-			path == prefix+"/config/keyspace/service-limit" ||
-			strings.HasPrefix(path, prefix+"/config/keyspace/service-limit/")
-	case http.MethodPut:
-		return path == prefix+"/config/group"
-	case http.MethodDelete:
-		return strings.HasPrefix(path, prefix+"/config/group/")
-	case http.MethodGet:
-		return path == prefix+"/config/groups" ||
-			strings.HasPrefix(path, prefix+"/config/group/") ||
-			path == prefix+"/config/controller" ||
-			path == prefix+"/config/keyspace/service-limit" ||
-			strings.HasPrefix(path, prefix+"/config/keyspace/service-limit/")
-	default:
-		return false
-	}
+	// Keep metadata APIs redirected to RM until PD<->RM metadata sync is in place.
+	_ = r
+	return false
 }
