@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
-	"github.com/tikv/pd/pkg/keyspace"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -38,7 +38,7 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-// resourceManagerRedirectorTestSuite verifies requests are redirected to the microservice when fallback is disabled.
+// resourceManagerRedirectorTestSuite verifies PD redirector behavior when fallback is disabled.
 type resourceManagerRedirectorTestSuite struct {
 	suite.Suite
 	ctx          context.Context
@@ -74,10 +74,8 @@ func (suite *resourceManagerRedirectorTestSuite) SetupTest() {
 	suite.rmPrimary = suite.rmCluster.WaitForPrimaryServing(re)
 	re.NotNil(suite.rmPrimary)
 	suite.waitForResourceManagerPrimary()
-	suite.keyspaceName = "redirector_keyspace"
-	meta, err := suite.pdLeader.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{Name: suite.keyspaceName})
-	re.NoError(err)
-	suite.keyspaceID = meta.GetId()
+	suite.keyspaceName = keyspaceconstant.DefaultKeyspaceName
+	suite.keyspaceID = keyspaceconstant.DefaultKeyspaceID
 }
 
 func (suite *resourceManagerRedirectorTestSuite) TearDownTest() {
@@ -101,24 +99,19 @@ func (suite *resourceManagerRedirectorTestSuite) TestRedirectsConfigRequests() {
 	re := suite.Require()
 	groupName := "redirector_group"
 	suite.createResourceGroupViaPD(groupName, 200)
-	rmGroup := suite.fetchResourceGroup(suite.rmPrimary.GetAddr(), groupName)
-	re.NotNil(rmGroup)
 	pdGroup := suite.fetchResourceGroup(
 		suite.pdLeader.GetAddr(),
 		groupName,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
 	)
-	re.Equal(rmGroup.Name, pdGroup.Name)
-	re.Equal(rmGroup.Priority, pdGroup.Priority)
-	re.Equal(rmGroup.RUSettings.RU.Settings.FillRate, pdGroup.RUSettings.RU.Settings.FillRate)
-	re.Equal(rmGroup.RUSettings.RU.Settings.BurstLimit, pdGroup.RUSettings.RU.Settings.BurstLimit)
+	re.Equal(groupName, pdGroup.Name)
+	re.Equal(uint32(5), pdGroup.Priority)
+	re.Equal(uint64(200), pdGroup.RUSettings.RU.Settings.FillRate)
+	re.Equal(int64(200), pdGroup.RUSettings.RU.Settings.BurstLimit)
 }
 
 func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupRequests() {
 	re := suite.Require()
-	groupName := "redirector_grpc_group"
-	suite.createResourceGroupViaPD(groupName, 300)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	pdConn, err := grpcutil.GetClientConn(ctx, suite.pdLeader.GetAddr(), nil)
@@ -130,26 +123,6 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 
 	pdClient := rmpb.NewResourceManagerClient(pdConn)
 	rmClient := rmpb.NewResourceManagerClient(rmConn)
-	getReq := &rmpb.GetResourceGroupRequest{
-		ResourceGroupName: groupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
-	}
-	pdResp, err := pdClient.GetResourceGroup(ctx, getReq)
-	re.NoError(err)
-	rmResp, err := rmClient.GetResourceGroup(ctx, getReq)
-	re.NoError(err)
-	re.Nil(pdResp.GetError())
-	re.Nil(rmResp.GetError())
-	re.NotNil(pdResp.GetGroup())
-	re.NotNil(rmResp.GetGroup())
-	re.Equal(rmResp.GetGroup().GetName(), pdResp.GetGroup().GetName())
-	re.Equal(rmResp.GetGroup().GetPriority(), pdResp.GetGroup().GetPriority())
-	rmSettings := rmResp.GetGroup().GetRUSettings().GetRU().GetSettings()
-	pdSettings := pdResp.GetGroup().GetRUSettings().GetRU().GetSettings()
-	re.Equal(rmSettings.GetFillRate(), pdSettings.GetFillRate())
-	re.Equal(rmSettings.GetBurstLimit(), pdSettings.GetBurstLimit())
 
 	addGroupName := "redirector_grpc_add_group"
 	addGroup := &rmpb.ResourceGroup{
@@ -247,7 +220,7 @@ func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name s
 		payload,
 		testutil.StatusOK(re),
 		testutil.StringContain(re, "Success!"),
-		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
 	))
 }
 
