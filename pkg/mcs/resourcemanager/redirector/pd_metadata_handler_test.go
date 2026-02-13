@@ -25,13 +25,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	bs "github.com/tikv/pd/pkg/basicserver"
 	pderrors "github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/metering"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestPDMetadataHandlerGroupCRUDAndErrorCodes(t *testing.T) {
 	t.Parallel()
@@ -124,6 +132,27 @@ func TestPDMetadataHandlerControllerAndServiceLimit(t *testing.T) {
 	re.Equal(http.StatusBadRequest, resp.Code)
 }
 
+func TestNewPDMetadataHandler(t *testing.T) {
+	t.Parallel()
+
+	provider := &mockManagerProvider{}
+	manager := rmserver.NewManager[*mockManagerProvider](provider)
+	handler := newPDMetadataHandler(manager)
+	require.NotNil(t, handler)
+}
+
+type mockManagerProvider struct{ bs.Server }
+
+func (*mockManagerProvider) GetControllerConfig() *rmserver.ControllerConfig {
+	return &rmserver.ControllerConfig{}
+}
+
+func (*mockManagerProvider) GetMeteringWriter() *metering.Writer { return nil }
+
+func (*mockManagerProvider) AddStartCallback(...func()) {}
+
+func (*mockManagerProvider) AddServiceReadyCallback(...func(context.Context) error) {}
+
 type testPDMetadataStore struct {
 	keyspaceIDs        map[string]uint32
 	validKeyspaceIDs   map[uint32]struct{}
@@ -182,7 +211,7 @@ func (s *testPDMetadataStore) GetResourceGroup(keyspaceID uint32, name string, w
 	return group.Clone(withStats), nil
 }
 
-func (s *testPDMetadataStore) GetResourceGroupList(_ uint32, _ bool) ([]*rmserver.ResourceGroup, error) {
+func (*testPDMetadataStore) GetResourceGroupList(_ uint32, _ bool) ([]*rmserver.ResourceGroup, error) {
 	return []*rmserver.ResourceGroup{}, nil
 }
 
@@ -214,7 +243,7 @@ func (s *testPDMetadataStore) SetKeyspaceServiceLimit(keyspaceID uint32, service
 	return nil
 }
 
-func (s *testPDMetadataStore) LookupKeyspaceID(_ context.Context, name string) (uint32, error) {
+func (s *testPDMetadataStore) lookupKeyspaceID(_ context.Context, name string) (uint32, error) {
 	keyspaceID, ok := s.keyspaceIDs[name]
 	if !ok {
 		return 0, pderrors.ErrKeyspaceNotExists.FastGenByArgs(name)
@@ -222,7 +251,7 @@ func (s *testPDMetadataStore) LookupKeyspaceID(_ context.Context, name string) (
 	return keyspaceID, nil
 }
 
-func (s *testPDMetadataStore) LookupKeyspaceServiceLimit(keyspaceID uint32) (any, bool) {
+func (s *testPDMetadataStore) lookupKeyspaceServiceLimit(keyspaceID uint32) (any, bool) {
 	serviceLimit, ok := s.serviceLimits[keyspaceID]
 	if !ok {
 		return nil, false

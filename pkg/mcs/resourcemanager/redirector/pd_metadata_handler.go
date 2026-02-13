@@ -40,15 +40,15 @@ type pdMetadataStore interface {
 	GetControllerConfig() *rmserver.ControllerConfig
 	UpdateControllerConfigItem(string, any) error
 	SetKeyspaceServiceLimit(uint32, float64) error
-	LookupKeyspaceID(context.Context, string) (uint32, error)
-	LookupKeyspaceServiceLimit(uint32) (any, bool)
+	lookupKeyspaceID(context.Context, string) (uint32, error)
+	lookupKeyspaceServiceLimit(uint32) (any, bool)
 }
 
 type pdMetadataManagerAdapter struct {
 	*rmserver.Manager
 }
 
-func (a *pdMetadataManagerAdapter) LookupKeyspaceID(ctx context.Context, name string) (uint32, error) {
+func (a *pdMetadataManagerAdapter) lookupKeyspaceID(ctx context.Context, name string) (uint32, error) {
 	keyspaceIDValue, err := a.GetKeyspaceIDByName(ctx, name)
 	if err != nil {
 		return 0, err
@@ -56,7 +56,7 @@ func (a *pdMetadataManagerAdapter) LookupKeyspaceID(ctx context.Context, name st
 	return rmserver.ExtractKeyspaceID(keyspaceIDValue), nil
 }
 
-func (a *pdMetadataManagerAdapter) LookupKeyspaceServiceLimit(keyspaceID uint32) (any, bool) {
+func (a *pdMetadataManagerAdapter) lookupKeyspaceServiceLimit(keyspaceID uint32) (any, bool) {
 	limiter := a.GetKeyspaceServiceLimiter(keyspaceID)
 	if limiter == nil {
 		return nil, false
@@ -216,7 +216,7 @@ func (h *pdMetadataHandler) setControllerConfig(c *gin.Context) {
 }
 
 func (h *pdMetadataHandler) setKeyspaceServiceLimit(c *gin.Context) {
-	keyspaceID, err := h.getKeyspaceIDByName(c, h.getServiceLimitTargetKeyspace(c))
+	keyspaceID, err := h.getKeyspaceIDByName(c, getServiceLimitTargetKeyspace(c))
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -238,13 +238,13 @@ func (h *pdMetadataHandler) setKeyspaceServiceLimit(c *gin.Context) {
 }
 
 func (h *pdMetadataHandler) getKeyspaceServiceLimit(c *gin.Context) {
-	keyspaceName := h.getServiceLimitTargetKeyspace(c)
+	keyspaceName := getServiceLimitTargetKeyspace(c)
 	keyspaceID, err := h.getKeyspaceIDByName(c, keyspaceName)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	limiter, ok := h.store.LookupKeyspaceServiceLimit(keyspaceID)
+	limiter, ok := h.store.lookupKeyspaceServiceLimit(keyspaceID)
 	if !ok {
 		c.String(http.StatusNotFound,
 			fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))
@@ -253,7 +253,7 @@ func (h *pdMetadataHandler) getKeyspaceServiceLimit(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, limiter)
 }
 
-func (h *pdMetadataHandler) getServiceLimitTargetKeyspace(c *gin.Context) string {
+func getServiceLimitTargetKeyspace(c *gin.Context) string {
 	keyspaceName := c.Param("keyspace_name")
 	if keyspaceName != "" {
 		return keyspaceName
@@ -262,5 +262,5 @@ func (h *pdMetadataHandler) getServiceLimitTargetKeyspace(c *gin.Context) string
 }
 
 func (h *pdMetadataHandler) getKeyspaceIDByName(c *gin.Context, keyspaceName string) (uint32, error) {
-	return h.store.LookupKeyspaceID(c, keyspaceName)
+	return h.store.lookupKeyspaceID(c, keyspaceName)
 }
