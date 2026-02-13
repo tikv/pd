@@ -41,6 +41,31 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+func TestShouldHandlePDMetadataLocally(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	tests := []struct {
+		method string
+		path   string
+		expect bool
+	}{
+		{http.MethodPost, "/resource-manager/api/v1/config/group", true},
+		{http.MethodPut, "/resource-manager/api/v1/config/group", true},
+		{http.MethodGet, "/resource-manager/api/v1/config/groups", true},
+		{http.MethodGet, "/resource-manager/api/v1/config/group/test", true},
+		{http.MethodDelete, "/resource-manager/api/v1/config/group/test", true},
+		{http.MethodPost, "/resource-manager/api/v1/config/keyspace/service-limit", true},
+		{http.MethodGet, "/resource-manager/api/v1/config/keyspace/service-limit/test", true},
+		{http.MethodGet, "/resource-manager/api/v1/config", false},
+		{http.MethodPut, "/resource-manager/api/v1/admin/log", false},
+	}
+	for _, tc := range tests {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		re.Equal(tc.expect, shouldHandlePDMetadataLocally(req), "method=%s path=%s", tc.method, tc.path)
+	}
+}
+
 func TestPDMetadataHandlerGroupCRUDAndErrorCodes(t *testing.T) {
 	t.Parallel()
 
