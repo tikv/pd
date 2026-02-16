@@ -188,7 +188,7 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	count := uint32(totalCount)
 
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count)
+	resp, err := requests[0].process(forwardStream, count) // #nosec G602 -- requests is guaranteed non-empty by caller loop guard
 	if err != nil {
 		return err
 	}
