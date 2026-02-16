@@ -181,9 +181,9 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	totalCount := uint64(0)
 	for _, request := range requests {
 		totalCount += uint64(request.getCount())
-		if totalCount > math.MaxUint32 {
-			return errs.ErrGenerateTimestamp.FastGenByArgs("merged tso request count overflow")
-		}
+	}
+	if totalCount > math.MaxUint32 {
+		return errs.ErrGenerateTimestamp.FastGenByArgs("merged tso request count overflow")
 	}
 	count := uint32(totalCount)
 
