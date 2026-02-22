@@ -985,9 +985,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			}
 		}
 		kgm.kgs[groupID] = nil
-		if kgm.metrics != nil {
-			DeleteKeyspaceListLength(groupID)
-		}
+		DeleteKeyspaceListLength(groupID)
 	}
 
 	allocator := kgm.allocators[groupID]
@@ -1437,10 +1435,8 @@ mergeLoop:
 				zap.Error(err))
 			continue
 		}
-		if kgm.metrics != nil {
-			for _, groupID := range mergeList {
-				DeleteKeyspaceListLength(groupID)
-			}
+		for _, groupID := range mergeList {
+			DeleteKeyspaceListLength(groupID)
 		}
 		kgm.metrics.mergeDuration.Observe(time.Since(startTime).Seconds())
 		log.Info("finished merging keyspace group",
