@@ -849,12 +849,6 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 
 	if oldGroup != nil {
 		oldKeyspaces = oldGroup.Keyspaces
-
-		// Keep the existing keyspaces sorted to simplify diff calculation
-		sort.Slice(oldKeyspaces, func(i, j int) bool {
-			return oldKeyspaces[i] < oldKeyspaces[j]
-		})
-
 		oldKeyspaceLookupTable = oldGroup.KeyspaceLookupTable
 	}
 
