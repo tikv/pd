@@ -194,9 +194,6 @@ type keyspaceGroupMetrics struct {
 	finishSplitDuration     prometheus.Observer
 	finishMergeSendDuration prometheus.Observer
 	finishMergeDuration     prometheus.Observer
-
-	// keyspaceListLengthGauge records the keyspace list length per keyspace group.
-	keyspaceListLengthGauge *prometheus.GaugeVec
 }
 
 func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
@@ -211,8 +208,6 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 		finishSplitDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-split"),
 		finishMergeSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
 		finishMergeDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
-
-		keyspaceListLengthGauge: keyspaceGroupKeyspaceCountGauge,
 	}
 }
 
@@ -231,12 +226,12 @@ func getKeyspaceGroupKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
 }
 
 // SetKeyspaceListLength sets the keyspace list length metric for the given keyspace group.
-func (m *keyspaceGroupMetrics) SetKeyspaceListLength(groupID uint32, length float64) {
+func SetKeyspaceListLength(groupID uint32, length float64) {
 	getKeyspaceGroupKeyspaceCountGauge(groupID).Set(length)
 }
 
 // DeleteKeyspaceListLength removes the keyspace list length metric for the given keyspace group.
-func (m *keyspaceGroupMetrics) DeleteKeyspaceListLength(groupID uint32) {
+func DeleteKeyspaceListLength(groupID uint32) {
 	keyspaceGroupKeyspaceCountGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
 	keyspaceGroupKeyspaceCountGaugeCache.Delete(groupID)
 }
