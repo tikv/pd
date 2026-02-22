@@ -16,6 +16,7 @@ package tso
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -96,6 +97,9 @@ var (
 			Name:      "keyspace_list_length",
 			Help:      "The length of keyspace list in each TSO keyspace group.",
 		}, []string{groupLabel})
+
+	// keyspaceGroupKeyspaceCountGaugeCache caches gauge per groupID to avoid repeated WithLabelValues.
+	keyspaceGroupKeyspaceCountGaugeCache sync.Map
 )
 
 func init() {
@@ -212,18 +216,33 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 	}
 }
 
+// getKeyspaceGroupKeyspaceCountGauge returns the cached gauge for the group, or creates one with WithLabelValues.
+func getKeyspaceGroupKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
+	key := groupID
+	if g, ok := keyspaceGroupKeyspaceCountGaugeCache.Load(key); ok {
+		return g.(prometheus.Gauge)
+	}
+	labelVal := strconv.FormatUint(uint64(groupID), 10)
+	gauge := keyspaceGroupKeyspaceCountGauge.WithLabelValues(labelVal)
+	if actual, loaded := keyspaceGroupKeyspaceCountGaugeCache.LoadOrStore(key, gauge); loaded {
+		return actual.(prometheus.Gauge)
+	}
+	return gauge
+}
+
 // SetKeyspaceListLength sets the keyspace list length metric for the given keyspace group.
 func (m *keyspaceGroupMetrics) SetKeyspaceListLength(groupID uint32, length float64) {
-	m.keyspaceListLengthGauge.WithLabelValues(strconv.FormatUint(uint64(groupID), 10)).Set(length)
+	getKeyspaceGroupKeyspaceCountGauge(groupID).Set(length)
 }
 
 // DeleteKeyspaceListLength removes the keyspace list length metric for the given keyspace group.
 func (m *keyspaceGroupMetrics) DeleteKeyspaceListLength(groupID uint32) {
-	m.keyspaceListLengthGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	keyspaceGroupKeyspaceCountGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	keyspaceGroupKeyspaceCountGaugeCache.Delete(groupID)
 }
 
 // SetKeyspaceGroupKeyspaceCountGauge sets the keyspace list length metric for the given keyspace group.
 // It is used by PD API service when saveKeyspaceGroups is executed.
 func SetKeyspaceGroupKeyspaceCountGauge(groupID uint32, length float64) {
-	keyspaceGroupKeyspaceCountGauge.WithLabelValues(strconv.FormatUint(uint64(groupID), 10)).Set(length)
+	getKeyspaceGroupKeyspaceCountGauge(groupID).Set(length)
 }

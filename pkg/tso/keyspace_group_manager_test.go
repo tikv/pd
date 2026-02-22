@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
-	"path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -34,10 +33,8 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -1300,14 +1297,12 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
 	keypath.SetClusterID(clusterID)
 
-	legacySvcRootPath := path.Join("/pd", clusterIDStr)
-	tsoSvcRootPath := path.Join(constant.MicroserviceRootPath, clusterIDStr, "tso")
 	electionNamePrefix := "tso-server-" + clusterIDStr
 	groupID := uint32(1)
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+		suite.cfg)
 	defer kgm.Close()
 	re.NoError(kgm.Initialize())
 
@@ -1328,7 +1323,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 		// check keyspace 6 wether exist in global lookup table
 		for _, id := range []uint32{6} {
 			groupID1, ok := kgm.keyspaceLookupTable[id]
-			log.Info("test-yjy TestUpdateKeyspaceGroup", zap.Any("kgm.keyspaceLookupTable", kgm.keyspaceLookupTable))
 			debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, address, id)
 			if exist {
 				re.True(ok, debug)
@@ -1352,7 +1346,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 	// case 2 : watch new keyspace added
 	newGroup := &endpoint.KeyspaceGroup{
 		ID:        groupID,
-		Keyspaces: []uint32{1, 2, 3, 10, 6, 11}, // 添加了 keyspace 11
+		Keyspaces: []uint32{1, 2, 3, 10, 6, 11}, // added keyspace 11
 		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.cfg.GetAdvertiseListenAddr(), Priority: 1}},
 	}
 	kgm.updateKeyspaceGroup(newGroup)
