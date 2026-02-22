@@ -849,6 +849,12 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 
 	if oldGroup != nil {
 		oldKeyspaces = oldGroup.Keyspaces
+
+		// Keep the existing keyspaces sorted to simplify diff calculation
+		sort.Slice(oldKeyspaces, func(i, j int) bool {
+			return oldKeyspaces[i] < oldKeyspaces[j]
+		})
+
 		oldKeyspaceLookupTable = oldGroup.KeyspaceLookupTable
 	}
 
@@ -1436,6 +1442,11 @@ mergeLoop:
 				zap.Uint32s("merge-list", mergeList),
 				zap.Error(err))
 			continue
+		}
+		if kgm.metrics != nil {
+			for _, groupID := range mergeList {
+				kgm.metrics.DeleteKeyspaceListLength(groupID)
+			}
 		}
 		kgm.metrics.mergeDuration.Observe(time.Since(startTime).Seconds())
 		log.Info("finished merging keyspace group",
