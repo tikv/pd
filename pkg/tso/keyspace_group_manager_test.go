@@ -1273,7 +1273,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 	// case 2 : watch new keyspace added
 	newGroup := &endpoint.KeyspaceGroup{
 		ID:        groupID,
-		Keyspaces: []uint32{1, 2, 3, 10, 6, 11}, // 添加了 keyspace 11
+		Keyspaces: []uint32{1, 2, 3, 10, 6, 11}, // keyspace 11 added
 		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.cfg.GetAdvertiseListenAddr(), Priority: 1}},
 	}
 	kgm.updateKeyspaceGroup(newGroup)
