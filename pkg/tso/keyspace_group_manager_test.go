@@ -733,7 +733,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	re *require.Assertions,
 	numberOfKeyspaceGroupsToAdd int,
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
-	probabilityAssignToMe int,         // percentage of assigning keyspace groups to this host/pod
+	probabilityAssignToMe int, // percentage of assigning keyspace groups to this host/pod
 ) {
 	expectedGroupIDs := []uint32{}
 	mgr := suite.newUniqueKeyspaceGroupManager(loadKeyspaceGroupsBatchSize)
