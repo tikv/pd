@@ -31,10 +31,8 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -1254,7 +1252,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 		// check keyspace 6 wether exist in global lookup table
 		for _, id := range []uint32{6} {
 			groupID1, ok := kgm.keyspaceLookupTable[id]
-			log.Info("test-yjy TestUpdateKeyspaceGroup", zap.Any("kgm.keyspaceLookupTable", kgm.keyspaceLookupTable))
 			debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, address, id)
 			if exist {
 				re.True(ok, debug)
