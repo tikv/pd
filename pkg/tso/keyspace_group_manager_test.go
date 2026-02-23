@@ -1226,10 +1226,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 	electionNamePrefix := "tso-server-" + clusterIDStr
 	groupID := uint32(1)
 
-	//kgm := NewKeyspaceGroupManager(
-	//	suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-	//	legacySvcRootPath, tsoSvcRootPath, suite.cfg)
-
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix, suite.cfg)
 	defer kgm.Close()
