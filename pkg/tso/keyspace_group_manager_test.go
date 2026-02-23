@@ -1245,7 +1245,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 		}
 		// Call updateKeyspaceGroup to update keyspaceLookupTable
 		kgm.updateKeyspaceGroup(newGroup)
-		// check keyspace 6 whether exist in global lookup table
+		// check keyspace 6 whether exist in global lookup table (RLock to avoid data race with background watchers)
+		kgm.RLock()
 		for _, id := range []uint32{6} {
 			groupID1, ok := kgm.keyspaceLookupTable[id]
 			debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, address, id)
@@ -1256,6 +1257,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 				re.False(ok, debug)
 			}
 		}
+		kgm.RUnlock()
 		index++
 	}
 
@@ -1275,13 +1277,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.cfg.GetAdvertiseListenAddr(), Priority: 1}},
 	}
 	kgm.updateKeyspaceGroup(newGroup)
-	// verify keyspaces 6, 10, and 11 exist in the global lookup table
+	// verify keyspaces 6, 10, and 11 exist in the global lookup table (RLock to avoid data race with background watchers)
+	kgm.RLock()
 	for _, id := range []uint32{6, 10, 11} {
 		groupID1, ok := kgm.keyspaceLookupTable[id]
 		debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, kgm.cfg.GetAdvertiseListenAddr(), id)
 		re.True(ok, debug)
 		re.Equal(groupID, groupID1, debug)
 	}
+	kgm.RUnlock()
 	index++
 }
 
