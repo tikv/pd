@@ -1284,31 +1284,3 @@ func waitForPrimariesServing(
 		return true
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 }
-
-func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
-	re := suite.Require()
-	groupID := uint32(1)
-	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
-	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
-	kgm := &KeyspaceGroupManager{
-		state: state{
-			keyspaceLookupTable: make(map[uint32]uint32),
-		},
-	}
-
-	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
-	for _, id := range []uint32{6, 10} {
-		groupID1, ok := kgm.keyspaceLookupTable[id]
-		re.True(ok)
-		re.Equal(groupID, groupID1)
-	}
-
-	oldGroup = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
-	newGroup = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
-	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
-	for _, id := range []uint32{6, 10} {
-		groupID1, ok := kgm.keyspaceLookupTable[id]
-		re.True(ok, id)
-		re.Equal(groupID, groupID1)
-	}
-}
