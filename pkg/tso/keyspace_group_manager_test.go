@@ -1245,7 +1245,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
 		}
 		// Call updateKeyspaceGroup to update keyspaceLookupTable
 		kgm.updateKeyspaceGroup(newGroup)
-		// check keyspace 6 wether exist in global lookup table
+		// check keyspace 6 whether exist in global lookup table
 		for _, id := range []uint32{6} {
 			groupID1, ok := kgm.keyspaceLookupTable[id]
 			debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, address, id)
