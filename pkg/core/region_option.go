@@ -153,7 +153,7 @@ func WithIncVersion() RegionCreateOption {
 	}
 }
 
-// WithBucketMeta sets the bucket meta for the region.
+// WithBucketMeta sets the bucket meta for the region, only use for test.
 func WithBucketMeta(bucketMeta *metapb.BucketMeta) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.bucketMeta = bucketMeta
@@ -237,10 +237,11 @@ func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 	}
 }
 
-// SetBuckets sets the buckets for the region, only use test and region syncer.
+// SetBuckets sets the buckets for the region, only use test and region syncer client.
 func SetBuckets(buckets *metapb.Buckets) RegionCreateOption {
 	return func(region *RegionInfo) {
-		// if buckets version less than 1, it means the buckets is just avoid nil panic.
+		// bucket version is the timestamp of tikv report buckets, so it must greater than 0.
+		// otherwise it means this is just avoid marshal panic, we should reset it.
 		if buckets != nil && buckets.GetVersion() > 0 {
 			region.bucketMeta = &metapb.BucketMeta{
 				Version: buckets.GetVersion(),
