@@ -691,7 +691,10 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 
 		errMsg := lastErr.Error()
 		switch {
-		case strings.Contains(errMsg, "address already in use"):
+		case strings.Contains(errMsg, "address already in use") || strings.Contains(errMsg, "Etcd cluster ID mismatch"):
+			// `Etcd cluster ID mismatch` can happen when the allocated peer URL happens to
+			// connect to another test's etcd cluster (port reuse across concurrent `go test`
+			// processes). Treat it as a port conflict and recreate servers with new ports.
 			log.Warn("port conflict detected, recreating servers with new ports",
 				zap.Int("attempt", i+1),
 				zap.Int("maxRetries", maxRetries),

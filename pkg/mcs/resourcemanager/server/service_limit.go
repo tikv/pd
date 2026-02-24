@@ -44,9 +44,20 @@ type serviceLimiter struct {
 	keyspaceID uint32
 	// storage is used to persist the service limit.
 	storage endpoint.ResourceGroupStorage
+	// writeRole controls whether metadata writes can be persisted.
+	writeRole ResourceGroupWriteRole
 }
 
-func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint.ResourceGroupStorage) *serviceLimiter {
+func newServiceLimiter(
+	keyspaceID uint32,
+	serviceLimit float64,
+	storage endpoint.ResourceGroupStorage,
+	writeRoles ...ResourceGroupWriteRole,
+) *serviceLimiter {
+	writeRole := ResourceGroupWriteRoleLegacyAll
+	if len(writeRoles) > 0 {
+		writeRole = writeRoles[0]
+	}
 	// The service limit should be non-negative.
 	serviceLimit = math.Max(0, serviceLimit)
 	return &serviceLimiter{
@@ -54,10 +65,19 @@ func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint
 		LastUpdate:   time.Now(),
 		keyspaceID:   keyspaceID,
 		storage:      storage,
+		writeRole:    writeRole,
 	}
 }
 
 func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
+	krl.setServiceLimitInternal(newServiceLimit, true)
+}
+
+func (krl *serviceLimiter) setServiceLimitNoPersist(newServiceLimit float64) {
+	krl.setServiceLimitInternal(newServiceLimit, false)
+}
+
+func (krl *serviceLimiter) setServiceLimitInternal(newServiceLimit float64, persist bool) {
 	// The service limit should be non-negative.
 	newServiceLimit = math.Max(0, newServiceLimit)
 	krl.Lock()
@@ -80,8 +100,8 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 		krl.refillTokensLocked(now)
 	}
 
-	// Persist the service limit to storage
-	if krl.storage != nil {
+	// Persist the service limit to storage.
+	if persist && krl.writeRole.AllowsMetadataWrite() && krl.storage != nil {
 		if err := krl.storage.SaveServiceLimit(krl.keyspaceID, newServiceLimit); err != nil {
 			log.Error("failed to persist service limit",
 				zap.Uint32("keyspace-id", krl.keyspaceID),

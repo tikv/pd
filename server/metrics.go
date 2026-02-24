@@ -101,6 +101,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
+	tsoBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_batch_size",
+			Help:      "Bucketed histogram of the batch size of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
+		})
+
 	queryRegionDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -207,6 +216,7 @@ func init() {
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
 	prometheus.MustRegister(tsoHandleDuration)
+	prometheus.MustRegister(tsoBatchSize)
 	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)

@@ -133,6 +133,7 @@ type tsoMetrics struct {
 	notLeaderAnymoreEvent        prometheus.Counter
 	logicalOverflowEvent         prometheus.Counter
 	exceededMaxRetryEvent        prometheus.Counter
+	notAllowedSaveTimestampEvent prometheus.Counter
 	// timestampOracle operation duration
 	syncSaveDuration   prometheus.Observer
 	resetSaveDuration  prometheus.Observer
@@ -169,6 +170,7 @@ func newTSOMetrics(groupID string) *tsoMetrics {
 		notLeaderAnymoreEvent:        tsoCounter.WithLabelValues("not_leader_anymore", groupID),
 		logicalOverflowEvent:         tsoCounter.WithLabelValues("logical_overflow", groupID),
 		exceededMaxRetryEvent:        tsoCounter.WithLabelValues("exceeded_max_retry", groupID),
+		notAllowedSaveTimestampEvent: tsoCounter.WithLabelValues("not_allowed_save_timestamp", groupID),
 		syncSaveDuration:             tsoOpDuration.WithLabelValues("sync_save", groupID),
 		resetSaveDuration:            tsoOpDuration.WithLabelValues("reset_save", groupID),
 		updateSaveDuration:           tsoOpDuration.WithLabelValues("update_save", groupID),
