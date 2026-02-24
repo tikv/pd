@@ -530,6 +530,12 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	}
 
 	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true); err != nil {
+		if updateOld {
+			oldKG.Keyspaces = append(oldKG.Keyspaces, keyspaceID)
+		}
+		if updateNew {
+			newKG.Keyspaces = slice.Remove(newKG.Keyspaces, keyspaceID)
+		}
 		return err
 	}
 
