@@ -517,8 +517,15 @@ retryLoop:
 			break retryLoop
 		}
 		gc.metrics.requestRetryCounter.Inc()
-		time.Sleep(gc.mainCfg.WaitRetryInterval)
-		*waitDuration += gc.mainCfg.WaitRetryInterval
+		reconfiguredCh := counter.limiter.GetReconfiguredCh()
+		waitStart := time.Now()
+		waitTimer := time.NewTimer(gc.mainCfg.WaitRetryInterval)
+		select {
+		case <-reconfiguredCh:
+			waitTimer.Stop()
+		case <-waitTimer.C:
+		}
+		*waitDuration += time.Since(waitStart)
 	}
 	return d, err
 }
