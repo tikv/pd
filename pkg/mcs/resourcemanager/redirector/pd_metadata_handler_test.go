@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/metering"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -64,6 +65,26 @@ func TestShouldHandlePDMetadataLocally(t *testing.T) {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		re.Equal(tc.expect, shouldHandlePDMetadataLocally(req), "method=%s path=%s", tc.method, tc.path)
 	}
+}
+
+func TestPDMetadataFallbackHandlerRejectsForbiddenForwardHeader(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	localCalled := false
+	localHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		localCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := newPDMetadataFallbackHandler(localHandler)
+	req := httptest.NewRequest(http.MethodPost, "/resource-manager/api/v1/config/group", nil)
+	req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+	re.Equal(http.StatusNotFound, resp.Code)
+	re.False(localCalled)
 }
 
 func TestPDMetadataHandlerGroupCRUDAndErrorCodes(t *testing.T) {

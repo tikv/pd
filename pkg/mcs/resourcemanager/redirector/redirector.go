@@ -53,7 +53,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				}),
 		),
 	)
-	redirector.UseHandler(localHandler)
+	redirector.UseHandler(newPDMetadataFallbackHandler(localHandler))
 	return redirector, apiutil.APIServiceGroup{
 		Name:       "resource-manager",
 		Version:    "v1",
@@ -66,4 +66,19 @@ func shouldHandlePDMetadataLocally(r *http.Request) bool {
 	// Keep metadata APIs redirected to RM until PD<->RM metadata sync is in place.
 	_ = r
 	return false
+}
+
+func newPDMetadataFallbackHandler(localHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Prevent bypassing redirect rules via an injected "forbidden forward" header.
+		if r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) == "true" {
+			http.NotFound(w, r)
+			return
+		}
+		if !shouldHandlePDMetadataLocally(r) {
+			http.NotFound(w, r)
+			return
+		}
+		localHandler.ServeHTTP(w, r)
+	})
 }
