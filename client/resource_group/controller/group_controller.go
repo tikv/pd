@@ -498,9 +498,10 @@ func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Co
 	)
 retryLoop:
 	for range gc.mainCfg.WaitRetryTimes {
+		counter := gc.run.requestUnitTokens
+		reconfiguredCh := counter.limiter.GetReconfiguredCh()
 		now := time.Now()
 		var res *Reservation
-		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			// record the consume token histogram if enable controller debug mode.
 			if enableControllerTraceLog.Load() {
@@ -517,12 +518,25 @@ retryLoop:
 			break retryLoop
 		}
 		gc.metrics.requestRetryCounter.Inc()
-		reconfiguredCh := counter.limiter.GetReconfiguredCh()
 		waitStart := time.Now()
 		waitTimer := time.NewTimer(gc.mainCfg.WaitRetryInterval)
 		select {
+		case <-ctx.Done():
+			if !waitTimer.Stop() {
+				select {
+				case <-waitTimer.C:
+				default:
+				}
+			}
+			*waitDuration += time.Since(waitStart)
+			return d, ctx.Err()
 		case <-reconfiguredCh:
-			waitTimer.Stop()
+			if !waitTimer.Stop() {
+				select {
+				case <-waitTimer.C:
+				default:
+				}
+			}
 		case <-waitTimer.C:
 		}
 		*waitDuration += time.Since(waitStart)

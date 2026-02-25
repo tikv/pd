@@ -264,7 +264,11 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	}()
 
 	// Wait for notify — Reserve has failed and the retry path is entered.
-	<-notifyCh
+	select {
+	case <-notifyCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for low-RU notification")
+	}
 
 	// Now reconfigure with enough tokens and a real fillRate.
 	// This closes the reconfiguredCh (waking the select) and provides

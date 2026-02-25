@@ -260,6 +260,9 @@ func (lim *Limiter) SetName(name string) *Limiter {
 func (lim *Limiter) GetReconfiguredCh() <-chan struct{} {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
+	if lim.reconfiguredCh == nil {
+		lim.reconfiguredCh = make(chan struct{})
+	}
 	return lim.reconfiguredCh
 }
 
@@ -366,7 +369,9 @@ func (lim *Limiter) Reconfigure(now time.Time,
 	}
 	lim.maybeNotify()
 	// Wake up all goroutines waiting in acquireTokens retry loops.
-	close(lim.reconfiguredCh)
+	if lim.reconfiguredCh != nil {
+		close(lim.reconfiguredCh)
+	}
 	lim.reconfiguredCh = make(chan struct{})
 	logControllerTrace("[resource group controller] after reconfigure",
 		zap.String("name", lim.name), zap.Float64("tokens", lim.tokens),
