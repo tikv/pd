@@ -267,7 +267,8 @@ func TestInherit(t *testing.T) {
 		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
 	}
 	for _, d := range data {
-		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		origin.UpdateBuckets(d.originBuckets, nil)
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.Inherit(origin, true)
 		re.Equal(d.originBuckets, r.GetBuckets())
