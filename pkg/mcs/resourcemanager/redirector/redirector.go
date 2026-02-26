@@ -62,6 +62,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	}, nil
 }
 
+// TODO: Implement a real PD metadata handler.
 func shouldHandlePDMetadataLocally(r *http.Request) bool {
 	// Keep metadata APIs redirected to RM until PD<->RM metadata sync is in place.
 	_ = r

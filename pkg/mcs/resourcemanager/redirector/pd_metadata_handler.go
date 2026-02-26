@@ -87,6 +87,8 @@ func (h *pdMetadataHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.engine.ServeHTTP(w, r)
 }
 
+// TODO: Deduplicate metadata /config handlers with pkg/mcs/resourcemanager/server/apis/v1/api.go
+// once PD and RM handler error mapping can share one abstraction safely.
 func (h *pdMetadataHandler) registerRouter() {
 	root := h.engine.Group(apis.APIPathPrefix)
 	configEndpoint := root.Group("/config")
