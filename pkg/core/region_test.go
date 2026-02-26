@@ -224,7 +224,7 @@ func TestInherit(t *testing.T) {
 		re.Equal(int64(testCase.expect), r.approximateSize)
 	}
 
-	// bucket
+	// bucket check
 	data := []struct {
 		originBuckets *metapb.Buckets
 		buckets       *metapb.Buckets
@@ -235,7 +235,8 @@ func TestInherit(t *testing.T) {
 		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
 	}
 	for _, d := range data {
-		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		origin.UpdateBuckets(d.originBuckets, nil)
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.Inherit(origin, true)
 		re.Equal(d.originBuckets, r.GetBuckets())
