@@ -15,7 +15,13 @@
 package server
 
 import (
+	"io"
+
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 var (
@@ -197,6 +203,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
+	grpcStreamOperationDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "grpc_stream_operation_duration_seconds",
+			Help:      "Bucketed histogram of duration (s) of gRPC stream Send/Recv operations.",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
+		}, []string{"request", "type"})
+
 	regionRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -228,5 +243,65 @@ func init() {
 	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
 	prometheus.MustRegister(forwardTsoDuration)
+	prometheus.MustRegister(grpcStreamOperationDuration)
 	prometheus.MustRegister(regionRequestCounter)
+}
+
+func newTsoMetricsStream(stream pdpb.PD_TsoServer) pdpb.PD_TsoServer {
+	return &grpcutil.MetricsStream[*pdpb.TsoResponse, *pdpb.TsoRequest]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("tso", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("tso", "recv"),
+	}
+}
+
+func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) pdpb.PD_RegionHeartbeatServer {
+	return &grpcutil.MetricsStream[*pdpb.RegionHeartbeatResponse, *pdpb.RegionHeartbeatRequest]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("region-heartbeat", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("region-heartbeat", "recv"),
+	}
+}
+
+func newReportBucketsMetricsStream(stream pdpb.PD_ReportBucketsServer) pdpb.PD_ReportBucketsServer {
+	return &grpcutil.MetricsStream[*pdpb.ReportBucketsResponse, *pdpb.ReportBucketsRequest]{
+		ServerStream: stream,
+		SendFn:       stream.SendAndClose,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("report-buckets", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("report-buckets", "recv"),
+	}
+}
+
+func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) pdpb.PD_QueryRegionServer {
+	return &grpcutil.MetricsStream[*pdpb.QueryRegionResponse, *pdpb.QueryRegionRequest]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("query-region", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("query-region", "recv"),
+	}
+}
+
+func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncRegionsServer {
+	return &grpcutil.MetricsStream[*pdpb.SyncRegionResponse, *pdpb.SyncRegionRequest]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("sync-regions", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("sync-regions", "recv"),
+	}
+}
+
+func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
+	return &grpcutil.MetricsStream[*pdpb.WatchGlobalConfigResponse, any]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       func() (any, error) { return nil, io.EOF },
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("watch-global-config", "send"),
+	}
 }

@@ -14,7 +14,13 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+)
 
 const (
 	namespace       = "scheduling"
@@ -22,6 +28,15 @@ const (
 )
 
 var (
+	grpcStreamOperationDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "grpc_stream_operation_duration_seconds",
+			Help:      "Bucketed histogram of duration (s) of gRPC stream Send/Recv operations.",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
+		}, []string{"request", "type"})
+
 	// Store heartbeat metrics
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -86,6 +101,7 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(grpcStreamOperationDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatCounter)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
@@ -93,4 +109,24 @@ func init() {
 	prometheus.MustRegister(regionBucketsHandleDuration)
 	prometheus.MustRegister(regionBucketsCounter)
 	prometheus.MustRegister(regionBucketsReportInterval)
+}
+
+func newRegionHeartbeatMetricsStream(stream schedulingpb.Scheduling_RegionHeartbeatServer) schedulingpb.Scheduling_RegionHeartbeatServer {
+	return &grpcutil.MetricsStream[*schedulingpb.RegionHeartbeatResponse, *schedulingpb.RegionHeartbeatRequest]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("region-heartbeat", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("region-heartbeat", "recv"),
+	}
+}
+
+func newRegionBucketsMetricsStream(stream schedulingpb.Scheduling_RegionBucketsServer) schedulingpb.Scheduling_RegionBucketsServer {
+	return &grpcutil.MetricsStream[*schedulingpb.RegionBucketsResponse, *schedulingpb.RegionBucketsRequest]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("region-buckets", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("region-buckets", "recv"),
+	}
 }

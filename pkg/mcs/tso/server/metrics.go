@@ -14,11 +14,26 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/tsopb"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+)
 
 const namespace = "tso"
 
 var (
+	grpcStreamOperationDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "server",
+			Name:      "grpc_stream_operation_duration_seconds",
+			Help:      "Bucketed histogram of duration (s) of gRPC stream Send/Recv operations.",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
+		}, []string{"request", "type"})
+
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -46,7 +61,18 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(grpcStreamOperationDuration)
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(metaDataGauge)
 	prometheus.MustRegister(tsoHandleDuration)
+}
+
+func newTsoMetricsStream(stream tsopb.TSO_TsoServer) tsopb.TSO_TsoServer {
+	return &grpcutil.MetricsStream[*tsopb.TsoResponse, *tsopb.TsoRequest]{
+		ServerStream: stream,
+		SendFn:       stream.Send,
+		RecvFn:       stream.Recv,
+		SendObs:      grpcStreamOperationDuration.WithLabelValues("tso", "send"),
+		RecvObs:      grpcStreamOperationDuration.WithLabelValues("tso", "recv"),
+	}
 }
