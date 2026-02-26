@@ -265,7 +265,7 @@ func newInnerClientForRMRouteTest(t *testing.T, ctx context.Context, pdAddr stri
 	return inner
 }
 
-func TestResourceManagerMetadataRPCsAlwaysUsePD(t *testing.T) {
+func TestResourceManagerWritesUsePDAndReadsUseRM(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -291,14 +291,14 @@ func TestResourceManagerMetadataRPCsAlwaysUsePD(t *testing.T) {
 	_, err = cli.DeleteResourceGroup(ctx, "test-group")
 	require.NoError(t, err)
 
-	require.EqualValues(t, 1, pdServer.listCount.Load())
-	require.EqualValues(t, 1, pdServer.getCount.Load())
+	require.EqualValues(t, 0, pdServer.listCount.Load())
+	require.EqualValues(t, 0, pdServer.getCount.Load())
 	require.EqualValues(t, 1, pdServer.addCount.Load())
 	require.EqualValues(t, 1, pdServer.modifyCount.Load())
 	require.EqualValues(t, 1, pdServer.deleteCount.Load())
 
-	require.EqualValues(t, 0, rmServer.listCount.Load())
-	require.EqualValues(t, 0, rmServer.getCount.Load())
+	require.EqualValues(t, 1, rmServer.listCount.Load())
+	require.EqualValues(t, 1, rmServer.getCount.Load())
 	require.EqualValues(t, 0, rmServer.addCount.Load())
 	require.EqualValues(t, 0, rmServer.modifyCount.Load())
 	require.EqualValues(t, 0, rmServer.deleteCount.Load())
