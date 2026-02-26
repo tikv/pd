@@ -125,31 +125,32 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 		members, err := etcdutil.ListEtcdMembers(s.serverCtx, s.getClient())
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
-			continue
-		}
-		for _, ep := range members.Members {
-			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
-				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
-				continue
-			}
-			status, err := s.getClient().Status(s.serverCtx, ep.ClientURLs[0])
-			if err != nil {
-				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
-				continue
-			}
-			if status.Leader != ep.ID {
-				continue
-			}
-			leaderAddr := ep.ClientURLs[0]
-			if s.pdLeaderAddr.CompareAndSwap(s.pdLeaderAddr.Load(), leaderAddr) {
-				if status.Leader != curLeader {
-					log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
-					s.reconnectCh <- true
+		} else {
+			for _, ep := range members.Members {
+				if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
+					log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
+					continue
 				}
-				curLeader = ep.ID
-				break
+				status, err := s.getClient().Status(s.serverCtx, ep.ClientURLs[0])
+				if err != nil {
+					log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
+					continue
+				}
+				if status.Leader != ep.ID {
+					continue
+				}
+				leaderAddr := ep.ClientURLs[0]
+				if s.pdLeaderAddr.CompareAndSwap(s.pdLeaderAddr.Load(), leaderAddr) {
+					if status.Leader != curLeader {
+						log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						s.reconnectCh <- true
+					}
+					curLeader = ep.ID
+					break
+				}
 			}
 		}
+
 		select {
 		case <-s.serverCtx.Done():
 			log.Info("server is closed, exit update member loop")
