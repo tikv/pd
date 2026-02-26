@@ -84,6 +84,10 @@ type Limiter struct {
 	remainingNotifyTimes int
 	name                 string
 
+	// reconfiguredCh is closed on every Reconfigure() call to wake up
+	// goroutines waiting in acquireTokens() retry loops.
+	reconfiguredCh chan struct{}
+
 	// metrics
 	metrics *limiterMetricsCollection
 }
@@ -114,6 +118,7 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 		tokens:              tokens,
 		burst:               b,
 		lowTokensNotifyChan: lowTokensNotifyChan,
+		reconfiguredCh:      make(chan struct{}),
 	}
 	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
@@ -130,6 +135,7 @@ func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArg
 		burst:               cfg.NewBurst,
 		notifyThreshold:     cfg.NotifyThreshold,
 		lowTokensNotifyChan: lowTokensNotifyChan,
+		reconfiguredCh:      make(chan struct{}),
 	}
 	lim.metrics = &limiterMetricsCollection{
 		lowTokenNotifyCounter: lowTokenRequestNotifyCounter.WithLabelValues(lim.name),
@@ -253,6 +259,18 @@ func (lim *Limiter) SetName(name string) *Limiter {
 	return lim
 }
 
+// GetReconfiguredCh returns a channel that is closed when the limiter is
+// reconfigured. Callers can select on this to be woken up immediately
+// when new tokens arrive, instead of blind-sleeping.
+func (lim *Limiter) GetReconfiguredCh() <-chan struct{} {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	if lim.reconfiguredCh == nil {
+		lim.reconfiguredCh = make(chan struct{})
+	}
+	return lim.reconfiguredCh
+}
+
 // notify tries to send a non-blocking notification on notifyCh and disables
 // further notifications (until the next Reconfigure or StartNotification).
 func (lim *Limiter) notify() {
@@ -351,7 +369,20 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		opt(lim)
 	}
 	lim.maybeNotify()
+<<<<<<< HEAD
 	logControllerTrace("[resource group controller] after reconfigure", zap.String("name", lim.name), zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
+=======
+	// Wake up all goroutines waiting in acquireTokens retry loops.
+	if lim.reconfiguredCh != nil {
+		close(lim.reconfiguredCh)
+	}
+	lim.reconfiguredCh = make(chan struct{})
+	logControllerTrace("[resource group controller] after reconfigure",
+		zap.String("name", lim.name), zap.Float64("tokens", lim.tokens),
+		zap.Float64("rate", float64(lim.fillRate)),
+		zap.Float64("notify-threshold", args.newNotifyThreshold),
+		zap.Int64("burst", lim.burst))
+>>>>>>> 2eb52ae047 (resourcegroup: replace blind sleep with signal-aware wait in acquireTokens (#10252))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
