@@ -108,7 +108,10 @@ func TestPDMetadataHandlerGroupCRUDAndErrorCodes(t *testing.T) {
 		},
 	}
 
-	resp := doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
+	resp := doJSONRequest(re, handler, http.MethodPut, "/resource-manager/api/v1/config/group", group)
+	re.Equal(http.StatusNotFound, resp.Code)
+
+	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
 	re.Equal(http.StatusOK, resp.Code)
 
 	resp = doJSONRequest(re, handler, http.MethodGet, "/resource-manager/api/v1/config/group/test_group", nil)
@@ -140,9 +143,11 @@ func TestPDMetadataHandlerControllerAndServiceLimit(t *testing.T) {
 	handler := newPDMetadataHandlerWithStore(store)
 
 	resp := doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/controller", map[string]any{
-		"unknown": 1,
+		"enable-controller-trace-log": true,
+		"unknown":                     1,
 	})
 	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Empty(store.updatedControllerConfigItems)
 
 	resp = doJSONRequest(re, handler, http.MethodPost,
 		"/resource-manager/api/v1/config/keyspace/service-limit/path_keyspace?keyspace_name=query_keyspace",
@@ -175,7 +180,7 @@ func TestPDMetadataHandlerControllerAndServiceLimit(t *testing.T) {
 	resp = doJSONRequest(re, handler, http.MethodPost,
 		"/resource-manager/api/v1/config/keyspace/service-limit/path_keyspace",
 		map[string]float64{"service_limit": 1})
-	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(http.StatusInternalServerError, resp.Code)
 }
 
 func TestNewPDMetadataHandler(t *testing.T) {
@@ -200,12 +205,13 @@ func (*mockManagerProvider) AddStartCallback(...func()) {}
 func (*mockManagerProvider) AddServiceReadyCallback(...func(context.Context) error) {}
 
 type testPDMetadataStore struct {
-	keyspaceIDs        map[string]uint32
-	validKeyspaceIDs   map[uint32]struct{}
-	groups             map[string]*rmserver.ResourceGroup
-	serviceLimits      map[uint32]float64
-	addErr             error
-	setServiceLimitErr error
+	keyspaceIDs                  map[string]uint32
+	validKeyspaceIDs             map[uint32]struct{}
+	groups                       map[string]*rmserver.ResourceGroup
+	serviceLimits                map[uint32]float64
+	addErr                       error
+	setServiceLimitErr           error
+	updatedControllerConfigItems []string
 }
 
 func newTestPDMetadataStore() *testPDMetadataStore {
@@ -274,7 +280,8 @@ func (*testPDMetadataStore) GetControllerConfig() *rmserver.ControllerConfig {
 	return &rmserver.ControllerConfig{}
 }
 
-func (*testPDMetadataStore) UpdateControllerConfigItem(_ string, _ any) error {
+func (s *testPDMetadataStore) UpdateControllerConfigItem(key string, _ any) error {
+	s.updatedControllerConfigItems = append(s.updatedControllerConfigItems, key)
 	return nil
 }
 

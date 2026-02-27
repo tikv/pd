@@ -125,6 +125,10 @@ func (h *pdMetadataHandler) putResourceGroup(c *gin.Context) {
 		return
 	}
 	if err := h.store.ModifyResourceGroup(&group); err != nil {
+		if errs.ErrResourceGroupNotExists.Equal(err) || errs.ErrKeyspaceNotExists.Equal(err) {
+			c.String(http.StatusNotFound, err.Error())
+			return
+		}
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -203,12 +207,16 @@ func (h *pdMetadataHandler) setControllerConfig(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
+	resolvedConf := make(map[string]any, len(conf))
 	for k, v := range conf {
 		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rmserver.ControllerConfig{}), k)
 		if key == "" {
 			c.String(http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
 		}
+		resolvedConf[key] = v
+	}
+	for key, v := range resolvedConf {
 		if err := h.store.UpdateControllerConfigItem(key, v); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
@@ -233,7 +241,7 @@ func (h *pdMetadataHandler) setKeyspaceServiceLimit(c *gin.Context) {
 		return
 	}
 	if err := h.store.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit); err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.String(http.StatusOK, "Success!")
