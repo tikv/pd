@@ -41,6 +41,7 @@ func storeUnifiedReadCPUUsage(cpuUsages []*pdpb.RecordPair) uint64 {
 }
 
 // StoreReadCPUUsage returns the store-level read CPU usage derived from unified-read and gRPC threads.
+// Read CPU is the sum of:  Unified read pool CPU and grpc CPU which is shared by read/write requests, so we apportion gRPC CPU by readQuery/totalQuery.
 func StoreReadCPUUsage(cpuUsages []*pdpb.RecordPair, readQuery, totalQuery uint64) float64 {
 	unifiedReadCPU := float64(storeUnifiedReadCPUUsage(cpuUsages))
 	if totalQuery == 0 || readQuery == 0 {

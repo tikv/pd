@@ -35,9 +35,9 @@ type dimStat struct {
 	lastDelta       float64
 }
 
-func newDimStat(reportInterval time.Duration, aotSize int, medianSize int) *dimStat {
+func newDimStat(reportInterval time.Duration, medianSize int) *dimStat {
 	return &dimStat{
-		rolling:         movingaverage.NewTimeMedian(aotSize, medianSize, reportInterval),
+		rolling:         movingaverage.NewTimeMedian(utils.DefaultAotSize, medianSize, reportInterval),
 		lastIntervalSum: 0,
 		lastDelta:       0,
 	}
@@ -163,16 +163,24 @@ func (stat *HotPeerStat) GetActionType() utils.ActionType {
 
 // GetLoad returns denoising load if possible.
 func (stat *HotPeerStat) GetLoad(dim int) float64 {
+	if dim < 0 {
+		return 0
+	}
 	if stat.rollingLoads != nil {
-		if dim < len(stat.rollingLoads) && stat.rollingLoads[dim] != nil {
-			return math.Round(stat.rollingLoads[dim].get())
+		if dim < len(stat.rollingLoads) {
+			if stat.rollingLoads[dim] != nil {
+				return math.Round(stat.rollingLoads[dim].get())
+			}
 		}
 		if dim < len(stat.Loads) {
 			return math.Round(stat.Loads[dim])
 		}
 		return 0
 	}
-	return math.Round(stat.Loads[dim])
+	if dim < len(stat.Loads) {
+		return math.Round(stat.Loads[dim])
+	}
+	return 0
 }
 
 // GetLoads returns denoising loads if possible.
@@ -200,6 +208,9 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 
 func (stat *HotPeerStat) isHot(thresholds []float64) bool {
 	return slice.AnyOf(stat.rollingLoads, func(i int) bool {
+		if stat.rollingLoads[i] == nil {
+			return false
+		}
 		if i == utils.CPUDim {
 			return stat.rollingLoads[i].isHot(thresholds[i])
 		}

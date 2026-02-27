@@ -65,14 +65,16 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
-	meta                      *metapb.Region
-	learners                  []*metapb.Peer
-	witnesses                 []*metapb.Peer
-	voters                    []*metapb.Peer
-	leader                    *metapb.Peer
-	downPeers                 []*pdpb.PeerStats
-	pendingPeers              []*metapb.Peer
-	term                      uint64
+	meta         *metapb.Region
+	learners     []*metapb.Peer
+	witnesses    []*metapb.Peer
+	voters       []*metapb.Peer
+	leader       *metapb.Peer
+	downPeers    []*pdpb.PeerStats
+	pendingPeers []*metapb.Peer
+	term         uint64
+	// cpuUsage is deprecated and will be removed in the future.
+	// We should use `cpuStats` instead.
 	cpuUsage                  uint64
 	cpuStats                  *pdpb.CPUStats
 	writtenBytes              uint64

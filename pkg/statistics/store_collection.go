@@ -309,6 +309,7 @@ func ResetStoreStatistics(storeAddress string, id string) {
 		"store_write_query_rate",
 		"store_read_query_rate",
 		"store_read_cpu_usage",
+		"store_read_cpu_usage_instant",
 		"store_regions_write_rate_bytes",
 		"store_regions_write_rate_keys",
 		"store_slow_trend_cause_value",
