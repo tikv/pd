@@ -28,14 +28,7 @@ const (
 )
 
 var (
-	grpcStreamOperationDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: serverSubsystem,
-			Name:      "grpc_stream_operation_duration_seconds",
-			Help:      "Bucketed histogram of duration (s) of gRPC stream Send/Recv operations.",
-			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
-		}, []string{"request", "type"})
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
 
 	// Store heartbeat metrics
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
@@ -101,7 +94,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(grpcStreamOperationDuration)
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatCounter)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
@@ -116,8 +109,7 @@ func newRegionHeartbeatMetricsStream(stream schedulingpb.Scheduling_RegionHeartb
 		ServerStream: stream,
 		SendFn:       stream.Send,
 		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamOperationDuration.WithLabelValues("region-heartbeat", "send"),
-		RecvObs:      grpcStreamOperationDuration.WithLabelValues("region-heartbeat", "recv"),
+		SendObs:      grpcStreamSendDuration.WithLabelValues("region-heartbeat"),
 	}
 }
 
@@ -126,7 +118,6 @@ func newRegionBucketsMetricsStream(stream schedulingpb.Scheduling_RegionBucketsS
 		ServerStream: stream,
 		SendFn:       stream.Send,
 		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamOperationDuration.WithLabelValues("region-buckets", "send"),
-		RecvObs:      grpcStreamOperationDuration.WithLabelValues("region-buckets", "recv"),
+		SendObs:      grpcStreamSendDuration.WithLabelValues("region-buckets"),
 	}
 }

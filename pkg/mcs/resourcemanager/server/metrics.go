@@ -49,14 +49,7 @@ const (
 )
 
 var (
-	grpcStreamOperationDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: serverSubsystem,
-			Name:      "grpc_stream_operation_duration_seconds",
-			Help:      "Bucketed histogram of duration (s) of gRPC stream Send/Recv operations.",
-			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
-		}, []string{"request", "type"})
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
 
 	// RU cost metrics.
 	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
@@ -212,7 +205,7 @@ type trackerKey struct {
 }
 
 func init() {
-	prometheus.MustRegister(grpcStreamOperationDuration)
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
@@ -523,7 +516,6 @@ func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireToke
 		ServerStream: stream,
 		SendFn:       stream.Send,
 		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamOperationDuration.WithLabelValues("acquire-token-buckets", "send"),
-		RecvObs:      grpcStreamOperationDuration.WithLabelValues("acquire-token-buckets", "recv"),
+		SendObs:      grpcStreamSendDuration.WithLabelValues("acquire-token-buckets"),
 	}
 }

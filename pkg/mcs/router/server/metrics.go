@@ -29,14 +29,7 @@ const (
 )
 
 var (
-	grpcStreamOperationDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: serverSubsystem,
-			Name:      "grpc_stream_operation_duration_seconds",
-			Help:      "Bucketed histogram of duration (s) of gRPC stream Send/Recv operations.",
-			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
-		}, []string{"request", "type"})
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
 
 	queryRegionDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -65,7 +58,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(grpcStreamOperationDuration)
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(regionRequestCounter)
 	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionSyncerStatus)
@@ -76,7 +69,6 @@ func newQueryRegionMetricsStream(stream routerpb.Router_QueryRegionServer) route
 		ServerStream: stream,
 		SendFn:       stream.Send,
 		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamOperationDuration.WithLabelValues("query-region", "send"),
-		RecvObs:      grpcStreamOperationDuration.WithLabelValues("query-region", "recv"),
+		SendObs:      grpcStreamSendDuration.WithLabelValues("query-region"),
 	}
 }
