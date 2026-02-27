@@ -326,6 +326,7 @@ type UpdateConfigParams struct {
 //	@Produce	json
 //	@Success	200	{object}	KeyspaceMeta
 //	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	409	{string}	string	"The update conflicts or preconditions are not met."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //
 // Router /keyspaces/{name}/config [patch]
