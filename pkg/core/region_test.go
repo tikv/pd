@@ -676,7 +676,7 @@ func BenchmarkUpdateBuckets(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		region.UpdateBuckets(buckets, nil)
 	}
 	if region.GetBuckets().GetVersion() != uint64(b.N-1) {
 		b.Fatal("update buckets failed")

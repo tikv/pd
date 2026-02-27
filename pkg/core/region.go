@@ -302,7 +302,8 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 	}
 	// skip bucket meta update if tikv has report bucket meta.
 	if bucket := r.GetBuckets(); bucketEnable && bucket == nil && origin != nil {
-		r.buckets = origin.buckets
+		inherited := atomic.LoadPointer(&origin.buckets)
+		atomic.StorePointer(&r.buckets, inherited)
 	}
 }
 

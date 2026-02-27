@@ -698,7 +698,7 @@ func TestStaleBucketMeta(t *testing.T) {
 	region2 := newRegion.Clone(core.WithIncVersion(), core.SetBuckets(bucket2))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
 	region1 := cluster.GetRegion(1)
-	re.NotEqual(bucket1, region1.GetBuckets())
+	re.Equal(bucket2, region1.GetBuckets())
 }
 
 func TestRegionHeartbeatHotStat(t *testing.T) {
@@ -792,8 +792,8 @@ func TestBucketHeartbeat(t *testing.T) {
 		re.NoError(cluster.setStore(store))
 	}
 
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1]))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0].Clone()))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1].Clone()))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
 	re.NoError(cluster.processRegionBuckets(buckets))
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
@@ -815,7 +815,7 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newRegion))
 	re.Len(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), 2)
 
-	// case6: disable region bucket in
+	// case6: disable region bucket
 	opt.SetRegionBucketEnabled(false)
 	newRegion2 := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newRegion2))
