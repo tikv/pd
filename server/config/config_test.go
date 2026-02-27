@@ -489,6 +489,31 @@ hot-regions-write-interval= "30m"
 	re.Equal(uint64(7), cfg.Schedule.HotRegionsReservedDays)
 }
 
+func TestMaxStorePreparingTime(t *testing.T) {
+	re := require.New(t)
+	cfgData := `
+[schedule]
+max-store-preparing-time = "48h"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(48*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "0s"
+`
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(0*time.Second, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+}
+
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 	cfg := &Config{}
