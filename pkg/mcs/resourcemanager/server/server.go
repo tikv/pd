@@ -215,6 +215,7 @@ func (s *Server) campaignLeader() {
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
 			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
+			return
 		}
 	}
 	// Check expected primary and watch the primary.
@@ -307,6 +308,11 @@ func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
 	return ResourceGroupWriteRoleLegacyAll
 }
 
+// ShouldRejectMetadataWritesViaGRPC returns whether metadata writes via RM gRPC APIs should be rejected.
+func (*Server) ShouldRejectMetadataWritesViaGRPC() bool {
+	return true
+}
+
 // EnableResourceGroupMetadataWatcher reports whether the independent RM service
 // should bootstrap manager state from the metadata watcher.
 // The PD server path does not implement this hook and keeps the legacy bootstrap path.
@@ -384,8 +390,9 @@ func (s *Server) startServer() (err error) {
 	s.participant.InitInfo(p, "primary election")
 
 	s.service = &Service{
-		ctx:     s.Context(),
-		manager: NewManager[*Server](s),
+		ctx:                         s.Context(),
+		manager:                     NewManager[*Server](s),
+		rejectMetadataWritesViaGRPC: s.ShouldRejectMetadataWritesViaGRPC(),
 	}
 
 	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
