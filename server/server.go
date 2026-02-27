@@ -230,12 +230,14 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry                      *registry.ServiceRegistry
-	isKeyspaceGroupEnabled        bool
-	servicePrimaryMap             sync.Map /* Store as map[string]string */
-	tsoPrimaryWatcher             *etcdutil.LoopWatcher
-	schedulingPrimaryWatcher      *etcdutil.LoopWatcher
-	resourceManagerPrimaryWatcher *etcdutil.LoopWatcher
+	registry                         *registry.ServiceRegistry
+	isKeyspaceGroupEnabled           bool
+	servicePrimaryMap                sync.Map /* Store as map[string]string */
+	tsoPrimaryWatcher                *etcdutil.LoopWatcher
+	schedulingPrimaryWatcher         *etcdutil.LoopWatcher
+	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
+	resourceGroupMetadataManager     *rm_server.Manager
+	resourceGroupMetadataManagerOnce sync.Once
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -307,6 +309,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	if runResourceManager {
 		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	} else {
+		// Initialize early to register callbacks before the server starts.
+		s.GetResourceGroupMetadataManager()
 	}
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
@@ -318,7 +323,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 		if !runResourceManager {
 			// resource manager proxy
-			resource_manager.RegisterResourceManagerServer(gs, &resourceGroupProxyServer{GrpcServer: grpcServer})
+			resource_manager.RegisterResourceManagerServer(gs, &resourceGroupProxyServer{
+				GrpcServer:      grpcServer,
+				metadataManager: s.GetResourceGroupMetadataManager(),
+			})
 		}
 		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)

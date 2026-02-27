@@ -19,10 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -116,10 +119,18 @@ func (suite *resourceManagerRedirectorTestSuite) TestRedirectsConfigRequests() {
 
 func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupRequests() {
 	re := suite.Require()
+	assertMetadataWriteRejected := func(err error) {
+		re.Error(err)
+		s, ok := status.FromError(err)
+		re.True(ok)
+		re.Equal(codes.FailedPrecondition, s.Code())
+		re.Contains(s.Message(), "resource group metadata writes must be handled by PD")
+	}
+
 	groupName := "redirector_grpc_group"
 	suite.createResourceGroupViaPD(groupName, 300)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pdConn, err := grpcutil.GetClientConn(ctx, suite.pdLeader.GetAddr(), nil)
 	re.NoError(err)
@@ -166,6 +177,9 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 		},
 		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
 	}
+	_, err = rmClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
+	assertMetadataWriteRejected(err)
+
 	addResp, err := pdClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
 	re.NoError(err)
 	re.Nil(addResp.GetError())
@@ -181,17 +195,22 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 	re.NoError(err)
 	re.Nil(pdAddGetResp.GetError())
 	re.Equal(addGroupName, pdAddGetResp.GetGroup().GetName())
-
-	rmAddGetResp, err := rmClient.GetResourceGroup(ctx, addGetReq)
-	re.NoError(err)
-	re.Nil(rmAddGetResp.GetError())
-	re.Equal(addGroupName, rmAddGetResp.GetGroup().GetName())
-	re.Equal(pdAddGetResp.GetGroup().GetPriority(), rmAddGetResp.GetGroup().GetPriority())
-	re.Equal(pdAddGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate(), rmAddGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
+	testutil.Eventually(re, func() bool {
+		rmAddGetResp, getErr := rmClient.GetResourceGroup(ctx, addGetReq)
+		if getErr != nil || rmAddGetResp.GetGroup() == nil {
+			return false
+		}
+		return addGroupName == rmAddGetResp.GetGroup().GetName() &&
+			pdAddGetResp.GetGroup().GetPriority() == rmAddGetResp.GetGroup().GetPriority() &&
+			pdAddGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate() == rmAddGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate()
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
 	addGroup.Priority = 9
 	addGroup.RUSettings.RU.Settings.FillRate = 800
 	addGroup.RUSettings.RU.Settings.BurstLimit = 900
+	_, err = rmClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
+	assertMetadataWriteRejected(err)
+
 	modifyResp, err := pdClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
 	re.NoError(err)
 	re.Nil(modifyResp.GetError())
@@ -203,13 +222,23 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 	re.Equal(uint32(9), pdModifyGetResp.GetGroup().GetPriority())
 	re.Equal(uint64(800), pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
 	re.Equal(int64(900), pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
+	testutil.Eventually(re, func() bool {
+		rmModifyGetResp, getErr := rmClient.GetResourceGroup(ctx, addGetReq)
+		if getErr != nil || rmModifyGetResp.GetGroup() == nil {
+			return false
+		}
+		return pdModifyGetResp.GetGroup().GetPriority() == rmModifyGetResp.GetGroup().GetPriority() &&
+			pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate() == rmModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate() &&
+			pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit() == rmModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit()
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
-	rmModifyGetResp, err := rmClient.GetResourceGroup(ctx, addGetReq)
-	re.NoError(err)
-	re.Nil(rmModifyGetResp.GetError())
-	re.Equal(pdModifyGetResp.GetGroup().GetPriority(), rmModifyGetResp.GetGroup().GetPriority())
-	re.Equal(pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate(), rmModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
-	re.Equal(pdModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit(), rmModifyGetResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
+	_, err = rmClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
+		ResourceGroupName: addGroupName,
+		KeyspaceId: &rmpb.KeyspaceIDValue{
+			Value: suite.keyspaceID,
+		},
+	})
+	assertMetadataWriteRejected(err)
 
 	deleteResp, err := pdClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: addGroupName,
@@ -220,9 +249,10 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 	re.NoError(err)
 	re.Nil(deleteResp.GetError())
 	re.Equal("Success!", deleteResp.GetBody())
-
-	_, err = rmClient.GetResourceGroup(ctx, addGetReq)
-	re.ErrorContains(err, "resource group does not exist")
+	testutil.Eventually(re, func() bool {
+		_, getErr := rmClient.GetResourceGroup(ctx, addGetReq)
+		return getErr != nil && strings.Contains(getErr.Error(), "resource group does not exist")
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name string, fillRate uint64) {

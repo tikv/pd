@@ -215,6 +215,7 @@ func (s *Server) campaignLeader() {
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
 			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
+			return
 		}
 	}
 	// Check expected primary and watch the primary.
@@ -307,6 +308,16 @@ func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
 	return ResourceGroupWriteRoleLegacyAll
 }
 
+// ShouldRejectMetadataWritesViaGRPC returns whether metadata writes via RM gRPC APIs should be rejected.
+func (*Server) ShouldRejectMetadataWritesViaGRPC() bool {
+	return true
+}
+
+// EnableResourceGroupMetadataWatcher returns whether to enable metadata watcher for this manager.
+func (*Server) EnableResourceGroupMetadataWatcher() bool {
+	return true
+}
+
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	return !s.IsClosed() && s.participant.IsServing()
@@ -377,8 +388,9 @@ func (s *Server) startServer() (err error) {
 	s.participant.InitInfo(p, "primary election")
 
 	s.service = &Service{
-		ctx:     s.Context(),
-		manager: NewManager[*Server](s),
+		ctx:                         s.Context(),
+		manager:                     NewManager[*Server](s),
+		rejectMetadataWritesViaGRPC: s.ShouldRejectMetadataWritesViaGRPC(),
 	}
 
 	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
