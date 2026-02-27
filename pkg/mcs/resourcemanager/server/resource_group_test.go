@@ -60,3 +60,41 @@ func TestClone(t *testing.T) {
 		require.Equal(t, &rg, rgClone)
 	}
 }
+
+func TestApplySettingsWithoutTokenPatch(t *testing.T) {
+	re := require.New(t)
+	rg := &ResourceGroup{
+		Name: testResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &RequestUnitSettings{
+			RU: &GroupTokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+				GroupTokenBucketState: GroupTokenBucketState{
+					Tokens:             123.0,
+					overrideFillRate:   -1,
+					overrideBurstLimit: -1,
+				},
+			},
+		},
+	}
+	patch := &rmpb.ResourceGroup{
+		Name: testResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   500,
+					BurstLimit: 800,
+				},
+				Tokens: 999.0,
+			},
+		},
+	}
+	re.NoError(rg.ApplySettings(patch))
+	re.Equal(float64(500), rg.getFillRate())
+	re.Equal(int64(800), rg.getBurstLimit())
+	re.Equal(123.0, rg.getRUToken())
+}

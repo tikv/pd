@@ -235,6 +235,72 @@ func TestQPS(t *testing.T) {
 	}
 }
 
+func TestReconfiguredCh(t *testing.T) {
+	re := require.New(t)
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 1, 0, 0, nc)
+
+	// The channel should block initially.
+	ch := lim.GetReconfiguredCh()
+	select {
+	case <-ch:
+		t.Fatal("reconfiguredCh should not be closed before Reconfigure")
+	default:
+	}
+
+	// After Reconfigure the old channel must be closed.
+	args := tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1}
+	lim.Reconfigure(t1, args)
+	select {
+	case <-ch:
+	default:
+		t.Fatal("reconfiguredCh should be closed after Reconfigure")
+	}
+
+	// A new channel is created; it should block again.
+	ch2 := lim.GetReconfiguredCh()
+	re.NotEqual(fmt.Sprintf("%p", ch), fmt.Sprintf("%p", ch2))
+	select {
+	case <-ch2:
+		t.Fatal("new reconfiguredCh should not be closed yet")
+	default:
+	}
+
+	// Successive Reconfigure calls each close the current channel.
+	lim.Reconfigure(t2, args)
+	select {
+	case <-ch2:
+	default:
+		t.Fatal("second reconfiguredCh should be closed after second Reconfigure")
+	}
+}
+
+func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 1, 0, 0, nc)
+
+	const numWaiters = 5
+	ch := lim.GetReconfiguredCh()
+	wokenUp := make(chan struct{}, numWaiters)
+
+	var wg sync.WaitGroup
+	for range numWaiters {
+		wg.Go(func() {
+			select {
+			case <-ch:
+				wokenUp <- struct{}{}
+			case <-time.After(2 * time.Second):
+			}
+		})
+	}
+
+	// Close by reconfiguring.
+	lim.Reconfigure(t1, tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1})
+	wg.Wait()
+
+	require.Len(t, wokenUp, numWaiters)
+}
+
 const testCaseRunTime = 4 * time.Second
 
 func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru float64, needWait time.Duration) {
