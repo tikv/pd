@@ -271,15 +271,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		return nil, err
 	}
 	recordStep(stepAllocateID, stepStart, newID, request.Name)
-	// Failpoint to override keyspaceID for testing purposes.
-	failpoint.Inject("overrideKeyspaceID", func(val failpoint.Value) {
-		if overrideID, ok := val.(int); ok {
-			newID = uint32(overrideID)
-			log.Info("[keyspace] override keyspace id via failpoint",
-				zap.Uint32("keyspace-id", newID),
-				zap.String("name", request.Name))
-		}
-	})
 
 	// Get keyspace config.
 	stepStart = time.Now()
