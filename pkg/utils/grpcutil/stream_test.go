@@ -32,11 +32,12 @@ func TestMetricsStream(t *testing.T) {
 	sendErr := errors.New("send failed")
 	recvErr := errors.New("recv failed")
 	var sent []string
-	s := &MetricsStream[string, string]{
-		SendFn:  func(m string) error { sent = append(sent, m); return nil },
-		RecvFn:  func() (string, error) { return "data", nil },
-		SendObs: h.WithLabelValues("my-rpc"),
-	}
+	s := NewMetricsStream[string, string](
+		nil,
+		func(m string) error { sent = append(sent, m); return nil },
+		func() (string, error) { return "data", nil },
+		h.WithLabelValues("my-rpc"),
+	)
 
 	// Send records duration and delegates correctly.
 	re.NoError(s.Send("a"))
@@ -53,23 +54,31 @@ func TestMetricsStream(t *testing.T) {
 	re.Equal("data", v)
 
 	// Send error is propagated; duration is still recorded.
-	sErr := &MetricsStream[string, string]{
-		SendFn:  func(string) error { return sendErr },
-		SendObs: h.WithLabelValues("my-rpc"),
-	}
+	sErr := NewMetricsStream[string, string](
+		nil,
+		func(string) error { return sendErr },
+		nil,
+		h.WithLabelValues("my-rpc"),
+	)
 	re.ErrorIs(sErr.Send("x"), sendErr)
 
 	// Recv error is propagated.
-	sRecvErr := &MetricsStream[string, string]{
-		RecvFn: func() (string, error) { return "", recvErr },
-	}
+	sRecvErr := NewMetricsStream[string, string](
+		nil,
+		nil,
+		func() (string, error) { return "", recvErr },
+		nil,
+	)
 	_, err = sRecvErr.Recv()
 	re.ErrorIs(err, recvErr)
 
 	// Nil observer: Send/SendAndClose still work without panic.
-	sNil := &MetricsStream[string, string]{
-		SendFn: func(m string) error { return nil },
-	}
+	sNil := NewMetricsStream[string, string](
+		nil,
+		func(string) error { return nil },
+		nil,
+		nil,
+	)
 	re.NoError(sNil.Send("no-obs"))
 	re.NoError(sNil.SendAndClose("no-obs"))
 

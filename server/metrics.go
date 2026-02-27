@@ -239,54 +239,37 @@ func init() {
 }
 
 func newTsoMetricsStream(stream pdpb.PD_TsoServer) pdpb.PD_TsoServer {
-	return &grpcutil.MetricsStream[*pdpb.TsoResponse, *pdpb.TsoRequest]{
-		ServerStream: stream,
-		SendFn:       stream.Send,
-		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("tso"),
-	}
+	return grpcutil.NewMetricsStream(
+		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("tso"),
+	)
 }
 
 func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) pdpb.PD_RegionHeartbeatServer {
-	return &grpcutil.MetricsStream[*pdpb.RegionHeartbeatResponse, *pdpb.RegionHeartbeatRequest]{
-		ServerStream: stream,
-		SendFn:       stream.Send,
-		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("region-heartbeat"),
-	}
+	return grpcutil.NewMetricsStream(
+		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("region-heartbeat"),
+	)
 }
 
 func newReportBucketsMetricsStream(stream pdpb.PD_ReportBucketsServer) pdpb.PD_ReportBucketsServer {
-	return &grpcutil.MetricsStream[*pdpb.ReportBucketsResponse, *pdpb.ReportBucketsRequest]{
-		ServerStream: stream,
-		SendFn:       stream.SendAndClose,
-		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("report-buckets"),
-	}
+	return grpcutil.NewMetricsStream(
+		stream, stream.SendAndClose, stream.Recv, grpcStreamSendDuration.WithLabelValues("report-buckets"),
+	)
 }
 
 func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) pdpb.PD_QueryRegionServer {
-	return &grpcutil.MetricsStream[*pdpb.QueryRegionResponse, *pdpb.QueryRegionRequest]{
-		ServerStream: stream,
-		SendFn:       stream.Send,
-		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("query-region"),
-	}
+	return grpcutil.NewMetricsStream(
+		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("query-region"),
+	)
 }
 
 func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncRegionsServer {
-	return &grpcutil.MetricsStream[*pdpb.SyncRegionResponse, *pdpb.SyncRegionRequest]{
-		ServerStream: stream,
-		SendFn:       stream.Send,
-		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("sync-regions"),
-	}
+	return grpcutil.NewMetricsStream(
+		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("sync-regions"),
+	)
 }
 
 func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
-	return &grpcutil.MetricsStream[*pdpb.WatchGlobalConfigResponse, any]{
-		ServerStream: stream,
-		SendFn:       stream.Send,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("watch-global-config"),
-	}
+	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](
+		stream, stream.Send, nil, grpcStreamSendDuration.WithLabelValues("watch-global-config"),
+	)
 }

@@ -17,7 +17,6 @@ package server
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/routerpb"
 
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -65,10 +64,7 @@ func init() {
 }
 
 func newQueryRegionMetricsStream(stream routerpb.Router_QueryRegionServer) routerpb.Router_QueryRegionServer {
-	return &grpcutil.MetricsStream[*pdpb.QueryRegionResponse, *pdpb.QueryRegionRequest]{
-		ServerStream: stream,
-		SendFn:       stream.Send,
-		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("query-region"),
-	}
+	return grpcutil.NewMetricsStream(
+		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("query-region"),
+	)
 }

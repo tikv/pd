@@ -43,34 +43,49 @@ func NewGRPCStreamSendDuration(namespace, subsystem string) *prometheus.Histogra
 // heartbeat periods) rather than any meaningful server-side cost.
 type MetricsStream[SendT any, RecvT any] struct {
 	grpc.ServerStream
-	SendFn  func(SendT) error
-	RecvFn  func() (RecvT, error)
-	SendObs prometheus.Observer
+	sendFn  func(SendT) error
+	recvFn  func() (RecvT, error)
+	sendObs prometheus.Observer
+}
+
+// NewMetricsStream creates a MetricsStream wrapping the given gRPC server stream.
+func NewMetricsStream[SendT any, RecvT any](
+	stream grpc.ServerStream,
+	sendFn func(SendT) error,
+	recvFn func() (RecvT, error),
+	sendObs prometheus.Observer,
+) *MetricsStream[SendT, RecvT] {
+	return &MetricsStream[SendT, RecvT]{
+		ServerStream: stream,
+		sendFn:       sendFn,
+		recvFn:       recvFn,
+		sendObs:      sendObs,
+	}
 }
 
 // Send delegates to the underlying stream's Send and records the duration.
 func (s *MetricsStream[SendT, RecvT]) Send(m SendT) error {
-	if s.SendObs == nil {
-		return s.SendFn(m)
+	if s.sendObs == nil {
+		return s.sendFn(m)
 	}
 	start := time.Now()
-	err := s.SendFn(m)
-	s.SendObs.Observe(time.Since(start).Seconds())
+	err := s.sendFn(m)
+	s.sendObs.Observe(time.Since(start).Seconds())
 	return err
 }
 
 // SendAndClose delegates to the underlying stream's SendAndClose and records the duration.
 func (s *MetricsStream[SendT, RecvT]) SendAndClose(m SendT) error {
-	if s.SendObs == nil {
-		return s.SendFn(m)
+	if s.sendObs == nil {
+		return s.sendFn(m)
 	}
 	start := time.Now()
-	err := s.SendFn(m)
-	s.SendObs.Observe(time.Since(start).Seconds())
+	err := s.sendFn(m)
+	s.sendObs.Observe(time.Since(start).Seconds())
 	return err
 }
 
 // Recv delegates to the underlying stream's Recv.
 func (s *MetricsStream[SendT, RecvT]) Recv() (RecvT, error) {
-	return s.RecvFn()
+	return s.recvFn()
 }

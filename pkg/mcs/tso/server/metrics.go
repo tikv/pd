@@ -61,10 +61,7 @@ func init() {
 }
 
 func newTsoMetricsStream(stream tsopb.TSO_TsoServer) tsopb.TSO_TsoServer {
-	return &grpcutil.MetricsStream[*tsopb.TsoResponse, *tsopb.TsoRequest]{
-		ServerStream: stream,
-		SendFn:       stream.Send,
-		RecvFn:       stream.Recv,
-		SendObs:      grpcStreamSendDuration.WithLabelValues("tso"),
-	}
+	return grpcutil.NewMetricsStream(
+		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("tso"),
+	)
 }
