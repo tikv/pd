@@ -699,17 +699,13 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 		}
 		// Here is used to simulate the upgrade process.
 		if i < regionLen/2 {
-			meta := &metapb.BucketMeta{
-				Keys:    [][]byte{r.StartKey, r.EndKey},
-				Version: 1,
-			}
-			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat), core.WithBucketMeta(meta))
 			buckets := &metapb.Buckets{
 				RegionId: r.Id,
 				Keys:     [][]byte{r.StartKey, r.EndKey},
 				Version:  1,
 			}
-			region.UpdateBuckets(buckets, region.GetBuckets())
+			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat), core.SetBuckets(buckets))
+			region.UpdateBuckets(buckets, nil)
 			regions = append(regions, region)
 		} else {
 			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
