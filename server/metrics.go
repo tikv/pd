@@ -269,6 +269,9 @@ func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncR
 }
 
 func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
+	if stream == nil {
+		return stream
+	}
 	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](
 		stream, stream.Send, nil, grpcStreamSendDuration.WithLabelValues("watch-global-config"),
 	)
