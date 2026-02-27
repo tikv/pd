@@ -23,13 +23,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -208,7 +208,7 @@ func expectedCreateKeyspaceSteps() []string {
 	}
 }
 
-func (suite *keyspaceTestSuite) TestCreateKeyspaceRecordStepMetrics() {
+func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 	re := suite.Require()
 	manager := suite.manager
 	expectedSteps := expectedCreateKeyspaceSteps()
