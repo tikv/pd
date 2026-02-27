@@ -171,7 +171,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 func getCreateKeyspaceStepCounts(re *require.Assertions) map[string]uint64 {
 	metrics, err := prometheus.DefaultGatherer.Gather()
 	re.NoError(err)
-	const countMetricName = "pd_keyspace_create_keyspace_step_duration_seconds_count"
+	const countMetricName = "pd_keyspace_create_keyspace_step_duration_seconds"
 	counts := make(map[string]uint64)
 	for _, mf := range metrics {
 		if mf.GetName() != countMetricName {
@@ -185,8 +185,8 @@ func getCreateKeyspaceStepCounts(re *require.Assertions) map[string]uint64 {
 					break
 				}
 			}
-			if step != "" && m.Counter != nil {
-				counts[step] = uint64(m.Counter.GetValue())
+			if step != "" && m.GetHistogram() != nil {
+				counts[step] = uint64(m.GetHistogram().GetSampleCount())
 			}
 		}
 		break
