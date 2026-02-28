@@ -1635,7 +1635,7 @@ func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
 
 // @Tags     affinity-groups
 // @Summary  List all affinity groups.
-// @Param    ids  query  string  false  "Repeated affinity group IDs (ids=a&ids=b)"
+// @Param    ids  query  []string  false  "Optional affinity group IDs. Repeat as ids=a&ids=b."
 // @Produce  json
 // @Success  200  {object}  AffinityGroupsResponse
 // @Failure  400  {string}  string  "The input is invalid."
