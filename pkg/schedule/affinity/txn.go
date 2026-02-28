@@ -93,6 +93,15 @@ func MakeLabelRule(groupKeyRanges GroupKeyRanges) *labeler.LabelRule {
 
 // CreateAffinityGroups adds multiple affinity groups to storage and creates corresponding label rules.
 func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
+	return m.createGroupsWithSkipExisting(changes, false)
+}
+
+// CreateAffinityGroupsIfNotExists adds multiple affinity groups, skipping those that already exist.
+func (m *Manager) CreateAffinityGroupsIfNotExists(changes []GroupKeyRanges) error {
+	return m.createGroupsWithSkipExisting(changes, true)
+}
+
+func (m *Manager) createGroupsWithSkipExisting(changes []GroupKeyRanges, skipExisting bool) error {
 	// Step 0: Validate all groups first (without lock)
 	groups := make([]*Group, 0, len(changes))
 	for _, change := range changes {
@@ -111,26 +120,45 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
 
-	// Step 1: Check whether the Group exists.
-	if err := m.noGroupsExist(groups); err != nil {
-		return err
+	filteredGroups := groups
+	filteredChanges := changes
+	if skipExisting {
+		filteredGroups = make([]*Group, 0, len(groups))
+		filteredChanges = make([]GroupKeyRanges, 0, len(changes))
+		m.RLock()
+		for i, group := range groups {
+			if _, exists := m.groups[group.ID]; exists {
+				continue
+			}
+			filteredGroups = append(filteredGroups, group)
+			filteredChanges = append(filteredChanges, changes[i])
+		}
+		m.RUnlock()
+		if len(filteredGroups) == 0 {
+			return nil
+		}
+	} else {
+		// Step 1: Check whether the Group exists.
+		if err := m.noGroupsExist(groups); err != nil {
+			return err
+		}
 	}
 
 	// Step 2: Convert and validate key ranges no overlaps
-	if err := m.validateNoOverlapLocked(changes); err != nil {
+	if err := m.validateNoOverlapLocked(filteredChanges); err != nil {
 		return err
 	}
 
 	// Step 3: Create the change plan for the Label
-	labelRules := make([]*labeler.LabelRule, len(changes))
+	labelRules := make([]*labeler.LabelRule, len(filteredChanges))
 	plan := m.regionLabeler.NewPlan()
-	for i, change := range changes {
+	for i, change := range filteredChanges {
 		if len(change.KeyRanges) > 0 {
 			labelRule := MakeLabelRule(change)
 			if err := plan.SetLabelRule(labelRule); err != nil {
 				log.Error("failed to create label rule",
 					zap.String("failed-group-id", change.GroupID),
-					zap.Int("total-groups", len(changes)),
+					zap.Int("total-groups", len(filteredChanges)),
 					zap.Error(err))
 				return err
 			}
@@ -140,7 +168,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 
 	// Step 4: Create the change plan for the Group
 	saveOps := plan.CommitOps()
-	for _, g := range groups {
+	for _, g := range filteredGroups {
 		group := g
 		saveOps = append(saveOps, func(txn kv.Txn) error {
 			return m.storage.SaveAffinityGroup(txn, group.ID, group)
@@ -150,7 +178,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	// Step 5: Save the Group and Label information in storage.
 	if err := endpoint.RunBatchOpInTxn(m.ctx, m.storage, saveOps); err != nil {
 		log.Error("failed to add affinity groups",
-			zap.Int("total-groups", len(changes)),
+			zap.Int("total-groups", len(filteredChanges)),
 			zap.Error(err))
 		return err
 	}
@@ -158,7 +186,7 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 	// Step 6: Save the Group and Label information in memory.
 	plan.Apply()
 
-	for i, change := range changes {
+	for i, change := range filteredChanges {
 		// Update key ranges cache for this group
 		if len(change.KeyRanges) > 0 {
 			m.keyRanges[change.GroupID] = GroupKeyRanges{
@@ -169,10 +197,10 @@ func (m *Manager) CreateAffinityGroups(changes []GroupKeyRanges) error {
 			// No key ranges, remove from cache if exists
 			delete(m.keyRanges, change.GroupID)
 		}
-		log.Info("affinity group added", zap.String("group", groups[i].String()))
+		log.Info("affinity group added", zap.String("group", filteredGroups[i].String()))
 	}
 
-	m.createGroups(groups, labelRules)
+	m.createGroups(filteredGroups, labelRules)
 	return nil
 }
 
