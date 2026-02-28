@@ -1,3 +1,9 @@
+---
+name: fix-ci
+description: Diagnose and fix PD CI failures. Given a CI failure signal (GitHub issue, Actions run URL, PR link, or test name), autonomously fetch logs, identify root cause with evidence from specific log lines mapped to source code, and produce a minimal fix. Use when CI is red, tests are flaky, or a user reports a CI failure.
+compatibility: Requires gh CLI authenticated with tikv/pd repo access.
+---
+
 # Persona & Goal
 
 Senior PD CI failure triage engineer. Given a CI failure signal, autonomously fetch logs, diagnose root cause, and produce a minimal fix. Every diagnosis must cite specific log lines mapped to source code.
@@ -10,9 +16,9 @@ Load on demand at the phase where they become relevant — do not preload.
 
 | File | Contents | Load When |
 |---|---|---|
-| `refs/ci-architecture.md` | CI workflows, test matrix, `pd-ut` usage, `gh` CLI commands, job→source mapping | **Phase 2** — to pick the right `gh` commands and understand which job failed |
-| `refs/log-patterns.md` | Failure search markers, classification table, example log fragments | **Phase 3** — to locate and classify failures in downloaded log files |
-| `refs/flaky-test-fixes.md` | Flaky diagnosis checklist, fix patterns, PD-specific test utilities | **Phase 4–6** — when the failure is identified as flaky/intermittent |
+| [references/ci-architecture.md](references/ci-architecture.md) | CI workflows, test matrix, `pd-ut` usage, `gh` CLI commands, job→source mapping | **Phase 2** — to pick the right `gh` commands and understand which job failed |
+| [references/log-patterns.md](references/log-patterns.md) | Failure search markers, classification table, example log fragments | **Phase 3** — to locate and classify failures in downloaded log files |
+| [references/flaky-test-fixes.md](references/flaky-test-fixes.md) | Flaky diagnosis checklist, fix patterns, PD-specific test utilities | **Phase 4–6** — when the failure is identified as flaky/intermittent |
 
 # Workflow
 
@@ -28,7 +34,7 @@ Load on demand at the phase where they become relevant — do not preload.
 
 ## Phase 2: Fetch Failure Logs
 
-> **Load `refs/ci-architecture.md` now.**
+> **Load [references/ci-architecture.md](references/ci-architecture.md) now.**
 
 1. `mkdir -p /tmp/ci-logs`
 2. Use the appropriate `gh` or `curl` command from the reference to download logs.
@@ -36,7 +42,7 @@ Load on demand at the phase where they become relevant — do not preload.
 
 ## Phase 3: Analyze Failure Logs
 
-> **Load `refs/log-patterns.md` now.**
+> **Load [references/log-patterns.md](references/log-patterns.md) now.**
 
 Read the log file **in segments** (never dump entire file into context):
 
@@ -47,7 +53,7 @@ Read the log file **in segments** (never dump entire file into context):
 
 ## Phase 4: Map Failure to Source Code
 
-> **If flaky/intermittent, load `refs/flaky-test-fixes.md` now.**
+> **If flaky/intermittent, load [references/flaky-test-fixes.md](references/flaky-test-fixes.md) now.**
 
 1. Locate the failing test with `Grep`, then `Read` the test file.
 2. Trace the failure: follow stack trace or assertion to the exact source line.
@@ -66,7 +72,7 @@ Present diagnosis to the user before fixing:
 
 ## Phase 6: Implement Fix
 
-Apply minimal fix following AGENTS.md conventions. For flaky tests, use patterns from `refs/flaky-test-fixes.md`.
+Apply minimal fix following AGENTS.md conventions. For flaky tests, use patterns from [references/flaky-test-fixes.md](references/flaky-test-fixes.md).
 
 ## Phase 7: Verify Fix
 
