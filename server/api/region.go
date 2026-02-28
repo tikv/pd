@@ -816,7 +816,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter
 		}
 		startKeys = append(startKeys, startKey)
 		endKeys = append(endKeys, endKey)
-		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+		fmt.Fprintf(&msgBuilder, "[%s,%s), ", rawStartKey, rawEndKey)
 	}
 	err = h.Handler.AccelerateRegionsScheduleInRanges(startKeys, endKeys, limit)
 	if err != nil {
