@@ -1575,3 +1575,89 @@ func transferPrimary(c *gin.Context) {
 	}
 	c.IndentedJSON(http.StatusOK, "success")
 }
+<<<<<<< HEAD
+=======
+
+func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrServerNotStarted.FastGenByArgs().Error())
+		return nil, false
+	}
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return nil, false
+	}
+	manager := cluster.GetAffinityManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrAffinityInternal.FastGenByArgs().Error())
+		return nil, false
+	}
+	return manager, true
+}
+
+// @Tags     affinity-groups
+// @Summary  List all affinity groups.
+// @Param    ids  query  []string  false  "Optional affinity group IDs. Repeat as ids=a&ids=b."
+// @Produce  json
+// @Success  200  {object}  AffinityGroupsResponse
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /affinity-groups [get]
+func getAllAffinityGroups(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+
+	rawIDs := c.QueryArray("ids")
+	var (
+		groupStates map[string]*affinity.GroupState
+		err         error
+	)
+	if len(rawIDs) == 0 {
+		groupStates = affinity.CollectAllGroupStates(manager)
+	} else {
+		groupStates, err = affinity.CollectGroupStates(manager, rawIDs)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	resp := AffinityGroupsResponse{
+		AffinityGroups: groupStates,
+	}
+	c.IndentedJSON(http.StatusOK, resp)
+}
+
+// @Tags     affinity-groups
+// @Summary  Get an affinity group by group id.
+// @Param    group_id  path  string  true  "The group id of the affinity group"
+// @Produce  json
+// @Success  200  {object}  *affinity.GroupState
+// @Failure  404  {string}  string  "Affinity group not found."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /affinity-groups/{group_id} [get]
+func getAffinityGroup(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+	groupID := c.Param("group_id")
+	groupState, err := manager.CheckAndGetAffinityGroupState(groupID)
+	if err != nil {
+		switch {
+		case errs.ErrInvalidGroupID.Equal(err):
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		case errs.ErrAffinityGroupNotFound.Equal(err):
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		default:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	c.IndentedJSON(http.StatusOK, groupState)
+}
+>>>>>>> 4f5039d437 (affinity: add ids filtering and skip-exist create options (#10157))
