@@ -153,7 +153,7 @@ func (s *TSODispatcher) dispatch(
 			case <-dispatcherCtx.Done():
 				return
 			}
-			err = s.processRequests(forwardStream, requests[:pendingTSOReqCount])
+			err = s.processRequests(dispatcherCtx, forwardStream, requests[:pendingTSOReqCount])
 			close(done)
 			if err != nil {
 				log.Error("proxy forward tso error",
@@ -175,7 +175,7 @@ func (s *TSODispatcher) dispatch(
 	}
 }
 
-func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
+func (s *TSODispatcher) processRequests(ctx context.Context, forwardStream stream, requests []Request) error {
 	// Merge the requests
 	count := uint32(0)
 	for _, request := range requests {
@@ -198,13 +198,13 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
 	firstLogical := logical - int64(count)
-	return s.finishRequest(requests, physical, firstLogical)
+	return s.finishRequest(ctx, requests, physical, firstLogical)
 }
 
-func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) error {
+func (*TSODispatcher) finishRequest(ctx context.Context, requests []Request, physical, firstLogical int64) error {
 	countSum := int64(0)
 	for i := range requests {
-		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
+		newCountSum, err := requests[i].postProcess(ctx, countSum, physical, firstLogical)
 		if err != nil {
 			return err
 		}

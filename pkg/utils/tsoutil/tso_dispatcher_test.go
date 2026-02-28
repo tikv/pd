@@ -110,7 +110,7 @@ func (m *mockRequest) process(forwardStream stream, count uint32) (tsoResp, erro
 	return forwardStream.process(0, count, 0, 0)
 }
 
-func (m *mockRequest) postProcess(countSum int64, _ int64, _ int64) (int64, error) {
+func (m *mockRequest) postProcess(_ context.Context, countSum int64, _ int64, _ int64) (int64, error) {
 	close(m.doneCh)
 	return countSum, m.err
 }

@@ -92,6 +92,15 @@ var (
 			Help:      "Counter of timeouts when tso proxy forwarding tso requests to tso service.",
 		})
 
+	tsoProxyChannelLatency = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "tso_proxy_channel_latency_seconds",
+			Help:      "Bucketed histogram of latency (s) of send/recv TSO from the tso dispatcher channel.",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 104s
+		})
+
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -215,6 +224,7 @@ func init() {
 	prometheus.MustRegister(tsoProxyHandleDuration)
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
+	prometheus.MustRegister(tsoProxyChannelLatency)
 	prometheus.MustRegister(tsoHandleDuration)
 	prometheus.MustRegister(tsoBatchSize)
 	prometheus.MustRegister(queryRegionDuration)

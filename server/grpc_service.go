@@ -494,7 +494,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		// The following are tso forward stream related variables.
 		tsoRequestProxyCtx context.Context
 		forwarder          = newTSOForwarder(stream)
-		tsoStreamErr       error
+		// when EnableTSOFollowerProxyis enabled, the concurrency level of the TSO stream is set to 1, just use block channel here.
+		tsoRespCh    = make(chan *pdpb.TsoResponse)
+		tsoStreamErr error
 	)
 
 	defer func() {
@@ -558,9 +560,20 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return errors.WithStack(err)
 			}
 
-			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
+			start := time.Now()
+			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, tsoRespCh)
 			// don't pass a stream context here as dispatcher serves multiple streams
 			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
+			select {
+			case response := <-tsoRespCh:
+				// Record the latency of receiving TSO response from the channel
+				tsoProxyChannelLatency.Observe(time.Since(start).Seconds())
+				if err = stream.Send(response); err != nil {
+					return errors.WithStack(err)
+				}
+			case <-tsoRequestProxyCtx.Done():
+				return errors.WithStack(context.Cause(tsoRequestProxyCtx))
+			}
 			continue
 		}
 
