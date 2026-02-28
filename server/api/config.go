@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -44,7 +45,10 @@ import (
 
 // This line is to ensure the package `sc` could always be imported so that
 // the swagger could generate the right definitions for the config structs.
-var _ *sc.ScheduleConfig = nil
+var (
+	_                                  *sc.ScheduleConfig = nil
+	resourceManagerControllerConfigURL                    = "/resource-manager/api/v1/config/controller"
+)
 
 type confHandler struct {
 	svr *server.Server
@@ -209,6 +213,8 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 		return h.updateKeyspaceConfig(cfg, kp[len(kp)-1], value)
 	case "micro-service":
 		return h.updateMicroserviceConfig(cfg, kp[len(kp)-1], value)
+	case "controller":
+		return h.updateControllerConfig(kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
@@ -619,11 +625,7 @@ func (h *confHandler) getLeaderConfig() (*config.Config, error) {
 	}
 	addr := addrs[0]
 	url := fmt.Sprintf("%s/pd/api/v1/config", addr)
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.GetJSONWithoutBody(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		return nil, err
 	}
@@ -646,11 +648,7 @@ func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 		return nil, errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.GetJSONWithoutBody(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		return nil, err
 	}
@@ -668,4 +666,42 @@ func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 		return nil, err
 	}
 	return &schedulingServerConfig, nil
+}
+
+func (h *confHandler) updateControllerConfig(key string, value any) error {
+	k := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rm.ControllerConfig{}), key)
+	if k == "" {
+		return errors.Errorf("controller config item %s not found", key)
+	}
+	// Don't allow updating child items, only allow updating top-level items.
+	if k != key {
+		return errors.Errorf("can't update controller child item %s, only top-level items are allowed", key)
+	}
+	addrs := h.svr.GetMember().GetServingUrls()
+	if len(addrs) == 0 {
+		return errs.ErrLeaderNil.FastGenByArgs()
+	}
+	addr := addrs[0]
+	url := fmt.Sprintf("%s%s", addr, resourceManagerControllerConfigURL)
+
+	body := map[string]any{
+		key: value,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	resp, err := apiutil.PostJSON(h.svr.GetHTTPClient(), url, data)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return errors.Errorf("failed to update controller config: %s", string(b))
+	}
+
+	return nil
 }

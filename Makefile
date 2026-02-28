@@ -269,6 +269,14 @@ basic-test: install-tools
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
+# gotest runs a targeted go test with failpoints automatically enabled/disabled.
+# Usage: make gotest GOTEST_ARGS='./pkg/gctuner -run TestInitGCTuner -count=1'
+GOTEST_ARGS ?= ./...
+gotest: install-tools
+	@$(FAILPOINT_ENABLE)
+	go test $(GOTEST_ARGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
+
 ci-test-job: install-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
 	./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
@@ -289,7 +297,7 @@ test-real-cluster:
 	# testing with the real cluster...
 	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
 
-.PHONY: test basic-test test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
+.PHONY: test basic-test gotest test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 

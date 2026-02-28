@@ -272,11 +272,7 @@ func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
 		idStr = strconv.FormatUint(id[0], 10)
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
-	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
-	if err != nil {
-		return err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.DoDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		return err
 	}

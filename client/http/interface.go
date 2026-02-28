@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -131,9 +132,13 @@ type Client interface {
 
 	// CreateAffinityGroups creates one or more affinity groups with key ranges.
 	// The affinityGroups parameter is a map from group ID to a list of key ranges.
-	CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error)
+	// Use options to customize behavior (for example, skipping existing groups).
+	CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error)
 	// GetAffinityGroup gets an affinity group by group ID.
 	GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error)
+	// GetAffinityGroups gets affinity groups by group IDs.
+	// When groupIDs is empty, it returns all affinity groups.
+	GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error)
 	// GetAllAffinityGroups gets all affinity groups.
 	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
 	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
@@ -1243,9 +1248,33 @@ func (c *client) DeleteGCSafePoint(ctx context.Context, serviceID string) (strin
 	return msg, nil
 }
 
+type createAffinityGroupsOptions struct {
+	skipExistCheck bool
+}
+
+// CreateAffinityGroupsOption customizes CreateAffinityGroups behavior.
+type CreateAffinityGroupsOption func(*createAffinityGroupsOptions)
+
+// WithSkipExistCheck skips existing groups and creates the rest.
+func WithSkipExistCheck() CreateAffinityGroupsOption {
+	return func(opts *createAffinityGroupsOptions) {
+		if opts == nil {
+			return
+		}
+		opts.skipExistCheck = true
+	}
+}
+
 // CreateAffinityGroups creates one or more affinity groups with key ranges.
-func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error) {
-	// Construct the request body
+func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error) {
+	options := &createAffinityGroupsOptions{}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(options)
+	}
+
 	reqGroups := make(map[string]CreateAffinityGroupInput, len(affinityGroups))
 	for groupID, ranges := range affinityGroups {
 		reqGroups[groupID] = CreateAffinityGroupInput{Ranges: ranges}
@@ -1257,9 +1286,13 @@ func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[st
 		return nil, errors.Trace(err)
 	}
 	var resp AffinityGroupsResponse
+	uri := AffinityGroups
+	if options.skipExistCheck {
+		uri = AffinityGroups + "?skip_exist_check=true"
+	}
 	err = c.request(ctx, newRequestInfo().
 		WithName("CreateAffinityGroups").
-		WithURI(AffinityGroups).
+		WithURI(uri).
 		WithMethod(http.MethodPost).
 		WithBody(reqJSON).
 		WithResp(&resp))
@@ -1281,6 +1314,33 @@ func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*Affinit
 		return nil, err
 	}
 	return &state, nil
+}
+
+// GetAffinityGroups gets affinity groups by group IDs.
+// When groupIDs is empty, it returns all affinity groups.
+func (c *client) GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error) {
+	if len(groupIDs) == 0 {
+		return c.GetAllAffinityGroups(ctx)
+	}
+
+	var query strings.Builder
+	for i, id := range groupIDs {
+		if i > 0 {
+			query.WriteByte('&')
+		}
+		query.WriteString("ids=")
+		query.WriteString(url.QueryEscape(id))
+	}
+	var resp AffinityGroupsResponse
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAffinityGroups").
+		WithURI(fmt.Sprintf("%s?%s", AffinityGroups, query.String())).
+		WithMethod(http.MethodGet).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
 }
 
 // GetAllAffinityGroups gets all affinity groups.
