@@ -120,12 +120,10 @@ func (t *createKeyspaceTracer) onStepFinished(step string) {
 	duration := now.Sub(t.lastCheckTime)
 	t.lastCheckTime = now
 	createKeyspaceStepDuration.WithLabelValues(step).Observe(duration.Seconds())
-	if duration > time.Second {
-		log.Warn("[create-keyspace] step slow",
-			zap.String("step", step),
-			zap.Uint32("keyspace-id", t.keyspaceID),
-			zap.String("keyspace-name", t.keyspaceName),
-			zap.Duration("duration", duration),
-		)
-	}
+	log.Debug("[create-keyspace] step completed",
+		zap.String("step", step),
+		zap.Uint32("keyspace-id", t.keyspaceID),
+		zap.String("keyspace-name", t.keyspaceName),
+		zap.Duration("duration", duration),
+	)
 }
