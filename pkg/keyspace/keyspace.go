@@ -70,6 +70,17 @@ const (
 	UnifiedGC = "unified"
 )
 
+// createKeyspaceStep represents the steps in create keyspace operation (for metrics label "step").
+const (
+	StepTotal               = "total"
+	StepAllocateID          = "allocate_id"
+	StepGetConfig           = "get_config"
+	StepSaveKeyspaceMeta    = "save_keyspace_meta"
+	StepSplitRegion         = "split_region"
+	StepEnableKeyspace      = "enable_keyspace"
+	StepUpdateKeyspaceGroup = "update_keyspace_group"
+)
+
 // Config is the interface for keyspace config.
 type Config interface {
 	GetPreAlloc() []string

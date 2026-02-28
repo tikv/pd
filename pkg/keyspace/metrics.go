@@ -37,6 +37,15 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of each step or total in create keyspace operation.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"step"})
+
+	// Pre-defined observers per step to avoid repeated WithLabelValues in hot path.
+	createKeyspaceStepDurationTotal          prometheus.Observer
+	createKeyspaceStepDurationAllocateID     prometheus.Observer
+	createKeyspaceStepDurationGetConfig      prometheus.Observer
+	createKeyspaceStepDurationSaveKeyspace   prometheus.Observer
+	createKeyspaceStepDurationSplitRegion    prometheus.Observer
+	createKeyspaceStepDurationEnableKeyspace prometheus.Observer
+	createKeyspaceStepDurationUpdateKG       prometheus.Observer
 )
 
 func init() {
@@ -46,18 +55,14 @@ func init() {
 		log.Warn("[keyspace] failed to register create_keyspace_step_duration_seconds metric",
 			zap.Error(err))
 	}
+	createKeyspaceStepDurationTotal = createKeyspaceStepDuration.WithLabelValues(StepTotal)
+	createKeyspaceStepDurationAllocateID = createKeyspaceStepDuration.WithLabelValues(StepAllocateID)
+	createKeyspaceStepDurationGetConfig = createKeyspaceStepDuration.WithLabelValues(StepGetConfig)
+	createKeyspaceStepDurationSaveKeyspace = createKeyspaceStepDuration.WithLabelValues(StepSaveKeyspaceMeta)
+	createKeyspaceStepDurationSplitRegion = createKeyspaceStepDuration.WithLabelValues(StepSplitRegion)
+	createKeyspaceStepDurationEnableKeyspace = createKeyspaceStepDuration.WithLabelValues(StepEnableKeyspace)
+	createKeyspaceStepDurationUpdateKG = createKeyspaceStepDuration.WithLabelValues(StepUpdateKeyspaceGroup)
 }
-
-// createKeyspaceStep represents the steps in create keyspace operation
-const (
-	stepTotal               = "total"
-	stepAllocateID          = "allocate_id"
-	stepGetConfig           = "get_config"
-	stepSaveKeyspaceMeta    = "save_keyspace_meta"
-	stepSplitRegion         = "split_region"
-	stepEnableKeyspace      = "enable_keyspace"
-	stepUpdateKeyspaceGroup = "update_keyspace_group"
-)
 
 // createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.
 type createKeyspaceTracer struct {
@@ -82,46 +87,45 @@ func (t *createKeyspaceTracer) SetKeyspace(keyspaceID uint32, keyspaceName strin
 
 // OnAllocateIDFinished is called when allocate ID step is finished.
 func (t *createKeyspaceTracer) OnAllocateIDFinished() {
-	t.onStepFinished(stepAllocateID)
+	t.onStepFinished(createKeyspaceStepDurationAllocateID)
 }
 
 // OnGetConfigFinished is called when get config step is finished.
 func (t *createKeyspaceTracer) OnGetConfigFinished() {
-	t.onStepFinished(stepGetConfig)
+	t.onStepFinished(createKeyspaceStepDurationGetConfig)
 }
 
 // OnSaveKeyspaceMetaFinished is called when save keyspace meta step is finished.
 func (t *createKeyspaceTracer) OnSaveKeyspaceMetaFinished() {
-	t.onStepFinished(stepSaveKeyspaceMeta)
+	t.onStepFinished(createKeyspaceStepDurationSaveKeyspace)
 }
 
 // OnSplitRegionFinished is called when split region step is finished.
 func (t *createKeyspaceTracer) OnSplitRegionFinished() {
-	t.onStepFinished(stepSplitRegion)
+	t.onStepFinished(createKeyspaceStepDurationSplitRegion)
 }
 
 // OnEnableKeyspaceFinished is called when enable keyspace step is finished.
 func (t *createKeyspaceTracer) OnEnableKeyspaceFinished() {
-	t.onStepFinished(stepEnableKeyspace)
+	t.onStepFinished(createKeyspaceStepDurationEnableKeyspace)
 }
 
 // OnUpdateKeyspaceGroupFinished is called when update keyspace group step is finished.
 func (t *createKeyspaceTracer) OnUpdateKeyspaceGroupFinished() {
-	t.onStepFinished(stepUpdateKeyspaceGroup)
+	t.onStepFinished(createKeyspaceStepDurationUpdateKG)
 }
 
 // OnCreateKeyspaceComplete is called when the entire create keyspace operation completes successfully.
 func (t *createKeyspaceTracer) OnCreateKeyspaceComplete() {
-	createKeyspaceStepDuration.WithLabelValues(stepTotal).Observe(time.Since(t.beginTime).Seconds())
+	createKeyspaceStepDurationTotal.Observe(time.Since(t.beginTime).Seconds())
 }
 
-func (t *createKeyspaceTracer) onStepFinished(step string) {
+func (t *createKeyspaceTracer) onStepFinished(observer prometheus.Observer) {
 	now := time.Now()
 	duration := now.Sub(t.lastCheckTime)
 	t.lastCheckTime = now
-	createKeyspaceStepDuration.WithLabelValues(step).Observe(duration.Seconds())
+	observer.Observe(duration.Seconds())
 	log.Debug("[create-keyspace] step completed",
-		zap.String("step", step),
 		zap.Uint32("keyspace-id", t.keyspaceID),
 		zap.String("keyspace-name", t.keyspaceName),
 		zap.Duration("duration", duration),
