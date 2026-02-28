@@ -229,8 +229,6 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	tracer := &createKeyspaceTracer{}
 	tracer.Begin()
-	tracer.SetKeyspace(0, request.Name)
-
 	// Step 1: Validate purposed name's legality.
 	if err := validateName(request.Name); err != nil {
 		return nil, err
@@ -250,7 +248,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
-
 	// Allocate new keyspaceID.
 	newID, err := manager.allocID()
 	if err != nil {
