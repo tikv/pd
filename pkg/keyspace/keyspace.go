@@ -229,7 +229,7 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	tracer := &createKeyspaceTracer{}
 	tracer.Begin()
-	// Step 1: Validate purposed name's legality.
+	// Validate purposed name's legality.
 	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
