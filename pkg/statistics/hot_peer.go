@@ -220,7 +220,9 @@ func (stat *HotPeerStat) isHot(thresholds []float64) bool {
 
 func (stat *HotPeerStat) clearLastAverage() {
 	for _, l := range stat.rollingLoads {
-		l.clearLastAverage()
+		if l != nil {
+			l.clearLastAverage()
+		}
 	}
 }
 
