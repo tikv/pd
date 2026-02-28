@@ -227,23 +227,11 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
-	// Ensure metrics.go is compiled by referencing the metric variable
-	_ = createKeyspaceStepDuration
-
-	// Helper function to record step duration and log
-	recordStep := func(step string, startTime time.Time, keyspaceID uint32, keyspaceName string) {
-		duration := time.Since(startTime)
-		createKeyspaceStepDuration.WithLabelValues(step).Observe(duration.Seconds())
-		log.Info("[create-keyspace] step completed",
-			zap.String("step", step),
-			zap.Uint32("keyspace-id", keyspaceID),
-			zap.String("keyspace-name", keyspaceName),
-			zap.Duration("duration", duration),
-		)
-	}
+	var tracer createKeyspaceTracer
+	tracer.Begin()
+	tracer.SetKeyspace(0, request.Name)
 
 	// Step 1: Validate purposed name's legality.
-	stepStart := time.Now()
 	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
@@ -262,18 +250,17 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
-	recordStep(stepValidateName, stepStart, 0, request.Name)
+	tracer.OnValidateNameFinished()
 
 	// Allocate new keyspaceID.
-	stepStart = time.Now()
 	newID, err := manager.allocID()
 	if err != nil {
 		return nil, err
 	}
-	recordStep(stepAllocateID, stepStart, newID, request.Name)
+	tracer.SetKeyspace(newID, request.Name)
+	tracer.OnAllocateIDFinished()
 
 	// Get keyspace config.
-	stepStart = time.Now()
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
@@ -296,10 +283,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
 	}
-	recordStep(stepGetConfig, stepStart, newID, request.Name)
+	tracer.OnGetConfigFinished()
 
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
-	stepStart = time.Now()
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
 		Name:           request.Name,
@@ -317,10 +303,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		)
 		return nil, err
 	}
-	recordStep(stepSaveKeyspaceMeta, stepStart, newID, request.Name)
+	tracer.OnSaveKeyspaceMetaFinished()
 
-	// Step 6: Split keyspace region.
-	stepStart = time.Now()
+	// Split keyspace region.
 	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -341,10 +326,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		}
 		return nil, err
 	}
-	recordStep(stepSplitRegion, stepStart, newID, request.Name)
+	tracer.OnSplitRegionFinished()
 
-	// Step 7: Enable the keyspace metadata after split.
-	stepStart = time.Now()
+	// Enable the keyspace metadata after split.
 	keyspace.State = keyspacepb.KeyspaceState_ENABLED
 	_, err = manager.UpdateKeyspaceStateByID(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
 	if err != nil {
@@ -355,16 +339,15 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		)
 		return nil, err
 	}
-	recordStep(stepEnableKeyspace, stepStart, newID, request.Name)
+	tracer.OnEnableKeyspaceFinished()
 
-	// Step 8: Update keyspace group.
-	stepStart = time.Now()
+	// Update keyspace group.
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
-	recordStep(stepUpdateKeyspaceGroup, stepStart, newID, request.Name)
+	tracer.OnUpdateKeyspaceGroupFinished()
 
-	log.Info("[keyspace] keyspace created",
+	log.Info("[create-keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
 		zap.String("keyspace-name", keyspace.GetName()),
 	)

@@ -15,6 +15,8 @@
 package keyspace
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
@@ -56,3 +58,69 @@ const (
 	stepEnableKeyspace      = "enable_keyspace"
 	stepUpdateKeyspaceGroup = "update_keyspace_group"
 )
+
+// createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.
+type createKeyspaceTracer struct {
+	lastCheckTime time.Time
+	keyspaceID    uint32
+	keyspaceName  string
+}
+
+// Begin starts the tracing.
+func (t *createKeyspaceTracer) Begin() {
+	t.lastCheckTime = time.Now()
+}
+
+// SetKeyspace sets keyspace id and name for step logs (call with 0, name before allocate; with newID, name after allocate).
+func (t *createKeyspaceTracer) SetKeyspace(keyspaceID uint32, keyspaceName string) {
+	t.keyspaceID = keyspaceID
+	t.keyspaceName = keyspaceName
+}
+
+// OnValidateNameFinished is called when validate name step is finished.
+func (t *createKeyspaceTracer) OnValidateNameFinished() {
+	t.onStepFinished(stepValidateName)
+}
+
+// OnAllocateIDFinished is called when allocate ID step is finished.
+func (t *createKeyspaceTracer) OnAllocateIDFinished() {
+	t.onStepFinished(stepAllocateID)
+}
+
+// OnGetConfigFinished is called when get config step is finished.
+func (t *createKeyspaceTracer) OnGetConfigFinished() {
+	t.onStepFinished(stepGetConfig)
+}
+
+// OnSaveKeyspaceMetaFinished is called when save keyspace meta step is finished.
+func (t *createKeyspaceTracer) OnSaveKeyspaceMetaFinished() {
+	t.onStepFinished(stepSaveKeyspaceMeta)
+}
+
+// OnSplitRegionFinished is called when split region step is finished.
+func (t *createKeyspaceTracer) OnSplitRegionFinished() {
+	t.onStepFinished(stepSplitRegion)
+}
+
+// OnEnableKeyspaceFinished is called when enable keyspace step is finished.
+func (t *createKeyspaceTracer) OnEnableKeyspaceFinished() {
+	t.onStepFinished(stepEnableKeyspace)
+}
+
+// OnUpdateKeyspaceGroupFinished is called when update keyspace group step is finished.
+func (t *createKeyspaceTracer) OnUpdateKeyspaceGroupFinished() {
+	t.onStepFinished(stepUpdateKeyspaceGroup)
+}
+
+func (t *createKeyspaceTracer) onStepFinished(step string) {
+	now := time.Now()
+	duration := now.Sub(t.lastCheckTime)
+	t.lastCheckTime = now
+	createKeyspaceStepDuration.WithLabelValues(step).Observe(duration.Seconds())
+	log.Info("[create-keyspace] step completed",
+		zap.String("step", step),
+		zap.Uint32("keyspace-id", t.keyspaceID),
+		zap.String("keyspace-name", t.keyspaceName),
+		zap.Duration("duration", duration),
+	)
+}
