@@ -66,6 +66,8 @@ const (
 	// do this check and re-distribute the primaries if necessary.
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
 	groupPatrolInterval                 = time.Minute
+
+	defaultPrimaryAddrCacheTTL = time.Second
 )
 
 type state struct {
@@ -95,6 +97,11 @@ type state struct {
 	// modRevision is the modification revision of keyspace space.
 	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
 	modRevision uint64
+}
+
+type primaryAddrCacheEntry struct {
+	addr     string
+	expireAt time.Time
 }
 
 func (s *state) initialize() {
@@ -369,6 +376,9 @@ type KeyspaceGroupManager struct {
 
 	primaryPriorityCheckInterval time.Duration
 
+	primaryAddrCache    map[uint32]primaryAddrCacheEntry
+	primaryAddrCacheTTL time.Duration
+
 	// tsoNodes is the registered tso servers.
 	tsoNodes sync.Map // store as map[string]struct{}
 	// serviceRegistryMap stores the mapping from the service registry key to the service address.
@@ -407,6 +417,8 @@ func NewKeyspaceGroupManager(
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
 		cfg:                          cfg,
 		groupUpdateRetryList:         make(map[uint32]*endpoint.KeyspaceGroup),
+		primaryAddrCache:             make(map[uint32]primaryAddrCacheEntry),
+		primaryAddrCacheTTL:          defaultPrimaryAddrCacheTTL,
 		serviceRegistryMap:           make(map[string]string),
 		metrics:                      newKeyspaceGroupMetrics(),
 	}
@@ -913,11 +925,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldGroup != nil {
 		// SplitTarget -> !Splitting
 		if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
-			kgm.allocators[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
-			splitTime := kgm.splittingGroups[groupID]
-			delete(kgm.splittingGroups, groupID)
-			kgm.metrics.splitTargetGauge.Dec()
-			kgm.metrics.splitDuration.Observe(time.Since(splitTime).Seconds())
+			if allocator := kgm.allocators[groupID]; allocator != nil {
+				allocator.GetMember().(*member.Participant).SetCampaignChecker(nil)
+			}
+			if splitTime, ok := kgm.splittingGroups[groupID]; ok {
+				delete(kgm.splittingGroups, groupID)
+				kgm.metrics.splitTargetGauge.Dec()
+				kgm.metrics.splitDuration.Observe(time.Since(splitTime).Seconds())
+			}
 		}
 		// SplitSource -> !SplitSource
 		if oldGroup.IsSplitSource() && !newGroup.IsSplitting() {
@@ -981,6 +996,8 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 		kgm.kgs[groupID] = nil
 	}
 
+	delete(kgm.primaryAddrCache, groupID)
+
 	allocator := kgm.allocators[groupID]
 	if allocator != nil {
 		allocator.Close()
@@ -1029,6 +1046,93 @@ func (kgm *KeyspaceGroupManager) GetAllocator(keyspaceGroupID uint32) (*Allocato
 		return allocator, nil
 	}
 	return nil, genNotServedErr(errs.ErrGetAllocator, keyspaceGroupID)
+}
+
+// GetKeyspaceGroupMetaByKeyspaceID returns the keyspace group meta which the keyspace belongs to.
+// Compared to FindGroupByKeyspaceID, it doesn't require the keyspace group to be served by this host/pod.
+// It's mainly used for service discovery queries.
+func (kgm *KeyspaceGroupManager) GetKeyspaceGroupMetaByKeyspaceID(
+	keyspaceID uint32,
+) (*endpoint.KeyspaceGroup, uint32, uint64, error) {
+	_, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
+		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
+	if err != nil {
+		// It's possible that the keyspace group is not served by this host/pod, but we can still
+		// return the keyspace group meta to the client.
+		if curKeyspaceGroup != nil {
+			return curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
+		}
+		return nil, curKeyspaceGroupID, modRevision, err
+	}
+	return curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
+}
+
+// GetKeyspaceGroupPrimaryAddr returns the current primary's serving address of the given keyspace group.
+// If the keyspace group is served by this host/pod, it uses the in-memory election state. Otherwise, it
+// falls back to query the primary from etcd directly.
+func (kgm *KeyspaceGroupManager) GetKeyspaceGroupPrimaryAddr(keyspaceGroupID uint32) (string, error) {
+	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+		return "", err
+	}
+
+	// Fast path: rely on the local keyspace group's allocator if it exists.
+	allocator, _ := kgm.getKeyspaceGroupMeta(keyspaceGroupID)
+	if allocator != nil {
+		if primaryAddr := allocator.GetPrimaryAddr(); len(primaryAddr) > 0 {
+			return primaryAddr, nil
+		}
+	}
+
+	// Try to use cached primary address to avoid querying etcd for each request when this host/pod
+	// doesn't serve the keyspace group.
+	now := time.Now()
+	kgm.RLock()
+	cacheEntry, ok := kgm.primaryAddrCache[keyspaceGroupID]
+	cacheTTL := kgm.primaryAddrCacheTTL
+	kg := kgm.kgs[keyspaceGroupID]
+	if ok && cacheTTL > 0 && len(cacheEntry.addr) > 0 && now.Before(cacheEntry.expireAt) {
+		if kg == nil {
+			addr := cacheEntry.addr
+			kgm.RUnlock()
+			return addr, nil
+		}
+		for _, member := range kg.Members {
+			if member.IsAddressEquivalent(cacheEntry.addr) {
+				addr := cacheEntry.addr
+				kgm.RUnlock()
+				return addr, nil
+			}
+		}
+	}
+	kgm.RUnlock()
+
+	// Slow path: query the primary from etcd by election key directly. It's required when the
+	// keyspace group isn't assigned to this host/pod, so no allocator exists locally.
+	electionPath := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: mcs.TSOServiceName,
+		GroupID:     keyspaceGroupID,
+	})
+	primary := &tsopb.Participant{}
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(kgm.etcdClient, electionPath, primary)
+	if err != nil {
+		return "", err
+	}
+	primaryAddrs := primary.GetListenUrls()
+	if !ok || len(primaryAddrs) < 1 {
+		return "", errs.ErrKeyspaceGroupPrimaryNotFound.FastGenByArgs()
+	}
+
+	primaryAddr := primaryAddrs[0]
+	if cacheTTL > 0 {
+		kgm.Lock()
+		kgm.primaryAddrCache[keyspaceGroupID] = primaryAddrCacheEntry{
+			addr:     primaryAddr,
+			expireAt: now.Add(cacheTTL),
+		}
+		kgm.Unlock()
+	}
+
+	return primaryAddr, nil
 }
 
 // FindGroupByKeyspaceID returns the keyspace group that contains the keyspace with the given ID.

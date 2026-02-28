@@ -1010,3 +1010,93 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
+
+func TestFindGroupByKeyspaceIDFromNonMemberNode(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	defer cluster.Destroy()
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeaderServer := cluster.GetServer(leaderName)
+	re.NoError(pdLeaderServer.BootstrapCluster())
+
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 3, pdLeaderServer.GetAddr())
+	re.NoError(err)
+	defer tsoCluster.Destroy()
+
+	addrs := make([]string, 0, 3)
+	for addr := range tsoCluster.GetServers() {
+		addrs = append(addrs, addr)
+	}
+	re.Len(addrs, 3)
+
+	const (
+		groupID    uint32 = 1
+		keyspaceID uint32 = 1001
+	)
+	members := []endpoint.KeyspaceGroupMember{
+		{Address: addrs[0]},
+		{Address: addrs[1]},
+	}
+	nonMemberAddr := addrs[2]
+
+	handlersutil.MustCreateKeyspaceGroup(re, pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:        groupID,
+				UserKind:  endpoint.Standard.String(),
+				Members:   members,
+				Keyspaces: []uint32{keyspaceID},
+			},
+		},
+	})
+
+	primaryServer := tsoCluster.WaitForPrimaryServing(re, keyspaceID, groupID)
+	re.NotNil(primaryServer)
+	re.NotEqual(nonMemberAddr, primaryServer.GetAddr())
+
+	cli := utils.SetupClientWithKeyspaceID(
+		ctx, re, keyspaceID, []string{pdLeaderServer.GetAddr()},
+		opt.WithForwardingOption(true),
+	)
+	re.NotNil(cli)
+	defer cli.Close()
+
+	clusterID := cli.GetClusterID(ctx)
+	conn, err := cli.GetServiceDiscovery().GetOrCreateGRPCConn(nonMemberAddr)
+	re.NoError(err)
+
+	req := tsopb.FindGroupByKeyspaceIDRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       clusterID,
+			KeyspaceId:      keyspaceID,
+			KeyspaceGroupId: 0,
+		},
+		KeyspaceId: keyspaceID,
+	}
+
+	var resp *tsopb.FindGroupByKeyspaceIDResponse
+	testutil.Eventually(re, func() bool {
+		resp, err = tsopb.NewTSOClient(conn).FindGroupByKeyspaceID(ctx, &req)
+		return err == nil && resp.GetHeader().GetError() == nil
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	re.NotNil(resp.GetKeyspaceGroup())
+	re.Equal(groupID, resp.KeyspaceGroup.Id)
+	re.Len(resp.KeyspaceGroup.Members, 2)
+
+	primaryAddr := ""
+	for _, m := range resp.KeyspaceGroup.Members {
+		if m.IsPrimary {
+			primaryAddr = m.Address
+		}
+	}
+	re.Equal(primaryServer.GetAddr(), primaryAddr)
+}

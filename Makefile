@@ -227,8 +227,11 @@ generate-easyjson: install-tools
 
 #### Test utils ####
 
-FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
-FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
+# Note: don't wrap failpoint-ctl invocation in command substitution.
+# failpoint-ctl may print progress logs to stdout, which would then be executed
+# as shell commands if captured.
+FAILPOINT_ENABLE  := find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable
+FAILPOINT_DISABLE := find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable
 
 failpoint-enable: install-tools
 	# Converting failpoints...

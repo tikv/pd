@@ -16,6 +16,7 @@ package tso
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -30,9 +31,11 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/tso"
+	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -43,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -79,6 +83,21 @@ type tsoClientTestSuite struct {
 
 func (suite *tsoClientTestSuite) getBackendEndpoints() []string {
 	return strings.Split(suite.backendEndpoints, ",")
+}
+
+func (suite *tsoClientTestSuite) mustGetTSOURLs(re *require.Assertions) []string {
+	pdClient, conn := testutil.MustNewGrpcClient(re, suite.backendEndpoints)
+	defer conn.Close()
+	var tsoURLs []string
+	testutil.Eventually(re, func() bool {
+		resp, err := pdClient.GetClusterInfo(suite.ctx, &pdpb.GetClusterInfoRequest{})
+		if err != nil {
+			return false
+		}
+		tsoURLs = resp.TsoUrls
+		return len(tsoURLs) >= 3
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+	return tsoURLs
 }
 
 func TestLegacyTSOClientSuite(t *testing.T) {
@@ -296,6 +315,229 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 		re.Less(lastTS, ts)
 		lastTS = ts
 	}
+}
+
+func (suite *tsoClientTestSuite) TestGetTSDuringSplitAndMergeFromNonMemberNode() {
+	if suite.legacy {
+		suite.T().Skip("skipping test in legacy mode")
+	}
+	re := suite.Require()
+	tsoURLs := suite.mustGetTSOURLs(re)
+
+	members := []endpoint.KeyspaceGroupMember{
+		{Address: tsoURLs[1]},
+		{Address: tsoURLs[2]},
+	}
+
+	const (
+		oldKeyspaceGroupID uint32 = 100
+		newKeyspaceGroupID uint32 = 101
+		keyspaceA          uint32 = 20001
+		keyspaceB          uint32 = 20002
+	)
+	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:        oldKeyspaceGroupID,
+				UserKind:  endpoint.Standard.String(),
+				Members:   members,
+				Keyspaces: []uint32{keyspaceA, keyspaceB},
+			},
+		},
+	})
+	suite.tsoCluster.WaitForPrimaryServing(re, keyspaceA, oldKeyspaceGroupID)
+
+	isIgnorableErr := func(err error) bool {
+		if err == nil {
+			return false
+		}
+		errMsg := err.Error()
+		return strings.Contains(errMsg, "context canceled") ||
+			strings.Contains(errMsg, clierrs.NotLeaderErr) ||
+			strings.Contains(errMsg, clierrs.NotServedErr) ||
+			strings.Contains(errMsg, "ErrKeyspaceNotAssigned") ||
+			strings.Contains(errMsg, "ErrKeyspaceGroupIsMerging") ||
+			errors.Is(err, clierrs.ErrClientTSOStreamClosed)
+	}
+
+	reqCtx, reqCancel := context.WithCancel(suite.ctx)
+	defer reqCancel()
+
+	errCh := make(chan error, 8)
+	var wg sync.WaitGroup
+
+	startTSLoop := func(keyspaceID uint32, successCounter *atomic.Int64) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cli := utils.SetupClientWithKeyspaceID(
+				reqCtx,
+				re,
+				keyspaceID,
+				suite.getBackendEndpoints(),
+				opt.WithForwardingOption(true),
+			)
+			defer cli.Close()
+
+			var lastTS uint64
+			for {
+				select {
+				case <-reqCtx.Done():
+					if successCounter.Load() == 0 {
+						select {
+						case errCh <- fmt.Errorf("no ts returned for keyspace %d", keyspaceID):
+						default:
+						}
+					}
+					return
+				default:
+				}
+
+				physical, logical, err := cli.GetTS(reqCtx)
+				if err != nil {
+					if isIgnorableErr(err) {
+						continue
+					}
+					select {
+					case errCh <- err:
+					default:
+					}
+					reqCancel()
+					return
+				}
+				successCounter.Add(1)
+				ts := tsoutil.ComposeTS(physical, logical)
+				if lastTS != 0 && ts <= lastTS {
+					select {
+					case errCh <- fmt.Errorf(
+						"non-monotonic ts for keyspace %d: now=%d last=%d",
+						keyspaceID, ts, lastTS,
+					):
+					default:
+					}
+					reqCancel()
+					return
+				}
+				lastTS = ts
+			}
+		}()
+	}
+
+	var successA1, successA2, successB atomic.Int64
+	startTSLoop(keyspaceA, &successA1)
+	startTSLoop(keyspaceA, &successA2)
+	startTSLoop(keyspaceB, &successB)
+
+	testutil.Eventually(re, func() bool {
+		return successA1.Load() > 0 && successA2.Load() > 0 && successB.Load() > 0
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+	baseA1, baseA2, baseB := successA1.Load(), successA2.Load(), successB.Load()
+
+	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, oldKeyspaceGroupID, &handlers.SplitKeyspaceGroupByIDParams{
+		NewID:     newKeyspaceGroupID,
+		Keyspaces: []uint32{keyspaceB},
+	})
+	suite.tsoCluster.WaitForPrimaryServing(re, keyspaceB, newKeyspaceGroupID)
+	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, newKeyspaceGroupID)
+
+	testutil.Eventually(re, func() bool {
+		return successA1.Load() > baseA1 && successA2.Load() > baseA2 && successB.Load() > baseB
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+	baseA1, baseA2, baseB = successA1.Load(), successA2.Load(), successB.Load()
+
+	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, oldKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
+		MergeList: []uint32{newKeyspaceGroupID},
+	})
+	testutil.Eventually(re, func() bool {
+		kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, oldKeyspaceGroupID)
+		re.Contains(kg.Keyspaces, keyspaceA)
+		re.Contains(kg.Keyspaces, keyspaceB)
+		return !kg.IsMergeTarget()
+	}, testutil.WithWaitFor(time.Minute), testutil.WithTickInterval(500*time.Millisecond))
+
+	testutil.Eventually(re, func() bool {
+		return successA1.Load() > baseA1 && successA2.Load() > baseA2 && successB.Load() > baseB
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	reqCancel()
+	wg.Wait()
+	close(errCh)
+	for loopErr := range errCh {
+		re.NoError(loopErr)
+	}
+}
+
+func (suite *tsoClientTestSuite) TestGetTSAndServiceDiscoveryFromNonMemberNode() {
+	if suite.legacy {
+		suite.T().Skip("skipping test in legacy mode")
+	}
+	re := suite.Require()
+	tsoURLs := suite.mustGetTSOURLs(re)
+
+	nonMemberAddr := tsoURLs[0]
+	members := []endpoint.KeyspaceGroupMember{
+		{Address: tsoURLs[1]},
+		{Address: tsoURLs[2]},
+	}
+
+	const (
+		keyspaceGroupID uint32 = 102
+		keyspaceID      uint32 = 20003
+	)
+	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:        keyspaceGroupID,
+				UserKind:  endpoint.Standard.String(),
+				Members:   members,
+				Keyspaces: []uint32{keyspaceID},
+			},
+		},
+	})
+	suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
+
+	foundNonMember := false
+	for _, server := range suite.tsoCluster.GetServers() {
+		if !typeutil.EqualBaseURLs(server.GetAddr(), nonMemberAddr) {
+			continue
+		}
+		_, err := server.GetTSOAllocator(keyspaceGroupID)
+		re.Error(err)
+		foundNonMember = true
+		break
+	}
+	re.True(foundNonMember)
+
+	ctx, cancel := context.WithTimeout(suite.ctx, 30*time.Second)
+	defer cancel()
+	client := utils.SetupClientWithKeyspaceID(
+		ctx, re, keyspaceID, suite.getBackendEndpoints(),
+		opt.WithForwardingOption(true),
+	)
+	defer client.Close()
+
+	var lastTS uint64
+	for range 50 {
+		physical, logical, err := client.GetTS(ctx)
+		re.NoError(err)
+		ts := tsoutil.ComposeTS(physical, logical)
+		re.Greater(ts, lastTS)
+		lastTS = ts
+	}
+
+	inner, ok := client.(interface{ GetTSOServiceDiscovery() sd.ServiceDiscovery })
+	re.True(ok)
+	tsoDiscovery := inner.GetTSOServiceDiscovery()
+	re.NotNil(tsoDiscovery)
+
+	re.NoError(tsoDiscovery.CheckMemberChanged())
+	re.Equal(keyspaceGroupID, tsoDiscovery.GetKeyspaceGroupID())
+	re.Len(tsoDiscovery.GetServiceURLs(), 2)
+	re.NotEmpty(tsoDiscovery.GetServingURL())
+	re.False(typeutil.EqualBaseURLs(nonMemberAddr, tsoDiscovery.GetServingURL()))
+
+	_, ok = tsoDiscovery.GetClientConns().Load(nonMemberAddr)
+	re.True(ok)
 }
 
 // TestGetMinTS tests the correctness of GetMinTS.
