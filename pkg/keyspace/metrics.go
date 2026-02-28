@@ -15,9 +15,10 @@
 package keyspace
 
 import (
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 const (

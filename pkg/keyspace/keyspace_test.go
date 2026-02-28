@@ -186,7 +186,7 @@ func getCreateKeyspaceStepCounts(re *require.Assertions) map[string]uint64 {
 				}
 			}
 			if step != "" && m.GetHistogram() != nil {
-				counts[step] = uint64(m.GetHistogram().GetSampleCount())
+				counts[step] = m.GetHistogram().GetSampleCount()
 			}
 		}
 		break
