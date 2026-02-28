@@ -239,40 +239,28 @@ func init() {
 }
 
 func newTsoMetricsStream(stream pdpb.PD_TsoServer) pdpb.PD_TsoServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("tso"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
 }
 
 func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) pdpb.PD_RegionHeartbeatServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("region-heartbeat"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
 }
 
 func newReportBucketsMetricsStream(stream pdpb.PD_ReportBucketsServer) pdpb.PD_ReportBucketsServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.SendAndClose, stream.Recv, grpcStreamSendDuration.WithLabelValues("report-buckets"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.SendAndClose, stream.Recv, grpcStreamSendDuration, "report-buckets")
 }
 
 func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) pdpb.PD_QueryRegionServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("query-region"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
 }
 
 func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncRegionsServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("sync-regions"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "sync-regions")
 }
 
 func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
 	if stream == nil {
 		return stream
 	}
-	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](
-		stream, stream.Send, nil, grpcStreamSendDuration.WithLabelValues("watch-global-config"),
-	)
+	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](stream, stream.Send, nil, grpcStreamSendDuration, "watch-global-config")
 }

@@ -64,7 +64,5 @@ func init() {
 }
 
 func newQueryRegionMetricsStream(stream routerpb.Router_QueryRegionServer) routerpb.Router_QueryRegionServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("query-region"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
 }

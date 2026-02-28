@@ -34,7 +34,5 @@ func init() {
 }
 
 func newWatchMetricsStream(server meta_storagepb.MetaStorage_WatchServer) meta_storagepb.MetaStorage_WatchServer {
-	return grpcutil.NewMetricsStream[*meta_storagepb.WatchResponse, any](
-		server, server.Send, nil, grpcStreamSendDuration.WithLabelValues("watch"),
-	)
+	return grpcutil.NewMetricsStream[*meta_storagepb.WatchResponse, any](server, server.Send, nil, grpcStreamSendDuration, "watch")
 }

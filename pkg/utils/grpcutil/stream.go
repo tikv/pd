@@ -15,10 +15,14 @@
 package grpcutil
 
 import (
+	"net"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // NewGRPCStreamSendDuration creates a HistogramVec for measuring gRPC stream
@@ -31,7 +35,26 @@ func NewGRPCStreamSendDuration(namespace, subsystem string) *prometheus.Histogra
 			Name:      "grpc_stream_send_duration_seconds",
 			Help:      "Bucketed histogram of duration (s) of gRPC stream Send operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
-		}, []string{"request"})
+		}, []string{"request", "client_ip"})
+}
+
+// clientIP extracts the client IP (without port) from a gRPC server stream's peer info.
+// The port is stripped to avoid high-cardinality Prometheus labels, since ephemeral
+// ports change across reconnections and would create unbounded time series.
+// Returns "unknown" if the peer information is unavailable.
+func clientIP(stream grpc.ServerStream) string {
+	if stream == nil {
+		return "unknown"
+	}
+	p, ok := peer.FromContext(stream.Context())
+	if !ok || p.Addr == nil {
+		return "unknown"
+	}
+	host, _, err := net.SplitHostPort(p.Addr.String())
+	if err != nil {
+		return p.Addr.String()
+	}
+	return host
 }
 
 // MetricsStream is a generic gRPC server stream wrapper that automatically
@@ -49,17 +72,25 @@ type MetricsStream[SendT any, RecvT any] struct {
 }
 
 // NewMetricsStream creates a MetricsStream wrapping the given gRPC server stream.
+// It automatically extracts the client IP from the stream's peer info and combines
+// it with requestLabel to create the prometheus observer from hist.
+// If hist is nil, no metrics are recorded.
 func NewMetricsStream[SendT any, RecvT any](
 	stream grpc.ServerStream,
 	sendFn func(SendT) error,
 	recvFn func() (RecvT, error),
-	sendObs prometheus.Observer,
+	hist *prometheus.HistogramVec,
+	requestLabel string,
 ) *MetricsStream[SendT, RecvT] {
+	var obs prometheus.Observer
+	if hist != nil {
+		obs = hist.WithLabelValues(requestLabel, clientIP(stream))
+	}
 	return &MetricsStream[SendT, RecvT]{
 		ServerStream: stream,
 		sendFn:       sendFn,
 		recvFn:       recvFn,
-		sendObs:      sendObs,
+		sendObs:      obs,
 	}
 }
 
@@ -87,5 +118,9 @@ func (s *MetricsStream[SendT, RecvT]) SendAndClose(m SendT) error {
 
 // Recv delegates to the underlying stream's Recv.
 func (s *MetricsStream[SendT, RecvT]) Recv() (RecvT, error) {
+	if s.recvFn == nil {
+		var zero RecvT
+		return zero, errs.ErrRecvNotSupported
+	}
 	return s.recvFn()
 }

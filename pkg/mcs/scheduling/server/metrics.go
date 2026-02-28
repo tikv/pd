@@ -105,13 +105,9 @@ func init() {
 }
 
 func newRegionHeartbeatMetricsStream(stream schedulingpb.Scheduling_RegionHeartbeatServer) schedulingpb.Scheduling_RegionHeartbeatServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("region-heartbeat"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
 }
 
 func newRegionBucketsMetricsStream(stream schedulingpb.Scheduling_RegionBucketsServer) schedulingpb.Scheduling_RegionBucketsServer {
-	return grpcutil.NewMetricsStream(
-		stream, stream.Send, stream.Recv, grpcStreamSendDuration.WithLabelValues("region-buckets"),
-	)
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-buckets")
 }
