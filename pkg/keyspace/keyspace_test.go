@@ -217,7 +217,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 	before := getCreateKeyspaceStepCounts(re)
 
 	req := &CreateKeyspaceRequest{
-		Name:       "record_step_metrics_test_keyspace",
+		Name:       "test_ks_metrics",
 		CreateTime: time.Now().Unix(),
 		Config: map[string]string{
 			testConfig1: "100",
