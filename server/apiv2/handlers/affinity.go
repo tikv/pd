@@ -144,7 +144,7 @@ func createAffinityGroups(c *gin.Context) {
 	if rawValue, ok := c.GetQuery("skip_exist_check"); ok {
 		parsed, err := strconv.ParseBool(rawValue)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrInvalidArgument.GenWithStackByArgs("skip_exist_check", err).Error())
 			return
 		}
 		skipExistCheck = parsed
