@@ -227,7 +227,7 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
-	var tracer createKeyspaceTracer
+	tracer := &createKeyspaceTracer{}
 	tracer.Begin()
 	tracer.SetKeyspace(0, request.Name)
 
