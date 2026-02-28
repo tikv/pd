@@ -28,6 +28,17 @@ const (
 	subsystem = "keyspace"
 )
 
+// createKeyspaceStep represents the steps in create keyspace operation (for metrics label "step").
+const (
+	StepTotal               = "total"
+	StepAllocateID          = "allocate_id"
+	StepGetConfig           = "get_config"
+	StepSaveKeyspaceMeta    = "save_keyspace_meta"
+	StepSplitRegion         = "split_region"
+	StepEnableKeyspace      = "enable_keyspace"
+	StepUpdateKeyspaceGroup = "update_keyspace_group"
+)
+
 var (
 	createKeyspaceStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -49,12 +60,7 @@ var (
 )
 
 func init() {
-	if err := prometheus.Register(createKeyspaceStepDuration); err != nil {
-		// If registration fails, log the error but don't panic
-		// This allows the code to continue working even if metrics registration fails
-		log.Warn("[keyspace] failed to register create_keyspace_step_duration_seconds metric",
-			zap.Error(err))
-	}
+	prometheus.MustRegister(createKeyspaceStepDuration)
 	createKeyspaceStepDurationTotal = createKeyspaceStepDuration.WithLabelValues(StepTotal)
 	createKeyspaceStepDurationAllocateID = createKeyspaceStepDuration.WithLabelValues(StepAllocateID)
 	createKeyspaceStepDurationGetConfig = createKeyspaceStepDuration.WithLabelValues(StepGetConfig)
