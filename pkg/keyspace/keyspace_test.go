@@ -204,6 +204,7 @@ func expectedCreateKeyspaceSteps() []string {
 		stepSplitRegion,
 		stepEnableKeyspace,
 		stepUpdateKeyspaceGroup,
+		stepTotal,
 	}
 }
 
@@ -211,7 +212,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 	re := suite.Require()
 	manager := suite.manager
 	expectedSteps := expectedCreateKeyspaceSteps()
-	re.Len(expectedSteps, 6, "expected 6 steps in create keyspace")
+	re.Len(expectedSteps, 7, "expected 7 steps in create keyspace")
 
 	before := getCreateKeyspaceStepCounts(re)
 

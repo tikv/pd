@@ -34,7 +34,7 @@ var (
 			Namespace: namespace,
 			Subsystem: subsystem,
 			Name:      "create_keyspace_step_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of each step in create keyspace operation.",
+			Help:      "Bucketed histogram of processing time (s) of each step or total in create keyspace operation.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"step"})
 )
@@ -50,8 +50,9 @@ func init() {
 
 // createKeyspaceStep represents the steps in create keyspace operation
 const (
+	stepTotal      = "total"
 	stepAllocateID = "allocate_id"
-	stepGetConfig           = "get_config"
+	stepGetConfig  = "get_config"
 	stepSaveKeyspaceMeta    = "save_keyspace_meta"
 	stepSplitRegion         = "split_region"
 	stepEnableKeyspace      = "enable_keyspace"
@@ -60,6 +61,7 @@ const (
 
 // createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.
 type createKeyspaceTracer struct {
+	beginTime     time.Time
 	lastCheckTime time.Time
 	keyspaceID    uint32
 	keyspaceName  string
@@ -67,7 +69,9 @@ type createKeyspaceTracer struct {
 
 // Begin starts the tracing.
 func (t *createKeyspaceTracer) Begin() {
-	t.lastCheckTime = time.Now()
+	now := time.Now()
+	t.beginTime = now
+	t.lastCheckTime = now
 }
 
 // SetKeyspace sets keyspace id and name for step logs (call with 0, name before allocate; with newID, name after allocate).
@@ -104,6 +108,11 @@ func (t *createKeyspaceTracer) OnEnableKeyspaceFinished() {
 // OnUpdateKeyspaceGroupFinished is called when update keyspace group step is finished.
 func (t *createKeyspaceTracer) OnUpdateKeyspaceGroupFinished() {
 	t.onStepFinished(stepUpdateKeyspaceGroup)
+}
+
+// OnCreateKeyspaceComplete is called when the entire create keyspace operation completes successfully.
+func (t *createKeyspaceTracer) OnCreateKeyspaceComplete() {
+	createKeyspaceStepDuration.WithLabelValues(stepTotal).Observe(time.Since(t.beginTime).Seconds())
 }
 
 func (t *createKeyspaceTracer) onStepFinished(step string) {

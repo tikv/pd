@@ -342,6 +342,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		return nil, err
 	}
 	tracer.OnUpdateKeyspaceGroupFinished()
+	tracer.OnCreateKeyspaceComplete()
 
 	log.Info("[create-keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
