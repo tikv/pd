@@ -526,6 +526,10 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 	queryStats := &pdpb.QueryStats{
 		Get:                    5,
 		Coprocessor:            6,
@@ -544,7 +548,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		DownPeers:       downPeers,
 		PendingPeers:    pendingPeers,
 		BytesWritten:    10,
@@ -565,7 +569,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		return region != nil && region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
 			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
 			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers)
 	})
@@ -605,6 +609,10 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
@@ -614,7 +622,7 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 			StartKey: []byte("a"),
 			EndKey:   []byte("z"),
 		},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
 		ApproximateKeys: 300,
 	}
@@ -729,6 +737,10 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	re.NoError(err)
 	for i := uint64(2); i <= 10; i++ {
 		peers := []*metapb.Peer{{Id: i, StoreId: 1}}
+		if len(peers) == 0 {
+			re.FailNow("peer list should not be empty")
+		}
+		leaderPeer := peers[0]
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -737,7 +749,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 				StartKey: []byte(fmt.Sprintf("t%d", i)),
 				EndKey:   []byte(fmt.Sprintf("t%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 		}
 		err = stream.Send(regionReq)
@@ -936,6 +948,10 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	// Send many regions to ensure the initial scheduling cluster's prepare checker is satisfied
 	for i := uint64(1); i <= 100; i++ {
@@ -947,7 +963,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -1000,7 +1016,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -1029,7 +1045,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -1148,12 +1164,16 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
 		ApproximateKeys: 300,
 		Interval:        interval,
@@ -1166,7 +1186,7 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
 		return region != nil && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval)
 	})
 

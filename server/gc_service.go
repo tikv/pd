@@ -35,6 +35,7 @@ import (
 )
 
 // UpdateGCSafePoint implements gRPC PDServer.
+//
 // Deprecated: Use AdvanceGCSafePoint instead. Note that it's only for use of GC internal.
 //
 //nolint:staticcheck
@@ -92,6 +93,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 }
 
 // GetGCSafePoint implements gRPC PDServer.
+//
 // Deprecated: Use GetGCState instead.
 //
 //nolint:staticcheck
@@ -138,6 +140,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 }
 
 // UpdateServiceGCSafePoint update the safepoint for specific service
+//
 // Deprecated: Use SetGCBarrier instead.
 //
 //nolint:staticcheck
@@ -209,6 +212,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 }
 
 // GetGCSafePointV2 return gc safe point for the given keyspace.
+//
 // Deprecated: Use GetGCState instead
 //
 //nolint:staticcheck
@@ -258,6 +262,7 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 }
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
+//
 // Deprecated: Use AdvanceGCSafePoint instead. Note that it's only for use of GC internal.
 //
 //nolint:staticcheck
@@ -317,6 +322,7 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 }
 
 // UpdateServiceSafePointV2 update service safe point for the given keyspace.
+//
 // Deprecated: Use SetGCBarrier instead.
 //
 //nolint:staticcheck
@@ -388,6 +394,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 }
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
+//
 // Deprecated: Poll GetAllKeyspacesGCStates instead.
 //
 //nolint:staticcheck
@@ -397,6 +404,7 @@ func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.
+//
 // Deprecated: Use GetAllKeyspacesGCStates instead.
 //
 //nolint:staticcheck

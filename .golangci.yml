@@ -51,6 +51,10 @@ linters:
         - appendAssign
         - exitAfterDefer
         - ifElseChain
+        - deprecatedComment
+    # govet:
+    #   disable:
+    #     - buildtag
     goheader:
       values:
         regexp:
@@ -245,6 +249,10 @@ linters:
           disabled: false
           exclude:
             - ""
+          arguments:
+            - [""] # AllowList
+            - [""] # DenyList
+            - - skip-package-name-checks: true
         - name: waitgroup-by-value
           severity: warning
           disabled: false
