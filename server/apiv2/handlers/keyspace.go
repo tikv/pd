@@ -45,6 +45,9 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 	router.PATCH("/:name/config", UpdateKeyspaceConfig)
 	router.PUT("/:name/state", UpdateKeyspaceState)
 	router.GET("/id/:id", LoadKeyspaceByID)
+	router.POST("/id/:id/rotation/start", StartRotation)
+	router.GET("/id/:id/rotation", GetRotationStatus)
+	router.POST("/id/:id/rotation/complete", CompleteRotation)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.
@@ -472,4 +475,154 @@ func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
 	}
 	meta.KeyspaceMeta = pbMeta
 	return nil
+}
+
+// StartRotationParams represents parameters needed to start a key rotation.
+type StartRotationParams struct {
+	CurrentFileID uint64 `json:"current_file_id"`
+	NextFileID    uint64 `json:"next_file_id"`
+}
+
+// StartRotation starts a key rotation for the specified keyspace.
+//
+//	@Tags		keyspaces
+//	@Summary	Start key rotation.
+//	@Param		id		path	string				true	"Keyspace ID"
+//	@Param		body	body	StartRotationParams	true	"Start rotation parameters"
+//	@Produce	json
+//	@Success	200	{object}	keyspace.RotationMeta
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	409	{string}	string	"Conflict: CAS check failed."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/keyspaces/id/{id}/rotation/start [post]
+func StartRotation(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace id")
+		return
+	}
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
+
+	params := &StartRotationParams{}
+	if err := c.BindJSON(params); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+
+	req := &keyspace.StartRotationRequest{
+		KeyspaceID:    uint32(id),
+		CurrentFileID: params.CurrentFileID,
+		NextFileID:    params.NextFileID,
+	}
+	meta, err := manager.StartRotation(req)
+	if err != nil {
+		c.AbortWithStatusJSON(rotationErrorToHTTPStatus(err), err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, meta)
+}
+
+// GetRotationStatus returns the current rotation status for the specified keyspace.
+//
+//	@Tags		keyspaces
+//	@Summary	Get rotation status.
+//	@Param		id	path	string	true	"Keyspace ID"
+//	@Produce	json
+//	@Success	200	{object}	keyspace.RotationMeta
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/keyspaces/id/{id}/rotation [get]
+func GetRotationStatus(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace id")
+		return
+	}
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
+
+	meta, err := manager.GetRotationStatus(uint32(id))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, meta)
+}
+
+// CompleteRotationParams represents parameters needed to complete a key rotation.
+type CompleteRotationParams struct {
+	CurrentFileID uint64 `json:"current_file_id"`
+	NextFileID    uint64 `json:"next_file_id"`
+}
+
+// CompleteRotation completes a key rotation for the specified keyspace.
+//
+//	@Tags		keyspaces
+//	@Summary	Complete key rotation.
+//	@Param		id		path	string					true	"Keyspace ID"
+//	@Param		body	body	CompleteRotationParams	true	"Complete rotation parameters"
+//	@Produce	json
+//	@Success	200	{object}	keyspace.RotationMeta
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	409	{string}	string	"Conflict: CAS check failed."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/keyspaces/id/{id}/rotation/complete [post]
+func CompleteRotation(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace id")
+		return
+	}
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
+
+	params := &CompleteRotationParams{}
+	if err := c.BindJSON(params); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+
+	req := &keyspace.CompleteRotationRequest{
+		KeyspaceID:    uint32(id),
+		CurrentFileID: params.CurrentFileID,
+		NextFileID:    params.NextFileID,
+	}
+	meta, err := manager.CompleteRotation(req)
+	if err != nil {
+		c.AbortWithStatusJSON(rotationErrorToHTTPStatus(err), err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, meta)
+}
+
+// rotationErrorToHTTPStatus maps rotation errors to appropriate HTTP status codes.
+// - 400 Bad Request: Parameter validation errors (e.g., invalid next_file_id)
+// - 409 Conflict: CAS check failures (e.g., file_id mismatch, rotation state conflicts)
+// - 500 Internal Server Error: Other unexpected errors
+func rotationErrorToHTTPStatus(err error) int {
+	rotationErr, ok := err.(*keyspace.RotationError)
+	if !ok {
+		return http.StatusInternalServerError
+	}
+	switch rotationErr.Kind {
+	case keyspace.RotationErrorKindBadRequest:
+		return http.StatusBadRequest
+	case keyspace.RotationErrorKindConflict:
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }

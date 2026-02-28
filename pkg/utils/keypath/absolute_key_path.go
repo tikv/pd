@@ -132,6 +132,8 @@ const (
 	msTimestampPathFormat = "/ms/%d/tso/%05d/gta/timestamp" // "/ms/{cluster_id}/tso/{group_id}/gta/timestamp"
 
 	affinityGroupPathFormat = "/pd/%d/affinity_groups/%s" // "/pd/{cluster_id}/affinity_groups/{group_id}"
+
+	keyspaceRotationPathFormat = "/pd/%d/keyspaces/rotation/%08d" // "/pd/{cluster_id}/keyspaces/rotation/{keyspace_id}"
 )
 
 // MsParam is the parameter of microservice.
@@ -302,4 +304,9 @@ func RegionPath(regionID uint64) string {
 	buf.Write(b)
 
 	return buf.String()
+}
+
+// KeyspaceRotationPath returns the path to the given keyspace's rotation metadata.
+func KeyspaceRotationPath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceRotationPathFormat, ClusterID(), keyspaceID)
 }

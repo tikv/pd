@@ -47,6 +47,10 @@ type KeyspaceStorage interface {
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
 	LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
+	// SaveKeyspaceRotation saves the keyspace rotation metadata.
+	SaveKeyspaceRotation(txn kv.Txn, meta *KeyspaceRotationMeta) error
+	// LoadKeyspaceRotation loads the keyspace rotation metadata.
+	LoadKeyspaceRotation(txn kv.Txn, keyspaceID uint32) (*KeyspaceRotationMeta, error)
 }
 
 var _ KeyspaceStorage = (*StorageEndpoint)(nil)
