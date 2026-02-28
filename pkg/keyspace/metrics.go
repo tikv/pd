@@ -43,8 +43,6 @@ func init() {
 		// This allows the code to continue working even if metrics registration fails
 		log.Warn("[keyspace] failed to register create_keyspace_step_duration_seconds metric",
 			zap.Error(err))
-	} else {
-		log.Info("[keyspace] successfully registered create_keyspace_step_duration_seconds metric")
 	}
 }
 
