@@ -198,7 +198,6 @@ func getCreateKeyspaceStepCounts(re *require.Assertions) map[string]uint64 {
 // for one successful CreateKeyspace. Must match metrics.go and keyspace.go CreateKeyspace flow.
 func expectedCreateKeyspaceSteps() []string {
 	return []string{
-		stepValidateName,
 		stepAllocateID,
 		stepGetConfig,
 		stepSaveKeyspaceMeta,
@@ -212,7 +211,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 	re := suite.Require()
 	manager := suite.manager
 	expectedSteps := expectedCreateKeyspaceSteps()
-	re.Len(expectedSteps, 7, "expected 7 steps in create keyspace")
+	re.Len(expectedSteps, 6, "expected 6 steps in create keyspace")
 
 	before := getCreateKeyspaceStepCounts(re)
 

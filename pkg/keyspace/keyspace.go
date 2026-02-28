@@ -250,7 +250,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
-	tracer.OnValidateNameFinished()
 
 	// Allocate new keyspaceID.
 	newID, err := manager.allocID()

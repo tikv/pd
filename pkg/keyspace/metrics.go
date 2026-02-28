@@ -50,8 +50,7 @@ func init() {
 
 // createKeyspaceStep represents the steps in create keyspace operation
 const (
-	stepValidateName        = "validate_name"
-	stepAllocateID          = "allocate_id"
+	stepAllocateID = "allocate_id"
 	stepGetConfig           = "get_config"
 	stepSaveKeyspaceMeta    = "save_keyspace_meta"
 	stepSplitRegion         = "split_region"
@@ -75,11 +74,6 @@ func (t *createKeyspaceTracer) Begin() {
 func (t *createKeyspaceTracer) SetKeyspace(keyspaceID uint32, keyspaceName string) {
 	t.keyspaceID = keyspaceID
 	t.keyspaceName = keyspaceName
-}
-
-// OnValidateNameFinished is called when validate name step is finished.
-func (t *createKeyspaceTracer) OnValidateNameFinished() {
-	t.onStepFinished(stepValidateName)
 }
 
 // OnAllocateIDFinished is called when allocate ID step is finished.
