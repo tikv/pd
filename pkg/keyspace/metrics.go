@@ -50,9 +50,9 @@ func init() {
 
 // createKeyspaceStep represents the steps in create keyspace operation
 const (
-	stepTotal      = "total"
-	stepAllocateID = "allocate_id"
-	stepGetConfig  = "get_config"
+	stepTotal               = "total"
+	stepAllocateID          = "allocate_id"
+	stepGetConfig           = "get_config"
 	stepSaveKeyspaceMeta    = "save_keyspace_meta"
 	stepSplitRegion         = "split_region"
 	stepEnableKeyspace      = "enable_keyspace"
