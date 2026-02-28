@@ -139,6 +139,32 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	return &result
 }
 
+func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
+	tests.MustPutStore(re, cluster, store)
+
+	leader := cluster.GetLeaderServer()
+	re.NotNil(leader)
+	raftCluster := leader.GetServer().GetRaftCluster()
+	re.NotNil(raftCluster)
+	storeInfo := raftCluster.GetStore(store.GetId())
+	re.NotNil(storeInfo)
+
+	stats := &pdpb.StoreStats{
+		Capacity:  uint64(10 * units.GiB),
+		UsedSize:  uint64(1 * units.GiB),
+		Available: uint64(9 * units.GiB),
+	}
+	newStore := storeInfo.Clone(core.SetStoreStats(stats))
+	raftCluster.GetBasicCluster().PutStore(newStore)
+	raftCluster.UpdateAllStoreStatus()
+
+	sche := cluster.GetSchedulingPrimaryServer()
+	if sche != nil {
+		sche.GetCluster().PutStore(newStore)
+		sche.GetCluster().UpdateAllStoreStatus()
+	}
+}
+
 // mustGetAffinityGroup gets a specific affinity group and expects success.
 func mustGetAffinityGroup(re *require.Assertions, serverAddr, groupID string) *affinity.GroupState {
 	var result affinity.GroupState
@@ -317,6 +343,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 		})
 
 		// Update peers for group-1.
+		mustPutHealthyStore(re, cluster, &metapb.Store{Id: 1, State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving})
 		updatePeersReq := handlers.UpdateAffinityGroupPeersRequest{
 			LeaderStoreID: 1,
 			VoterStoreIDs: []uint64{1},
@@ -608,6 +635,63 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 	})
 }
 
+// TestAffinityGroupCreateSkipExistCheck verifies skip_exist_check ignores existing groups.
+func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		serverAddr := leader.GetAddr()
+
+		// Create a baseline group.
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+
+		// Create another group while including the existing one.
+		createReq = handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"existing": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"new":      {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+			},
+		}
+		data, err := json.Marshal(createReq)
+		re.NoError(err)
+		var result handlers.AffinityGroupsResponse
+		err = testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?skip_exist_check=true", data,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &result))
+		re.NoError(err)
+		re.Contains(result.AffinityGroups, "existing")
+		re.Contains(result.AffinityGroups, "new")
+
+		listResp := mustGetAllAffinityGroups(re, serverAddr)
+		re.Contains(listResp.AffinityGroups, "existing")
+		re.Contains(listResp.AffinityGroups, "new")
+	})
+}
+
+// TestAffinityGroupCreateSkipExistCheckInvalidBool verifies invalid bool value is rejected.
+func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheckInvalidBool() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		serverAddr := leader.GetAddr()
+
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+			},
+		}
+		data, err := json.Marshal(createReq)
+		re.NoError(err)
+		err = testutil.CheckPostJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?skip_exist_check=not-bool", data,
+			testutil.Status(re, http.StatusBadRequest))
+		re.NoError(err)
+	})
+}
+
 // TestAffinityInvalidKeyRanges tests various invalid key range scenarios.
 func (suite *affinityHandlerTestSuite) TestAffinityInvalidKeyRanges() {
 	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
@@ -758,6 +842,74 @@ func (suite *affinityHandlerTestSuite) TestAffinityGetInvalidGroupID() {
 		statusCode, errorMsg := doGetAffinityGroup(re, serverAddr, "bad@id")
 		re.Equal(http.StatusBadRequest, statusCode)
 		re.Contains(errorMsg, "invalid group id")
+	})
+}
+
+// TestAffinityListWithIDs verifies listing affinity groups with ids filter.
+func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		serverAddr := leader.GetAddr()
+
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+				"group-3": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x40}, EndKey: []byte{0x50}}}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+
+		var result handlers.AffinityGroupsResponse
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &result)
+		re.NoError(err)
+		re.Len(result.AffinityGroups, 2)
+		re.Contains(result.AffinityGroups, "group-1")
+		re.Contains(result.AffinityGroups, "group-3")
+	})
+}
+
+// TestAffinityListWithInvalidIDs verifies invalid ID values are rejected.
+func (suite *affinityHandlerTestSuite) TestAffinityListWithInvalidIDs() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		serverAddr := leader.GetAddr()
+
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+
+		err := testutil.CheckGetJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=bad$id", nil,
+			testutil.Status(re, http.StatusBadRequest))
+		re.NoError(err)
+	})
+}
+
+// TestAffinityListWithEmptyID verifies empty ID entries are ignored.
+func (suite *affinityHandlerTestSuite) TestAffinityListWithEmptyID() {
+	suite.env.RunTest(func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		leader := cluster.GetLeaderServer()
+		serverAddr := leader.GetAddr()
+
+		createReq := handlers.CreateAffinityGroupsRequest{
+			AffinityGroups: map[string]handlers.CreateAffinityGroupInput{
+				"group-1": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x01}, EndKey: []byte{0x10}}}},
+				"group-2": {Ranges: []handlers.AffinityKeyRange{{StartKey: []byte{0x20}, EndKey: []byte{0x30}}}},
+			},
+		}
+		mustCreateAffinityGroups(re, serverAddr, &createReq)
+
+		var result handlers.AffinityGroupsResponse
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=&ids=group-2", &result)
+		re.NoError(err)
+		re.Len(result.AffinityGroups, 1)
+		re.Contains(result.AffinityGroups, "group-2")
 	})
 }
 
