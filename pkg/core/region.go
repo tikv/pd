@@ -92,6 +92,7 @@ type RegionInfo struct {
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
 	// bucketMeta is used to store the bucket meta reported by tikv.
+	// It only can be set when creating RegionInfo, and will not be updated by the request `report buckets` with greater version.
 	bucketMeta *metapb.BucketMeta
 }
 
@@ -287,13 +288,8 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 		}
 	}
 	if bucket := r.GetBuckets(); bucketEnable && bucket == nil && origin != nil {
-		originBucket := origin.GetBuckets()
-		if originBucket != nil {
-			r.bucketMeta = &metapb.BucketMeta{
-				Version: originBucket.GetVersion(),
-				Keys:    originBucket.GetKeys(),
-			}
-		}
+		inherited := atomic.LoadPointer(&origin.buckets)
+		atomic.StorePointer(&r.buckets, inherited)
 	}
 }
 
