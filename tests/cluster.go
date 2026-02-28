@@ -142,14 +142,21 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
 	s.Lock()
-	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
+		s.Unlock()
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
+	s.Unlock()
+
+	// Run the server without holding the lock to avoid deadlock.
+	// The server.Run() call may block for a long time waiting for etcd to be ready.
 	if err := s.server.Run(); err != nil {
 		return err
 	}
+
+	s.Lock()
 	s.state = Running
+	s.Unlock()
 	return nil
 }
 
