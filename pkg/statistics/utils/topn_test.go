@@ -106,6 +106,11 @@ func TestPut(t *testing.T) {
 	}
 }
 
+// putPerm inserts total items into tn with randomized permutation for each dimension.
+// For each item, f generates the values based on the item index.
+// The randomized insertion order helps verify that TopN maintains correct ordering
+// regardless of how items are inserted. If isUpdate is true, the Put method should
+// indicate these are updates; otherwise, they should be new inserts.
 func putPerm(re *require.Assertions, tn *TopN, total int, f func(x int) float64, isUpdate bool) {
 	{ // insert
 		dims := make([][]int, DimLen)
@@ -197,6 +202,82 @@ func TestRemove(t *testing.T) {
 		it := tn.Get(i).(*item)
 		re.Equal(i, it.id)
 		re.Equal(-float64(i), it.values[0])
+	}
+}
+
+func TestGetTopNMin(t *testing.T) {
+	re := require.New(t)
+	const Total, N = 1000, 60
+	tn := NewTopN(DimLen, N, time.Hour)
+
+	putPerm(re, tn, Total, func(x int) float64 {
+		return float64(-x)
+	}, false /*insert*/)
+
+	// For each dimension, verify that GetTopNMin is correct
+	for k := range DimLen {
+		minItem := tn.GetTopNMin(k)
+		re.NotNil(minItem)
+
+		// Verify minItem is less than or equal to all items in topN in dimension k
+		// !(it.Less(k, minItem)) ⟹ (minItem.values[k] <= it.values[k])
+		for _, it := range tn.GetAllTopN(k) {
+			re.False(it.Less(k, minItem))
+		}
+
+		// Count items greater than minItem in dimension k
+		allItems := tn.GetAll()
+		countGreaterThanMin := 0
+		for _, it := range allItems {
+			if minItem.Less(k, it) {
+				countGreaterThanMin++
+			}
+		}
+		// Should be at most N-1 since minItem is the minimum in topN,
+		// and there are at most N-1 other items in topN greater than it
+		re.LessOrEqual(countGreaterThanMin, N-1)
+	}
+}
+
+func TestGetTopNMax(t *testing.T) {
+	re := require.New(t)
+	const Total = 1000
+
+	for _, N := range []int{60, 61} {
+		tn := NewTopN(DimLen, N, time.Hour)
+
+		putPerm(re, tn, Total, func(x int) float64 {
+			return float64(-x)
+		}, false /*insert*/)
+
+		// For each dimension, verify that GetTopNMax is correct
+		for k := range DimLen {
+			maxItem := tn.GetTopNMax(k)
+			re.NotNil(maxItem)
+
+			// Verify maxItem is greater than or equal to all items in topN
+			// !(maxItem.Less(k, it)) ⟹ (maxItem.values[k] >= it.values[k])
+			for _, it := range tn.GetAllTopN(k) {
+				re.False(maxItem.Less(k, it))
+			}
+		}
+	}
+}
+
+func TestGetAllTopNIsSubset(t *testing.T) {
+	re := require.New(t)
+	const Total, N = 1000, 60
+	tn := NewTopN(DimLen, N, time.Hour)
+
+	putPerm(re, tn, Total, func(x int) float64 {
+		return float64(-x)
+	}, false /*insert*/)
+
+	// For each dimension, verify that GetAllTopN is a subset of GetAll
+	allItems := tn.GetAll()
+	for k := range DimLen {
+		topNItems := tn.GetAllTopN(k)
+		re.Subset(allItems, topNItems)
 	}
 }
 
