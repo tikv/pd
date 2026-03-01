@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -1411,7 +1412,7 @@ func TestStoreConfigUpdate(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	tc := newTestCluster(ctx, re, opt)
+	tc := newTestCluster(ctx, opt)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
 		re.NoError(tc.setStore(s))
@@ -1481,7 +1482,7 @@ func TestSyncConfigContext(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	tc := newTestCluster(ctx, re, opt)
+	tc := newTestCluster(ctx, opt)
 	tc.httpClient = &http.Client{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
@@ -1528,7 +1529,7 @@ func TestStoreConfigSync(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	tc := newTestCluster(ctx, re, opt)
+	tc := newTestCluster(ctx, opt)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
 		re.NoError(tc.setStore(s))
@@ -1572,7 +1573,7 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	tc := newTestCluster(ctx, re, opt)
+	tc := newTestCluster(ctx, opt)
 	tc.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
@@ -2139,13 +2140,8 @@ func newTestScheduleConfig() (*sc.ScheduleConfig, *config.PersistOptions, error)
 	return &cfg.Schedule, opt, nil
 }
 
-func newTestCluster(ctx context.Context, re *require.Assertions, opt *config.PersistOptions) *testCluster {
-	var err error
+func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluster {
 	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-	storage := storage.NewStorageWithMemoryBackend()
-	rc.regionLabeler, err = labeler.NewRegionLabeler(ctx, storage, time.Second*5)
-	re.NoError(err)
-
 	return &testCluster{RaftCluster: rc}
 }
 
@@ -2166,12 +2162,16 @@ func newTestRaftCluster(
 	if err != nil {
 		panic(err)
 	}
-	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
 		if err != nil {
 			panic(err)
 		}
+	}
+	rc.regionLabeler = labeler.NewRegionLabeler(ctx, s)
+	rc.affinityManager, err = affinity.NewManager(ctx, s, rc.BasicCluster, opt, rc.regionLabeler)
+	if err != nil {
+		panic(err)
 	}
 	rc.schedulingController = newSchedulingController(rc.ctx, rc.BasicCluster, rc.opt, rc.ruleManager)
 	return rc
@@ -2486,7 +2486,7 @@ func TestDispatch(t *testing.T) {
 	re.NoError(tc.updateLeaderCount(1, 10))
 	re.NoError(tc.addLeaderRegion(2, 4, 3, 2))
 
-	go co.RunUntilStop()
+	go co.RunUntilStop(false)
 
 	// Wait for schedule and turn off balance.
 	waitOperator(re, co, 1)
@@ -2622,7 +2622,7 @@ func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func
 	if setCfg != nil {
 		setCfg(cfg)
 	}
-	tc := newTestCluster(ctx, re, opt)
+	tc := newTestCluster(ctx, opt)
 	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
@@ -2676,7 +2676,7 @@ func TestCheckRegion(t *testing.T) {
 	re.NoError(tc.putRegion(r))
 	checkRegionAndOperator(re, tc, co, 1, 0)
 
-	tc = newTestCluster(ctx, re, opt)
+	tc = newTestCluster(ctx, opt)
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	re.NoError(tc.addRegionStore(4, 4))

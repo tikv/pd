@@ -86,8 +86,16 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	}
 	// It should be updated to the latest feature version.
 	c.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	c.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, c.Storage, time.Second*5)
+	c.RegionLabeler = labeler.NewRegionLabeler(ctx, c.Storage)
+	if err := c.RegionLabeler.Initialize(time.Second * 5); err != nil {
+		panic(err)
+	}
+
 	c.AffinityManager, _ = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig(), c.RegionLabeler)
+	if err := c.AffinityManager.Initialize(); err != nil {
+		panic(err)
+	}
+
 	return c
 }
 
@@ -214,9 +222,9 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
 		mc.RuleManager = placement.NewRuleManager(mc.ctx, mc.GetStorage(), mc, mc.GetSharedConfig())
-		err := mc.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel, false)
+		err := mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel, false)
 		if err != nil {
-			log.Info("failed to initialize rule manager", errs.ZapError(err))
+			panic(err)
 		}
 	}
 }

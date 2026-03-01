@@ -67,9 +67,12 @@ func TestAdjustGroup(t *testing.T) {
 	}
 
 	conf := mockconfig.NewTestOptions()
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	group := &Group{

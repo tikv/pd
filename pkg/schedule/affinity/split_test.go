@@ -52,10 +52,13 @@ func TestAllowSplit(t *testing.T) {
 	cfg.AffinityScheduleLimit = 4 // Enable affinity scheduling
 	conf.SetScheduleConfig(cfg)
 
-	regionLabeler, err := labeler.NewRegionLabeler(ctx, store, time.Second*5)
+	regionLabeler := labeler.NewRegionLabeler(ctx, store)
+	err := regionLabeler.Initialize(time.Second * 5)
 	re.NoError(err)
 
 	manager, err := NewManager(ctx, store, storeInfos, conf, regionLabeler)
+	re.NoError(err)
+	err = manager.Initialize()
 	re.NoError(err)
 
 	groupID := "g1"
