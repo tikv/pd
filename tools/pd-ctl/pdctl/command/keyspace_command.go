@@ -40,6 +40,8 @@ const (
 	nmPageToken           = "page_token"
 	nmRemove              = "remove"
 	nmUpdate              = "update"
+	nmExpect              = "expect"
+	nmExpectAbsent        = "expect-absent"
 	nmForceRefreshGroupID = "force_refresh_group_id"
 )
 
@@ -187,6 +189,10 @@ func newUpdateKeyspaceConfigCommand() *cobra.Command {
 		"specify as comma separated keys, e.g. --remove k1,k2")
 	r.Flags().StringSlice(nmUpdate, nil, "kv pairs to upsert into keyspace config\n"+
 		"specify as comma separated key value pairs, e.g. --update k1=v1,k2=v2")
+	r.Flags().StringSlice(nmExpect, nil, "preconditions for config update\n"+
+		"specify as comma separated key value pairs, e.g. --expect k1=v1,k2=v2")
+	r.Flags().StringSlice(nmExpectAbsent, nil, "preconditions for config update\n"+
+		"specify as comma separated keys, e.g. --expect-absent k1,k2")
 	return r
 }
 
@@ -231,7 +237,45 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 			configPatch[pair[0]] = &pair[1]
 		}
 	}
-	params := handlers.UpdateConfigParams{Config: configPatch}
+
+	preconditions := map[string]*string{}
+	expectFlags, err := cmd.Flags().GetStringSlice(nmExpect)
+	if err != nil {
+		cmd.PrintErrln("Failed to parse flag: ", err)
+		return
+	}
+	for _, flag := range expectFlags {
+		kvs := strings.Split(flag, ",")
+		for _, kv := range kvs {
+			pair := strings.Split(kv, "=")
+			if len(pair) != 2 {
+				cmd.PrintErrf("Failed to update keyspace config: invalid kv pair %s\n", kv)
+				return
+			}
+			if _, exist := preconditions[pair[0]]; exist {
+				cmd.PrintErrf("Failed to update keyspace config: precondition for key %s is specified multiple times\n", pair[0])
+				return
+			}
+			preconditions[pair[0]] = &pair[1]
+		}
+	}
+	expectAbsentFlags, err := cmd.Flags().GetStringSlice(nmExpectAbsent)
+	if err != nil {
+		cmd.PrintErrln("Failed to parse flag: ", err)
+		return
+	}
+	for _, flag := range expectAbsentFlags {
+		keys := strings.Split(flag, ",")
+		for _, key := range keys {
+			if _, exist := preconditions[key]; exist {
+				cmd.PrintErrf("Failed to update keyspace config: precondition for key %s is specified multiple times\n", key)
+				return
+			}
+			preconditions[key] = nil
+		}
+	}
+
+	params := handlers.UpdateConfigParams{Config: configPatch, Preconditions: preconditions}
 	data, err := json.Marshal(params)
 	if err != nil {
 		cmd.PrintErrln("Failed to update keyspace config:", err)
