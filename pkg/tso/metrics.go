@@ -14,7 +14,12 @@
 
 package tso
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"strconv"
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 const (
 	pdNamespace  = "pd"
@@ -83,6 +88,18 @@ var (
 			Help:      "Bucketed histogram of processing time(s) of the Keyspace Group operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{typeLabel})
+
+	// keyspaceGroupKeyspaceCountGauge records the keyspace list length of each keyspace group.
+	keyspaceGroupKeyspaceCountGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: tsoNamespace,
+			Subsystem: "keyspace_group",
+			Name:      "keyspace_list_length",
+			Help:      "The length of keyspace list in each TSO keyspace group.",
+		}, []string{groupLabel})
+
+	// keyspaceGroupKeyspaceCountGaugeCache caches gauge per groupID to avoid repeated WithLabelValues.
+	keyspaceGroupKeyspaceCountGaugeCache sync.Map
 )
 
 func init() {
@@ -93,6 +110,7 @@ func init() {
 	prometheus.MustRegister(tsoAllocatorRole)
 	prometheus.MustRegister(keyspaceGroupStateGauge)
 	prometheus.MustRegister(keyspaceGroupOpDuration)
+	prometheus.MustRegister(keyspaceGroupKeyspaceCountGauge)
 }
 
 type tsoMetrics struct {
@@ -193,4 +211,35 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 		finishMergeSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
 		finishMergeDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
 	}
+}
+
+// getKeyspaceGroupKeyspaceCountGauge returns the cached gauge for the group, or creates one with WithLabelValues.
+func getKeyspaceGroupKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
+	key := groupID
+	if g, ok := keyspaceGroupKeyspaceCountGaugeCache.Load(key); ok {
+		return g.(prometheus.Gauge)
+	}
+	labelVal := strconv.FormatUint(uint64(groupID), 10)
+	gauge := keyspaceGroupKeyspaceCountGauge.WithLabelValues(labelVal)
+	if actual, loaded := keyspaceGroupKeyspaceCountGaugeCache.LoadOrStore(key, gauge); loaded {
+		return actual.(prometheus.Gauge)
+	}
+	return gauge
+}
+
+// SetKeyspaceListLength sets the keyspace list length metric for the given keyspace group.
+func SetKeyspaceListLength(groupID uint32, length float64) {
+	getKeyspaceGroupKeyspaceCountGauge(groupID).Set(length)
+}
+
+// DeleteKeyspaceListLength removes the keyspace list length metric for the given keyspace group.
+func DeleteKeyspaceListLength(groupID uint32) {
+	keyspaceGroupKeyspaceCountGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	keyspaceGroupKeyspaceCountGaugeCache.Delete(groupID)
+}
+
+// SetKeyspaceGroupKeyspaceCountGauge sets the keyspace list length metric for the given keyspace group.
+// It is used by PD API service when saveKeyspaceGroups is executed.
+func SetKeyspaceGroupKeyspaceCountGauge(groupID uint32, length float64) {
+	getKeyspaceGroupKeyspaceCountGauge(groupID).Set(length)
 }

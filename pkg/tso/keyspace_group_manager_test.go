@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -1145,6 +1147,74 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	cancel()
 	wg.Wait()
+}
+
+// TestKeyspaceListLengthMetric tests that tso_keyspace_group_keyspace_list_length can be set
+// (e.g. by PD API saveKeyspaceGroups via SetKeyspaceGroupKeyspaceCountGauge) and removed
+// when the group is deleted (DeleteKeyspaceListLength on TSO service).
+func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
+	re := suite.Require()
+	groupID := uint32(1)
+
+	getGaugeValue := func(g prometheus.Gauge) float64 {
+		var out dto.Metric
+		re.NoError(g.(prometheus.Metric).Write(&out))
+		return out.GetGauge().GetValue()
+	}
+
+	// Test SetKeyspaceGroupKeyspaceCountGauge (used by PD API saveKeyspaceGroups)
+	SetKeyspaceGroupKeyspaceCountGauge(groupID, 3)
+	gauge, err := keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(3.0, getGaugeValue(gauge))
+
+	SetKeyspaceGroupKeyspaceCountGauge(groupID, 5)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(5.0, getGaugeValue(gauge))
+
+	SetKeyspaceGroupKeyspaceCountGauge(groupID, 0)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(0.0, getGaugeValue(gauge))
+
+	// Test DeleteKeyspaceListLength: set group 2 via metrics, then delete, gather and ensure group 2 is not present
+	groupID2 := uint32(2)
+	SetKeyspaceListLength(groupID2, 10)
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	var foundGroup2Before bool
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						foundGroup2Before = true
+						re.Equal(10.0, m.GetGauge().GetValue())
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+	re.True(foundGroup2Before, "metric for group 2 should exist before delete")
+
+	DeleteKeyspaceListLength(groupID2)
+	mfs, err = prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						re.Fail("metric for group 2 should be removed after DeleteKeyspaceListLength")
+					}
+				}
+			}
+			break
+		}
+	}
 }
 
 // Register TSO server.

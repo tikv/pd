@@ -38,7 +38,6 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -55,6 +54,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -67,6 +67,16 @@ const (
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
 	groupPatrolInterval                 = time.Minute
 )
+
+// getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
+// It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
+// create an import cycle with keyspace importing pkg/tso for SetKeyspaceGroupKeyspaceCountGauge).
+func getBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
 
 type state struct {
 	syncutil.RWMutex
@@ -906,7 +916,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				j++
 			}
 		}
-		keyspaceID := keyspace.GetBootstrapKeyspaceID()
+		keyspaceID := getBootstrapKeyspaceID()
 		kgm.checkReserveKeyspace(newGroup, newKeyspaces, keyspaceID)
 	}
 	// Check the split state.
@@ -979,6 +989,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			}
 		}
 		kgm.kgs[groupID] = nil
+		DeleteKeyspaceListLength(groupID)
 	}
 
 	allocator := kgm.allocators[groupID]
@@ -991,7 +1002,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 }
 
 func (kgm *KeyspaceGroupManager) genDefaultKeyspaceGroupMeta() *endpoint.KeyspaceGroup {
-	keyspaces := []uint32{keyspace.GetBootstrapKeyspaceID()}
+	keyspaces := []uint32{getBootstrapKeyspaceID()}
 	return &endpoint.KeyspaceGroup{
 		ID: constant.DefaultKeyspaceGroupID,
 		Members: []endpoint.KeyspaceGroupMember{{
@@ -1427,6 +1438,9 @@ mergeLoop:
 				zap.Uint32s("merge-list", mergeList),
 				zap.Error(err))
 			continue
+		}
+		for _, groupID := range mergeList {
+			DeleteKeyspaceListLength(groupID)
 		}
 		kgm.metrics.mergeDuration.Observe(time.Since(startTime).Seconds())
 		log.Info("finished merging keyspace group",
