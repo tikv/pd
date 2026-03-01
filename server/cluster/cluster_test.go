@@ -4204,3 +4204,173 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 		re.NoError(err)
 	}
 }
+
+func TestCalcClusterFeatureFlags_InMemoryPessimisticLocksForNextGen(t *testing.T) {
+	re := require.New(t)
+
+	newStore := func(id uint64, addr string, flags uint64) *core.StoreInfo {
+		return core.NewStoreInfo(&metapb.Store{
+			Id:           id,
+			Address:      addr,
+			Version:      "8.5.0",
+			FeatureFlags: flags,
+		})
+	}
+	newTiFlashStore := func(id uint64, addr string, flags uint64) *core.StoreInfo {
+		return core.NewStoreInfo(&metapb.Store{
+			Id:           id,
+			Address:      addr,
+			Version:      "8.5.0",
+			FeatureFlags: flags,
+			Labels:       []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
+		})
+	}
+	newTombstoneStore := func(id uint64, addr string, flags uint64) *core.StoreInfo {
+		return core.NewStoreInfo(&metapb.Store{
+			Id:           id,
+			Address:      addr,
+			Version:      "8.5.0",
+			FeatureFlags: flags,
+			State:        metapb.StoreState_Tombstone,
+			NodeState:    metapb.NodeState_Removed,
+		})
+	}
+
+	flag := uint64(FeatureFlagInMemoryPessimisticLocksNextGen)
+
+	// All TiKV stores support the flag.
+	stores := []*core.StoreInfo{
+		newStore(1, "tikv1", flag),
+		newStore(2, "tikv2", flag),
+		newStore(3, "tikv3", flag),
+	}
+	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, calcClusterFeatureFlags(stores))
+
+	// One TiKV store doesn't support the flag.
+	stores = []*core.StoreInfo{
+		newStore(1, "tikv1", flag),
+		newStore(2, "tikv2", 0),
+		newStore(3, "tikv3", flag),
+	}
+	re.Equal(StoreFeatureFlags(0), calcClusterFeatureFlags(stores))
+
+	// Tombstone stores should be ignored.
+	stores = []*core.StoreInfo{
+		newStore(1, "tikv1", flag),
+		newTombstoneStore(2, "tikv2", 0),
+		newStore(3, "tikv3", flag),
+	}
+	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, calcClusterFeatureFlags(stores))
+
+	// In-memory pessimistic locks don't have the requirement on TiFlash nodes.
+	stores = []*core.StoreInfo{
+		newStore(1, "tikv1", flag),
+		newStore(2, "tikv2", flag),
+		newTiFlashStore(3, "tiflash1", 0),
+	}
+	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, calcClusterFeatureFlags(stores))
+}
+
+func TestFeatureFlagsPersistence(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	s := storage.NewStorageWithMemoryBackend()
+	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, s)
+
+	// A store with no feature flag set.
+	store := &metapb.Store{
+		Id:           1,
+		Address:      "tikv1",
+		Version:      "8.5.0",
+		FeatureFlags: 0,
+	}
+	re.NoError(c.PutMetaStore(store))
+
+	var loaded metapb.Store
+	ok, err := s.LoadStoreMeta(1, &loaded)
+	re.NoError(err)
+	re.True(ok)
+	re.Equal(uint64(0), loaded.FeatureFlags)
+
+	// A store with a flag set.
+	store = &metapb.Store{
+		Id:           2,
+		Address:      "tikv2",
+		Version:      "8.5.0",
+		FeatureFlags: uint64(FeatureFlagInMemoryPessimisticLocksNextGen),
+	}
+	re.NoError(c.PutMetaStore(store))
+
+	ok, err = s.LoadStoreMeta(2, &loaded)
+	re.NoError(err)
+	re.True(ok)
+	re.Equal(uint64(FeatureFlagInMemoryPessimisticLocksNextGen), loaded.FeatureFlags)
+
+	// Updating an existing store and set a flag, simulating upgrading.
+	store = &metapb.Store{
+		Id:           1,
+		Address:      "tikv1",
+		Version:      "8.5.0",
+		FeatureFlags: uint64(FeatureFlagInMemoryPessimisticLocksNextGen),
+	}
+	re.NoError(c.PutMetaStore(store))
+
+	ok, err = s.LoadStoreMeta(1, &loaded)
+	re.NoError(err)
+	re.True(ok)
+	re.Equal(uint64(FeatureFlagInMemoryPessimisticLocksNextGen), loaded.FeatureFlags)
+}
+
+func TestGetClusterFeatureFlags(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+
+	flag := uint64(FeatureFlagInMemoryPessimisticLocksNextGen)
+
+	// Initialize with mixed states: store 1 without flag, store 2 with flag.
+	re.NoError(c.PutMetaStore(&metapb.Store{
+		Id: 1, Address: "tikv1", Version: "8.5.0", FeatureFlags: 0,
+	}))
+	re.NoError(c.PutMetaStore(&metapb.Store{
+		Id: 2, Address: "tikv2", Version: "8.5.0", FeatureFlags: flag,
+	}))
+	re.Equal(StoreFeatureFlags(0), c.GetClusterFeatureFlags())
+
+	// Add TiFlash without the flag - should not affect cluster flags.
+	re.NoError(c.PutMetaStore(&metapb.Store{
+		Id: 3, Address: "tiflash1", Version: "8.5.0", FeatureFlags: 0,
+		Labels: []*metapb.StoreLabel{{Key: core.EngineKey, Value: core.EngineTiFlash}},
+	}))
+	re.Equal(StoreFeatureFlags(0), c.GetClusterFeatureFlags())
+
+	// Upgrade store 1 to support the flag.
+	re.NoError(c.PutMetaStore(&metapb.Store{
+		Id: 1, Address: "tikv1", Version: "8.5.0", FeatureFlags: flag,
+	}))
+	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, c.GetClusterFeatureFlags())
+
+	// Add another TiKV with the flag - cluster flags should remain set.
+	re.NoError(c.PutMetaStore(&metapb.Store{
+		Id: 4, Address: "tikv3", Version: "8.5.0", FeatureFlags: flag,
+	}))
+	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, c.GetClusterFeatureFlags())
+
+	// Add a TiKV without the flag - cluster flags should be cleared.
+	re.NoError(c.PutMetaStore(&metapb.Store{
+		Id: 5, Address: "tikv4", Version: "8.5.0", FeatureFlags: 0,
+	}))
+	re.Equal(StoreFeatureFlags(0), c.GetClusterFeatureFlags())
+
+	// Bury the store without flag - cluster flags should be set again.
+	re.NoError(c.BuryStore(5, true))
+	re.Equal(FeatureFlagInMemoryPessimisticLocksNextGen, c.GetClusterFeatureFlags())
+}
