@@ -267,7 +267,8 @@ func TestInherit(t *testing.T) {
 		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
 	}
 	for _, d := range data {
-		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		origin.UpdateBuckets(d.originBuckets, nil)
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.Inherit(origin, true)
 		re.Equal(d.originBuckets, r.GetBuckets())
@@ -675,7 +676,7 @@ func BenchmarkUpdateBuckets(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		region.UpdateBuckets(buckets, nil)
 	}
 	if region.GetBuckets().GetVersion() != uint64(b.N-1) {
 		b.Fatal("update buckets failed")
