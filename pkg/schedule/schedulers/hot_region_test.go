@@ -90,7 +90,7 @@ func TestUpgrade(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
 	re.Equal("v2", hb.conf.getRankFormulaVersion())
@@ -98,7 +98,7 @@ func TestUpgrade(t *testing.T) {
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
 	re.Equal("v2", hb.conf.getRankFormulaVersion())
@@ -211,6 +211,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	b := &metapb.Buckets{
 		RegionId:   1,
 		PeriodInMs: 1000,
@@ -1280,6 +1281,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.QueryPriority, utils.BytePriority}
 
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -2286,6 +2288,14 @@ func TestCompatibility(t *testing.T) {
 		{utils.ByteDim, utils.KeyDim},
 	})
 	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
+	re.False(hb.(*hotScheduler).conf.lastCPUSupported)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.6"))
+	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
+		{utils.CPUDim, utils.ByteDim},
+		{utils.QueryDim, utils.ByteDim},
+		{utils.ByteDim, utils.KeyDim},
+	})
+	re.True(hb.(*hotScheduler).conf.lastCPUSupported)
 }
 
 func TestCompatibilityConfig(t *testing.T) {
@@ -2389,6 +2399,16 @@ func TestConfigValidation(t *testing.T) {
 	// query is not allowed to be set in priorities for write-peer-priorities
 	hc = initHotRegionScheduleConfig()
 	hc.WritePeerPriorities = []string{"query", "byte"}
+	err = hc.validateLocked()
+	re.Error(err)
+	// cpu is not allowed to be set in priorities for write-leader-priorities
+	hc = initHotRegionScheduleConfig()
+	hc.WriteLeaderPriorities = []string{"cpu", "byte"}
+	err = hc.validateLocked()
+	re.Error(err)
+	// cpu is not allowed to be set in priorities for write-peer-priorities
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"cpu", "byte"}
 	err = hc.validateLocked()
 	re.Error(err)
 	// priorities shouldn't be repeated

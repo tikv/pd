@@ -65,15 +65,18 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
-	meta                      *metapb.Region
-	learners                  []*metapb.Peer
-	witnesses                 []*metapb.Peer
-	voters                    []*metapb.Peer
-	leader                    *metapb.Peer
-	downPeers                 []*pdpb.PeerStats
-	pendingPeers              []*metapb.Peer
-	term                      uint64
+	meta         *metapb.Region
+	learners     []*metapb.Peer
+	witnesses    []*metapb.Peer
+	voters       []*metapb.Peer
+	leader       *metapb.Peer
+	downPeers    []*pdpb.PeerStats
+	pendingPeers []*metapb.Peer
+	term         uint64
+	// cpuUsage is deprecated and will be removed in the future.
+	// We should use `cpuStats` instead.
 	cpuUsage                  uint64
+	cpuStats                  *pdpb.CPUStats
 	writtenBytes              uint64
 	writtenKeys               uint64
 	readBytes                 uint64
@@ -257,7 +260,8 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
-		region.cpuUsage = h.GetCpuUsage()
+		region.cpuUsage = h.GetCpuUsage() //nolint:staticcheck
+		region.cpuStats = h.GetCpuStats()
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -324,6 +328,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		downPeers:                 downPeers,
 		pendingPeers:              pendingPeers,
 		cpuUsage:                  r.cpuUsage,
+		cpuStats:                  typeutil.DeepClone(r.cpuStats, CPUStatsFactory),
 		writtenBytes:              r.writtenBytes,
 		writtenKeys:               r.writtenKeys,
 		readBytes:                 r.readBytes,
@@ -2007,6 +2012,7 @@ func (r *RegionInfo) GetLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		float64(r.GetCPUUsage()),
 	}
 }
 
@@ -2019,6 +2025,7 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		0,
 	}
 }
 

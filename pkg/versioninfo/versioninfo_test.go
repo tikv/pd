@@ -1,4 +1,4 @@
-// Copyright 2024 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package versioninfo
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -30,23 +27,21 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestIsHot(t *testing.T) {
+func TestIsHotScheduleWithCPUSupported(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
-		cluster := core.NewBasicCluster()
-		cache := NewHotCache(ctx, cluster)
-		region, err := buildRegion(cluster, i, 3, 60)
-		re.NoError(err)
-		loads := make([]float64, utils.RegionStatCount)
-		loads[utils.RegionReadBytes] = 100000000
-		loads[utils.RegionReadKeys] = 1000
-		loads[utils.RegionReadQueryNum] = 1000
-		stats := cache.CheckReadPeerSync(region, region.GetPeers(), loads, 60)
-		cache.Update(stats[0], i)
-		for range 100 {
-			re.True(cache.IsRegionHot(region, 1))
-		}
+	re.False(IsHotScheduleWithCPUSupported(nil))
+
+	tests := []struct {
+		version string
+		expect  bool
+	}{
+		{"8.5.5", false},
+		{"8.5.6", true},
+		{"9.0.0-beta.1", true},
+		{"9.0.0", true},
+		{"9.1.0", true},
+	}
+	for _, test := range tests {
+		re.Equal(test.expect, IsHotScheduleWithCPUSupported(MustParseVersion(test.version)), test.version)
 	}
 }
