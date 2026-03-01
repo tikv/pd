@@ -405,7 +405,7 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) erro
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
-// AddServiceExitCallback adds callbacks when the server becomes the primary.
+// AddServiceExitCallback adds callbacks when the server resigns the primary.
 func (s *Server) AddServiceExitCallback(callbacks ...func()) {
 	s.primaryExitCallbacks = append(s.primaryExitCallbacks, callbacks...)
 }
