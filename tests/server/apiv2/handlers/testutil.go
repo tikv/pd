@@ -308,3 +308,40 @@ func MustMergeKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(data))
 }
+
+// MustRemoveKeyspacesFromGroup removes keyspaces from a keyspace group with HTTP API.
+func MustRemoveKeyspacesFromGroup(re *require.Assertions, server *tests.TestServer, groupID uint32, keyspaceIDs []uint32) *endpoint.KeyspaceGroup {
+	params := &handlers.RemoveKeyspacesFromGroupParams{
+		Keyspaces: keyspaceIDs,
+	}
+	data, err := json.Marshal(params)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/keyspaces", groupID), bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	respData, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(respData))
+	var kg endpoint.KeyspaceGroup
+	re.NoError(json.Unmarshal(respData, &kg))
+	return &kg
+}
+
+// FailRemoveKeyspacesFromGroupWithCode fails to remove keyspaces from a keyspace group with HTTP API.
+func FailRemoveKeyspacesFromGroupWithCode(re *require.Assertions, server *tests.TestServer, groupID uint32, keyspaceIDs []uint32, expectCode int) {
+	params := &handlers.RemoveKeyspacesFromGroupParams{
+		Keyspaces: keyspaceIDs,
+	}
+	data, err := json.Marshal(params)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/keyspaces", groupID), bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	respData, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(expectCode, resp.StatusCode, string(respData))
+}
