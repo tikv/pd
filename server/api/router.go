@@ -335,6 +335,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/health", healthHandler.GetHealthStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/ping", healthHandler.Ping, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
+	etcdHandler := newEtcdHandler(svr, rd)
+	registerFunc(apiRouter, "/ready", etcdHandler.GetReadyStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
+
 	// metric query use to query metric data, the protocol is compatible with prometheus.
 	registerFunc(apiRouter, "/metric/query", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/metric/query_range", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
