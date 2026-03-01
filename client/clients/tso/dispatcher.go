@@ -371,11 +371,15 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	default:
 	}
 
-	// Release this stream from the manager due to error.
-	conCtxMgr.Release(streamURL)
 	// Update the member list to ensure the latest topology is used before the next batch.
 	svcDiscovery := td.provider.getServiceDiscovery()
+	// Release this stream from the manager due to error.
+	conCtxMgr.Release(streamURL)
+	if errs.ShouldRedial(err) {
+		svcDiscovery.RemoveClientConn(streamURL)
+	}
 	if errs.IsLeaderChange(err) {
+		metrics.TSOLeaderChangedCounter.Inc()
 		// If the leader changed, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {

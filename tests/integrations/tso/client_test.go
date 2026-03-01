@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/pingcap/failpoint"
 
@@ -737,4 +739,91 @@ func checkServiceDiscovery(re *require.Assertions, client pd.Client, urlsLen int
 			re.Len(urls, urlsLen)
 		}
 	}
+}
+
+// TestStaleConnectionDueToDNSCache tests the scenario where DNS cache stale
+// connections are not refreshed after leader change. When the leader changes, the domain name
+// points to the new leader, but DNS cache still returns the old leader's IP, causing
+// GetOrCreateGRPCConn to return the old connection.
+func TestStaleConnectionDueToDNSCache(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Create a PD cluster which has 3 servers
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeaderServer := cluster.GetServer(leaderName)
+	re.NoError(pdLeaderServer.BootstrapCluster())
+	backendEndpoints := pdLeaderServer.GetAddr()
+
+	// Enable skip campaign leader check to allow leader resign
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
+
+	// Create a client
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, []string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	defer client.Close()
+
+	// Wait for TSO service to be available and establish connection
+	utils.WaitForTSOServiceAvailable(ctx, re, client)
+	_, _, err = client.GetTS(ctx)
+	re.NoError(err)
+
+	// Get old leader info and its connection
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeaderURL := cluster.GetServer(oldLeaderName).GetAddr()
+
+	// Resign the leader first
+	err = cluster.GetServer(oldLeaderName).ResignLeader()
+	re.NoError(err)
+
+	// Wait for new leader
+	newLeaderName := cluster.WaitLeader()
+	re.NotEmpty(newLeaderName)
+	re.NotEqual(oldLeaderName, newLeaderName)
+	newLeaderURL := cluster.GetServer(newLeaderName).GetAddr()
+
+	oldLeaderURL = strings.TrimPrefix(oldLeaderURL, "http://")
+
+	// Create a NEW connection to old leader address to simulate DNS cache
+	// This is what happens when DNS resolves newLeaderURL but returns oldLeaderURL's IP
+	staleConn, err := grpc.Dial(oldLeaderURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	re.NoError(err)
+	defer staleConn.Close()
+
+	// Simulate DNS cache: store new leader URL -> stale connection (pointing to old leader)
+	// Re-inject the stale connection mapping to simulate persistent DNS cache
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/client/servicediscovery/staleDNS", func() {
+		client.GetServiceDiscovery().SetClientConn(newLeaderURL, staleConn)
+	}))
+	for range 3 {
+		_, _, err = client.GetTS(ctx)
+		if err != nil {
+			t.Logf("GetTS failed due to stale DNS cache: %v", err)
+		} else {
+			t.Logf("GetTS succeeded")
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/staleDNS"))
+	// Stop simulating DNS cache - now client can create proper connections
+	// TSO should work normally now
+	testutil.Eventually(re, func() bool {
+		_, _, err := client.GetTS(ctx)
+		if err == nil {
+			t.Logf("TSO request succeeded after DNS cache cleared")
+		}
+		return err == nil
+	})
 }

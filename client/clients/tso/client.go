@@ -198,11 +198,12 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 	if len(url) == 0 {
 		log.Fatal("[tso] the tso leader should exist")
 	}
-	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
-	if !ok {
-		return nil, url
+	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(url)
+	if err != nil {
+		log.Warn("[tso] fail to dial gRPC connection to tso allocator", zap.Error(err))
+		return nil, ""
 	}
-	return cc.(*grpc.ClientConn), url
+	return cc, url
 }
 
 func (c *Cli) updateTSOLeaderURL(url string) error {

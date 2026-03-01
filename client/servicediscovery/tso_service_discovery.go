@@ -300,6 +300,21 @@ func (c *tsoServiceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
 
+// RemoveClientConn removes the grpc client connection of the given url from the connection pools.
+func (c *tsoServiceDiscovery) RemoveClientConn(url string) {
+	cc, ok := c.clientConns.LoadAndDelete(url)
+	if !ok {
+		return
+	}
+	_ = cc.(*grpc.ClientConn).Close()
+}
+
+// SetClientConn sets the grpc client connection of the given url in the connection pools.
+// Only for test purpose.
+func (c *tsoServiceDiscovery) SetClientConn(url string, conn *grpc.ClientConn) {
+	c.clientConns.Store(url, conn)
+}
+
 // GetServingURL returns the serving endpoint which is the primary in a
 // primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) GetServingURL() string {
