@@ -212,6 +212,8 @@ func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
 		ticker.Reset(newInterval)
 		log.Info("checkers starts patrol regions with new interval", zap.Duration("interval", newInterval))
 	}
+	ctx                context.Context
+	cancel             context.CancelFunc
 }
 
 func (c *Controller) updatePatrolWorkersIfNeeded() {
@@ -494,6 +496,14 @@ func (c *Controller) CheckSuspectRanges() {
 			}
 			c.AddPendingProcessedRegions(false, regionIDList...)
 		}
+	}
+}
+
+// StopPatrolRegionWorkers stops all patrol region workers.
+func (c *PatrolRegionContext) StopPatrolRegionWorkers() {
+	if c.cancel != nil {
+		c.cancel()
+		c.regionsWorkers = nil
 	}
 }
 
