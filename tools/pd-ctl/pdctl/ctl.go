@@ -48,7 +48,7 @@ func GetRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
 	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
 
-	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
+	rootCmd.Flags().ParseErrorsAllowlist.UnknownFlags = true
 
 	rootCmd.AddCommand(
 		command.NewConfigCommand(),

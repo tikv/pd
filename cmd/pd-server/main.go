@@ -65,7 +65,8 @@ func main() {
 	addFlags(rootCmd)
 	rootCmd.AddCommand(NewServiceCommand())
 
-	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stdout)
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
 		exit(1)

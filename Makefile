@@ -180,7 +180,6 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.6.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
@@ -197,6 +196,9 @@ static: install-tools pre-build
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
 	@ echo "leakcheck ..."
 	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
+	@ echo "promtool ..."
+	@ promtool check rules metrics/alertmanager/pd.rules.yml
+	@ promtool test rules metrics/alertmanager/pd.rules.test.yml
 
 
 # Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
