@@ -32,11 +32,12 @@ type testStruct1 struct {
 
 type testStruct2 struct {
 	Name   string      `json:"name"`
-	Action testStruct3 `json:"action"`
+	Action testStruct3 `json:"action" online:"true"`
 }
 
 type testStruct3 struct {
-	Enable bool `json:"enable,string"`
+	Enable bool `json:"enable,string" online:"true"`
+	Online bool `json:"online" online:"false"`
 }
 
 func TestFindJSONFullTagByChildTag(t *testing.T) {
@@ -52,6 +53,19 @@ func TestFindJSONFullTagByChildTag(t *testing.T) {
 	key = "disable"
 	result = FindJSONFullTagByChildTag(reflect.TypeOf(testStruct1{}), key)
 	re.Empty(result)
+}
+
+func TestGetAllOnlineConfigTags(t *testing.T) {
+	re := require.New(t)
+	dict := GetAllOnlineConfigTags(reflect.TypeOf(testStruct1{}))
+	re.Contains(dict, "object.name")
+	re.Contains(dict, "name")
+	re.Contains(dict, "object.action.enable")
+	re.Contains(dict, "object.enable")
+	re.Contains(dict, "enable")
+	re.NotContains(dict, "object.action.online")
+	re.NotContains(dict, "object.online")
+	re.NotContains(dict, "online")
 }
 
 func TestFindSameFieldByJSON(t *testing.T) {
