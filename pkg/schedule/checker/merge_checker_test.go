@@ -16,7 +16,6 @@ package checker
 
 import (
 	"context"
-	"encoding/hex"
 	"testing"
 	"time"
 
@@ -36,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	regiontestutil "github.com/tikv/pd/pkg/utils/testutil/region"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -57,6 +57,7 @@ func TestMergeCheckerTestSuite(t *testing.T) {
 }
 
 func (suite *mergeCheckerTestSuite) SetupTest() {
+	re := suite.Require()
 	cfg := mockconfig.NewTestOptions()
 	gcInterval = 100 * time.Millisecond
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -74,10 +75,10 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 		suite.cluster.PutStoreWithLabels(storeID, labels...)
 	}
 	suite.regions = []*core.RegionInfo{
-		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
-		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
-		newRegionInfo(3, "t", "x", 0, 0, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
-		newRegionInfo(4, "x", "", 1, 1, []uint64{109, 4}, []uint64{109, 4}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 1, "", "1a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 2, "1a", "1b", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 3, "1b", "1c", 0, 0, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 4, "1c", "", 1, 1, []uint64{109, 4}, []uint64{109, 4}),
 	}
 
 	for _, region := range suite.regions {
@@ -197,8 +198,8 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 		ID:          "test",
 		Index:       1,
 		Override:    true,
-		StartKeyHex: hex.EncodeToString([]byte("x")),
-		EndKeyHex:   hex.EncodeToString([]byte("z")),
+		StartKeyHex: "1c",
+		EndKeyHex:   "1d",
 		Role:        placement.Voter,
 		Count:       3,
 	})
@@ -216,7 +217,7 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
 		RuleType: labeler.KeyRange,
-		Data:     makeKeyRanges("", "74"),
+		Data:     makeKeyRanges("", "1b"),
 	})
 	re.NoError(err)
 	ops = suite.mc.Check(suite.regions[0])
@@ -471,10 +472,10 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 	tc.SetMaxMergeRegionKeys(2)
 	tc.SetSplitMergeInterval(0)
 	regions := []*core.RegionInfo{
-		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
-		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
-		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
-		newRegionInfo(4, "x", "", 10, 10, []uint64{109, 4}, []uint64{109, 4}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 1, "", "1a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 2, "1a", "1b", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 3, "1b", "1c", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 4, "1c", "", 10, 10, []uint64{109, 4}, []uint64{109, 4}),
 	}
 
 	for i := uint64(1); i <= 6; i++ {
@@ -547,8 +548,8 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 		suite.cluster.PutStoreWithLabels(storeID, labels...)
 	}
 	suite.regions = []*core.RegionInfo{
-		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
-		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 2, "1a", "1b", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+		regiontestutil.NewRegionInfoWithHexKey(re, 3, "1b", "1c", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
 	}
 
 	for _, region := range suite.regions {
@@ -571,22 +572,4 @@ func makeKeyRanges(keys ...string) []any {
 		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
-}
-
-func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
-	prs := make([]*metapb.Peer, 0, len(peers))
-	for _, peer := range peers {
-		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
-	}
-	return core.NewRegionInfo(
-		&metapb.Region{
-			Id:       id,
-			StartKey: []byte(startKey),
-			EndKey:   []byte(endKey),
-			Peers:    prs,
-		},
-		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
-		core.SetApproximateSize(size),
-		core.SetApproximateKeys(keys),
-	)
 }
