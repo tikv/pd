@@ -106,6 +106,39 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, r
 	return nil
 }
 
+func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string, rawValue string) error {
+	group := &rmpb.ResourceGroup{}
+	if err := proto.Unmarshal([]byte(rawValue), group); err != nil {
+		log.Error("failed to parse the keyspace resource group meta info",
+			zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
+		return err
+	}
+
+	krgm.RLock()
+	existing := krgm.groups[group.Name]
+	krgm.RUnlock()
+	if existing != nil {
+		if err := existing.ApplySettings(group); err != nil {
+			log.Error("failed to apply the keyspace resource group settings from raw value",
+				zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
+			return err
+		}
+		return nil
+	}
+
+	krgm.Lock()
+	krgm.groups[group.Name] = FromProtoResourceGroup(group)
+	krgm.Unlock()
+	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromCache(name string) {
+	krgm.Lock()
+	delete(krgm.groups, name)
+	delete(krgm.groupRUTrackers, name)
+	krgm.Unlock()
+}
+
 func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name string, rawValue string) error {
 	tokens := &GroupStates{}
 	if err := json.Unmarshal([]byte(rawValue), tokens); err != nil {
