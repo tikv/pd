@@ -220,9 +220,9 @@ type testStore struct {
 
 func newTestStore() *testStore {
 	keyspaceIDs := map[string]uint32{
-		"":               constant.NullKeyspaceID,
-		"path_keyspace":  1,
-		"not_created":    3,
+		"":              constant.NullKeyspaceID,
+		"path_keyspace": 1,
+		"not_created":   3,
 	}
 	validKeyspaceIDs := make(map[uint32]struct{}, len(keyspaceIDs)-1)
 	for name, id := range keyspaceIDs {
