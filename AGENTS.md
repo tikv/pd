@@ -137,6 +137,14 @@
 - Commit subject: `pkg: message`, <=70 chars; blank line; body wrapped 80 chars; add `Signed-off-by` via `git commit -s`.
 - Multi-area: separate packages with commas; use `*:` for broad changes.
 
+## Agent Skills
+
+Reusable agent skills live under `.agents/skills/`. Each skill has a `SKILL.md` describing its workflow and constraints.
+
+| Skill | Purpose | Prerequisites | Docs |
+|---|---|---|---|
+| `create-pr` | Push the current branch and open a well-formatted PR on tikv/pd. Analyzes commits, generates PR title/body following the repository template, and submits via `gh pr create`. | `gh` CLI authenticated with tikv/pd repo access; local commits on a non-master branch. | [`.agents/skills/create-pr/SKILL.md`](.agents/skills/create-pr/SKILL.md) |
+
 ## Microservices / NextGen
 - `NEXT_GEN=1` builds/tests use `nextgen` tag and disable dashboard; ensure compatibility.
 - Resource group/keyspace features live under `server/` resource dirs—follow existing patterns.
