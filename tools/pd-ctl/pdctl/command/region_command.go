@@ -144,6 +144,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(scanRegion)
 
 	r.Flags().String("jq", "", "jq query")
+	r.PersistentFlags().Bool("direct", false, "send X-Forwarded-For with PD endpoints")
 
 	return r
 }

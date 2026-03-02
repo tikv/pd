@@ -47,6 +47,10 @@ func TestRegionTestSuite(t *testing.T) {
 
 func (suite *regionTestSuite) SetupSuite() {
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.PDCount = 3
+	suite.env.RunFunc(func(cluster *pdTests.TestCluster) {
+		suite.NotEmpty(cluster.WaitLeader())
+	})
 }
 
 func (suite *regionTestSuite) TearDownSuite() {
@@ -64,6 +68,7 @@ func (suite *regionTestSuite) TestRegionKeyFormat() {
 func (suite *regionTestSuite) checkRegionKeyFormat(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	url := cluster.GetConfig().GetClientURL()
+	cluster.WaitLeader()
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
@@ -495,5 +500,61 @@ func (suite *regionTestSuite) checkPatrolWithLimit(cluster *pdTests.TestCluster)
 		re.Equal(float64(totalRegions), res["scan_count"], "scan_count should equal total regions regardless of limit")
 		re.Empty(res["count"])
 		re.Empty(res["results"])
+	}
+}
+
+func (suite *regionTestSuite) TestFollowerDirect() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.followerDirect)
+}
+
+func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	re.NotEmpty(cluster.WaitLeader())
+	cmd := ctl.GetRootCmd()
+	stores := []*metapb.Store{
+		{
+			Id:    1,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    2,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    3,
+			State: metapb.StoreState_Up,
+		},
+	}
+
+	for i := range stores {
+		pdTests.MustPutStore(re, cluster, stores[i])
+	}
+	metaRegion := &metapb.Region{
+		Id:       100,
+		StartKey: []byte(""),
+		EndKey:   []byte(""),
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 5, StoreId: 2},
+			{Id: 6, StoreId: 3}},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	region := core.NewRegionInfo(metaRegion, metaRegion.Peers[0])
+	re.NoError(cluster.HandleRegionHeartbeat(region))
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	pointValue := fmt.Sprintf("return(%s)", pdAddr)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/skipRegionInfo", pointValue))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/skipRegionInfo"))
+	}()
+	for _, server := range cluster.GetServers() {
+		// leader reject any region info request with --direct, followers should work normally.
+		if server.GetAddr() == pdAddr {
+			_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "region", "100", "--direct")
+			re.Error(err)
+		} else {
+			_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "region", "100", "--direct")
+			re.NoError(err)
+		}
 	}
 }

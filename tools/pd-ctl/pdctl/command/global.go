@@ -166,10 +166,11 @@ func doRequest(cmd *cobra.Command, prefix string, method string, customHeader ht
 		o(b)
 	}
 	var resp string
+	header := buildDirectHeader(cmd, customHeader)
 
 	endpoints := getEndpoints(cmd)
 	err := tryURLs(cmd, endpoints, func(endpoint string) error {
-		return do(endpoint, prefix, method, &resp, customHeader, b)
+		return do(endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
 }
@@ -181,11 +182,26 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 		o(b)
 	}
 	var resp string
+	header := buildDirectHeader(cmd, customHeader)
 
 	err := requestURL(cmd, endpoint, func(endpoint string) error {
-		return do(endpoint, prefix, method, &resp, customHeader, b)
+		return do(endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
+}
+
+func buildDirectHeader(cmd *cobra.Command, customHeader http.Header) http.Header {
+	header := customHeader.Clone()
+	if header == nil {
+		header = http.Header{}
+	}
+	if flag := cmd.Flags().Lookup("direct"); flag != nil && cmd.Flags().Changed("direct") {
+		for _, endpoint := range getEndpoints(cmd) {
+			header.Add(apiutil.XForwardedForHeader, endpoint)
+		}
+		header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	}
+	return header
 }
 
 func dial(req *http.Request) (string, error) {

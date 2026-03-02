@@ -77,6 +77,12 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegion(regionID)
+	failpoint.Inject("skipRegionInfo", func(val failpoint.Value) {
+		addr, ok := val.(string)
+		if ok && addr == h.svr.GetAddr() {
+			regionInfo = nil
+		}
+	})
 	if regionInfo == nil {
 		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
 		return

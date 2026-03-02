@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -84,4 +85,60 @@ func TestSendAndGetComponent(t *testing.T) {
 	output, err = ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
+}
+
+func TestRegionDirectHeader(t *testing.T) {
+	re := require.New(t)
+	var (
+		mu                 sync.Mutex
+		forwardedForByPath = make(map[string][]string)
+	)
+	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/api/v1/regions", func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			forwardedForByPath[r.URL.RawQuery] = append([]string{}, r.Header.Values(apiutil.XForwardedForHeader)...)
+			mu.Unlock()
+			fmt.Fprint(w, `{}`)
+		})
+		info := apiutil.APIServiceGroup{IsCore: true}
+		return mux, info, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+
+	cmd := cmd.GetRootCmd()
+
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region")
+	re.NoError(err)
+	mu.Lock()
+	re.Empty(forwardedForByPath[""], "X-Forwarded-For should be empty without --direct")
+	mu.Unlock()
+
+	// request should have X-Forwarded-For header with --direct flag, even if the value is false,
+	// because the direct flag is only used to control whether to bypass the PD server and send request directly to the tikv server, it does not control whether to add X-Forwarded-For header or not.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct")
+	re.NoError(err)
+	mu.Lock()
+	re.Equal([]string{pdAddr}, forwardedForByPath[""], "X-Forwarded-For should contain PD endpoint with --direct")
+	mu.Unlock()
+
+	// ignore direct flag value.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=false")
+	re.NoError(err)
+	mu.Lock()
+	re.Equal([]string{pdAddr}, forwardedForByPath[""], "X-Forwarded-For should still exist when direct flag is explicitly present")
+	mu.Unlock()
 }
