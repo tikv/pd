@@ -213,8 +213,8 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 	}
 }
 
-// getKeyspaceGroupKeyspaceCountGauge returns the cached gauge for the group, or creates one with WithLabelValues.
-func getKeyspaceGroupKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
+// getOrInitKeyspaceCountGauge returns the cached gauge for the group, or creates one with WithLabelValues.
+func getOrInitKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
 	key := groupID
 	if g, ok := keyspaceGroupKeyspaceCountGaugeCache.Load(key); ok {
 		return g.(prometheus.Gauge)
@@ -229,17 +229,12 @@ func getKeyspaceGroupKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
 
 // SetKeyspaceListLength sets the keyspace list length metric for the given keyspace group.
 func SetKeyspaceListLength(groupID uint32, length float64) {
-	getKeyspaceGroupKeyspaceCountGauge(groupID).Set(length)
+	getOrInitKeyspaceCountGauge(groupID).Set(length)
 }
 
-// DeleteKeyspaceListLength removes the keyspace list length metric for the given keyspace group.
-func DeleteKeyspaceListLength(groupID uint32) {
+// DeleteKeyspaceListLengthMetric removes the keyspace list length metric for the given keyspace group.
+func DeleteKeyspaceListLengthMetric(groupID uint32) {
 	keyspaceGroupKeyspaceCountGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
 	keyspaceGroupKeyspaceCountGaugeCache.Delete(groupID)
 }
 
-// SetKeyspaceGroupKeyspaceCountGauge sets the keyspace list length metric for the given keyspace group.
-// The metric is periodically synced by TSO keyspaceGroupMetricsSyncer; this setter is for tests or one-off updates.
-func SetKeyspaceGroupKeyspaceCountGauge(groupID uint32, length float64) {
-	getKeyspaceGroupKeyspaceCountGauge(groupID).Set(length)
-}

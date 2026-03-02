@@ -1150,8 +1150,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 }
 
 // TestKeyspaceListLengthMetric tests that tso_keyspace_group_keyspace_list_length can be set
-// (by TSO keyspaceGroupMetricsSyncer or SetKeyspaceListLength/SetKeyspaceGroupKeyspaceCountGauge)
-// and removed when the group is deleted (DeleteKeyspaceListLength on TSO service).
+// (by TSO keyspaceGroupMetricsSyncer or SetKeyspaceListLength / getOrInitKeyspaceCountGauge(...).Set)
+// and removed when the group is deleted (DeleteKeyspaceListLengthMetric on TSO service).
 func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 	re := suite.Require()
 	groupID := uint32(1)
@@ -1162,23 +1162,23 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 		return out.GetGauge().GetValue()
 	}
 
-	// Test SetKeyspaceGroupKeyspaceCountGauge / SetKeyspaceListLength (same underlying metric)
-	SetKeyspaceGroupKeyspaceCountGauge(groupID, 3)
+	// Test getOrInitKeyspaceCountGauge(...).Set / SetKeyspaceListLength (same underlying metric)
+	getOrInitKeyspaceCountGauge(groupID).Set(3)
 	gauge, err := keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
 	re.NoError(err)
 	re.Equal(3.0, getGaugeValue(gauge))
 
-	SetKeyspaceGroupKeyspaceCountGauge(groupID, 5)
+	getOrInitKeyspaceCountGauge(groupID).Set(5)
 	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
 	re.NoError(err)
 	re.Equal(5.0, getGaugeValue(gauge))
 
-	SetKeyspaceGroupKeyspaceCountGauge(groupID, 0)
+	getOrInitKeyspaceCountGauge(groupID).Set(0)
 	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
 	re.NoError(err)
 	re.Equal(0.0, getGaugeValue(gauge))
 
-	// Test DeleteKeyspaceListLength: set group 2 via metrics, then delete, gather and ensure group 2 is not present
+	// Test DeleteKeyspaceListLengthMetric: set group 2 via metrics, then delete, gather and ensure group 2 is not present
 	groupID2 := uint32(2)
 	SetKeyspaceListLength(groupID2, 10)
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -1200,7 +1200,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 	}
 	re.True(foundGroup2Before, "metric for group 2 should exist before delete")
 
-	DeleteKeyspaceListLength(groupID2)
+	DeleteKeyspaceListLengthMetric(groupID2)
 	mfs, err = prometheus.DefaultGatherer.Gather()
 	re.NoError(err)
 	for _, mf := range mfs {
@@ -1208,7 +1208,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 			for _, m := range mf.GetMetric() {
 				for _, lp := range m.GetLabel() {
 					if lp.GetName() == "group" && lp.GetValue() == "2" {
-						re.Fail("metric for group 2 should be removed after DeleteKeyspaceListLength")
+						re.Fail("metric for group 2 should be removed after DeleteKeyspaceListLengthMetric")
 					}
 				}
 			}
@@ -1217,10 +1217,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 	}
 }
 
-// TestDeleteKeyspaceGroupTriggersDeleteKeyspaceListLength verifies that the delete flow
-// (deleteKeyspaceGroup) triggers DeleteKeyspaceListLength so the keyspace-list-length metric
-// is removed. The test calls deleteKeyspaceGroup only; it does not call DeleteKeyspaceListLength
-// directly. The merge path (mergingChecker calls DeleteKeyspaceListLength for mergeList after
+// TestDeleteKeyspaceGroupClearsListLengthMetric verifies that the delete flow
+// (deleteKeyspaceGroup) triggers DeleteKeyspaceListLengthMetric so the keyspace-list-length metric
+// is removed. The test calls deleteKeyspaceGroup only; it does not call DeleteKeyspaceListLengthMetric
+// directly. The merge path (mergingChecker calls DeleteKeyspaceListLengthMetric for mergeList after
 // finishMergeKeyspaceGroup) is a separate code path and is covered by integration tests
 // (e.g. tests/integrations/mcs/tso TestTSOKeyspaceGroupMerge).
 func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLengthMetric() {
@@ -1245,7 +1245,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLen
 		return false
 	}
 
-	// Delete path: deleteKeyspaceGroup must trigger DeleteKeyspaceListLength (no direct call in test).
+	// Delete path: deleteKeyspaceGroup must trigger DeleteKeyspaceListLengthMetric (no direct call in test).
 	kgm := &KeyspaceGroupManager{
 		state:   state{},
 		metrics: newKeyspaceGroupMetrics(),
@@ -1264,7 +1264,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLen
 	kgm.deleteKeyspaceGroup(groupID)
 	mfs, err = prometheus.DefaultGatherer.Gather()
 	re.NoError(err)
-	re.False(metricExists(mfs, groupID), "deleteKeyspaceGroup should trigger DeleteKeyspaceListLength and remove metric")
+	re.False(metricExists(mfs, groupID), "deleteKeyspaceGroup should trigger DeleteKeyspaceListLengthMetric and remove metric")
 }
 
 // Register TSO server.

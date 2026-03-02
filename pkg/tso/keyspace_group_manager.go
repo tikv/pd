@@ -66,11 +66,13 @@ const (
 	// do this check and re-distribute the primaries if necessary.
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
 	groupPatrolInterval                 = time.Minute
+	// keyspaceGroupMetricsSyncInterval is the interval for syncing keyspace list length metrics from kgm.kgs.
+	keyspaceGroupMetricsSyncInterval = 15 * time.Second
 )
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
 // It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
-// create an import cycle with keyspace importing pkg/tso for SetKeyspaceGroupKeyspaceCountGauge).
+// create an import cycle with keyspace importing pkg/tso for keyspace list length metric).
 func getBootstrapKeyspaceID() uint32 {
 	if kerneltype.IsNextGen() {
 		return constant.SystemKeyspaceID
@@ -990,7 +992,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			}
 		}
 		kgm.kgs[groupID] = nil
-		DeleteKeyspaceListLength(groupID)
+		DeleteKeyspaceListLengthMetric(groupID)
 	}
 
 	allocator := kgm.allocators[groupID]
@@ -1441,7 +1443,7 @@ mergeLoop:
 			continue
 		}
 		for _, groupID := range mergeList {
-			DeleteKeyspaceListLength(groupID)
+			DeleteKeyspaceListLengthMetric(groupID)
 		}
 		kgm.metrics.mergeDuration.Observe(time.Since(startTime).Seconds())
 		log.Info("finished merging keyspace group",
@@ -1504,7 +1506,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 func (kgm *KeyspaceGroupManager) keyspaceGroupMetricsSyncer() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
-	interval := groupPatrolInterval
+	interval := keyspaceGroupMetricsSyncInterval
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	log.Info("keyspace group metrics syncer is started",
