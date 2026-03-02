@@ -93,6 +93,8 @@ type state struct {
 	// Once a group receives its first TSO request and pass the certain check, it will be added to this map.
 	// Being merged will cause the group to be removed from this map eventually if the merge is successful.
 	requestedGroups map[uint32]struct{}
+	finishingSplits map[uint32]struct{}
+	finishingMerges map[uint32]struct{}
 
 	// modRevision is the modification revision of keyspace space.
 	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
@@ -109,6 +111,8 @@ func (s *state) initialize() {
 	s.splittingGroups = make(map[uint32]time.Time)
 	s.deletedGroups = make(map[uint32]struct{})
 	s.requestedGroups = make(map[uint32]struct{})
+	s.finishingSplits = make(map[uint32]struct{})
+	s.finishingMerges = make(map[uint32]struct{})
 }
 
 func (s *state) deInitialize() {
@@ -1322,83 +1326,118 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
-// Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	start := time.Now()
+	var (
+		hc       *http.Client
+		endpoint string
+	)
+
 	kgm.Lock()
-	defer kgm.Unlock()
-	// Check if the keyspace group is in split state.
 	splitGroup := kgm.kgs[id]
-	if !splitGroup.IsSplitTarget() {
+	if splitGroup == nil || !splitGroup.IsSplitTarget() {
+		kgm.Unlock()
 		return nil
 	}
-	// Check if the HTTP client is initialized.
 	if kgm.httpClient == nil {
+		kgm.Unlock()
 		return nil
 	}
+	if _, ok := kgm.finishingSplits[id]; ok {
+		kgm.Unlock()
+		return nil
+	}
+	kgm.finishingSplits[id] = struct{}{}
+	hc = kgm.httpClient
+	endpoint = kgm.cfg.GetBackendEndpoints()
+	kgm.Unlock()
+
 	startRequest := time.Now()
-	resp, err := apiutil.DoDelete(
-		kgm.httpClient,
-		kgm.cfg.GetBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
-	if err != nil {
-		return err
+	resp, err := apiutil.DoDelete(hc, endpoint+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			log.Warn("failed to finish split keyspace group",
+				zap.Uint32("keyspace-group-id", id),
+				zap.Int("status-code", resp.StatusCode))
+			err = errs.ErrSendRequest.FastGenByArgs()
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Warn("failed to finish split keyspace group",
-			zap.Uint32("keyspace-group-id", id),
-			zap.Int("status-code", resp.StatusCode))
-		return errs.ErrSendRequest.FastGenByArgs()
+
+	kgm.Lock()
+	delete(kgm.finishingSplits, id)
+	if err == nil {
+		kgm.metrics.finishSplitSendDuration.Observe(time.Since(startRequest).Seconds())
+		// Pre-update the split keyspace group's split state in memory.
+		// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
+		cur := kgm.kgs[id]
+		if cur != nil && cur.IsSplitTarget() {
+			newSplitGroup := *cur
+			newSplitGroup.SplitState = nil
+			kgm.kgs[id] = &newSplitGroup
+		}
+		kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
 	}
-	kgm.metrics.finishSplitSendDuration.Observe(time.Since(startRequest).Seconds())
-	// Pre-update the split keyspace group's split state in memory.
-	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
-	// For now, we only have scenarios to update split state/merge state, and the other fields are always
-	// loaded from etcd without any modification, so we can simply copy the group and replace the state.
-	newSplitGroup := *splitGroup
-	newSplitGroup.SplitState = nil
-	kgm.kgs[id] = &newSplitGroup
-	kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
-	return nil
+	kgm.Unlock()
+
+	return err
 }
 
 func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 	start := time.Now()
+	var (
+		hc       *http.Client
+		endpoint string
+	)
+
 	kgm.Lock()
-	defer kgm.Unlock()
-	// Check if the keyspace group is in the merging state.
 	mergeTarget := kgm.kgs[id]
-	if !mergeTarget.IsMergeTarget() {
+	if mergeTarget == nil || !mergeTarget.IsMergeTarget() {
+		kgm.Unlock()
 		return nil
 	}
-	// Check if the HTTP client is initialized.
 	if kgm.httpClient == nil {
+		kgm.Unlock()
 		return nil
 	}
+	if _, ok := kgm.finishingMerges[id]; ok {
+		kgm.Unlock()
+		return nil
+	}
+	kgm.finishingMerges[id] = struct{}{}
+	hc = kgm.httpClient
+	endpoint = kgm.cfg.GetBackendEndpoints()
+	kgm.Unlock()
+
 	startRequest := time.Now()
-	resp, err := apiutil.DoDelete(
-		kgm.httpClient,
-		kgm.cfg.GetBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
-	if err != nil {
-		return err
+	resp, err := apiutil.DoDelete(hc, endpoint+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			log.Warn("failed to finish merging keyspace group",
+				zap.Uint32("keyspace-group-id", id),
+				zap.Int("status-code", resp.StatusCode))
+			err = errs.ErrSendRequest.FastGenByArgs()
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Warn("failed to finish merging keyspace group",
-			zap.Uint32("keyspace-group-id", id),
-			zap.Int("status-code", resp.StatusCode))
-		return errs.ErrSendRequest.FastGenByArgs()
+
+	kgm.Lock()
+	delete(kgm.finishingMerges, id)
+	if err == nil {
+		kgm.metrics.finishMergeSendDuration.Observe(time.Since(startRequest).Seconds())
+		// Pre-update the merge target keyspace group's merge state in memory.
+		// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
+		cur := kgm.kgs[id]
+		if cur != nil && cur.IsMergeTarget() {
+			newTargetGroup := *cur
+			newTargetGroup.MergeState = nil
+			kgm.kgs[id] = &newTargetGroup
+		}
+		kgm.metrics.finishMergeDuration.Observe(time.Since(start).Seconds())
 	}
-	kgm.metrics.finishMergeSendDuration.Observe(time.Since(startRequest).Seconds())
-	// Pre-update the merge target keyspace group's merge state in memory.
-	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
-	// For now, we only have scenarios to update split state/merge state, and the other fields are always
-	// loaded from etcd without any modification, so we can simply copy the group and replace the state.
-	newTargetGroup := *mergeTarget
-	newTargetGroup.MergeState = nil
-	kgm.kgs[id] = &newTargetGroup
-	kgm.metrics.finishMergeDuration.Observe(time.Since(start).Seconds())
-	return nil
+	kgm.Unlock()
+
+	return err
 }
 
 // mergingChecker is used to check if the keyspace group is in merge state, and if so, it will
