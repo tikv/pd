@@ -16,6 +16,7 @@ package handlers
 
 import (
 	"encoding/json"
+	goerrors "errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -308,6 +309,10 @@ func LoadAllKeyspaces(c *gin.Context) {
 // which will both be set to "" if value type is string during binding.
 type UpdateConfigParams struct {
 	Config map[string]*string `json:"config"`
+	// Preconditions specifies prerequisites for updating config, using a JSON-merge-patch-like encoding:
+	// - key -> null means the key must be absent.
+	// - key -> "value" means the key must exist and equal "value".
+	Preconditions map[string]*string `json:"preconditions,omitempty"`
 }
 
 // UpdateKeyspaceConfig updates target keyspace's config.
@@ -321,6 +326,7 @@ type UpdateConfigParams struct {
 //	@Produce	json
 //	@Success	200	{object}	KeyspaceMeta
 //	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	409	{string}	string	"The update conflicts or preconditions are not met."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //
 // Router /keyspaces/{name}/config [patch]
@@ -350,8 +356,16 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 		}
 	}
 
-	meta, err := manager.UpdateKeyspaceConfig(name, mutations)
+	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(name, mutations, configParams.Preconditions)
 	if err != nil {
+		if goerrors.Is(err, errs.ErrKeyspaceConfigPreconditionFailed) {
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			return
+		}
+		if goerrors.Is(err, errs.ErrEtcdTxnConflict) {
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

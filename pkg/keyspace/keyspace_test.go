@@ -460,6 +460,85 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	checkMutations(re, nil, updated.Config, mutations)
 }
 
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigWithPreconditions() {
+	re := suite.Require()
+	manager := suite.manager
+
+	ksName := "precond_test"
+	_, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       ksName,
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	currentKey := "current_file_id"
+	nextKey := "next_file_id"
+
+	// Expecting a missing key to exist should fail.
+	expectedMissing := "1"
+	_, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: currentKey, Value: expectedMissing},
+	}, map[string]*string{
+		currentKey: &expectedMissing,
+	})
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrKeyspaceConfigPreconditionFailed)
+
+	// 1) only set next_file_id if it doesn't exist already.
+	nextV1 := "1000"
+	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: nextKey, Value: nextV1},
+	}, map[string]*string{
+		nextKey: nil,
+	})
+	re.NoError(err)
+	re.Equal(nextV1, meta.Config[nextKey])
+
+	nextV2 := "2000"
+	_, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: nextKey, Value: nextV2},
+	}, map[string]*string{
+		nextKey: nil,
+	})
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrKeyspaceConfigPreconditionFailed)
+
+	// 2) Update current_file_id to the next_file_id (guarded by next_file_id == expected).
+	meta, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: currentKey, Value: nextV1},
+	}, map[string]*string{
+		nextKey: &nextV1,
+	})
+	re.NoError(err)
+	re.Equal(nextV1, meta.Config[currentKey])
+
+	// 3) Delete next_file_id if it matches my expected value.
+	wrongExpected := "999"
+	_, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpDel, Key: nextKey},
+	}, map[string]*string{
+		nextKey: &wrongExpected,
+	})
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrKeyspaceConfigPreconditionFailed)
+
+	meta, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpDel, Key: nextKey},
+	}, map[string]*string{
+		nextKey: &nextV1,
+	})
+	re.NoError(err)
+	re.NotContains(meta.GetConfig(), nextKey)
+
+	// Empty preconditions should behave like a normal update.
+	meta, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: currentKey, Value: "3000"},
+	}, map[string]*string{})
+	re.NoError(err)
+	re.Equal("3000", meta.Config[currentKey])
+}
+
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
 	manager := suite.manager
