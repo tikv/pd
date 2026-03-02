@@ -133,7 +133,7 @@ func (s *Service) FindGroupByKeyspaceID(
 	}
 
 	keyspaceID := request.GetKeyspaceId()
-	allocator, keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.GetKeyspaceGroupMetaByKeyspaceID(keyspaceID)
 	if request.GetModRevision() > modRevision {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),
@@ -151,14 +151,30 @@ func (s *Service) FindGroupByKeyspaceID(
 		}, nil
 	}
 
+	primaryAddr, err := s.keyspaceGroupManager.GetKeyspaceGroupPrimaryAddr(keyspaceGroupID)
+	if err != nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
+		}, nil
+	}
+
 	members := make([]*tsopb.KeyspaceGroupMember, 0, len(keyspaceGroup.Members))
+	primaryFound := false
 	for _, member := range keyspaceGroup.Members {
+		isPrimary := member.IsAddressEquivalent(primaryAddr)
+		if isPrimary {
+			primaryFound = true
+		}
 		members = append(members, &tsopb.KeyspaceGroupMember{
-			Address: member.Address,
-			// TODO: watch the keyspace groups' primary serving address changes
-			// to get the latest primary serving addresses of all keyspace groups.
-			IsPrimary: member.IsAddressEquivalent(allocator.GetPrimaryAddr()),
+			Address:   member.Address,
+			IsPrimary: isPrimary,
 		})
+	}
+	if !primaryFound {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: wrapErrorToHeader(
+				tsopb.ErrorType_UNKNOWN, errs.ErrKeyspaceGroupPrimaryNotFound.Error(), keyspaceGroupID),
+		}, nil
 	}
 
 	var splitState *tsopb.SplitState
