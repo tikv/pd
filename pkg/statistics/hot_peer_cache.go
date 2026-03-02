@@ -38,9 +38,6 @@ const (
 	HotThresholdRatio = 0.8
 
 	rollingWindowsSize = 5
-	// It is used to moving average CPU usage,
-	// and the window size is larger than other dimensions to make the CPU usage more stable.
-	cpuRollingWindowsSize = 9
 
 	// HotRegionReportMinInterval is used for the simulator and test
 	HotRegionReportMinInterval = 3
@@ -500,11 +497,7 @@ func (f *HotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 	newItem.actionType = utils.Add
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
 	for i, k := range regionStats {
-		windowSize := rollingWindowsSize
-		if f.kind == utils.Read && k == utils.RegionReadCPU {
-			windowSize = cpuRollingWindowsSize
-		}
-		ds := newDimStat(f.interval(), windowSize)
+		ds := newDimStat(f.interval(), rollingWindowsSize)
 		ds.add(deltaLoads[k], interval)
 		if ds.isFull(f.interval()) {
 			ds.clearLastAverage()
