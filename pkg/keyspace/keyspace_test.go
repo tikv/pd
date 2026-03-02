@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -163,6 +164,75 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	// Create a keyspace with empty name must return error.
 	_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{Name: ""})
 	re.Error(err)
+}
+
+// getCreateKeyspaceStepCounts gathers metrics and returns the observation count per step
+// for the create_keyspace_step_duration_seconds histogram.
+func getCreateKeyspaceStepCounts(re *require.Assertions) map[string]uint64 {
+	metrics, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	const countMetricName = "pd_keyspace_create_keyspace_step_duration_seconds"
+	counts := make(map[string]uint64)
+	for _, mf := range metrics {
+		if mf.GetName() != countMetricName {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			var step string
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == "step" {
+					step = lp.GetValue()
+					break
+				}
+			}
+			if step != "" && m.GetHistogram() != nil {
+				counts[step] = m.GetHistogram().GetSampleCount()
+			}
+		}
+		break
+	}
+	return counts
+}
+
+// expectedCreateKeyspaceSteps returns the ordered list of step names that recordStep should record
+// for one successful CreateKeyspace. Must match metrics.go and keyspace.go CreateKeyspace flow.
+func expectedCreateKeyspaceSteps() []string {
+	return []string{
+		StepAllocateID,
+		StepGetConfig,
+		StepSaveKeyspaceMeta,
+		StepSplitRegion,
+		StepEnableKeyspace,
+		StepUpdateKeyspaceGroup,
+		StepTotal,
+	}
+}
+
+func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
+	re := suite.Require()
+	manager := suite.manager
+	expectedSteps := expectedCreateKeyspaceSteps()
+	re.Len(expectedSteps, 7, "expected 7 steps in create keyspace")
+
+	before := getCreateKeyspaceStepCounts(re)
+
+	req := &CreateKeyspaceRequest{
+		Name:       "test_ks_metrics",
+		CreateTime: time.Now().Unix(),
+		Config: map[string]string{
+			testConfig1: "100",
+			testConfig2: "200",
+		},
+	}
+	_, err := manager.CreateKeyspace(req)
+	re.NoError(err)
+
+	after := getCreateKeyspaceStepCounts(re)
+	for _, step := range expectedSteps {
+		re.Contains(after, step, "metric should have step %q", step)
+		re.GreaterOrEqual(after[step], before[step]+1,
+			"step %q: after (%d) should be >= before (%d) + 1", step, after[step], before[step])
+	}
 }
 
 func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
