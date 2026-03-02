@@ -119,23 +119,13 @@ func TestConfigServiceKeyspaceServiceLimitAndErrors(t *testing.T) {
 	handler := newTestHTTPHandler(store)
 
 	resp := doJSONRequest(re, handler, http.MethodPost,
-		"/resource-manager/api/v1/config/keyspace/service-limit/path_keyspace?keyspace_name=query_keyspace",
+		"/resource-manager/api/v1/config/keyspace/service-limit/path_keyspace",
 		map[string]float64{"service_limit": 12.5})
 	re.Equal(http.StatusOK, resp.Code)
 
 	resp = doJSONRequest(re, handler, http.MethodGet, "/resource-manager/api/v1/config/keyspace/service-limit/path_keyspace", nil)
 	re.Equal(http.StatusOK, resp.Code)
 	re.Equal(12.5, readServiceLimit(re, resp))
-
-	resp = doJSONRequest(re, handler, http.MethodPost,
-		"/resource-manager/api/v1/config/keyspace/service-limit?keyspace_name=query_keyspace",
-		map[string]float64{"service_limit": 7.5})
-	re.Equal(http.StatusOK, resp.Code)
-
-	resp = doJSONRequest(re, handler, http.MethodGet,
-		"/resource-manager/api/v1/config/keyspace/service-limit?keyspace_name=query_keyspace", nil)
-	re.Equal(http.StatusOK, resp.Code)
-	re.Equal(7.5, readServiceLimit(re, resp))
 
 	resp = doJSONRequest(re, handler, http.MethodPost,
 		"/resource-manager/api/v1/config/keyspace/service-limit/non-existing",
@@ -232,7 +222,6 @@ func newTestStore() *testStore {
 	keyspaceIDs := map[string]uint32{
 		"":               constant.NullKeyspaceID,
 		"path_keyspace":  1,
-		"query_keyspace": 2,
 		"not_created":    3,
 	}
 	validKeyspaceIDs := make(map[uint32]struct{}, len(keyspaceIDs)-1)

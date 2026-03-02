@@ -325,9 +325,5 @@ func (*ConfigService) respondStoreWriteError(c *gin.Context, err error) {
 }
 
 func getServiceLimitTargetKeyspace(c *gin.Context) string {
-	keyspaceName := c.Param("keyspace_name")
-	if keyspaceName != "" {
-		return keyspaceName
-	}
-	return c.Query("keyspace_name")
+	return c.Param("keyspace_name")
 }

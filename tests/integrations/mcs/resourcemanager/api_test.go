@@ -396,21 +396,6 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	re.Equal(http.StatusNotFound, statusCode)
 	re.Equal(0.0, limit)
 
-	// Verify query fallback works for keyspace service-limit APIs.
-	queryParams := url.Values{}
-	queryParams.Set("keyspace_name", "test_keyspace")
-	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodPost, "/config/keyspace/service-limit", queryParams,
-		apis.KeyspaceServiceLimitRequest{ServiceLimit: 3.5})
-	re.Equal(http.StatusOK, statusCode)
-	re.Equal("Success!", string(bodyBytes))
-
-	limitResp, statusCode := sendRequest(re, leaderAddr, http.MethodGet, "/config/keyspace/service-limit", queryParams, nil)
-	re.Equal(http.StatusOK, statusCode)
-	var limiter struct {
-		ServiceLimit float64 `json:"service_limit"`
-	}
-	re.NoError(json.NewDecoder(bytes.NewReader(limitResp)).Decode(&limiter))
-	re.Equal(3.5, limiter.ServiceLimit)
 }
 
 func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
