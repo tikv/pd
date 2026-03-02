@@ -257,7 +257,7 @@ func (s *ConfigService) SetControllerConfig(c *gin.Context) {
 
 // SetKeyspaceServiceLimit handles POST /config/keyspace/service-limit*.
 func (s *ConfigService) SetKeyspaceServiceLimit(c *gin.Context) {
-	keyspaceName := getServiceLimitTargetKeyspace(c)
+	keyspaceName := c.Param("keyspace_name")
 	keyspaceID, err := s.store.LookupKeyspaceID(c, keyspaceName)
 	if err != nil {
 		s.respondKeyspaceLookupError(c, err)
@@ -281,7 +281,7 @@ func (s *ConfigService) SetKeyspaceServiceLimit(c *gin.Context) {
 
 // GetKeyspaceServiceLimit handles GET /config/keyspace/service-limit*.
 func (s *ConfigService) GetKeyspaceServiceLimit(c *gin.Context) {
-	keyspaceName := getServiceLimitTargetKeyspace(c)
+	keyspaceName := c.Param("keyspace_name")
 	keyspaceID, err := s.store.LookupKeyspaceID(c, keyspaceName)
 	if err != nil {
 		s.respondKeyspaceLookupError(c, err)
@@ -322,8 +322,4 @@ func (*ConfigService) respondStoreWriteError(c *gin.Context, err error) {
 		return
 	}
 	c.String(http.StatusInternalServerError, err.Error())
-}
-
-func getServiceLimitTargetKeyspace(c *gin.Context) string {
-	return c.Param("keyspace_name")
 }
