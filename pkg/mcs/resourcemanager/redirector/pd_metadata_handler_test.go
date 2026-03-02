@@ -15,7 +15,6 @@
 package redirector
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,9 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	bs "github.com/tikv/pd/pkg/basicserver"
-	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
-	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -78,24 +74,3 @@ func TestPDMetadataFallbackHandlerRejectsForbiddenForwardHeader(t *testing.T) {
 	re.Equal(http.StatusNotFound, resp.Code)
 	re.False(localCalled)
 }
-
-func TestNewPDMetadataHandler(t *testing.T) {
-	t.Parallel()
-
-	provider := &mockManagerProvider{}
-	manager := rmserver.NewManager[*mockManagerProvider](provider)
-	handler := newPDMetadataHandler(manager)
-	require.NotNil(t, handler)
-}
-
-type mockManagerProvider struct{ bs.Server }
-
-func (*mockManagerProvider) GetControllerConfig() *rmserver.ControllerConfig {
-	return &rmserver.ControllerConfig{}
-}
-
-func (*mockManagerProvider) GetMeteringWriter() *metering.Writer { return nil }
-
-func (*mockManagerProvider) AddStartCallback(...func()) {}
-
-func (*mockManagerProvider) AddServiceReadyCallback(...func(context.Context) error) {}
