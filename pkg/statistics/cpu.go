@@ -21,7 +21,11 @@ import (
 )
 
 const (
-	grpcServerThreadPrefix      = "grpc-server"
+	// grpcServerThreadPrefix matches TiKV's gRPC server thread prefix:
+	// https://github.com/tikv/tikv/blob/master/components/tikv_util/src/thread_name_prefix.rs#L34
+	grpcServerThreadPrefix = "grpc-server"
+	// unifiedReadPoolThreadPrefix matches TiKV's unified-read thread prefix:
+	// https://github.com/tikv/tikv/blob/master/components/tikv_util/src/thread_name_prefix.rs#L60
 	unifiedReadPoolThreadPrefix = "unified-read"
 )
 
@@ -48,6 +52,7 @@ func StoreReadCPUUsage(cpuUsages []*pdpb.RecordPair, readQuery, totalQuery uint6
 		return unifiedReadCPU
 	}
 	grpcCPU := float64(StoreGRPCCPUUsage(cpuUsages))
+	// gRPC server CPU is shared by read/write requests, so we apportion it by readQuery/totalQuery.
 	return unifiedReadCPU + grpcCPU*float64(readQuery)/float64(totalQuery)
 }
 
