@@ -52,7 +52,7 @@ Fill every section of the PR template:
 
 2. **What is changed and how does it work?**
    - Describe the implementation approach.
-   - Fill the `commit-message` code block with a concise summary suitable for the squash-merge commit.
+   - Fill the `commit-message` code block with **only** a plain description of the code-logic changes that will land in the final squash-merged commit. Do not include a title line, PR number, `Signed-off-by`, or any other metadata — the PR title is automatically used as the commit subject after squash merge.
 
 3. **Check List**
    - **Tests**: Infer from the diff which test types apply (unit test if `_test.go` files changed, etc.).
