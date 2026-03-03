@@ -1524,7 +1524,7 @@ func (kgm *KeyspaceGroupManager) keyspaceGroupMetricsSyncer() {
 		kgm.RLock()
 		for groupID, kg := range kgm.kgs {
 			if kg != nil {
-				SetKeyspaceListLength(uint32(groupID), float64(len(kg.Keyspaces)))
+				getOrInitKeyspaceCountGauge(uint32(groupID)).Set(float64(len(kg.Keyspaces)))
 			}
 		}
 		kgm.RUnlock()

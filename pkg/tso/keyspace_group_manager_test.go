@@ -1150,7 +1150,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 }
 
 // TestKeyspaceListLengthMetric tests that tso_keyspace_group_keyspace_list_length can be set
-// (by TSO keyspaceGroupMetricsSyncer or SetKeyspaceListLength / getOrInitKeyspaceCountGauge(...).Set)
+// (by TSO keyspaceGroupMetricsSyncer or getOrInitKeyspaceCountGauge(...).Set)
 // and removed when the group is deleted (DeleteKeyspaceListLengthMetric on TSO service).
 func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 	re := suite.Require()
@@ -1162,7 +1162,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 		return out.GetGauge().GetValue()
 	}
 
-	// Test getOrInitKeyspaceCountGauge(...).Set / SetKeyspaceListLength (same underlying metric)
+	// Test getOrInitKeyspaceCountGauge(...).Set (keyspace list length metric)
 	getOrInitKeyspaceCountGauge(groupID).Set(3)
 	gauge, err := keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
 	re.NoError(err)
@@ -1180,7 +1180,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
 
 	// Test DeleteKeyspaceListLengthMetric: set group 2 via metrics, then delete, gather and ensure group 2 is not present
 	groupID2 := uint32(2)
-	SetKeyspaceListLength(groupID2, 10)
+	getOrInitKeyspaceCountGauge(groupID2).Set(10)
 	mfs, err := prometheus.DefaultGatherer.Gather()
 	re.NoError(err)
 	var foundGroup2Before bool
@@ -1256,7 +1256,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLen
 	kgm.kgs[groupID] = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{groupID}}
 	kgm.Unlock()
 
-	SetKeyspaceListLength(groupID, 10)
+	getOrInitKeyspaceCountGauge(groupID).Set(10)
 	mfs, err := prometheus.DefaultGatherer.Gather()
 	re.NoError(err)
 	re.True(metricExists(mfs, groupID), "metric for group 2 should exist before delete")

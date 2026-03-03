@@ -227,11 +227,6 @@ func getOrInitKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
 	return gauge
 }
 
-// SetKeyspaceListLength sets the keyspace list length metric for the given keyspace group.
-func SetKeyspaceListLength(groupID uint32, length float64) {
-	getOrInitKeyspaceCountGauge(groupID).Set(length)
-}
-
 // DeleteKeyspaceListLengthMetric removes the keyspace list length metric for the given keyspace group.
 func DeleteKeyspaceListLengthMetric(groupID uint32) {
 	keyspaceGroupKeyspaceCountGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
