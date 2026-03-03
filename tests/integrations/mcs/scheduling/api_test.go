@@ -681,6 +681,24 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	re.Equal(3, int(resp["count"].(float64)))
 	re.Len(resp["stores"].([]any), 3)
 	// Test /stores/{id}
+	// Wait until all stores (including the tombstone store 7) are available on
+	// the scheduling server before checking individual stores. The store metadata
+	// may not be immediately available via the scheduling server API due to the
+	// asynchronous nature of the store watcher propagation.
+	testutil.Eventually(re, func() bool {
+		for _, storeID := range []int{1, 6, 7} {
+			url := fmt.Sprintf("%s/scheduling/api/v1/stores/%d", scheServerAddr, storeID)
+			resp, err := tests.TestDialClient.Get(url)
+			if err != nil {
+				return false
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return false
+			}
+		}
+		return true
+	})
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/1", scheServerAddr)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
