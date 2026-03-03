@@ -33,41 +33,9 @@ Collect all information needed to fill the PR template. Run these in parallel:
 
 > **Load `.github/pull_request_template.md` and [references/pr-template.md](references/pr-template.md) now.**
 
-### PR Title
-
-Follow the PD convention: `pkg [, pkg2]: short description`
-
-- Derive package names from the changed file paths (e.g., `server/`, `pkg/schedule/` → `server, schedule`).
-- Use `*:` if changes span many packages.
-- Keep title under 70 characters.
-
-### PR Body
-
-Fill every section of the PR template:
-
-1. **What problem does this PR solve?**
-   - If the user provides issue numbers, ask whether each should be `close` or `ref`, then write the appropriate `Issue Number: close #xxx` or `Issue Number: ref #xxx` line.
-   - If issue numbers are unknown, ask the user first. Do not invent placeholders.
-   - Summarize the problem being solved based on commit messages and diff analysis.
-
-2. **What is changed and how does it work?**
-   - Describe the implementation approach.
-   - Fill the `commit-message` code block with **only** a plain description of the code-logic changes that will land in the final squash-merged commit. Do not include a title line, PR number, `Signed-off-by`, or any other metadata — the PR title is automatically used as the commit subject after squash merge.
-
-3. **Check List**
-   - **Tests**: Infer from the diff which test types apply (unit test if `_test.go` files changed, etc.).
-   - **Code changes**: Check if configuration, HTTP API, or persistent data changed.
-   - **Side effects**: Assess performance regression, complexity, and backward compatibility.
-   - **Related changes**: Leave blank unless obvious from context.
-   - **Omit empty subsections**: If Code changes, Side effects, or Related changes have no items, remove their heading entirely from the PR body.
-
-4. **Release note**
-   - If the change is a bug fix or new feature, write a user-facing release note.
-   - Otherwise keep `None.` in the release-note block.
-
-### Present to User
-
-Show the composed PR title and full body to the user for review **before** creating the PR. Ask if any section needs adjustment (especially the issue number).
+1. Following the filling guidelines in `references/pr-template.md`, compose the PR title and fill every section of the PR body template.
+2. Summarize the problem being solved based on commit messages and diff analysis.
+3. Show the composed PR title and full body to the user for review **before** creating the PR. Ask if any section needs adjustment (especially the issue number).
 
 ## Phase 3: Push and Create PR
 
