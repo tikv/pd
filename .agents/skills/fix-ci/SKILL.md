@@ -12,13 +12,9 @@ IMPORTANT: Never load full CI logs into context. Download to `/tmp/ci-logs/` fir
 
 # Reference Files
 
-Load on demand at the phase where they become relevant — do not preload.
-
 | File | Contents | Load When |
 |---|---|---|
-| [references/ci-architecture.md](references/ci-architecture.md) | CI workflows, test matrix, `pd-ut` usage, `gh` CLI commands, job→source mapping | **Phase 2** — to pick the right `gh` commands and understand which job failed |
-| [references/log-patterns.md](references/log-patterns.md) | Failure search markers, classification table, example log fragments | **Phase 3** — to locate and classify failures in downloaded log files |
-| [references/flaky-test-fixes.md](references/flaky-test-fixes.md) | Flaky diagnosis checklist, fix patterns, PD-specific test utilities | **Phase 4–6** — when the failure is identified as flaky/intermittent |
+| [references/ci-architecture.md](references/ci-architecture.md) | CI workflow file locations, `gh` CLI commands for fetching logs | **Phase 2** — to pick the right `gh` commands |
 
 # Workflow
 
@@ -42,23 +38,19 @@ Load on demand at the phase where they become relevant — do not preload.
 
 ## Phase 3: Analyze Failure Logs
 
-> **Load [references/log-patterns.md](references/log-patterns.md) now.**
-
 Read the log file **in segments** (never dump entire file into context):
 
-1. Search for failure markers (priority order from reference).
-2. Read ~100 lines around each marker.
-3. Identify failing test(s): full name (`TestXxx/subtest`) and package path.
-4. Classify the failure type using the reference table.
+1. Start from the end of the log — test summary lines cluster near the bottom.
+2. Search for failure markers (`--- FAIL:`, `WARNING: DATA RACE`, `panic:`, `fatal error:`).
+3. Read ~100 lines around each marker to get full context.
+4. Identify failing test(s): full name (`TestXxx/subtest`) and package path.
 
 ## Phase 4: Map Failure to Source Code
-
-> **If flaky/intermittent, load [references/flaky-test-fixes.md](references/flaky-test-fixes.md) now.**
 
 1. Locate the failing test with `Grep`, then `Read` the test file.
 2. Trace the failure: follow stack trace or assertion to the exact source line.
 3. Read surrounding code, related types, and concurrent operations.
-4. For flaky tests: walk through the diagnosis checklist from the reference.
+4. For flaky tests: read other tests in the same package to learn established patterns (e.g., PD's `testutil` helpers, retry utilities).
 
 ## Phase 5: Diagnose Root Cause
 
@@ -72,11 +64,11 @@ Present diagnosis to the user before fixing:
 
 ## Phase 6: Implement Fix
 
-Apply minimal fix following AGENTS.md conventions. For flaky tests, use patterns from [references/flaky-test-fixes.md](references/flaky-test-fixes.md).
+Apply minimal fix following CLAUDE.md conventions. Follow patterns from existing tests in the same package.
 
 ## Phase 7: Verify Fix
 
-Run `go test -run TestXxx -count=3 -race`, then `make check`. See AGENTS.md for exact commands and `make` targets.
+Run `go test -run TestXxx -count=3 -race`, then `make check`. See CLAUDE.md for exact commands and `make` targets.
 
 ## Phase 8: Report Results
 
@@ -89,7 +81,6 @@ Run `go test -run TestXxx -count=3 -race`, then `make check`. See AGENTS.md for 
 # Agent Constraints
 
 - **Never load full CI logs into context.** Download to `/tmp/ci-logs/`, read segments.
-- **Load reference files on demand.** Only at the phase that needs them.
 - **Present diagnosis before fixing.** User should approve the approach.
 - **Minimal fixes only.** No surrounding refactors or unrelated improvements.
 - **Verify before done.** Run failing test with `-count=3 -race` at minimum.
