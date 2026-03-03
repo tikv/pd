@@ -44,9 +44,28 @@ func (*mockConfigProvider) GetControllerConfig() *ControllerConfig { return &Con
 
 func (*mockConfigProvider) GetMeteringWriter() *metering.Writer { return nil }
 
+func (*mockConfigProvider) GetResourceGroupWriteRole() ResourceGroupWriteRole {
+	return ResourceGroupWriteRoleLegacyAll
+}
+
 func (*mockConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
+
+type mockRoleConfigProvider struct {
+	bs.Server
+	role ResourceGroupWriteRole
+}
+
+func (*mockRoleConfigProvider) GetControllerConfig() *ControllerConfig { return &ControllerConfig{} }
+
+func (*mockRoleConfigProvider) GetMeteringWriter() *metering.Writer { return nil }
+
+func (m *mockRoleConfigProvider) GetResourceGroupWriteRole() ResourceGroupWriteRole { return m.role }
+
+func (*mockRoleConfigProvider) AddStartCallback(...func()) {}
+
+func (*mockRoleConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
 
 func prepareManager() *Manager {
 	storage := storage.NewStorageWithMemoryBackend()
@@ -316,14 +335,14 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	re.Equal(0.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
 	// Test set the service limit of the keyspace.
-	m.SetKeyspaceServiceLimit(1, 100.0)
+	re.NoError(m.SetKeyspaceServiceLimit(1, 100.0))
 	limiter = m.GetKeyspaceServiceLimiter(1)
 	re.Equal(100.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens) // When setting from 0 to positive, available tokens remain 0
 	// Test set the service limit of the non-existing keyspace.
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Nil(limiter)
-	m.SetKeyspaceServiceLimit(2, 100.0)
+	re.NoError(m.SetKeyspaceServiceLimit(2, 100.0))
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Equal(100.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
@@ -393,7 +412,7 @@ func TestResourceGroupPersistence(t *testing.T) {
 	err := m.AddResourceGroup(group)
 	re.NoError(err)
 	keyspaceID := ExtractKeyspaceID(group.KeyspaceId)
-	m.SetKeyspaceServiceLimit(keyspaceID, 100.0)
+	re.NoError(m.SetKeyspaceServiceLimit(keyspaceID, 100.0))
 
 	// Use the same storage to rebuild a manager.
 	storage := m.storage
@@ -422,4 +441,89 @@ func TestResourceGroupPersistence(t *testing.T) {
 	// Non-existing keyspace should have a nil limiter.
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Nil(limiter)
+}
+
+func TestManagerMetadataWriteRoleGates(t *testing.T) {
+	re := require.New(t)
+	m := NewManager[*mockRoleConfigProvider](&mockRoleConfigProvider{
+		role: ResourceGroupWriteRoleRMTokenOnly,
+	})
+	m.storage = storage.NewStorageWithMemoryBackend()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(m.Init(ctx))
+	re.Equal(ResourceGroupWriteRoleRMTokenOnly, m.GetWriteRole())
+
+	group := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
+		},
+	}
+	re.ErrorIs(m.AddResourceGroup(group), errMetadataWriteDisabled)
+	re.ErrorIs(m.ModifyResourceGroup(group), errMetadataWriteDisabled)
+	re.ErrorIs(m.DeleteResourceGroup(constant.NullKeyspaceID, group.Name), errMetadataWriteDisabled)
+	re.ErrorIs(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.0), errMetadataWriteDisabled)
+	re.ErrorIs(m.SetKeyspaceServiceLimit(constant.NullKeyspaceID, 1.0), errMetadataWriteDisabled)
+}
+
+func TestKeyspaceResourceGroupManagerWriteRoleGates(t *testing.T) {
+	re := require.New(t)
+	memStorage := storage.NewStorageWithMemoryBackend()
+	group := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
+		},
+	}
+
+	tokenOnlyKRGM := newKeyspaceResourceGroupManager(1, memStorage, ResourceGroupWriteRoleRMTokenOnly)
+	re.NoError(tokenOnlyKRGM.addResourceGroup(group))
+	modifiedGroup := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 200}},
+		},
+	}
+	re.ErrorIs(tokenOnlyKRGM.modifyResourceGroup(modifiedGroup), errMetadataWriteDisabled)
+	re.Equal(float64(100), tokenOnlyKRGM.getResourceGroup(group.GetName(), false).getFillRate())
+	re.ErrorIs(tokenOnlyKRGM.deleteResourceGroup(group.GetName()), errMetadataWriteDisabled)
+	re.NotNil(tokenOnlyKRGM.getResourceGroup(group.GetName(), false))
+
+	var tokenOnlySettingsCount int
+	re.NoError(memStorage.LoadResourceGroupSettings(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == tokenOnlyKRGM.keyspaceID && name == group.GetName() {
+			tokenOnlySettingsCount++
+		}
+	}))
+	var tokenOnlyStatesCount int
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == tokenOnlyKRGM.keyspaceID && name == group.GetName() {
+			tokenOnlyStatesCount++
+		}
+	}))
+	re.Equal(0, tokenOnlySettingsCount)
+	re.Equal(1, tokenOnlyStatesCount)
+
+	metaOnlyKRGM := newKeyspaceResourceGroupManager(2, memStorage, ResourceGroupWriteRolePDMetaOnly)
+	re.NoError(metaOnlyKRGM.addResourceGroup(group))
+	metaOnlyKRGM.persistResourceGroupRunningState()
+
+	var metaOnlySettingsCount int
+	re.NoError(memStorage.LoadResourceGroupSettings(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == metaOnlyKRGM.keyspaceID && name == group.GetName() {
+			metaOnlySettingsCount++
+		}
+	}))
+	var metaOnlyStatesCount int
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == metaOnlyKRGM.keyspaceID && name == group.GetName() {
+			metaOnlyStatesCount++
+		}
+	}))
+	re.Equal(1, metaOnlySettingsCount)
+	re.Equal(0, metaOnlyStatesCount)
 }

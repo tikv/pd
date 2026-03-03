@@ -54,6 +54,7 @@ type Manager struct {
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	srv              bs.Server
+	writeRole        ResourceGroupWriteRole
 	controllerConfig *ControllerConfig
 	krgms            map[uint32]*keyspaceResourceGroupManager
 	storage          interface {
@@ -82,11 +83,21 @@ type factoryProvider interface {
 	GetMeteringWriter() *metering.Writer
 }
 
+// writeRoleProvider is an optional provider used to configure the manager write role.
+type writeRoleProvider interface {
+	GetResourceGroupWriteRole() ResourceGroupWriteRole
+}
+
 // NewManager returns a new manager base on the given server,
 // which should implement the `FactoryProvider` interface.
 func NewManager[T factoryProvider](srv bs.Server) *Manager {
 	fp := srv.(T)
+	writeRole := ResourceGroupWriteRoleLegacyAll
+	if provider, ok := any(fp).(writeRoleProvider); ok {
+		writeRole = provider.GetResourceGroupWriteRole()
+	}
 	m := &Manager{
+		writeRole:             writeRole,
 		controllerConfig:      fp.GetControllerConfig(),
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
@@ -130,6 +141,11 @@ func (m *Manager) GetStorage() endpoint.ResourceGroupStorage {
 	return m.storage
 }
 
+// GetWriteRole returns the manager write role.
+func (m *Manager) GetWriteRole() ResourceGroupWriteRole {
+	return m.writeRole
+}
+
 // GetKeyspaceServiceLimiter returns the service limit of the keyspace.
 func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
@@ -140,16 +156,20 @@ func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
 }
 
 // SetKeyspaceServiceLimit sets the service limit of the keyspace.
-func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float64) {
+func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float64) error {
+	if !m.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
 	// If the keyspace is not found, create a new keyspace resource group manager.
 	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimit(serviceLimit)
+	return nil
 }
 
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
 	krgm, ok := m.krgms[keyspaceID]
 	if !ok {
-		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage)
+		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
 		m.krgms[keyspaceID] = krgm
 	}
 	m.Unlock()
@@ -193,8 +213,10 @@ func (m *Manager) Init(ctx context.Context) error {
 	}
 
 	// re-save the config to make sure the config has been persisted.
-	if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
-		return err
+	if m.writeRole.AllowsMetadataWrite() {
+		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+			return err
+		}
 	}
 
 	// Load keyspace resource groups from the storage.
@@ -205,13 +227,16 @@ func (m *Manager) Init(ctx context.Context) error {
 	// This context is derived from the leader/primary context, it will be canceled
 	// from the outside loop when the leader/primary step down.
 	ctx, m.cancel = context.WithCancel(ctx)
-	m.wg.Add(2)
+	m.wg.Add(1)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
-	go func() {
-		defer logutil.LogPanic()
-		m.persistLoop(ctx)
-	}()
+	if m.writeRole.AllowsStateWrite() {
+		m.wg.Add(1)
+		go func() {
+			defer logutil.LogPanic()
+			m.persistLoop(ctx)
+		}()
+	}
 	// TODO: Add a goroutine to loadKeyspaceResourceGroups periodically to avoid
 	// the resource group exists gap between PD server and resource manager service
 	// during redirection.
@@ -255,7 +280,7 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.initReserved()
 	// Load service limits from the storage after all resource groups are loaded.
 	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimit(serviceLimit)
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	})
 }
 
@@ -270,6 +295,9 @@ func (m *Manager) initReserved() {
 
 // UpdateControllerConfigItem updates the controller config item.
 func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
+	if !m.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
 	kp := strings.Split(key, ".")
 	if len(kp) == 0 {
 		return errors.Errorf("invalid key %s", key)
@@ -313,6 +341,9 @@ func (m *Manager) GetControllerConfig() *ControllerConfig {
 // NOTE: AddResourceGroup should also be idempotent because tidb depends
 // on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	if !m.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
 	// If the keyspace is not initialized, it means this is the first resource group created for this keyspace,
 	// so we need to initialize the default resource group for the keyspace as well.
@@ -325,6 +356,9 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 
 // ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	if !m.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
 	if err != nil {
@@ -335,6 +369,9 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
+	if !m.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
 	// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {

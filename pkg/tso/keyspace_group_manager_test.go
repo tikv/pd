@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -1147,6 +1149,124 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	wg.Wait()
 }
 
+// TestKeyspaceListLengthMetric tests that tso_keyspace_group_keyspace_list_length can be set
+// (by TSO keyspaceGroupMetricsSyncer or getOrInitKeyspaceCountGauge(...).Set)
+// and removed when the group is deleted (DeleteKeyspaceListLengthMetric on TSO service).
+func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
+	re := suite.Require()
+	groupID := uint32(1)
+
+	getGaugeValue := func(g prometheus.Gauge) float64 {
+		var out dto.Metric
+		re.NoError(g.(prometheus.Metric).Write(&out))
+		return out.GetGauge().GetValue()
+	}
+
+	// Test getOrInitKeyspaceCountGauge(...).Set (keyspace list length metric)
+	getOrInitKeyspaceCountGauge(groupID).Set(3)
+	gauge, err := keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(3.0, getGaugeValue(gauge))
+
+	getOrInitKeyspaceCountGauge(groupID).Set(5)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(5.0, getGaugeValue(gauge))
+
+	getOrInitKeyspaceCountGauge(groupID).Set(0)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(0.0, getGaugeValue(gauge))
+
+	// Test DeleteKeyspaceListLengthMetric: set group 2 via metrics, then delete, gather and ensure group 2 is not present
+	groupID2 := uint32(2)
+	getOrInitKeyspaceCountGauge(groupID2).Set(10)
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	var foundGroup2Before bool
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						foundGroup2Before = true
+						re.Equal(10.0, m.GetGauge().GetValue())
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+	re.True(foundGroup2Before, "metric for group 2 should exist before delete")
+
+	DeleteKeyspaceListLengthMetric(groupID2)
+	mfs, err = prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						re.Fail("metric for group 2 should be removed after DeleteKeyspaceListLengthMetric")
+					}
+				}
+			}
+			break
+		}
+	}
+}
+
+// TestDeleteKeyspaceGroupClearsListLengthMetric verifies that the delete flow
+// (deleteKeyspaceGroup) triggers DeleteKeyspaceListLengthMetric so the keyspace-list-length metric
+// is removed. The test calls deleteKeyspaceGroup only; it does not call DeleteKeyspaceListLengthMetric
+// directly. The merge path (mergingChecker calls DeleteKeyspaceListLengthMetric for mergeList after
+// finishMergeKeyspaceGroup) is a separate code path and is covered by integration tests
+// (e.g. tests/integrations/mcs/tso TestTSOKeyspaceGroupMerge).
+func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLengthMetric() {
+	re := suite.Require()
+	metricName := "tso_keyspace_group_keyspace_list_length"
+
+	metricExists := func(mfs []*dto.MetricFamily, groupID uint32) bool {
+		groupStr := strconv.FormatUint(uint64(groupID), 10)
+		for _, mf := range mfs {
+			if mf.GetName() != metricName {
+				continue
+			}
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == groupStr {
+						return true
+					}
+				}
+			}
+			break
+		}
+		return false
+	}
+
+	// Delete path: deleteKeyspaceGroup must trigger DeleteKeyspaceListLengthMetric (no direct call in test).
+	kgm := &KeyspaceGroupManager{
+		state:   state{},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
+	groupID := uint32(2)
+	kgm.Lock()
+	kgm.kgs[groupID] = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{groupID}}
+	kgm.Unlock()
+
+	getOrInitKeyspaceCountGauge(groupID).Set(10)
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	re.True(metricExists(mfs, groupID), "metric for group 2 should exist before delete")
+
+	kgm.deleteKeyspaceGroup(groupID)
+	mfs, err = prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	re.False(metricExists(mfs, groupID), "deleteKeyspaceGroup should trigger DeleteKeyspaceListLengthMetric and remove metric")
+}
+
 // Register TSO server.
 func (suite *keyspaceGroupManagerTestSuite) registerTSOServer(
 	re *require.Assertions, svcAddr string, cfg *TestServiceConfig,
@@ -1213,4 +1333,106 @@ func waitForPrimariesServing(
 		}
 		return true
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
+	re := suite.Require()
+	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
+	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
+	re.NoError(err)
+	clusterIDStr := strconv.FormatUint(clusterID, 10)
+	keypath.SetClusterID(clusterID)
+
+	electionNamePrefix := "tso-server-" + clusterIDStr
+	groupID := uint32(1)
+
+	kgm := NewKeyspaceGroupManager(
+		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix, suite.cfg)
+	defer kgm.Close()
+	re.NoError(kgm.Initialize())
+
+	// case 1 : watch resign node->rejoin node-> another node restart
+
+	// define checkFn function to verify keyspace lookup table state
+	index := 1
+	checkFn := func(address string, exist bool) {
+		// Create a KeyspaceGroup for testing, including keyspaces [1, 2, 3, 10, 6]
+		// The member address is set to the passed-in address parameter
+		newGroup := &endpoint.KeyspaceGroup{
+			ID:        groupID,
+			Keyspaces: []uint32{1, 2, 3, 10, 6},
+			Members:   []endpoint.KeyspaceGroupMember{{Address: address, Priority: 1}},
+		}
+		// Call updateKeyspaceGroup to update keyspaceLookupTable
+		kgm.updateKeyspaceGroup(newGroup)
+		// check keyspace 6 whether exist in global lookup table (RLock to avoid data race with background watchers)
+		kgm.RLock()
+		for _, id := range []uint32{6} {
+			groupID1, ok := kgm.keyspaceLookupTable[id]
+			debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, address, id)
+			if exist {
+				re.True(ok, debug)
+				re.Equal(groupID, groupID1, debug)
+			} else {
+				re.False(ok, debug)
+			}
+		}
+		kgm.RUnlock()
+		index++
+	}
+
+	// watch resign node
+	checkFn("", true)
+
+	// watch rejoin node
+	checkFn(kgm.cfg.GetAdvertiseListenAddr(), true)
+
+	// watch another tso restart
+	checkFn(kgm.cfg.GetAdvertiseListenAddr(), true)
+
+	// case 2 : watch new keyspace added
+	newGroup := &endpoint.KeyspaceGroup{
+		ID:        groupID,
+		Keyspaces: []uint32{1, 2, 3, 10, 6, 11}, // keyspace 11 added
+		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.cfg.GetAdvertiseListenAddr(), Priority: 1}},
+	}
+	kgm.updateKeyspaceGroup(newGroup)
+	// verify keyspaces 6, 10, and 11 exist in the global lookup table (RLock to avoid data race with background watchers)
+	kgm.RLock()
+	for _, id := range []uint32{6, 10, 11} {
+		groupID1, ok := kgm.keyspaceLookupTable[id]
+		debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, kgm.cfg.GetAdvertiseListenAddr(), id)
+		re.True(ok, debug)
+		re.Equal(groupID, groupID1, debug)
+	}
+	kgm.RUnlock()
+	index++
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
+	re := suite.Require()
+	groupID := uint32(1)
+	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
+	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
+	kgm := &KeyspaceGroupManager{
+		state: state{
+			keyspaceLookupTable: make(map[uint32]uint32),
+		},
+	}
+
+	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
+	for _, id := range []uint32{6, 10} {
+		groupID1, ok := kgm.keyspaceLookupTable[id]
+		re.True(ok)
+		re.Equal(groupID, groupID1)
+	}
+
+	oldGroup = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
+	newGroup = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
+	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
+	for _, id := range []uint32{6, 10} {
+		groupID1, ok := kgm.keyspaceLookupTable[id]
+		re.True(ok, id)
+		re.Equal(groupID, groupID1)
+	}
 }

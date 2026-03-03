@@ -78,8 +78,17 @@ func WithRUStats(op *GetResourceGroupOp) {
 	op.withRUStats = true
 }
 
-// resourceManagerClient gets the ResourceManager client of current PD leader.
-func (c *innerClient) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
+// resourceManagerWriteClient gets the ResourceManager client from current PD leader.
+func (c *innerClient) resourceManagerWriteClient() (rmpb.ResourceManagerClient, error) {
+	cc, err := c.getOrCreateGRPCConn()
+	if err != nil {
+		return nil, err
+	}
+	return rmpb.NewResourceManagerClient(cc), nil
+}
+
+// resourceManagerReadClient gets the ResourceManager client for read RPCs.
+func (c *innerClient) resourceManagerReadClient() (rmpb.ResourceManagerClient, error) {
 	if ds := c.getResourceManagerDiscovery(); ds != nil {
 		// If the discovery has not established the connection, using PD server connection.
 		if cc := ds.GetConn(); cc != nil {
@@ -93,9 +102,14 @@ func (c *innerClient) resourceManagerClient() (rmpb.ResourceManagerClient, error
 	return rmpb.NewResourceManagerClient(cc), nil
 }
 
+// resourceManagerTokenClient gets the ResourceManager client for token RPCs.
+func (c *innerClient) resourceManagerTokenClient() (rmpb.ResourceManagerClient, error) {
+	return c.resourceManagerReadClient()
+}
+
 // ListResourceGroups loads and returns all metadata of resource groups.
 func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerReadClient()
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +138,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 
 // GetResourceGroup implements the ResourceManagerClient interface.
 func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string, ops ...GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerReadClient()
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +177,7 @@ func (c *client) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.Resour
 }
 
 func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup, typ actionType) (string, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerWriteClient()
 	if err != nil {
 		return "", err
 	}
@@ -188,7 +202,6 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 	}
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
-		c.inner.resourceManagerErrorHandler(err)
 		return "", err
 	}
 	resErr := resp.GetError()
@@ -200,7 +213,7 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 
 // DeleteResourceGroup implements the ResourceManagerClient interface.
 func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
-	cc, err := c.inner.resourceManagerClient()
+	cc, err := c.inner.resourceManagerWriteClient()
 	if err != nil {
 		return "", err
 	}
@@ -213,7 +226,6 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
-		c.inner.resourceManagerErrorHandler(err)
 		return "", err
 	}
 	resErr := resp.GetError()
@@ -417,7 +429,7 @@ func (c *innerClient) tryResourceManagerConnect(ctx context.Context, connection 
 	ticker := time.NewTicker(constants.RetryInterval)
 	defer ticker.Stop()
 	for range constants.MaxRetryTimes {
-		cc, err := c.resourceManagerClient()
+		cc, err := c.resourceManagerTokenClient()
 		if err != nil {
 			continue
 		}

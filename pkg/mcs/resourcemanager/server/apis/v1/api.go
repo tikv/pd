@@ -357,6 +357,8 @@ type KeyspaceServiceLimitRequest struct {
 //	@Param		service_limit	body		object	true	"json params, keyspaceServiceLimitRequest"
 //	@Success	200				{string}	string	"Success!"
 //	@Failure	400				{string}	error
+//	@Failure	403				{string}	error
+//	@Failure	500				{string}	error
 //	@Router		/config/keyspace/service-limit/{keyspace_name} [post]
 func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 	keyspaceName := c.Param("keyspace_name")
@@ -375,7 +377,14 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit)
+	if err := s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit); err != nil {
+		if rmserver.IsMetadataWriteDisabledError(err) {
+			c.String(http.StatusForbidden, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
 	c.String(http.StatusOK, "Success!")
 }
 

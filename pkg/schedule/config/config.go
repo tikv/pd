@@ -368,7 +368,10 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
-	configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
+	if !meta.IsDefined("max-store-preparing-time") {
+		configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
+	}
+
 	if !meta.IsDefined("leader-schedule-limit") {
 		configutil.AdjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}

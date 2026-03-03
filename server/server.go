@@ -330,7 +330,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	return s, nil
 }
 
-func (s *Server) startEtcd(ctx context.Context) error {
+func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	newCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
 	defer cancel()
 
@@ -338,6 +338,34 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
+	cleanup := func() {
+		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths
+		// (e.g. when starting a removed member that can never become ready). Avoid
+		// blocking the caller (tests may wait for the start error) by stopping the
+		// server synchronously and closing the embedded etcd asynchronously.
+		if etcd.Server != nil {
+			etcd.Server.Stop()
+		}
+		go etcd.Close()
+		if s.client != nil {
+			if cerr := s.client.Close(); cerr != nil {
+				log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
+			}
+		}
+		if s.electionClient != nil {
+			if cerr := s.electionClient.Close(); cerr != nil {
+				log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
+			}
+		}
+		if s.httpClient != nil {
+			s.httpClient.CloseIdleConnections()
+		}
+	}
+	defer func() {
+		if retErr != nil {
+			cleanup()
+		}
+	}()
 
 	// Check cluster ID
 	urlMap, err := etcdtypes.NewURLsMap(s.cfg.InitialCluster)

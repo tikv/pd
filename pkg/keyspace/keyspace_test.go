@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -163,6 +164,75 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	// Create a keyspace with empty name must return error.
 	_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{Name: ""})
 	re.Error(err)
+}
+
+// getCreateKeyspaceStepCounts gathers metrics and returns the observation count per step
+// for the create_keyspace_step_duration_seconds histogram.
+func getCreateKeyspaceStepCounts(re *require.Assertions) map[string]uint64 {
+	metrics, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	const countMetricName = "pd_keyspace_create_keyspace_step_duration_seconds"
+	counts := make(map[string]uint64)
+	for _, mf := range metrics {
+		if mf.GetName() != countMetricName {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			var step string
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == "step" {
+					step = lp.GetValue()
+					break
+				}
+			}
+			if step != "" && m.GetHistogram() != nil {
+				counts[step] = m.GetHistogram().GetSampleCount()
+			}
+		}
+		break
+	}
+	return counts
+}
+
+// expectedCreateKeyspaceSteps returns the ordered list of step names that recordStep should record
+// for one successful CreateKeyspace. Must match metrics.go and keyspace.go CreateKeyspace flow.
+func expectedCreateKeyspaceSteps() []string {
+	return []string{
+		StepAllocateID,
+		StepGetConfig,
+		StepSaveKeyspaceMeta,
+		StepSplitRegion,
+		StepEnableKeyspace,
+		StepUpdateKeyspaceGroup,
+		StepTotal,
+	}
+}
+
+func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
+	re := suite.Require()
+	manager := suite.manager
+	expectedSteps := expectedCreateKeyspaceSteps()
+	re.Len(expectedSteps, 7, "expected 7 steps in create keyspace")
+
+	before := getCreateKeyspaceStepCounts(re)
+
+	req := &CreateKeyspaceRequest{
+		Name:       "test_ks_metrics",
+		CreateTime: time.Now().Unix(),
+		Config: map[string]string{
+			testConfig1: "100",
+			testConfig2: "200",
+		},
+	}
+	_, err := manager.CreateKeyspace(req)
+	re.NoError(err)
+
+	after := getCreateKeyspaceStepCounts(re)
+	for _, step := range expectedSteps {
+		re.Contains(after, step, "metric should have step %q", step)
+		re.GreaterOrEqual(after[step], before[step]+1,
+			"step %q: after (%d) should be >= before (%d) + 1", step, after[step], before[step])
+	}
 }
 
 func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
@@ -388,6 +458,85 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	delete(updated.Config, UserKindKey)
 	delete(updated.Config, GCManagementType)
 	checkMutations(re, nil, updated.Config, mutations)
+}
+
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigWithPreconditions() {
+	re := suite.Require()
+	manager := suite.manager
+
+	ksName := "precond_test"
+	_, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       ksName,
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	currentKey := "current_file_id"
+	nextKey := "next_file_id"
+
+	// Expecting a missing key to exist should fail.
+	expectedMissing := "1"
+	_, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: currentKey, Value: expectedMissing},
+	}, map[string]*string{
+		currentKey: &expectedMissing,
+	})
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrKeyspaceConfigPreconditionFailed)
+
+	// 1) only set next_file_id if it doesn't exist already.
+	nextV1 := "1000"
+	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: nextKey, Value: nextV1},
+	}, map[string]*string{
+		nextKey: nil,
+	})
+	re.NoError(err)
+	re.Equal(nextV1, meta.Config[nextKey])
+
+	nextV2 := "2000"
+	_, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: nextKey, Value: nextV2},
+	}, map[string]*string{
+		nextKey: nil,
+	})
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrKeyspaceConfigPreconditionFailed)
+
+	// 2) Update current_file_id to the next_file_id (guarded by next_file_id == expected).
+	meta, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: currentKey, Value: nextV1},
+	}, map[string]*string{
+		nextKey: &nextV1,
+	})
+	re.NoError(err)
+	re.Equal(nextV1, meta.Config[currentKey])
+
+	// 3) Delete next_file_id if it matches my expected value.
+	wrongExpected := "999"
+	_, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpDel, Key: nextKey},
+	}, map[string]*string{
+		nextKey: &wrongExpected,
+	})
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrKeyspaceConfigPreconditionFailed)
+
+	meta, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpDel, Key: nextKey},
+	}, map[string]*string{
+		nextKey: &nextV1,
+	})
+	re.NoError(err)
+	re.NotContains(meta.GetConfig(), nextKey)
+
+	// Empty preconditions should behave like a normal update.
+	meta, err = manager.UpdateKeyspaceConfigWithPreconditions(ksName, []*Mutation{
+		{Op: OpPut, Key: currentKey, Value: "3000"},
+	}, map[string]*string{})
+	re.NoError(err)
+	re.Equal("3000", meta.Config[currentKey])
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {

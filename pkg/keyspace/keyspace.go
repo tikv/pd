@@ -227,6 +227,8 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
+	tracer := &createKeyspaceTracer{}
+	tracer.Begin()
 	// Validate purposed name's legality.
 	if err := validateName(request.Name); err != nil {
 		return nil, err
@@ -251,6 +253,10 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
+	tracer.SetKeyspace(newID, request.Name)
+	tracer.OnAllocateIDFinished()
+
+	// Get keyspace config.
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
@@ -273,6 +279,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
 	}
+	tracer.OnGetConfigFinished()
+
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
@@ -284,13 +292,15 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	}
 	err = manager.saveNewKeyspace(keyspace)
 	if err != nil {
-		log.Warn("[keyspace] failed to save keyspace before split",
+		log.Warn("[create-keyspace] failed to save keyspace before split",
 			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("name", keyspace.GetName()),
+			zap.String("keyspace-name", keyspace.GetName()),
 			zap.Error(err),
 		)
 		return nil, err
 	}
+	tracer.OnSaveKeyspaceMetaFinished()
+
 	// Split keyspace region.
 	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
 	if err != nil {
@@ -304,31 +314,39 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			return txn.Remove(metaPath)
 		})
 		if err2 != nil {
-			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
+			log.Warn("[create-keyspace] failed to remove pre-created keyspace after split failed",
 				zap.Uint32("keyspace-id", keyspace.GetId()),
-				zap.String("name", keyspace.GetName()),
+				zap.String("keyspace-name", keyspace.GetName()),
 				zap.Error(err2),
 			)
 		}
 		return nil, err
 	}
-	// enable the keyspace metadata after split.
+	tracer.OnSplitRegionFinished()
+
+	// Enable the keyspace metadata after split.
 	keyspace.State = keyspacepb.KeyspaceState_ENABLED
 	_, err = manager.UpdateKeyspaceStateByID(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
 	if err != nil {
-		log.Warn("[keyspace] failed to create keyspace",
+		log.Warn("[create-keyspace] failed to create keyspace",
 			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("name", keyspace.GetName()),
+			zap.String("keyspace-name", keyspace.GetName()),
 			zap.Error(err),
 		)
 		return nil, err
 	}
+	tracer.OnEnableKeyspaceFinished()
+
+	// Update keyspace group.
 	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
-	log.Info("[keyspace] keyspace created",
+	tracer.OnUpdateKeyspaceGroupFinished()
+	tracer.OnCreateKeyspaceComplete()
+
+	log.Info("[create-keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
-		zap.String("name", keyspace.GetName()),
+		zap.String("keyspace-name", keyspace.GetName()),
 	)
 	return keyspace, nil
 }
@@ -645,6 +663,62 @@ const (
 // UpdateKeyspaceConfig changes target keyspace's config in the order specified in mutations.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
+	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+		return applyKeyspaceConfigMutations(meta.Config, mutations)
+	})
+}
+
+// UpdateKeyspaceConfigWithPreconditions changes target keyspace's config in the order specified in mutations if the
+// given preconditions are satisfied.
+// Preconditions use a JSON-merge-patch-like encoding:
+// - key -> null means the key must be absent.
+// - key -> "value" means the key must exist and equal "value".
+func (manager *Manager) UpdateKeyspaceConfigWithPreconditions(name string, mutations []*Mutation, preconditions map[string]*string) (*keyspacepb.KeyspaceMeta, error) {
+	if len(preconditions) == 0 {
+		return manager.UpdateKeyspaceConfig(name, mutations)
+	}
+	return manager.updateKeyspaceConfigTxn(name, func(meta *keyspacepb.KeyspaceMeta) error {
+		if err := checkKeyspaceConfigPreconditions(meta.GetConfig(), preconditions); err != nil {
+			return err
+		}
+		return applyKeyspaceConfigMutations(meta.Config, mutations)
+	})
+}
+
+func checkKeyspaceConfigPreconditions(config map[string]string, preconditions map[string]*string) error {
+	for k, expected := range preconditions {
+		actual, exists := config[k]
+		if expected == nil {
+			if exists {
+				return errs.ErrKeyspaceConfigPreconditionFailed.FastGenByArgs(k + " must be absent")
+			}
+			continue
+		}
+		if !exists {
+			return errs.ErrKeyspaceConfigPreconditionFailed.FastGenByArgs(k + " does not exist")
+		}
+		if actual != *expected {
+			return errs.ErrKeyspaceConfigPreconditionFailed.FastGenByArgs("key=" + k + " expected=" + *expected + " actual=" + actual)
+		}
+	}
+	return nil
+}
+
+func applyKeyspaceConfigMutations(config map[string]string, mutations []*Mutation) error {
+	for _, mutation := range mutations {
+		switch mutation.Op {
+		case OpPut:
+			config[mutation.Key] = mutation.Value
+		case OpDel:
+			delete(config, mutation.Key)
+		default:
+			return errs.ErrIllegalOperation
+		}
+	}
+	return nil
+}
+
+func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *keyspacepb.KeyspaceMeta) error) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -677,16 +751,9 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		for k, v := range meta.GetConfig() {
 			oldConfig[k] = v
 		}
-		// Update keyspace config according to mutations.
-		for _, mutation := range mutations {
-			switch mutation.Op {
-			case OpPut:
-				meta.Config[mutation.Key] = mutation.Value
-			case OpDel:
-				delete(meta.Config, mutation.Key)
-			default:
-				return errs.ErrIllegalOperation
-			}
+		// Update keyspace config.
+		if err := update(meta); err != nil {
+			return err
 		}
 		newConfig := meta.GetConfig()
 		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
