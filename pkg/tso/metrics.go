@@ -232,4 +232,3 @@ func DeleteKeyspaceListLengthMetric(groupID uint32) {
 	keyspaceGroupKeyspaceCountGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
 	keyspaceGroupKeyspaceCountGaugeCache.Delete(groupID)
 }
-
