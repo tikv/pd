@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -1145,6 +1147,124 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	cancel()
 	wg.Wait()
+}
+
+// TestKeyspaceListLengthMetric tests that tso_keyspace_group_keyspace_list_length can be set
+// (by TSO keyspaceGroupMetricsSyncer or getOrInitKeyspaceCountGauge(...).Set)
+// and removed when the group is deleted (DeleteKeyspaceListLengthMetric on TSO service).
+func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
+	re := suite.Require()
+	groupID := uint32(1)
+
+	getGaugeValue := func(g prometheus.Gauge) float64 {
+		var out dto.Metric
+		re.NoError(g.(prometheus.Metric).Write(&out))
+		return out.GetGauge().GetValue()
+	}
+
+	// Test getOrInitKeyspaceCountGauge(...).Set (keyspace list length metric)
+	getOrInitKeyspaceCountGauge(groupID).Set(3)
+	gauge, err := keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(3.0, getGaugeValue(gauge))
+
+	getOrInitKeyspaceCountGauge(groupID).Set(5)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(5.0, getGaugeValue(gauge))
+
+	getOrInitKeyspaceCountGauge(groupID).Set(0)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(0.0, getGaugeValue(gauge))
+
+	// Test DeleteKeyspaceListLengthMetric: set group 2 via metrics, then delete, gather and ensure group 2 is not present
+	groupID2 := uint32(2)
+	getOrInitKeyspaceCountGauge(groupID2).Set(10)
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	var foundGroup2Before bool
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						foundGroup2Before = true
+						re.Equal(10.0, m.GetGauge().GetValue())
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+	re.True(foundGroup2Before, "metric for group 2 should exist before delete")
+
+	DeleteKeyspaceListLengthMetric(groupID2)
+	mfs, err = prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						re.Fail("metric for group 2 should be removed after DeleteKeyspaceListLengthMetric")
+					}
+				}
+			}
+			break
+		}
+	}
+}
+
+// TestDeleteKeyspaceGroupClearsListLengthMetric verifies that the delete flow
+// (deleteKeyspaceGroup) triggers DeleteKeyspaceListLengthMetric so the keyspace-list-length metric
+// is removed. The test calls deleteKeyspaceGroup only; it does not call DeleteKeyspaceListLengthMetric
+// directly. The merge path (mergingChecker calls DeleteKeyspaceListLengthMetric for mergeList after
+// finishMergeKeyspaceGroup) is a separate code path and is covered by integration tests
+// (e.g. tests/integrations/mcs/tso TestTSOKeyspaceGroupMerge).
+func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLengthMetric() {
+	re := suite.Require()
+	metricName := "tso_keyspace_group_keyspace_list_length"
+
+	metricExists := func(mfs []*dto.MetricFamily, groupID uint32) bool {
+		groupStr := strconv.FormatUint(uint64(groupID), 10)
+		for _, mf := range mfs {
+			if mf.GetName() != metricName {
+				continue
+			}
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == groupStr {
+						return true
+					}
+				}
+			}
+			break
+		}
+		return false
+	}
+
+	// Delete path: deleteKeyspaceGroup must trigger DeleteKeyspaceListLengthMetric (no direct call in test).
+	kgm := &KeyspaceGroupManager{
+		state:   state{},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
+	groupID := uint32(2)
+	kgm.Lock()
+	kgm.kgs[groupID] = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{groupID}}
+	kgm.Unlock()
+
+	getOrInitKeyspaceCountGauge(groupID).Set(10)
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	re.True(metricExists(mfs, groupID), "metric for group 2 should exist before delete")
+
+	kgm.deleteKeyspaceGroup(groupID)
+	mfs, err = prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	re.False(metricExists(mfs, groupID), "deleteKeyspaceGroup should trigger DeleteKeyspaceListLengthMetric and remove metric")
 }
 
 // Register TSO server.

@@ -341,7 +341,7 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 // saveKeyspaceGroups will try to save the given keyspace groups into the storage.
 // If any keyspace group already exists and `overwrite` is false, it will return ErrKeyspaceGroupExists.
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup, overwrite bool) error {
-	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for _, keyspaceGroup := range keyspaceGroups {
 			// Check if keyspace group has already existed.
 			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
@@ -370,6 +370,7 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 		}
 		return nil
 	})
+	return err
 }
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
