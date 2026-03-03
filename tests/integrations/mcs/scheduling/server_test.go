@@ -304,8 +304,9 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
-		re.NotNil(suite.pdLeader.GetServer())
-		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
+		if suite.pdLeader.GetServer() == nil || suite.pdLeader.GetServer().GetRaftCluster() == nil {
+			return false
+		}
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
@@ -335,7 +336,15 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs.
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 	// Disable scheduling service fallback and stop scheduling server. PD won't execute scheduling jobs again.
 	conf.EnableSchedulingFallback = false
