@@ -166,6 +166,7 @@ func (s *Service) ModifyResourceGroup(_ context.Context, req *rmpb.PutResourceGr
 
 // AcquireTokenBuckets implements ResourceManagerServer.AcquireTokenBuckets.
 func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBucketsServer) error {
+	stream = newAcquireTokenBucketsMetricsStream(stream)
 	for {
 		select {
 		case <-s.ctx.Done():
