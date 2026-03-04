@@ -151,10 +151,11 @@ func (s *hotRegionStorageTestSuite) checkHotRegionStorage(cluster *tests.TestClu
 	next, err = iter.Next()
 	re.NoError(err)
 	re.Nil(next)
-	iter = hotRegionStorage.NewIterator([]string{utils.Read.String()}, startTime*1000, time.Now().UnixMilli())
-	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
+	testutil.Eventually(re, func() bool { // wait for the read hot region to be written to the storage
+		iter = hotRegionStorage.NewIterator([]string{utils.Read.String()}, startTime*1000, time.Now().UnixMilli())
+		next, err = iter.Next()
+		return err == nil && next != nil
+	})
 	re.Equal(uint64(3), next.RegionID)
 	re.Equal(uint64(1), next.StoreID)
 	re.Equal(utils.Read.String(), next.HotRegionType)
