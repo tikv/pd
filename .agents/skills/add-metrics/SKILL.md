@@ -29,7 +29,7 @@ Before adding or changing metrics, ensure:
 
 ### 2. Hot path: consider background aggregation
 
-If the metric is on a **high-frequency request path**, consider moving stats collection to a **background periodic task** instead of updating on every request. In-memory aggregation with periodic flush (or timer-driven gauge updates) keeps the request path fast.
+Remind developers to judge whether the **current path** is a hot path; if it is, suggest moving **metrics operations** to a **background (periodic) task** instead of updating on every request, so the request path stays fast.
 
 ### 3. Cover all related code paths and label lifecycle
 
