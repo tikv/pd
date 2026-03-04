@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -421,4 +423,173 @@ func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	}
 	checkKeyspace(constants.NullKeyspaceID)
 	checkKeyspace(1)
+}
+
+// TestIsAcquireTokenBucketsRPCError verifies that only RPC/transport errors
+// are treated as fallback-able; logical errors return false.
+func TestIsAcquireTokenBucketsRPCError(t *testing.T) {
+	re := require.New(t)
+
+	// RPC/transport errors -> true (use fallback)
+	re.True(isAcquireTokenBucketsRPCError(status.Error(codes.Unavailable, "unavailable")))
+	re.True(isAcquireTokenBucketsRPCError(status.Error(codes.DeadlineExceeded, "deadline")))
+	re.True(isAcquireTokenBucketsRPCError(status.Error(codes.Canceled, "canceled")))
+	re.True(isAcquireTokenBucketsRPCError(status.Error(codes.Internal, "internal")))
+	re.True(isAcquireTokenBucketsRPCError(status.Error(codes.ResourceExhausted, "exhausted")))
+	re.True(isAcquireTokenBucketsRPCError(context.Canceled))
+
+	// Logical errors -> false (do not use fallback)
+	re.False(isAcquireTokenBucketsRPCError(status.Error(codes.NotFound, "not found")))
+	re.False(isAcquireTokenBucketsRPCError(status.Error(codes.InvalidArgument, "invalid")))
+	re.False(isAcquireTokenBucketsRPCError(status.Error(codes.FailedPrecondition, "failed")))
+	re.False(isAcquireTokenBucketsRPCError(status.Error(codes.PermissionDenied, "denied")))
+	re.False(isAcquireTokenBucketsRPCError(status.Error(codes.Unknown, "unknown")))
+
+	// Nil and non-gRPC errors
+	re.False(isAcquireTokenBucketsRPCError(nil))
+	re.False(isAcquireTokenBucketsRPCError(errors.New("plain error")))
+}
+
+// TestBuildDegradedTokenBucketResponses verifies the shape and nil-handling of
+// the degraded fallback response builder.
+func TestBuildDegradedTokenBucketResponses(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	degradedSettings := &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   100,
+				BurstLimit: 200,
+			},
+		},
+	}
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, WithDegradedRUSettings(degradedSettings))
+	re.NoError(err)
+
+	requests := []*rmpb.TokenBucketRequest{
+		{ResourceGroupName: "rg1"},
+		{ResourceGroupName: "rg2"},
+	}
+
+	// Nil degraded settings -> nil response
+	re.Nil(controller.buildDegradedTokenBucketResponses(requests, nil))
+
+	// Valid settings -> one response per request with correct settings
+	resp := controller.buildDegradedTokenBucketResponses(requests, degradedSettings)
+	re.Len(resp, 2)
+	re.Equal("rg1", resp[0].ResourceGroupName)
+	re.Len(resp[0].GrantedRUTokens, 1)
+	re.Equal(uint64(100), resp[0].GrantedRUTokens[0].GrantedTokens.Settings.FillRate)
+	re.Equal(int64(200), resp[0].GrantedRUTokens[0].GrantedTokens.Settings.BurstLimit)
+	re.Equal(int64(0), resp[0].GrantedRUTokens[0].TrickleTimeMs)
+	re.Equal("rg2", resp[1].ResourceGroupName)
+	re.Len(resp[1].GrantedRUTokens, 1)
+}
+
+// TestAcquireTokenBucketsRPCErrorUsesDegradedFallback verifies that when
+// AcquireTokenBuckets returns an RPC error (e.g. Unavailable) and the controller
+// has WithDegradedRUSettings, the RU path continues via fallback token response.
+func TestAcquireTokenBucketsRPCErrorUsesDegradedFallback(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	degradedSettings := &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   10000,
+				BurstLimit: 20000,
+			},
+		},
+	}
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, WithDegradedRUSettings(degradedSettings))
+	re.NoError(err)
+	controller.Start(ctx)
+
+	defaultRG := &rmpb.ResourceGroup{
+		Name: defaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultRG, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
+	re.NoError(err)
+	re.NotNil(gc)
+
+	// Simulate RM down: AcquireTokenBuckets returns Unavailable
+	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return(
+		([]*rmpb.TokenBucketResponse)(nil),
+		status.Error(codes.Unavailable, "resource manager unavailable"),
+	)
+
+	// Trigger low token so collectTokenBucketRequests -> sendTokenBucketRequests is called
+	counter := gc.run.requestUnitTokens
+	counter.limiter.mu.Lock()
+	counter.limiter.notify()
+	counter.limiter.mu.Unlock()
+
+	// Wait for main loop to receive fallback response and call handleTokenBucketResponse
+	time.Sleep(500 * time.Millisecond)
+
+	// OnRequestWait with a small request should succeed because fallback granted tokens
+	reqCtx, reqCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer reqCancel()
+	requestInfo := NewTestRequestInfo(false, 0, 1, AccessUnknown)
+	_, _, _, _, err = controller.OnRequestWait(reqCtx, defaultResourceGroupName, requestInfo)
+	re.NoError(err)
+}
+
+// TestAcquireTokenBucketsLogicalErrorNoFallback verifies that when
+// AcquireTokenBuckets returns a logical error (e.g. NotFound), no fallback is
+// used and the error path is taken (no tokens granted via fallback).
+func TestAcquireTokenBucketsLogicalErrorNoFallback(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	degradedSettings := &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{FillRate: 100, BurstLimit: 200},
+		},
+	}
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, WithDegradedRUSettings(degradedSettings))
+	re.NoError(err)
+	controller.Start(ctx)
+
+	defaultRG := &rmpb.ResourceGroup{
+		Name: defaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultRG, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
+	re.NoError(err)
+	re.NotNil(gc)
+
+	// Logical error: server returns NotFound (e.g. resource group not found)
+	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Return(
+		([]*rmpb.TokenBucketResponse)(nil),
+		status.Error(codes.NotFound, "resource group not found"),
+	)
+
+	counter := gc.run.requestUnitTokens
+	counter.limiter.mu.Lock()
+	counter.limiter.notify()
+	counter.limiter.mu.Unlock()
+
+	time.Sleep(500 * time.Millisecond)
+
+	// No fallback was applied, so requestInProgress should still be true (handleTokenBucketResponse was not called)
+	re.True(gc.run.requestInProgress)
 }
