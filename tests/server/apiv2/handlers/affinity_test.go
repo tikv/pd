@@ -131,15 +131,7 @@ func doCreateAffinityGroups(re *require.Assertions, serverAddr string, req *hand
 	return resp.StatusCode, errorMsg
 }
 
-// mustGetAllAffinityGroups gets all affinity groups and expects success.
-func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handlers.AffinityGroupsResponse {
-	var result handlers.AffinityGroupsResponse
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr), &result)
-	re.NoError(err)
-	return &result
-}
-
-// tryGetAllAffinityGroups is like mustGetAllAffinityGroups but returns an error
+// tryGetAllAffinityGroups gets all affinity groups, returning an error
 // instead of failing the test. Safe for use inside Eventually condition functions.
 func tryGetAllAffinityGroups(serverAddr string) (*handlers.AffinityGroupsResponse, error) {
 	var result handlers.AffinityGroupsResponse
