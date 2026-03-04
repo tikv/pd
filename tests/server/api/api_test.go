@@ -1321,10 +1321,7 @@ func TestPreparingProgress(t *testing.T) {
 				return false
 			}
 			output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-			if !strings.Contains(string(output), "no progress found for the given store ID") {
-				return false
-			}
-			return true
+			return strings.Contains(string(output), "no progress found for the given store ID")
 		})
 	}
 
@@ -1448,10 +1445,7 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 			return false
 		}
 		output, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return false
-		}
-		return true
+		return err == nil
 	})
 
 	return output

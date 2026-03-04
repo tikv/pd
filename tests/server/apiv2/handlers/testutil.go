@@ -221,13 +221,13 @@ func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer,
 	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
 		var err error
-		kg, err = tryLoadKeyspaceGroupByID(server, id)
+		kg, err = loadKeyspaceGroupByIDNoAssert(server, id)
 		return err == nil && kg != nil
 	})
 	return kg
 }
 
-func tryLoadKeyspaceGroupByID(server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, error) {
+func loadKeyspaceGroupByIDNoAssert(server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, error) {
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	if err != nil {
 		return nil, err

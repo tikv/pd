@@ -175,14 +175,6 @@ func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, sto
 	}
 }
 
-// mustGetAffinityGroup gets a specific affinity group and expects success.
-func mustGetAffinityGroup(re *require.Assertions, serverAddr, groupID string) *affinity.GroupState {
-	var result affinity.GroupState
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr, groupID), &result)
-	re.NoError(err)
-	return &result
-}
-
 // tryGetAffinityGroup is like mustGetAffinityGroup but returns an error
 // instead of failing the test. Safe for use inside Eventually condition functions.
 func tryGetAffinityGroup(serverAddr, groupID string) (*affinity.GroupState, error) {

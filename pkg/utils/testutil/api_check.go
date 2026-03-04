@@ -186,7 +186,7 @@ func TryReadGetJSON(client *http.Client, url string, data any) error {
 	if err != nil {
 		return err
 	}
-	return tryCheckResp(resp, http.StatusOK, data)
+	return tryCheckResp(resp, data)
 }
 
 // TryReadGetJSONWithBody performs a GET request with body and unmarshals the JSON response.
@@ -196,7 +196,7 @@ func TryReadGetJSONWithBody(client *http.Client, url string, input []byte, data 
 	if err != nil {
 		return err
 	}
-	return tryCheckResp(resp, http.StatusOK, data)
+	return tryCheckResp(resp, data)
 }
 
 // TryCheckGetJSON performs a GET request and checks the response status is OK.
@@ -206,7 +206,7 @@ func TryCheckGetJSON(client *http.Client, url string, data any) error {
 	if err != nil {
 		return err
 	}
-	return tryCheckResp(resp, http.StatusOK, data)
+	return tryCheckResp(resp, data)
 }
 
 // TryCheckPostJSON performs a POST request, checks status is OK and unmarshals response.
@@ -216,7 +216,7 @@ func TryCheckPostJSON(client *http.Client, url string, reqData []byte, data any)
 	if err != nil {
 		return err
 	}
-	return tryCheckResp(resp, http.StatusOK, data)
+	return tryCheckResp(resp, data)
 }
 
 // TryCheckPatchJSON performs a PATCH request, checks status is OK and unmarshals response.
@@ -226,17 +226,17 @@ func TryCheckPatchJSON(client *http.Client, url string, reqData []byte, data any
 	if err != nil {
 		return err
 	}
-	return tryCheckResp(resp, http.StatusOK, data)
+	return tryCheckResp(resp, data)
 }
 
-func tryCheckResp(resp *http.Response, expectedCode int, data any) error {
+func tryCheckResp(resp *http.Response, data any) error {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode != expectedCode {
-		return fmt.Errorf("expected status %d, got %d: %s", expectedCode, resp.StatusCode, string(body))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("expected status %d, got %d: %s", http.StatusOK, resp.StatusCode, string(body))
 	}
 	if data != nil {
 		return json.Unmarshal(body, data)

@@ -109,35 +109,8 @@ func TestMemberDelete(t *testing.T) {
 	}
 }
 
-func checkMemberList(re *require.Assertions, clientURL string, configs []*config.Config) error {
-	addr := clientURL + "/pd/api/v1/members"
-	res, err := tests.TestDialClient.Get(addr)
-	re.NoError(err)
-	defer res.Body.Close()
-	buf, err := io.ReadAll(res.Body)
-	re.NoError(err)
-	if res.StatusCode != http.StatusOK {
-		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
-	}
-	data := &pdpb.GetMembersResponse{}
-	err = json.Unmarshal(buf, &data)
-	re.NoError(err)
-	if len(data.GetMembers()) != len(configs) {
-		return errors.Errorf("member length not match, %v vs %v", len(data.GetMembers()), len(configs))
-	}
-	for _, member := range data.GetMembers() {
-		for _, cfg := range configs {
-			if member.GetName() == cfg.Name {
-				re.Equal([]string{cfg.ClientUrls}, member.ClientUrls)
-				re.Equal([]string{cfg.PeerUrls}, member.PeerUrls)
-			}
-		}
-	}
-	return nil
-}
-
-// tryCheckMemberList is like checkMemberList but returns errors instead of
-// using testify assertions. Safe for use inside Eventually condition functions.
+// tryCheckMemberList checks the member list via HTTP API and returns errors
+// instead of using testify assertions. Safe for use inside Eventually condition functions.
 func tryCheckMemberList(clientURL string, configs []*config.Config) error {
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := tests.TestDialClient.Get(addr)
