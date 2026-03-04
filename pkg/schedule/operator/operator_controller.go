@@ -900,6 +900,9 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInflue
 	influence := &OpInfluence{
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
+	if cluster == nil {
+		return influence
+	}
 	oc.operators.Range(
 		func(_, value any) bool {
 			op := value.(*Operator)
@@ -907,6 +910,9 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInflue
 				region := cluster.GetRegion(op.RegionID())
 				if region != nil {
 					for _, opt := range ops {
+						if opt == nil {
+							continue
+						}
 						if !opt(region) {
 							return true
 						}
