@@ -138,8 +138,9 @@ func checkStatus(re *require.Assertions, status string, url string) {
 	re.NoError(err)
 	re.Eventually(func() bool {
 		result := &schedulers.DiagnosticResult{}
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, url, result)
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, result); err != nil {
+			return false
+		}
 		return result.Status == status
 	}, time.Second, time.Millisecond*50)
 }

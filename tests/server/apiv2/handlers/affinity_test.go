@@ -82,8 +82,8 @@ func (suite *affinityHandlerTestSuite) TearDownTest() {
 		}
 
 		testutil.Eventually(re, func() bool {
-			listResp := mustGetAllAffinityGroups(re, leader.GetAddr())
-			return len(listResp.AffinityGroups) == 0
+			listResp, err := tryGetAllAffinityGroups(leader.GetAddr())
+			return err == nil && len(listResp.AffinityGroups) == 0
 		})
 	})
 }
@@ -139,6 +139,16 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	return &result
 }
 
+// tryGetAllAffinityGroups is like mustGetAllAffinityGroups but returns an error
+// instead of failing the test. Safe for use inside Eventually condition functions.
+func tryGetAllAffinityGroups(serverAddr string) (*handlers.AffinityGroupsResponse, error) {
+	var result handlers.AffinityGroupsResponse
+	if err := testutil.TryReadGetJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
 	tests.MustPutStore(re, cluster, store)
 
@@ -171,6 +181,16 @@ func mustGetAffinityGroup(re *require.Assertions, serverAddr, groupID string) *a
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr, groupID), &result)
 	re.NoError(err)
 	return &result
+}
+
+// tryGetAffinityGroup is like mustGetAffinityGroup but returns an error
+// instead of failing the test. Safe for use inside Eventually condition functions.
+func tryGetAffinityGroup(serverAddr, groupID string) (*affinity.GroupState, error) {
+	var result affinity.GroupState
+	if err := testutil.TryReadGetJSON(tests.TestDialClient, getAffinityGroupURL(serverAddr, groupID), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // doGetAffinityGroup gets a specific affinity group and returns status code and error message.
@@ -338,8 +358,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 
 		// Query all groups.
 		testutil.Eventually(re, func() bool {
-			listResp := mustGetAllAffinityGroups(re, serverAddr)
-			return len(listResp.AffinityGroups) == 2
+			listResp, err := tryGetAllAffinityGroups(serverAddr)
+			return err == nil && len(listResp.AffinityGroups) == 2
 		})
 
 		// Update peers for group-1.
@@ -378,8 +398,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupLifecycle() {
 
 		// Listing again should be empty.
 		testutil.Eventually(re, func() bool {
-			listResp := mustGetAllAffinityGroups(re, serverAddr)
-			return len(listResp.AffinityGroups) == 0
+			listResp, err := tryGetAllAffinityGroups(serverAddr)
+			return err == nil && len(listResp.AffinityGroups) == 0
 		})
 	})
 }
@@ -459,8 +479,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityRemoveOnlyPatch() {
 
 		// Verify range count cleared.
 		testutil.Eventually(re, func() bool {
-			state := mustGetAffinityGroup(re, serverAddr, "remove-only")
-			return state.RangeCount == 0
+			state, err := tryGetAffinityGroup(serverAddr, "remove-only")
+			return err == nil && state.RangeCount == 0
 		})
 	})
 }
@@ -591,8 +611,8 @@ func (suite *affinityHandlerTestSuite) TestAffinityHandlersErrors() {
 
 		// Verify existing group "ok" is not affected (state not polluted)
 		testutil.Eventually(re, func() bool {
-			groupState := mustGetAffinityGroup(re, serverAddr, "ok")
-			return groupState.RangeCount == 1
+			groupState, err := tryGetAffinityGroup(serverAddr, "ok")
+			return err == nil && groupState.RangeCount == 1
 		})
 
 		// Batch modify with empty operations.
@@ -1018,8 +1038,8 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyAddOnly() {
 
 		// Verify the group now has 2 ranges
 		testutil.Eventually(re, func() bool {
-			state := mustGetAffinityGroup(re, serverAddr, "add-only")
-			return state.RangeCount == 2
+			state, err := tryGetAffinityGroup(serverAddr, "add-only")
+			return err == nil && state.RangeCount == 2
 		})
 	})
 }
@@ -1103,8 +1123,9 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentGroup() {
 		// Verify baseline group is not affected (state not polluted)
 		var listResp *handlers.AffinityGroupsResponse
 		testutil.Eventually(re, func() bool {
-			listResp = mustGetAllAffinityGroups(re, serverAddr)
-			return len(listResp.AffinityGroups) == 1
+			var err error
+			listResp, err = tryGetAllAffinityGroups(serverAddr)
+			return err == nil && len(listResp.AffinityGroups) == 1
 		})
 		re.Equal(1, listResp.AffinityGroups["baseline"].RangeCount)
 	})
@@ -1158,7 +1179,11 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyOverlappingRanges() {
 		// Verify system state not polluted: both groups still have only 1 range each
 		var listResp *handlers.AffinityGroupsResponse
 		testutil.Eventually(re, func() bool {
-			listResp = mustGetAllAffinityGroups(re, serverAddr)
+			var err error
+			listResp, err = tryGetAllAffinityGroups(serverAddr)
+			if err != nil {
+				return false
+			}
 			g1, ok1 := listResp.AffinityGroups["group-1"]
 			g2, ok2 := listResp.AffinityGroups["group-2"]
 			return ok1 && ok2 && g1.RangeCount == 1 && g2.RangeCount == 1
@@ -1229,8 +1254,9 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteNonExistentGroup() {
 		// Verify baseline group is not affected (state not polluted)
 		var listResp *handlers.AffinityGroupsResponse
 		testutil.Eventually(re, func() bool {
-			listResp = mustGetAllAffinityGroups(re, serverAddr)
-			return len(listResp.AffinityGroups) == 1
+			var err error
+			listResp, err = tryGetAllAffinityGroups(serverAddr)
+			return err == nil && len(listResp.AffinityGroups) == 1
 		})
 		re.Contains(listResp.AffinityGroups, "existing")
 		re.Equal(1, listResp.AffinityGroups["existing"].RangeCount)
@@ -1265,8 +1291,8 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 
 		// Verify the original range is still intact (state not polluted)
 		testutil.Eventually(re, func() bool {
-			state := mustGetAffinityGroup(re, serverAddr, id)
-			return state.RangeCount == 1
+			state, err := tryGetAffinityGroup(serverAddr, id)
+			return err == nil && state.RangeCount == 1
 		})
 	})
 }

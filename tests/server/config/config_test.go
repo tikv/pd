@@ -110,8 +110,9 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	addr := fmt.Sprintf("%s/pd/api/v1/config", urlPrefix)
 	cfg := &config.Config{}
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, addr, cfg)
-		re.NoError(err)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, cfg) != nil {
+			return false
+		}
 		return cfg.PDServerCfg.DashboardAddress != "auto"
 	})
 
@@ -144,9 +145,10 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 
 	testutil.Eventually(re, func() bool {
 		newCfg := &config.Config{}
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, addr, newCfg)
-		re.NoError(err)
-		return suite.Equal(newCfg, cfg)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, newCfg) != nil {
+			return false
+		}
+		return reflect.DeepEqual(newCfg, cfg)
 	})
 	// the new way
 	l = map[string]any{
@@ -175,9 +177,10 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	cfg.ClusterVersion = *v
 	testutil.Eventually(re, func() bool {
 		newCfg1 := &config.Config{}
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, addr, newCfg1)
-		re.NoError(err)
-		return suite.Equal(cfg, newCfg1)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, newCfg1) != nil {
+			return false
+		}
+		return reflect.DeepEqual(cfg, newCfg1)
 	})
 
 	// revert this to avoid it affects TestConfigTTL
@@ -240,7 +243,9 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 
 	testutil.Eventually(re, func() bool {
 		scheduleConfig1 := &sc.ScheduleConfig{}
-		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, addr, scheduleConfig1))
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, scheduleConfig1) != nil {
+			return false
+		}
 		return reflect.DeepEqual(*scheduleConfig1, *scheduleConfig)
 	})
 }
@@ -282,8 +287,9 @@ func (suite *configTestSuite) checkConfigReplication(cluster *tests.TestCluster)
 
 	rc4 := &sc.ReplicationConfig{}
 	testutil.Eventually(re, func() bool {
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, addr, rc4)
-		re.NoError(err)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, rc4) != nil {
+			return false
+		}
 		return reflect.DeepEqual(*rc4, *rc)
 	})
 }

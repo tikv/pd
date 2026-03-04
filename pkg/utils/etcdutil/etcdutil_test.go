@@ -756,7 +756,9 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
 				b, err := os.ReadFile(fname)
-				re.NoError(err)
+				if err != nil {
+					return false
+				}
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
@@ -764,7 +766,9 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 		} else {
 			testutil.Eventually(re, func() bool {
 				b, err := os.ReadFile(fname)
-				re.NoError(err)
+				if err != nil {
+					return false
+				}
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})

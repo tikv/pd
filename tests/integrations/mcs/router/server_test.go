@@ -158,8 +158,7 @@ func (suite *serverTestSuite) TestStoreAPI() {
 		if err != nil {
 			return false
 		}
-		re.Equal(store1, store.GetId())
-		return true
+		return store.GetId() == store1
 	})
 	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
 	defer func() {
@@ -196,8 +195,7 @@ func (suite *serverTestSuite) TestRouterServiceDown() {
 		if err != nil {
 			return false
 		}
-		re.Equal(regionID, r1.Meta.Id)
-		return true
+		return r1.Meta.Id == regionID
 	})
 	suite.routerCleanup()
 	testutil.Eventually(suite.Require(), func() bool {
@@ -244,8 +242,7 @@ func (suite *serverTestSuite) checkRegionAPI(cli pd.Client) {
 		if err != nil {
 			return false
 		}
-		re.Equal(regionID, r1.Meta.Id)
-		return true
+		return r1.Meta.Id == regionID
 	})
 
 	// get region by key

@@ -140,9 +140,13 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var conf config.PDServerConfig
-		re.NoError(json.Unmarshal(output, &conf))
+		if json.Unmarshal(output, &conf) != nil {
+			return false
+		}
 		return conf.FlowRoundByDigit == origin
 	})
 
@@ -655,7 +659,9 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 	var group placement.RuleGroup
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", placement.DefaultGroupID)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return !strings.Contains(string(output), "404")
 	})
 	re.NoError(json.Unmarshal(output, &group), string(output))
@@ -676,8 +682,12 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 	var groups []placement.RuleGroup
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show")
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &groups))
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(output, &groups) != nil {
+			return false
+		}
 		return reflect.DeepEqual([]placement.RuleGroup{
 			{ID: placement.DefaultGroupID, Index: 42, Override: true},
 			{ID: "group2", Index: 100, Override: false},
@@ -693,7 +703,9 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 	// show again
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "404")
 	})
 
@@ -703,7 +715,9 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "404")
 	})
 }
@@ -841,10 +855,16 @@ func checkLoadRuleBundle(re *require.Assertions, pdAddr string, fname string, ex
 	cmd := ctl.GetRootCmd()
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		b, err := os.ReadFile(fname)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(b, &bundles))
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(b, &bundles) != nil {
+			return false
+		}
 		return len(bundles) == len(expectValues)
 	})
 	assertBundles(re, bundles, expectValues)
@@ -855,10 +875,16 @@ func checkLoadRule(re *require.Assertions, pdAddr string, fname string, expectVa
 	cmd := ctl.GetRootCmd()
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		b, err := os.ReadFile(fname)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(b, &rules))
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(b, &rules) != nil {
+			return false
+		}
 		return len(rules) == len(expectValues)
 	})
 	for i, v := range expectValues {
@@ -876,12 +902,16 @@ func checkShowRuleKey(re *require.Assertions, pdAddr string, expectValues [][2]s
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show"}
 		output, err := tests.ExecuteCommand(cmd, append(args, opts...)...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		err = json.Unmarshal(output, &rules)
 		if err == nil {
 			return len(rules) == len(expectValues)
 		}
-		re.NoError(json.Unmarshal(output, &fit))
+		if json.Unmarshal(output, &fit) != nil {
+			return false
+		}
 		return len(fit.RuleFits) != 0
 	})
 	if len(rules) != 0 {

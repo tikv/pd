@@ -358,9 +358,11 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
 	// new request anymore.
 	testutil.Eventually(s.re, func() bool {
-		return s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
-			s.re.Error(err)
-		}) != nil
+		var callbackErr error
+		processErr := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
+			callbackErr = err
+		})
+		return processErr != nil && callbackErr != nil
 	})
 }
 

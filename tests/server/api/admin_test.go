@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,20 +219,21 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		resp, err := apiutil.PostJSON(tests.TestDialClient, url, values)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer resp.Body.Close()
 		b, err := io.ReadAll(resp.Body)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		switch resp.StatusCode {
 		case http.StatusOK:
-			re.Contains(string(b), "Reset ts successfully.")
-			return true
+			return strings.Contains(string(b), "Reset ts successfully.")
 		case http.StatusServiceUnavailable:
 			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
 			return false
 		default:
-			re.FailNow("unexpected status code", resp.StatusCode)
 			return false
 		}
 	})

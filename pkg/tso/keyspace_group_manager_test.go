@@ -114,16 +114,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	// Check if the TSO key is created.
 	testutil.Eventually(re, func() bool {
 		ts, err := mgr.storage.LoadTimestamp(1)
-		re.NoError(err)
-		return ts != typeutil.ZeroTime
+		return err == nil && ts != typeutil.ZeroTime
 	})
 	// Delete keyspace group 1.
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupDeleteEvent(1)})
 	// Check if the TSO key is deleted.
 	testutil.Eventually(re, func() bool {
 		ts, err := mgr.storage.LoadTimestamp(1)
-		re.NoError(err)
-		return ts.Equal(typeutil.ZeroTime)
+		return err == nil && ts.Equal(typeutil.ZeroTime)
 	})
 	// Check if the keyspace group is deleted completely.
 	mgr.RLock()
@@ -322,8 +320,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestWatchAndDynamicallyApplyChanges(
 	// Eventually, this keyspace groups manager is expected to serve the following keyspace groups.
 	expectedAssignedGroups := []uint32{0, 1, 4}
 	testutil.Eventually(re, func() bool {
-		assignedGroups := collectAssignedKeyspaceGroupIDs(re, mgr)
-		return reflect.DeepEqual(expectedAssignedGroups, assignedGroups)
+		assignedGroups, ok := tryCollectAssignedKeyspaceGroupIDs(mgr)
+		return ok && reflect.DeepEqual(expectedAssignedGroups, assignedGroups)
 	})
 
 	// Verify the keyspace groups loaded.
@@ -368,8 +366,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitDefaultKeyspaceGroup() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, event.ksg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
-		return reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
+		assignedGroupIDs, ok := tryCollectAssignedKeyspaceGroupIDs(mgr)
+		return ok && reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
 	})
 	// Config keyspace group 0 in the storage and assigned to this host/pod/keyspace-group-manager.
 	// final result: [0]
@@ -378,8 +376,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitDefaultKeyspaceGroup() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, event.ksg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
-		return reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
+		assignedGroupIDs, ok := tryCollectAssignedKeyspaceGroupIDs(mgr)
+		return ok && reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
 	})
 	// Delete keyspace group 0. Every tso node/pod now should initialize keyspace group 0.
 	// final result: [0]
@@ -388,8 +386,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitDefaultKeyspaceGroup() {
 	err = deleteKeyspaceGroupInEtcd(suite.ctx, suite.etcdClient, event.ksg.ID)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
-		return reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
+		assignedGroupIDs, ok := tryCollectAssignedKeyspaceGroupIDs(mgr)
+		return ok && reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
 	})
 	// Config keyspace group 0 in the storage and assigned to this host/pod/keyspace-group-manager.
 	// final result: [0]
@@ -398,8 +396,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitDefaultKeyspaceGroup() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, event.ksg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
-		return reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
+		assignedGroupIDs, ok := tryCollectAssignedKeyspaceGroupIDs(mgr)
+		return ok && reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
 	})
 }
 
@@ -880,6 +878,14 @@ func addKeyspaceGroupAssignment(
 }
 
 func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupManager) []uint32 {
+	ids, ok := tryCollectAssignedKeyspaceGroupIDs(kgm)
+	re.True(ok, "inconsistent keyspace group state")
+	return ids
+}
+
+// tryCollectAssignedKeyspaceGroupIDs is like collectAssignedKeyspaceGroupIDs but returns
+// (nil, false) instead of using testify assertions on failure, making it safe to use inside Eventually.
+func tryCollectAssignedKeyspaceGroupIDs(kgm *KeyspaceGroupManager) ([]uint32, bool) {
 	kgm.RLock()
 	defer kgm.RUnlock()
 
@@ -887,14 +893,17 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 	for i := range kgm.kgs {
 		kg := kgm.kgs[i]
 		if kg == nil {
-			re.Nilf(kgm.allocators[i], "ksg is nil but allocator is not nil for id %d", i)
+			if kgm.allocators[i] != nil {
+				return nil, false
+			}
 		} else {
 			allocator := kgm.allocators[i]
 			if allocator == nil {
 				continue
 			}
-			re.Equal(i, int(allocator.keyspaceGroupID))
-			re.Equal(i, int(kg.ID))
+			if i != int(allocator.keyspaceGroupID) || i != int(kg.ID) {
+				return nil, false
+			}
 			for _, m := range kg.Members {
 				if m.IsAddressEquivalent(kgm.tsoServiceID.ServiceAddr) {
 					ids = append(ids, uint32(i))
@@ -904,7 +913,7 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 		}
 	}
 
-	return ids
+	return ids, true
 }
 
 func collectAllLoadedKeyspaceGroupIDs(kgm *KeyspaceGroupManager) []uint32 {
@@ -1031,8 +1040,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSplitUpdateRetry() {
 
 	// Verify the keyspace group assignment.
 	testutil.Eventually(re, func() bool {
-		assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
-		return reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
+		assignedGroupIDs, ok := tryCollectAssignedKeyspaceGroupIDs(mgr)
+		return ok && reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
 	})
 }
 

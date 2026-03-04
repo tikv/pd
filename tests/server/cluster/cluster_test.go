@@ -1748,7 +1748,9 @@ func checkStoreMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, ex
 func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
 	re.Eventually(func() bool {
 		ts2, err := rc.GetStorage().LoadMinResolvedTS()
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return expect == ts2
 	}, time.Second*10, time.Millisecond*50)
 }
@@ -2110,7 +2112,9 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 func checkLog(re *require.Assertions, fname, expect string) {
 	testutil.Eventually(re, func() bool {
 		b, err := os.ReadFile(fname)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		l := string(b)
 		return strings.Contains(l, expect)
 	})

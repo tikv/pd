@@ -850,7 +850,9 @@ func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *requir
 	// Force to update the members info.
 	testutil.Eventually(re, func() bool {
 		leader, err = client.GetLeader(ctx)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return newLeader == leader.GetName()
 	})
 	members, err = client.GetMembers(ctx)

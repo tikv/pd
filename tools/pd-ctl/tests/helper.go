@@ -104,3 +104,20 @@ func MustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) 
 	re.NoError(json.Unmarshal(output, v), string(output))
 	return ""
 }
+
+// TryExec executes a command and optionally unmarshals the output into v.
+// Unlike MustExec, it returns an error instead of using testify assertions,
+// making it safe for use inside testutil.Eventually condition functions.
+func TryExec(cmd *cobra.Command, args []string, v any) (string, error) {
+	output, err := ExecuteCommand(cmd, args...)
+	if err != nil {
+		return "", err
+	}
+	if v == nil {
+		return string(output), nil
+	}
+	if err := json.Unmarshal(output, v); err != nil {
+		return "", err
+	}
+	return "", nil
+}

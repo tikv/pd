@@ -141,10 +141,13 @@ func (suite *keyspaceGroupTestSuite) TestExternalAllocNodeWhenStart() {
 	args := []string{"-u", suite.pdAddr, "keyspace-group"}
 	testutil.Eventually(re, func() bool {
 		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var keyspaceGroup endpoint.KeyspaceGroup
-		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoError(err)
+		if json.Unmarshal(output, &keyspaceGroup) != nil {
+			return false
+		}
 		return len(keyspaceGroup.Keyspaces) == suite.keyspaceCount+1 && len(keyspaceGroup.Members) == 2
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/externalAllocNode"))
@@ -160,7 +163,9 @@ func (suite *keyspaceGroupTestSuite) TestSetNodeAndPriorityKeyspaceGroup() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, suite.tsoAddrs[0], suite.tsoAddrs[1]}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 
@@ -174,7 +179,9 @@ func (suite *keyspaceGroupTestSuite) TestSetNodeAndPriorityKeyspaceGroup() {
 				args = append(args, "--", strconv.Itoa(p))
 			}
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			return strings.Contains(string(output), "Success")
 		})
 
@@ -246,7 +253,9 @@ func (suite *keyspaceGroupTestSuite) TestMergeKeyspaceGroup() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, newKeyspaceGroupIDStr, testKeyspaceIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 
@@ -259,7 +268,9 @@ func (suite *keyspaceGroupTestSuite) TestMergeKeyspaceGroup() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "merge", defaultKeyspaceGroupID, newKeyspaceGroupIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 
@@ -282,7 +293,9 @@ func (suite *keyspaceGroupTestSuite) TestMergeKeyspaceGroup() {
 		testutil.Eventually(re, func() bool {
 			args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, splitTargetID, splitTargetID}
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			return strings.Contains(string(output), "Success")
 		})
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "finish-split", splitTargetID}
@@ -295,7 +308,9 @@ func (suite *keyspaceGroupTestSuite) TestMergeKeyspaceGroup() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "merge", defaultKeyspaceGroupID, "--all"}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 
@@ -347,7 +362,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupState() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, newKeyspaceGroupIDStr, testKeyspaceIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 	args := []string{"-u", suite.pdAddr, "keyspace-group", "finish-split", newKeyspaceGroupIDStr}
@@ -374,7 +391,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupState() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", defaultKeyspaceGroupID, newKeyspaceGroupIDStr, testKeyspaceIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 	args = []string{"-u", suite.pdAddr, "keyspace-group", "--state", "split"}
@@ -395,7 +414,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupState() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "merge", "0", newKeyspaceGroupIDStr}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 
@@ -424,11 +445,13 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group"}
 		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
-		re.NoError(err)
-		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoError(err)
-		re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
-		return len(keyspaceGroup.Members) == 2
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(output, &keyspaceGroup) != nil {
+			return false
+		}
+		return keyspaceGroup.ID == constant.DefaultKeyspaceGroupID && len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
 		re.Contains(suite.tsoAddrs, member.Address)
@@ -438,7 +461,9 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "primary", defaultKeyspaceGroupID}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
 		json.Unmarshal(output, &resp)
 		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
@@ -448,7 +473,9 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "split", "0", "1", "2"}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 
@@ -456,14 +483,15 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group"}
 		output, err := tests.ExecuteCommand(cmd, append(args, "1")...)
-		re.NoError(err)
-		if strings.Contains(string(output), "Failed") {
-			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
-			re.Contains(string(output), "ErrEtcdTxnConflict", "output: %s", string(output))
+		if err != nil {
 			return false
 		}
-		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoError(err)
+		if strings.Contains(string(output), "Failed") {
+			return false
+		}
+		if json.Unmarshal(output, &keyspaceGroup) != nil {
+			return false
+		}
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
@@ -474,7 +502,9 @@ func (suite *keyspaceGroupTestSuite) TestShowKeyspaceGroupPrimary() {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", suite.pdAddr, "keyspace-group", "primary", "1"}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
 		json.Unmarshal(output, &resp)
 		return suite.tsoAddrs[0] == resp.Primary || suite.tsoAddrs[1] == resp.Primary
@@ -535,7 +565,9 @@ func (suite *keyspaceGroupTestSuite) checkKeyspaceContains(keyspaceGroupID uint3
 	// Manager may not initialize when the server starts, so we need to wait for it.
 	testutil.Eventually(re, func() bool {
 		output, err := tests.ExecuteCommand(cmd, append(args, keyspaceGroupIDStr)...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var keyspaceGroup endpoint.KeyspaceGroup
 		err = json.Unmarshal(output, &keyspaceGroup)
 		if err != nil {

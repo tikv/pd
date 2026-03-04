@@ -460,9 +460,9 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		re.NoError(err)
 		respBundle := make([]placement.GroupBundle, 0)
 		testutil.Eventually(re, func() bool {
-			err = testutil.CheckGetJSON(TestDialClient, ruleURL, nil,
-				testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-			re.NoError(err)
+			if err := testutil.TryCheckGetJSON(TestDialClient, ruleURL, &respBundle); err != nil {
+				return false
+			}
 			return len(respBundle) == 1 && respBundle[0].ID == placement.DefaultGroupID && len(respBundle[0].Rules) == 1 &&
 				respBundle[0].Rules[0].ID == placement.DefaultRuleID && respBundle[0].Rules[0].Count == 3 && respBundle[0].Rules[0].Role == placement.Voter
 		})
@@ -501,9 +501,9 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		testutil.Eventually(re, func() bool {
 			// get current schedulers
 			var currentSchedulers []string
-			err := testutil.CheckGetJSON(http.DefaultClient, schedulerURL, nil,
-				testutil.StatusOK(re), testutil.ExtractJSON(re, &currentSchedulers))
-			re.NoError(err)
+			if err := testutil.TryCheckGetJSON(http.DefaultClient, schedulerURL, &currentSchedulers); err != nil {
+				return false
+			}
 			// compare schedulers
 			defaultSet := make(map[string]struct{}, len(types.DefaultSchedulers))
 			for _, s := range types.DefaultSchedulers {
@@ -531,13 +531,17 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 			for _, name := range toAdd {
 				input := map[string]any{"name": name}
 				body, err := json.Marshal(input)
-				re.NoError(err)
-				err = testutil.CheckPostJSON(http.DefaultClient, schedulerURL, body)
-				re.NoError(err)
+				if err != nil {
+					return false
+				}
+				if err = testutil.CheckPostJSON(http.DefaultClient, schedulerURL, body); err != nil {
+					return false
+				}
 			}
 			for _, name := range toRemove {
-				err = testutil.CheckDelete(http.DefaultClient, schedulerURL+"/"+name)
-				re.NoError(err)
+				if err := testutil.CheckDelete(http.DefaultClient, schedulerURL+"/"+name); err != nil {
+					return false
+				}
 			}
 			return false
 		})
@@ -553,9 +557,9 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		re.NoError(err)
 		testutil.Eventually(re, func() bool {
 			var operators []*operator.Operator
-			err := testutil.CheckGetJSON(TestDialClient, operatorURL, nil,
-				testutil.StatusOK(re), testutil.ExtractJSON(re, &operators))
-			re.NoError(err)
+			if err := testutil.TryCheckGetJSON(TestDialClient, operatorURL, &operators); err != nil {
+				return false
+			}
 			return len(operators) == 0
 		})
 		rc.GetOperatorController().CleanAllOpRecords()

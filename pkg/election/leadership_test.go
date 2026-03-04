@@ -266,7 +266,9 @@ func TestRequestProgress(t *testing.T) {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)"))
 			testutil.Eventually(re, func() bool {
 				b, err := os.ReadFile(fname)
-				re.NoError(err)
+				if err != nil {
+					return false
+				}
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
@@ -274,7 +276,9 @@ func TestRequestProgress(t *testing.T) {
 		} else {
 			testutil.Eventually(re, func() bool {
 				b, err := os.ReadFile(fname)
-				re.NoError(err)
+				if err != nil {
+					return false
+				}
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})

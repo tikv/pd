@@ -84,8 +84,12 @@ func TestKeyspace(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &k))
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(output, &k) != nil {
+			return false
+		}
 		return k.GetName() == keyspaceName
 	})
 	re.Equal(keyspaceIDs[0], k.GetId())
@@ -96,7 +100,9 @@ func TestKeyspace(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", newGroupID, strconv.Itoa(int(keyspaceIDs[0]))}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "Success")
 	})
 
@@ -104,8 +110,12 @@ func TestKeyspace(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
 		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &k))
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(output, &k) != nil {
+			return false
+		}
 		return newGroupID == k.Config[keyspace.TSOKeyspaceGroupIDKey]
 	})
 

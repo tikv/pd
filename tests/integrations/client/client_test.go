@@ -527,8 +527,9 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 			Region: region,
 			Leader: peers[0],
 		}
-		err = stream.Send(req)
-		re.NoError(err)
+		if err = stream.Send(req); err != nil {
+			return false
+		}
 		_, err = stream.Recv()
 		return err == nil
 	})
@@ -1192,13 +1193,12 @@ func (suite *clientStatelessTestSuite) TestScanRegions() {
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
 		region1 := suite.srv.GetRaftCluster().GetRegion(regions[0].GetId())
-		if region1 != nil {
-			digit := suite.srv.GetPDServerConfig().FlowRoundByDigit
-			re.NotEqual(digit, region1.GetFlowRoundDivisor())
-			re.Equal(core.GetFlowRoundDivisorByDigit(digit), region1.GetFlowRoundDivisor())
-			return true
+		if region1 == nil {
+			return false
 		}
-		return false
+		digit := suite.srv.GetPDServerConfig().FlowRoundByDigit
+		return uint64(digit) != region1.GetFlowRoundDivisor() &&
+			core.GetFlowRoundDivisorByDigit(digit) == region1.GetFlowRoundDivisor()
 	})
 	testutil.Eventually(re, func() bool {
 		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
@@ -1357,10 +1357,11 @@ func (suite *clientStatelessTestSuite) TestScatterRegion() {
 			return false
 		}
 		if scatterResp.FinishedPercentage != uint64(100) {
-			re.Contains(scatterResp.FailedRegionsId, regionID)
 			return false
 		}
-		re.Empty(scatterResp.FailedRegionsId)
+		if len(scatterResp.FailedRegionsId) != 0 {
+			return false
+		}
 		resp, err := suite.client.GetOperator(context.Background(), regionID)
 		if err != nil {
 			return false
@@ -1995,7 +1996,9 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		b, err := os.ReadFile(fname)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		l := string(b)
 		// We need to check the log to see if the circuit breaker is half open
 		return strings.Contains(l, "Transitioning to half-open state to test the service")

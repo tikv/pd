@@ -225,9 +225,9 @@ func (suite *ruleTestSuite) TestSchedulingSwitch() {
 	url := fmt.Sprintf("%s/pd/api/v1/config/placement-rule", suite.pdLeaderServer.GetAddr())
 	respBundle := make([]placement.GroupBundle, 0)
 	testutil.Eventually(re, func() bool {
-		err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
+		if err := testutil.TryCheckGetJSON(tests.TestDialClient, url, &respBundle); err != nil {
+			return false
+		}
 		return len(respBundle) == 1 && len(respBundle[0].Rules) == 1
 	})
 
@@ -244,9 +244,9 @@ func (suite *ruleTestSuite) TestSchedulingSwitch() {
 	err = testutil.CheckPostJSON(tests.TestDialClient, url+"/pd", data, testutil.StatusOK(re))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
+		if err := testutil.TryCheckGetJSON(tests.TestDialClient, url, &respBundle); err != nil {
+			return false
+		}
 		return len(respBundle) == 1 && len(respBundle[0].Rules) == 1
 	})
 
@@ -257,9 +257,9 @@ func (suite *ruleTestSuite) TestSchedulingSwitch() {
 	newPrimary := tc.GetPrimaryServer()
 	re.NotEqual(oldPrimary.GetAddr(), newPrimary.GetAddr())
 	testutil.Eventually(re, func() bool {
-		err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
+		if err := testutil.TryCheckGetJSON(tests.TestDialClient, url, &respBundle); err != nil {
+			return false
+		}
 		return len(respBundle) == 1 && len(respBundle[0].Rules) == 1
 	})
 }

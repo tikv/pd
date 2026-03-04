@@ -18,7 +18,6 @@ import (
 	"context"
 	"math/rand/v2"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -119,8 +118,7 @@ func (suite *routerClientSuite) TestGetRegion() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"))
-		re.NoError(err)
-		if r == nil {
+		if err != nil || r == nil {
 			return false
 		}
 		return reflect.DeepEqual(region, r.Meta) &&
@@ -147,8 +145,7 @@ func (suite *routerClientSuite) TestGetRegion() {
 	re.NoError(suite.reportBucket.Send(breq))
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
-		re.NoError(err)
-		if r == nil {
+		if err != nil || r == nil {
 			return false
 		}
 		return r.Buckets != nil
@@ -157,8 +154,7 @@ func (suite *routerClientSuite) TestGetRegion() {
 
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
-		re.NoError(err)
-		if r == nil {
+		if err != nil || r == nil {
 			return false
 		}
 		return r.Buckets == nil
@@ -201,7 +197,9 @@ func (suite *routerClientSuite) TestGetPrevRegion() {
 	for i := range 20 {
 		testutil.Eventually(re, func() bool {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			if i > 0 && i < regionLen {
 				// In this case, the region must not be nil.
 				if r == nil {
@@ -236,8 +234,7 @@ func (suite *routerClientSuite) TestGetRegionByID() {
 
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegionByID(context.Background(), regionID)
-		re.NoError(err)
-		if r == nil {
+		if err != nil || r == nil {
 			return false
 		}
 		return reflect.DeepEqual(region, r.Meta) &&
@@ -249,8 +246,7 @@ func (suite *routerClientSuite) TestGetRegionByID() {
 		r, err := suite.client.
 			WithCallerComponent(caller.GetComponent(0)).
 			GetRegionByID(context.Background(), regionID)
-		re.NoError(err)
-		if r == nil {
+		if err != nil || r == nil {
 			return false
 		}
 		return reflect.DeepEqual(region, r.Meta) &&
@@ -314,10 +310,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegion(ctx, region.GetStartKey())
 					}
 					if err != nil {
-						if strings.Contains(err.Error(), "region not found") {
-							return false
-						}
-						re.ErrorContains(err, context.Canceled.Error())
+						return false
 					}
 					if r == nil {
 						return false
@@ -334,10 +327,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
 					}
 					if err != nil {
-						if strings.Contains(err.Error(), "region not found") {
-							return false
-						}
-						re.ErrorContains(err, context.Canceled.Error())
+						return false
 					}
 					if r == nil {
 						return false
@@ -355,10 +345,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 						r, err = suite.client.GetRegionByID(ctx, region.GetId())
 					}
 					if err != nil {
-						if strings.Contains(err.Error(), "region not found") {
-							return false
-						}
-						re.ErrorContains(err, context.Canceled.Error())
+						return false
 					}
 					if r == nil {
 						return false

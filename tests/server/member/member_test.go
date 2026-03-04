@@ -79,9 +79,13 @@ func TestMemberDelete(t *testing.T) {
 		testutil.Eventually(re, func() bool {
 			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + table.path
 			req, err := http.NewRequest(http.MethodDelete, addr, http.NoBody)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			res, err := tests.TestDialClient.Do(req)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			defer res.Body.Close()
 			// Check by status.
 			if table.status != 0 {
@@ -92,8 +96,10 @@ func TestMemberDelete(t *testing.T) {
 				return true
 			}
 			// Check by member list.
-			re.NotEmpty(cluster.WaitLeader())
-			if err = checkMemberList(re, leader.GetConfig().ClientUrls, table.members); err != nil {
+			if len(cluster.WaitLeader()) == 0 {
+				return false
+			}
+			if err = tryCheckMemberList(leader.GetConfig().ClientUrls, table.members); err != nil {
 				t.Logf("check member fail: %v", err)
 				time.Sleep(time.Second)
 				return false
@@ -124,6 +130,44 @@ func checkMemberList(re *require.Assertions, clientURL string, configs []*config
 			if member.GetName() == cfg.Name {
 				re.Equal([]string{cfg.ClientUrls}, member.ClientUrls)
 				re.Equal([]string{cfg.PeerUrls}, member.PeerUrls)
+			}
+		}
+	}
+	return nil
+}
+
+// tryCheckMemberList is like checkMemberList but returns errors instead of
+// using testify assertions. Safe for use inside Eventually condition functions.
+func tryCheckMemberList(clientURL string, configs []*config.Config) error {
+	addr := clientURL + "/pd/api/v1/members"
+	res, err := tests.TestDialClient.Get(addr)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	buf, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != http.StatusOK {
+		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
+	}
+	data := &pdpb.GetMembersResponse{}
+	if err = json.Unmarshal(buf, data); err != nil {
+		return err
+	}
+	if len(data.GetMembers()) != len(configs) {
+		return errors.Errorf("member length not match, %v vs %v", len(data.GetMembers()), len(configs))
+	}
+	for _, member := range data.GetMembers() {
+		for _, cfg := range configs {
+			if member.GetName() == cfg.Name {
+				if len(member.ClientUrls) != 1 || member.ClientUrls[0] != cfg.ClientUrls {
+					return errors.Errorf("client urls mismatch for %s", cfg.Name)
+				}
+				if len(member.PeerUrls) != 1 || member.PeerUrls[0] != cfg.PeerUrls {
+					return errors.Errorf("peer urls mismatch for %s", cfg.Name)
+				}
 			}
 		}
 	}
@@ -178,10 +222,14 @@ func TestLeaderPriority(t *testing.T) {
 func post(t *testing.T, re *require.Assertions, url string, body string) {
 	testutil.Eventually(re, func() bool {
 		res, err := tests.TestDialClient.Post(url, "", bytes.NewBufferString(body)) // #nosec
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		b, err := io.ReadAll(res.Body)
 		res.Body.Close()
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		t.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
 		return res.StatusCode == http.StatusOK
 	})

@@ -226,8 +226,9 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 				},
 			},
 		)
-		re.NoError(err)
-		re.Empty(resp1.GetHeader().GetError())
+		if err != nil || resp1.GetHeader().GetError() != nil {
+			return false
+		}
 		store := tc.GetPrimaryServer().GetCluster().GetStore(1)
 		return store.GetStoreStats().GetCapacity() == uint64(1798985089024) &&
 			store.GetStoreStats().GetAvailable() == uint64(1709868695552) &&
@@ -304,8 +305,9 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
-		re.NotNil(suite.pdLeader.GetServer())
-		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
+		if suite.pdLeader.GetServer() == nil || suite.pdLeader.GetServer().GetRaftCluster() == nil {
+			return false
+		}
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
@@ -431,7 +433,9 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 				return false
 			}
 			disabled, err := schedulersController.IsSchedulerDisabled(name)
-			re.NoError(err, name)
+			if err != nil {
+				return false
+			}
 			return disabled == shouldDisabled
 		})
 	}

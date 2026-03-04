@@ -94,7 +94,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	}
 	// Ensure the TSO is ready to serve before running the tests.
 	testutil.Eventually(re, func() bool {
-		return suite.request(suite.ctx, re, 1) == nil
+		return suite.tryRequest(suite.ctx, 1) == nil
 	})
 }
 
@@ -121,6 +121,46 @@ func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoun
 	if err != nil {
 		suite.Require().ErrorContains(err, "is smaller than now")
 	}
+}
+
+// tryRequest is a version of request that does not use testify assertions,
+// making it safe to use inside Eventually condition functions.
+func (suite *tsoServerTestSuite) tryRequest(ctx context.Context, count uint32) error {
+	clusterID := keypath.ClusterID()
+	if suite.legacy {
+		req := &pdpb.TsoRequest{
+			Header: &pdpb.RequestHeader{ClusterId: clusterID},
+			Count:  count,
+		}
+		tsoClient, err := suite.pdClient.Tso(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = tsoClient.CloseSend()
+		}()
+		if err := tsoClient.Send(req); err != nil {
+			return err
+		}
+		_, err = tsoClient.Recv()
+		return err
+	}
+	req := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{ClusterId: clusterID},
+		Count:  count,
+	}
+	tsoClient, err := suite.tsoClient.Tso(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tsoClient.CloseSend()
+	}()
+	if err := tsoClient.Send(req); err != nil {
+		return err
+	}
+	_, err = tsoClient.Recv()
+	return err
 }
 
 func (suite *tsoServerTestSuite) request(ctx context.Context, re *require.Assertions, count uint32) (err error) {

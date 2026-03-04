@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"testing"
@@ -189,15 +190,16 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
+		if err := testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
+			return false
+		}
 		return len(respBundle) == 1 && respBundle[0].ID == "5"
 	})
 
 	testutil.Eventually(re, func() bool {
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, &status); err != nil {
+			return false
+		}
 		return status == "REPLICATED"
 	})
 
@@ -221,15 +223,16 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
+		if err := testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
+			return false
+		}
 		return len(respBundle) == 1 && len(respBundle[0].Rules) == 2
 	})
 
 	testutil.Eventually(re, func() bool {
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, &status); err != nil {
+			return false
+		}
 		return status == "REPLICATED"
 	})
 
@@ -250,9 +253,9 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
+		if err := testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
+			return false
+		}
 		if len(respBundle) != 2 {
 			return false
 		}
@@ -262,8 +265,9 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	})
 
 	testutil.Eventually(re, func() bool {
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, &status); err != nil {
+			return false
+		}
 		return status == "INPROGRESS"
 	})
 
@@ -272,8 +276,9 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	tests.MustPutRegionInfo(re, cluster, r1)
 
 	testutil.Eventually(re, func() bool {
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, &status); err != nil {
+			return false
+		}
 		return status == "REPLICATED"
 	})
 }
@@ -375,11 +380,11 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "down-peer")
 	r2 := &response.RegionsInfo{}
 	testutil.Eventually(re, func() bool {
-		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r2); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, r2); err != nil {
 			return false
 		}
 		r2.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+		return reflect.DeepEqual(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
 	})
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "pending-peer")
@@ -399,11 +404,11 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
 	testutil.Eventually(re, func() bool {
-		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r5); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, r5); err != nil {
 			return false
 		}
 		r5.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+		return reflect.DeepEqual(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
 	})
 
 	r = r.Clone(core.SetApproximateSize(1))
@@ -411,11 +416,11 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-size")
 	r6 := make([]*api.HistItem, 1)
 	testutil.Eventually(re, func() bool {
-		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r6); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, &r6); err != nil {
 			return false
 		}
 		histSizes := []*api.HistItem{{Start: 1, End: 1, Count: 1}}
-		return suite.Equal(histSizes, r6)
+		return reflect.DeepEqual(histSizes, r6)
 	})
 
 	r = r.Clone(core.SetApproximateKeys(1000))
@@ -423,11 +428,11 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-keys")
 	r7 := make([]*api.HistItem, 1)
 	testutil.Eventually(re, func() bool {
-		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r7); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, &r7); err != nil {
 			return false
 		}
 		histKeys := []*api.HistItem{{Start: 1000, End: 1999, Count: 1}}
-		return suite.Equal(histKeys, r7)
+		return reflect.DeepEqual(histKeys, r7)
 	})
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
@@ -442,11 +447,11 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "offline-peer")
 	r8 := &response.RegionsInfo{}
 	testutil.Eventually(re, func() bool {
-		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r8); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, url, r8); err != nil {
 			return false
 		}
 		r4.Adjust()
-		return r8.Count == 1 && len(r8.Regions) > 0 && suite.Equal(r.GetID(), r8.Regions[0].ID)
+		return r8.Count == 1 && len(r8.Regions) > 0 && r.GetID() == r8.Regions[0].ID
 	})
 }
 

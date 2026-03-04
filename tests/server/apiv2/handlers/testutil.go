@@ -218,15 +218,37 @@ func tryCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, re
 
 // MustLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
 func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) *endpoint.KeyspaceGroup {
-	var (
-		kg   *endpoint.KeyspaceGroup
-		code int
-	)
+	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		kg, code = TryLoadKeyspaceGroupByID(re, server, id)
-		return code == http.StatusOK
+		var err error
+		kg, err = tryLoadKeyspaceGroupByID(server, id)
+		return err == nil && kg != nil
 	})
 	return kg
+}
+
+func tryLoadKeyspaceGroupByID(server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, error) {
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := tests.TestDialClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	var kg endpoint.KeyspaceGroup
+	if err := json.Unmarshal(data, &kg); err != nil {
+		return nil, err
+	}
+	return &kg, nil
 }
 
 // TryLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
@@ -299,16 +321,14 @@ func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServ
 			return false
 		}
 		defer resp.Body.Close()
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
+		if _, err := io.ReadAll(resp.Body); err != nil {
 			return false
 		}
 		if resp.StatusCode == http.StatusServiceUnavailable ||
 			resp.StatusCode == http.StatusInternalServerError {
 			return false
 		}
-		re.Equal(http.StatusOK, resp.StatusCode, string(data))
-		return true
+		return resp.StatusCode == http.StatusOK
 	})
 }
 

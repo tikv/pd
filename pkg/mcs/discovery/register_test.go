@@ -72,7 +72,9 @@ func TestRegister(t *testing.T) {
 		// ensure that the request is timeout
 		testutil.Eventually(re, func() bool {
 			content, err := os.ReadFile(fname)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			// check log in function `ServiceRegister.Register`
 			// ref https://github.com/tikv/pd/blob/6377b26e4e879e7623fbc1d0b7f1be863dea88ad/pkg/mcs/discovery/register.go#L77
 			// need to both contain `register.go` and `keep alive failed`
@@ -85,7 +87,8 @@ func TestRegister(t *testing.T) {
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		testutil.Eventually(re, func() bool {
-			return getKeyAfterLeaseExpired(ctx, re, client, sr.key) == "127.0.0.1:2"
+			val, err := tryGetKeyAfterLeaseExpired(ctx, client, sr.key)
+			return err == nil && val == "127.0.0.1:2"
 		})
 	}
 	// Close the last restarted etcd instance
@@ -102,4 +105,19 @@ func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client
 		return ""
 	}
 	return string(resp.Kvs[0].Value)
+}
+
+// tryGetKeyAfterLeaseExpired is like getKeyAfterLeaseExpired but returns an error
+// instead of using testify assertions, making it safe to use inside Eventually.
+func tryGetKeyAfterLeaseExpired(ctx context.Context, client *clientv3.Client, key string) (string, error) {
+	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
+	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
+	resp, err := client.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Kvs) == 0 {
+		return "", nil
+	}
+	return string(resp.Kvs[0].Value), nil
 }
