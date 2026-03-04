@@ -10,7 +10,7 @@ description: Add or change Prometheus metrics: cache WithLabelValues, consider b
 Before adding or changing metrics, ensure:
 
 1. **Cache WithLabelValues** — Call once at init, store result in package-level vars; never call on every request.
-2. **Hot path** — On high-frequency paths, consider moving collection to a background periodic task.
+2. **Hot path** — Remind developers to judge whether the current path is a hot path; if it is, suggest moving metrics operations to a background (periodic) task.
 3. **Related paths** — Instrument all related operations (e.g. add + delete); clean up labels on teardown (`DeleteLabelValues`).
 4. **Naming** — Align with existing metrics in the same module (Namespace, Subsystem, name/label style).
 5. **Encapsulation** — If you wrap metrics logic in a func, include **`Metrics`** in the name (e.g. `recordRequestDurationMetrics`).
