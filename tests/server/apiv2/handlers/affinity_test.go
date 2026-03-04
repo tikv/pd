@@ -672,9 +672,15 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 		re.Contains(result.AffinityGroups, "existing")
 		re.Contains(result.AffinityGroups, "new")
 
-		listResp := mustGetAllAffinityGroups(re, serverAddr)
-		re.Contains(listResp.AffinityGroups, "existing")
-		re.Contains(listResp.AffinityGroups, "new")
+		testutil.Eventually(re, func() bool {
+			listResp, err := tryGetAllAffinityGroups(serverAddr)
+			if err != nil {
+				return false
+			}
+			_, hasExisting := listResp.AffinityGroups["existing"]
+			_, hasNew := listResp.AffinityGroups["new"]
+			return hasExisting && hasNew
+		})
 	})
 }
 

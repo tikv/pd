@@ -877,7 +877,18 @@ func TestStoreVersionChange(t *testing.T) {
 	re.NoError(err)
 	store := newMetaStore(storeID, "mock://tikv-1:1", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 	var wg sync.WaitGroup
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/versionChangeConcurrency", `return(true)`))
+	// Use channel-based synchronization to ensure deterministic ordering:
+	// 1. Goroutine enters OnStoreVersionChange and reads clusterVersion (2.0.0)
+	// 2. Goroutine signals "entered" and blocks
+	// 3. Main thread sets clusterVersion to 1.0.0
+	// 4. Main thread signals "proceed" to unblock the goroutine
+	// 5. Goroutine's CAS(old=ptr(2.0.0), new=ptr(2.1.0)) fails because current is ptr(1.0.0)
+	entered := make(chan struct{})
+	proceed := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/versionChangeConcurrency", func() {
+		close(entered)
+		<-proceed
+	}))
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -885,9 +896,10 @@ func TestStoreVersionChange(t *testing.T) {
 		re.NoError(err)
 		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}()
-	time.Sleep(100 * time.Millisecond)
+	<-entered
 	err = svr.SetClusterVersion("1.0.0")
 	re.NoError(err)
+	close(proceed)
 	wg.Wait()
 	v, err := semver.NewVersion("1.0.0")
 	re.NoError(err)
