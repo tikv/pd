@@ -570,13 +570,26 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 			return false
 		}
 		jobConf = rangeConf[0]
-		return jobConf["rule"] == "learner-scatter" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
+		if jobConf["rule"] != "learner-scatter" || jobConf["engine"] != "tiflash" || jobConf["alias"] != "test" {
+			return false
+		}
+		if jobConf["status"] != "running" {
+			return false
+		}
+		if jobConf["timeout"] != float64(30*time.Minute.Nanoseconds()) {
+			return false
+		}
+		rangesSlice, ok := jobConf["ranges"].([]any)
+		if !ok || len(rangesSlice) == 0 {
+			return false
+		}
+		rangeMap, ok := rangesSlice[0].(map[string]any)
+		if !ok {
+			return false
+		}
+		return rangeMap["start-key"] == core.HexRegionKeyStr([]byte("a")) &&
+			rangeMap["end-key"] == core.HexRegionKeyStr([]byte("b"))
 	})
-	re.Equal(float64(30*time.Minute.Nanoseconds()), jobConf["timeout"])
-	re.Equal("running", jobConf["status"])
-	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
-	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
-	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
 
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "learner", "a", "b"}, nil)
 	re.Contains(echo, "Success!")

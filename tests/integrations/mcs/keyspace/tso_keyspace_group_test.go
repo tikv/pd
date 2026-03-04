@@ -388,16 +388,16 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 
 	// the default keyspace group is exist.
 	var kg *endpoint.KeyspaceGroup
-	var code int
-	testutil.Eventually(re, func() bool {
-		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
-		return code == http.StatusOK && kg != nil
-	}, testutil.WithWaitFor(time.Second*1))
-	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 	// the allocNodesToAllKeyspaceGroups loop will run every 100ms.
 	testutil.Eventually(re, func() bool {
+		got, code, err := suite.getKeyspaceGroup(constant.DefaultKeyspaceGroupID)
+		if err != nil || code != http.StatusOK || got == nil {
+			return false
+		}
+		kg = got
 		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 	for _, member := range kg.Members {
 		re.Contains(nodes, member.Address)
 	}
@@ -433,8 +433,12 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 	// alloc nodes for the keyspace group
 	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
-		return code == http.StatusOK && kg != nil && len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
+		got, code, err := suite.getKeyspaceGroup(constant.DefaultKeyspaceGroupID)
+		if err != nil || code != http.StatusOK || got == nil {
+			return false
+		}
+		kg = got
+		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 	stopNode := kg.Members[0].Address
 	// close one of members
@@ -442,13 +446,17 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 
 	// the member list will be updated
 	testutil.Eventually(re, func() bool {
-		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		got, code, err := suite.getKeyspaceGroup(constant.DefaultKeyspaceGroupID)
+		if err != nil || code != http.StatusOK || got == nil {
+			return false
+		}
+		kg = got
 		for _, member := range kg.Members {
 			if member.Address == stopNode {
 				return false
 			}
 		}
-		return code == http.StatusOK && kg != nil && len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
+		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 }
 
@@ -475,8 +483,12 @@ func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
 	// alloc nodes for the keyspace group
 	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
-		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
+		got, code, err := suite.getKeyspaceGroup(constant.DefaultKeyspaceGroupID)
+		if err != nil || code != http.StatusOK || got == nil {
+			return false
+		}
+		kg = got
+		return len(kg.Members) == 1
 	})
 	stopNode := kg.Members[0].Address
 	// close old tso server
@@ -491,11 +503,15 @@ func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
 
 	// the member list will be updated
 	testutil.Eventually(re, func() bool {
-		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		got, code, err := suite.getKeyspaceGroup(constant.DefaultKeyspaceGroupID)
+		if err != nil || code != http.StatusOK || got == nil {
+			return false
+		}
+		kg = got
 		if len(kg.Members) != 0 && kg.Members[0].Address == stopNode {
 			return false
 		}
-		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
+		return len(kg.Members) == 1
 	})
 }
 
@@ -540,6 +556,31 @@ func (suite *keyspaceGroupTestSuite) tryGetKeyspaceGroup(re *require.Assertions,
 		re.NoError(json.Unmarshal(bodyBytes, kg))
 	}
 	return kg, resp.StatusCode
+}
+
+// getKeyspaceGroup is a non-asserting version of tryGetKeyspaceGroup, safe to use inside
+// testutil.Eventually condition functions where testify assertions must not be used.
+func (suite *keyspaceGroupTestSuite) getKeyspaceGroup(id uint32) (*endpoint.KeyspaceGroup, int, error) {
+	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
+	if err != nil {
+		return nil, 0, err
+	}
+	resp, err := tests.TestDialClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	kg := &endpoint.KeyspaceGroup{}
+	if resp.StatusCode == http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, resp.StatusCode, err
+		}
+		if err := json.Unmarshal(bodyBytes, kg); err != nil {
+			return nil, resp.StatusCode, err
+		}
+	}
+	return kg, resp.StatusCode, nil
 }
 
 func (suite *keyspaceGroupTestSuite) trySetNodesForKeyspaceGroup(re *require.Assertions, id int, request *handlers.SetNodesForKeyspaceGroupParams) (*endpoint.KeyspaceGroup, int) {
@@ -606,8 +647,8 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 
 	// Wait for keyspace group to be ready
 	testutil.Eventually(re, func() bool {
-		kg, code := suite.tryGetKeyspaceGroup(re, keyspaceGroupID)
-		return code == http.StatusOK && kg != nil && len(kg.Members) == nodeCount
+		kg, code, err := suite.getKeyspaceGroup(keyspaceGroupID)
+		return err == nil && code == http.StatusOK && kg != nil && len(kg.Members) == nodeCount
 	})
 
 	// Create keyspace (will be assigned to keyspaceGroupID via failpoint)

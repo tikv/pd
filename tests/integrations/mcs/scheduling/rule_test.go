@@ -202,10 +202,16 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		labelRules = regionLabeler.GetAllLabelRules()
-		return len(labelRules) == 2
-	})
-	sort.Slice(labelRules, func(i, j int) bool {
-		return labelRules[i].ID < labelRules[j].ID
+		if len(labelRules) != 2 {
+			return false
+		}
+		sort.Slice(labelRules, func(i, j int) bool {
+			return labelRules[i].ID < labelRules[j].ID
+		})
+		// After the patch, "rule1" should be deleted and "rule2" should be present.
+		// We must check the content, not just the count, because the count stays at 2
+		// during the transition (old rules -> new rules).
+		return labelRules[1].ID == labelRule.ID
 	})
 	re.Len(labelRules, 2)
 	re.Equal(labelRule.ID, labelRules[1].ID)

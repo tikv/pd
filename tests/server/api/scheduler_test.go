@@ -683,13 +683,17 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	if createdName == "" {
 		createdName = name
 	}
-	var schedulers []string
-	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers)
-	re.NoError(err)
-	if !slice.Contains(schedulers, createdName) {
-		err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re))
-		re.NoError(err)
-	}
+	// Ensure the scheduler exists, retrying if the API is not ready yet.
+	testutil.Eventually(re, func() bool {
+		var schedulers []string
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix, &schedulers); err != nil {
+			return false
+		}
+		if slice.Contains(schedulers, createdName) {
+			return true
+		}
+		return testutil.TryCheckPostJSON(tests.TestDialClient, urlPrefix, body, nil) == nil
+	})
 	suite.assertSchedulerExists(urlPrefix, createdName) // wait for scheduler to be synced.
 
 	// test pause.
