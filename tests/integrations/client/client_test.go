@@ -260,9 +260,12 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	re.NoError(err)
 
 	testutil.Eventually(re, leaderSwitched.Load)
-	// The leader stream must be updated after the leader switch is sensed by the client.
-	_, _, err = cli.GetTS(context.TODO())
-	re.NoError(err)
+	// The TSO stream may not be immediately ready after the leader switch is sensed by the client,
+	// so retry until the new stream is established.
+	testutil.Eventually(re, func() bool {
+		_, _, err = cli.GetTS(context.TODO())
+		return err == nil
+	})
 }
 
 func TestTSOFollowerProxy(t *testing.T) {
