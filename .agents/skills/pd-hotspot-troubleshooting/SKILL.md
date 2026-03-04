@@ -15,23 +15,28 @@ description: Troubleshooting workflow for PD hotspot investigations in TiDB/TiKV
 ## 2) Troubleshooting Order and Priority
 
 1. **PD / TiKV monitoring**
-2. **Key Visualizer heatmap**
-3. **Top SQL and Slow SQL**
-4. **`pd-ctl` hotspot and history data (fallback and evidence supplement)**
+2. **Top SQL and Slow SQL**
+3. **PD / TiKV logs**
+4. **SQL hotspot and hotspot history views**
+5. **`pd-ctl` fallback (internal-access scenarios only)**
 
-Do not start with `pd-ctl` directly. Use monitoring first to determine whether the system can detect hotspots, schedule hotspots, and execute operators.
+Cloud-first principle: prioritize monitoring, Top SQL / Slow SQL, and logs.
+Do not start with `pd-ctl` directly. Use externally accessible evidence first.
 
 ## 3) Step 1: PD / TiKV Monitoring Investigation (Primary Path)
 
-### 3.1 Capture PD configuration snapshot first
+### 3.1 Capture PD config snapshot from control platform
 
-```bash
-pd-ctl -u http://<pd>:2379 scheduler show
-pd-ctl -u http://<pd>:2379 scheduler show --status paused
-pd-ctl -u http://<pd>:2379 scheduler config balance-hot-region-scheduler show
-pd-ctl -u http://<pd>:2379 config show schedule
-pd-ctl -u http://<pd>:2379 config show all | grep halt
-```
+Before metric/log analysis, capture a PD config snapshot from your control
+platform (managed service console or internal control plane):
+
+- scheduler inventory and paused status;
+- `balance-hot-region-scheduler` config;
+- schedule-level hotspot knobs (for example, `hot-region-schedule-limit` and
+  `hot-region-cache-hits-threshold`);
+- halt/disable related flags if exposed by the platform.
+
+Use this snapshot as baseline evidence for diagnosis and rollback decisions.
 
 ### 3.2 PD monitoring (panel order)
 
@@ -48,7 +53,8 @@ Then verify scheduler runtime:
 Then check operator lifecycle:
 
 - **Schedule operator create / check / finish / timeout / replaced or canceled**.
-- Key signal: normal creation but low finish with high timeout usually indicates execution bottlenecks, not scheduling logic bottlenecks.
+- Key signal: normal creation but low finish with high timeout usually indicates
+  execution bottlenecks, not scheduling logic bottlenecks.
 
 Finally check hotspot scheduling metrics:
 
@@ -57,7 +63,8 @@ Finally check hotspot scheduling metrics:
   - whether hot region leader/peer distribution is overly concentrated;
   - whether store-level read/write bytes/keys/query are imbalanced;
   - whether **Selector write events / Selector read events** are abnormal;
-  - whether **Direction of hotspot transfer leader / move peer** shows repeated moves without real dispersion.
+  - whether **Direction of hotspot transfer leader / move peer** shows repeated
+    moves without real dispersion.
 
 ### 3.3 TiKV monitoring (aligned with PD conclusions)
 
@@ -72,30 +79,57 @@ CPU path:
 Traffic path:
 
 - Check whether MBps trends align with PD hotspot conclusions.
-- If PD shows scheduling activity but TiKV shows no improvement, prioritize snapshot/disk/network execution bottlenecks.
+- If PD shows scheduling activity but TiKV shows no improvement, prioritize
+  snapshot/disk/network execution bottlenecks.
 
-## 4) Step 2: Key Visualizer Heatmap
+## 4) Step 2: Top SQL / Slow SQL
 
-Use this to identify hotspot shapes and business root-cause hints:
-
-- Read hotspot:
-  - isolated bright block: commonly a hot small table;
-  - isolated bright column: commonly a hot index;
-  - trapezoid/triangle bright area: commonly linear range scan.
-- Write hotspot:
-  - continuously upward diagonal line: commonly append-write pattern.
-
-## 5) Step 3: Top SQL / Slow SQL
-
-If Dashboard is available, this step is mandatory:
+If Top SQL is available (Dashboard or SQL entry), this step is mandatory:
 
 - Identify hotspot SQL, hotspot tables, and hotspot indexes.
-- Cross-validate with Key Visualizer ranges and PD/TiKV metrics.
+- Cross-validate with PD/TiKV monitoring evidence.
 - Build a causal chain from request pattern to hotspot distribution.
 
-## 6) Step 4: `pd-ctl` Hotspot and History Data (Fallback)
+## 5) Step 3: PD / TiKV Logs
 
-Use this only when monitoring evidence is insufficient or needs supplementation:
+Use logs to validate scheduling and execution paths over the incident window:
+
+- PD log focus:
+  - hotspot scheduler activity;
+  - operator create/finish/timeout/cancel signals;
+  - scheduling-limit related signals.
+- TiKV log focus:
+  - snapshot/raftstore execution pressure;
+  - timeout/backoff related signals around hotspot periods;
+  - disk/network stress signals that block operator completion.
+
+## 6) Step 4: SQL Hotspot and History Views
+
+Prefer SQL evidence that is externally accessible. When possible, use these views
+instead of `pd-ctl hot history`:
+
+```sql
+-- Current hotspot distribution
+SELECT
+  DB_NAME, TABLE_NAME, INDEX_NAME, TYPE, REGION_ID, MAX_HOT_DEGREE, FLOW_BYTES
+FROM INFORMATION_SCHEMA.TIDB_HOT_REGIONS
+ORDER BY FLOW_BYTES DESC
+LIMIT 50;
+
+-- Hotspot history in recent window
+SELECT
+  UPDATE_TIME, DB_NAME, TABLE_NAME, INDEX_NAME, REGION_ID, STORE_ID,
+  TYPE, HOT_DEGREE, FLOW_BYTES, KEY_RATE, QUERY_RATE
+FROM INFORMATION_SCHEMA.TIDB_HOT_REGIONS_HISTORY
+WHERE UPDATE_TIME >= NOW() - INTERVAL 30 MINUTE
+ORDER BY UPDATE_TIME DESC
+LIMIT 500;
+```
+
+## 7) Step 5: `pd-ctl` Fallback (Internal Access Only)
+
+Use only when SQL/monitoring/log evidence is insufficient and cluster access is
+available:
 
 ```bash
 # Hotspot views
@@ -104,17 +138,15 @@ pd-ctl -u http://<pd>:2379 hot write
 pd-ctl -u http://<pd>:2379 hot store
 pd-ctl -u http://<pd>:2379 hot buckets <region_id>
 
-# History hotspot (millisecond timestamps)
-# Optional filter keys: hot_region_type, region_id, store_id, peer_id, is_leader, is_learner
-pd-ctl -u http://<pd>:2379 hot history <start_ms> <end_ms> hot_region_type write store_id 1,2
-
 # Top Region and execution status
 pd-ctl -u http://<pd>:2379 region topread query 20
 pd-ctl -u http://<pd>:2379 region topwrite byte 20
 pd-ctl -u http://<pd>:2379 region topcpu 20
+pd-ctl -u http://<pd>:2379 operator show
+pd-ctl -u http://<pd>:2379 operator check <region_id>
 ```
 
-## 7) Decision Tree (Symptom -> Diagnosis -> Action)
+## 8) Decision Tree (Symptom -> Diagnosis -> Action)
 
 ### A. `hot read/write` is clearly hot, but hotspot balancing is ineffective
 
@@ -129,8 +161,9 @@ Actions:
 
 - restore/enable hotspot scheduler first and ensure it is not paused;
 - tune in small steps in controlled windows (one parameter per round);
-- if operator execution is slow, prioritize TiKV bottlenecks;
-- for super-hot regions, locate with Key Visualizer + Top SQL + Slow SQL and prioritize workload-side scatter.
+- if operator execution is slow, prioritize snapshot/network/disk execution bottlenecks;
+- for super-hot regions, locate with Top SQL / Slow SQL / SQL hotspot views and
+  prioritize workload-side scatter.
 
 If still ineffective, branch by hotspot type:
 
@@ -152,7 +185,7 @@ Common causes:
 
 Actions:
 
-- prioritize structural scatter by locating hotspot tables/indexes via Top SQL / Slow SQL;
+- prioritize structural scatter by locating hotspot tables/indexes via Top SQL / Slow SQL / SQL hotspot views;
 - if tombstone accumulation likely causes CPU skew, evaluate compact in low-traffic windows.
 
 Emergency fallback only when all are true:
@@ -192,7 +225,7 @@ Actions:
 - increase `hot-region-cache-hits-threshold` to filter transient noise;
 - observe at least one full peak/valley cycle after each tuning round.
 
-## 8) Tuning Recommendations (Record Before Change)
+## 9) Tuning Recommendations (Record Before Change)
 
 Record current values for rollback:
 
@@ -215,10 +248,10 @@ Rollback rules:
 - restore old values one by one, do not change many items at once;
 - rollback immediately if side effects grow (latency jitter, operator timeout, etc.).
 
-## 9) Output Template
+## 10) Output Template
 
 1. Symptom summary: hotspot type, start time, and impact scope;
-2. Key evidence: commands and critical fields (store/region/operator);
+2. Key evidence: metrics/logs/SQL evidence and critical fields (store/region/operator);
 3. Diagnosis: primary and secondary causes with confidence;
 4. Immediate mitigation: low-risk and rollback-safe actions with expected watch metrics;
 5. Mid-term suggestions: schema/workload/capacity/version optimization;
