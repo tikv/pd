@@ -359,7 +359,7 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 	// new request anymore. Note: when the stream is in closing state, processRequests returns an error immediately
 	// without invoking the callback, so we only check processErr here.
 	testutil.Eventually(s.re, func() bool {
-		processErr := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {})
+		processErr := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {})
 		return processErr != nil
 	})
 }

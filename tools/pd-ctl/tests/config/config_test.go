@@ -99,12 +99,10 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 
 	// config show
 	args := []string{"-u", pdAddr, "config", "show"}
-	output, err := tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	var output []byte
+	var err error
 	cfg := config.Config{}
-	re.NoError(json.Unmarshal(output, &cfg))
 	scheduleConfig := svr.GetScheduleConfig()
-
 	// hidden config
 	scheduleConfig.Schedulers = nil
 	scheduleConfig.StoreLimit = nil
@@ -117,8 +115,18 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.Equal(uint64(0), scheduleConfig.MaxMergeRegionKeys)
 	// The result of config show doesn't be 0.
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
-	re.Equal(scheduleConfig, &cfg.Schedule)
-	re.Equal(svr.GetReplicationConfig(), &cfg.Replication)
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = tests.ExecuteCommand(cmd, args...)
+		if err != nil {
+			return false
+		}
+		cfg = config.Config{}
+		if json.Unmarshal(output, &cfg) != nil {
+			return false
+		}
+		return reflect.DeepEqual(scheduleConfig, &cfg.Schedule) &&
+			reflect.DeepEqual(svr.GetReplicationConfig(), &cfg.Replication)
+	})
 
 	// config set trace-region-flow <value>
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
