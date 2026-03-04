@@ -454,8 +454,6 @@ func TestIsAcquireTokenBucketsRPCError(t *testing.T) {
 // the degraded fallback response builder.
 func TestBuildDegradedTokenBucketResponses(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	degradedSettings := &rmpb.GroupRequestUnitSettings{
 		RU: &rmpb.TokenBucket{
@@ -465,20 +463,16 @@ func TestBuildDegradedTokenBucketResponses(t *testing.T) {
 			},
 		},
 	}
-	mockProvider := newMockResourceGroupProvider()
-	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, WithDegradedRUSettings(degradedSettings))
-	re.NoError(err)
-
 	requests := []*rmpb.TokenBucketRequest{
 		{ResourceGroupName: "rg1"},
 		{ResourceGroupName: "rg2"},
 	}
 
 	// Nil degraded settings -> nil response
-	re.Nil(controller.buildDegradedTokenBucketResponses(requests, nil))
+	re.Nil(buildDegradedTokenBucketResponses(requests, nil))
 
 	// Valid settings -> one response per request with correct settings
-	resp := controller.buildDegradedTokenBucketResponses(requests, degradedSettings)
+	resp := buildDegradedTokenBucketResponses(requests, degradedSettings)
 	re.Len(resp, 2)
 	re.Equal("rg1", resp[0].ResourceGroupName)
 	re.Len(resp[0].GrantedRUTokens, 1)

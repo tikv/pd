@@ -520,7 +520,7 @@ func isAcquireTokenBucketsRPCError(err error) bool {
 // any server-side RU; it grants tokens locally at the degraded fill rate so
 // the client-side limiter can continue. Called repeatedly (e.g. RM down) only
 // re-applies the same rate each time.
-func (c *ResourceGroupsController) buildDegradedTokenBucketResponses(
+func buildDegradedTokenBucketResponses(
 	requests []*rmpb.TokenBucketRequest,
 	degradedRUSettings *rmpb.GroupRequestUnitSettings,
 ) []*rmpb.TokenBucketResponse {
@@ -731,7 +731,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			// Only use degraded fallback for RPC/transport errors (e.g. RM down, timeout).
 			// Logical errors (e.g. resource group not found) are not masked so the caller can handle them.
 			if isAcquireTokenBucketsRPCError(err) && c.degradedRUSettings != nil {
-				resp = c.buildDegradedTokenBucketResponses(req.Requests, c.degradedRUSettings)
+				resp = buildDegradedTokenBucketResponses(req.Requests, c.degradedRUSettings)
 				if resp != nil {
 					if !errors.ErrorEqual(err, context.Canceled) {
 						log.Info("[resource group controller] use degraded token bucket response due to rpc error, ru path continues", zap.Error(err))
