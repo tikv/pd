@@ -1,56 +1,50 @@
 ---
 name: add-metrics
-description: Add or change Prometheus metrics: cache WithLabelValues, consider background aggregation on hot paths, cover add/delete and clean labels, match module naming, use Metrics in helper func names, avoid changing existing metric types and labels for backward compatibility, register with prometheus.MustRegister.
+description: "Add or change Prometheus metrics — cache WithLabelValues, hot path, cleanup, avoid high cardinality, naming, MustRegister, backward compatibility. From tikv/pd metrics PRs."
 ---
 
 # Adding Metrics
 
-## Principles (checklist)
+## PR summary (tikv/pd, latest ~100 metrics-related PRs)
 
-Before adding or changing metrics, ensure:
+From [GitHub search](https://github.com/tikv/pd/pulls?q=is%3Apr+metrics) (600+ PRs), recurring themes:
 
-1. **Cache WithLabelValues** — Call once at init, store result in package-level vars; never call on every request.
-2. **Hot path** — Remind developers to judge whether the current path is a hot path; if it is, suggest moving metrics operations to a background (periodic) task.
-3. **Related paths** — Instrument all related operations (e.g. add + delete); clean up labels on teardown (`DeleteLabelValues`).
-4. **Naming** — Align with existing metrics in the same module (Namespace, Subsystem, name/label style).
-5. **Encapsulation** — If you wrap metrics logic in a func, include **`Metrics`** in the name (e.g. `recordRequestDurationMetrics`).
-6. **Backward compatibility** — Avoid changing the **type** of existing metrics or existing **labels**; old metrics may already be in use (dashboards, alerts, scrapers).
-7. **Registration** — Register metrics with **`prometheus.MustRegister(...)`** (not `Register`); duplicate or invalid registration will panic at init and fail fast.
+- **Cleanup on deletion** — Delete cluster/group metrics when store or resource is removed (e.g. [#9945](https://github.com/tikv/pd/pull/9945), [#9266](https://github.com/tikv/pd/pull/9266)).
+- **Reduce cardinality** — Reduce balance/filter metrics or avoid many unique label values ([#9537](https://github.com/tikv/pd/pull/9537), [#9536](https://github.com/tikv/pd/pull/9536)).
+- **Dashboard/panel alignment** — Align Grafana and metric semantics (e.g. store used vs user storage) ([#10277](https://github.com/tikv/pd/pull/10277), [#9891](https://github.com/tikv/pd/pull/9891)).
+- **Labels for observability** — Add keyspace/store labels where useful ([#9778](https://github.com/tikv/pd/pull/9778), [#9898](https://github.com/tikv/pd/pull/9898)).
+- **gRPC/stream metrics** — Per-service stream duration histograms, lifecycle instrumentation ([#10201](https://github.com/tikv/pd/pull/10201), [#9768](https://github.com/tikv/pd/pull/9768)).
+- **Client** — Don’t record when no retry; use const labels for resource group ([#9464](https://github.com/tikv/pd/pull/9464), [#9383](https://github.com/tikv/pd/pull/9383)).
+- **Fix wrong metrics** — Correct measurement or add new metric/version; don’t silently change semantics ([#9561](https://github.com/tikv/pd/pull/9561), [#3524](https://github.com/tikv/pd/pull/3524)).
 
 ---
 
-## Principle details
+## Principles (checklist + detail)
 
-### 1. Cache WithLabelValues
+Before adding or changing metrics, ensure:
 
-**Do not** call `WithLabelValues(...)` on every use. **Do** call it once at initialization, store the returned `prometheus.Observer` / `Counter` / `Gauge` in package-level variables, and use only those cached variables in business code.
+1. **Cache WithLabelValues** — Call once at init, store result in package-level vars; never call on every request. `WithLabelValues` does lookup/creation; on hot paths it adds overhead and can worsen cardinality.
 
-`WithLabelValues` does lookup/creation; calling it on hot paths adds overhead and can worsen label cardinality.
+2. **Hot path** — Remind developers to judge whether the current path is a hot path; if it is, suggest moving metrics operations to a background (periodic) task so the request path stays fast.
 
-### 2. Hot path: consider background aggregation
+3. **Related paths & cleanup** — Instrument add + delete (or create/teardown). When an entity (store, group, stream) is removed, call `vec.DeleteLabelValues(...)` so cardinality does not grow and stale series are removed. Same for create/delete, register/unregister, connect/disconnect.
 
-Remind developers to judge whether the **current path** is a hot path; if it is, suggest moving **metrics operations** to a **background (periodic) task** instead of updating on every request, so the request path stays fast.
+4. **Avoid high-cardinality labels** — Prefer reducing or aggregating; avoid many unique label values on hot paths. High cardinality can overwhelm Prometheus (memory, scrape cost).
 
-### 3. Cover all related code paths and label lifecycle
+5. **Naming** — Align with existing metrics in the same module: **Namespace** and **Subsystem** (e.g. `pd_client`, `request`), name with `_seconds`/`_total`/`_count`, snake_case, label names (e.g. `type`, `host`, `stream`) for consistent dashboards and queries.
 
-Check that **every related path** is instrumented. If you add metrics for one operation (e.g. add group), also handle the symmetric/teardown operation (e.g. delete group): remove or reset the metric for that label set so cardinality does not grow and stale series are not left behind. Same for create/delete, register/unregister, connect/disconnect. Use `vec.DeleteLabelValues(...)` in the delete/teardown path.
+6. **Encapsulation** — If you wrap metrics logic in a func, include **`Metrics`** in the name (e.g. `recordRequestDurationMetrics`, `initMetrics`, `registerMetrics`) so it’s easy to find and grep.
 
-### 4. Naming: align with same module or directory
+7. **Backward compatibility** — Do not change the **type** of existing metrics (e.g. Counter → Gauge) or remove/rename existing **labels**; dashboards and alerts may break. Prefer adding **new** metrics or deprecating old ones in docs.
 
-Follow the naming style of existing metrics in the same file or same `Namespace`/`Subsystem`:
+8. **Registration** — Use **`prometheus.MustRegister(...)`** (not `Register`); duplicate or invalid registration will panic at init and fail fast.
 
-- **Namespace** and **Subsystem** (e.g. `pd_client`, `cmd` / `request`)
-- **Name**: suffix (`_seconds`, `_total`, `_count`), snake_case
-- **Label names** (e.g. `type`, `host`, `stream`) for consistent dashboards and queries
+9. **Dashboard/panel alignment** — When adding or changing a metric, ensure Grafana panels and alerts use the same definition (e.g. store used vs user storage size).
 
-### 5. Encapsulation: use `Metrics` in function names
+10. **Don’t record when there’s nothing to record** — Skip updating metrics when the operation didn’t happen (e.g. no retry, no forward); avoid recording zeros or empty aggregates that add noise.
 
-When wrapping metrics logic in a helper, include the **`Metrics`** keyword in the function name (e.g. `recordRequestDurationMetrics`, `initMetrics`, `registerMetrics`) so metrics-related code is easy to find and grep.
+11. **Const labels for stable dimensions** — For dimensions fixed per process/component (e.g. resource group name in client), use const labels at init instead of dynamic label values on every call.
 
-### 6. Backward compatibility: avoid changing existing metrics type and labels
+12. **Fix wrong metrics and document semantics** — If a metric measures the wrong thing (e.g. “processing time” including network), fix the measurement or add a new metric/version; do not silently change semantics.
 
-Do **not** change the **type** of an existing metric (e.g. Counter → Gauge, or Histogram → Summary) or remove/rename existing **labels**. Existing metrics are often consumed by dashboards, alerts, and scrapers; changing type or labels breaks queries and can cause silent misreporting. Prefer adding **new** metrics or new labels (with a new name) instead of modifying the old ones; deprecate old ones in docs if needed.
-
-### 7. Registration: use prometheus.MustRegister
-
-When registering metrics with the default registry (or a custom one), use **`prometheus.MustRegister(...)`** instead of `Register(...)`. `MustRegister` panics on duplicate or invalid registration, so problems surface at startup rather than at scrape time or in production. This keeps metric setup consistent and fail-fast.
+13. **Instrument full lifecycle** — For gRPC streams or long-lived resources, add metrics for the full lifecycle and reflect cleanup/end so dashboards don’t show stuck or misleading series.
