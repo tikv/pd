@@ -24,17 +24,17 @@ import (
 	apis "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
 )
 
-type pdMetadataHandler struct {
+type rmMetadataHandler struct {
 	configService *metadataapi.ConfigService
 	engine        *gin.Engine
 }
 
-func newPDMetadataHandler(manager *rmserver.Manager) http.Handler {
-	return newPDMetadataHandlerWithStore(metadataapi.NewManagerStore(manager))
+func newRMMetadataHandler(manager *rmserver.Manager) http.Handler {
+	return newRMMetadataHandlerWithStore(metadataapi.NewManagerStore(manager))
 }
 
-func newPDMetadataHandlerWithStore(store metadataapi.Store) http.Handler {
-	handler := &pdMetadataHandler{
+func newRMMetadataHandlerWithStore(store metadataapi.Store) http.Handler {
+	handler := &rmMetadataHandler{
 		configService: metadataapi.NewConfigService(store),
 		engine:        gin.New(),
 	}
@@ -43,11 +43,11 @@ func newPDMetadataHandlerWithStore(store metadataapi.Store) http.Handler {
 	return handler
 }
 
-func (h *pdMetadataHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *rmMetadataHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.engine.ServeHTTP(w, r)
 }
 
-func (h *pdMetadataHandler) registerRouter() {
+func (h *rmMetadataHandler) registerRouter() {
 	root := h.engine.Group(apis.APIPathPrefix)
 	configEndpoint := root.Group("/config")
 	h.configService.Register(configEndpoint)

@@ -28,19 +28,19 @@ import (
 	"github.com/tikv/pd/server"
 )
 
-type pdMetadataManagerProvider struct {
+type rmMetadataManagerProvider struct {
 	*server.Server
 }
 
-// GetResourceGroupWriteRole returns the write role used by the local PD metadata manager.
-func (*pdMetadataManagerProvider) GetResourceGroupWriteRole() rm_server.ResourceGroupWriteRole {
+// GetResourceGroupWriteRole returns the write role used by the local RM metadata fallback manager.
+func (*rmMetadataManagerProvider) GetResourceGroupWriteRole() rm_server.ResourceGroupWriteRole {
 	return rm_server.ResourceGroupWriteRolePDMetaOnly
 }
 
 // NewHandler creates a new redirector handler for resource manager.
 func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
-	manager := rm_server.NewManager[*pdMetadataManagerProvider](&pdMetadataManagerProvider{Server: svr})
-	localHandler := newPDMetadataHandler(manager)
+	manager := rm_server.NewManager[*rmMetadataManagerProvider](&rmMetadataManagerProvider{Server: svr})
+	localHandler := newRMMetadataHandler(manager)
 	redirector := negroni.New(
 		serverapi.NewRedirector(svr,
 			serverapi.MicroserviceRedirectRule(
@@ -49,11 +49,11 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				constant.ResourceManagerServiceName,
 				[]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete},
 				func(r *http.Request) bool {
-					return !shouldHandlePDMetadataLocally(r)
+					return !shouldHandleRMMetadataLocally(r)
 				}),
 		),
 	)
-	redirector.UseHandler(newPDMetadataFallbackHandler(localHandler))
+	redirector.UseHandler(newRMMetadataFallbackHandler(localHandler))
 	return redirector, apiutil.APIServiceGroup{
 		Name:       "resource-manager",
 		Version:    "v1",
@@ -62,21 +62,21 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	}, nil
 }
 
-// TODO: Implement a real PD metadata handler.
-func shouldHandlePDMetadataLocally(r *http.Request) bool {
+// TODO: Implement a real local handling policy for RM metadata fallback.
+func shouldHandleRMMetadataLocally(r *http.Request) bool {
 	// Keep metadata APIs redirected to RM until PD<->RM metadata sync is in place.
 	_ = r
 	return false
 }
 
-func newPDMetadataFallbackHandler(localHandler http.Handler) http.Handler {
+func newRMMetadataFallbackHandler(localHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Prevent bypassing redirect rules via an injected "forbidden forward" header.
+		// Prevent bypassing RM metadata fallback guard via an injected "forbidden forward" header.
 		if r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) == "true" {
 			http.NotFound(w, r)
 			return
 		}
-		if !shouldHandlePDMetadataLocally(r) {
+		if !shouldHandleRMMetadataLocally(r) {
 			http.NotFound(w, r)
 			return
 		}

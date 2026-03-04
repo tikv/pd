@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestShouldHandlePDMetadataLocally(t *testing.T) {
+func TestShouldHandleRMMetadataLocally(t *testing.T) {
 	t.Parallel()
 
 	re := require.New(t)
@@ -51,11 +51,11 @@ func TestShouldHandlePDMetadataLocally(t *testing.T) {
 	}
 	for _, tc := range tests {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
-		re.Equal(tc.expect, shouldHandlePDMetadataLocally(req), "method=%s path=%s", tc.method, tc.path)
+		re.Equal(tc.expect, shouldHandleRMMetadataLocally(req), "method=%s path=%s", tc.method, tc.path)
 	}
 }
 
-func TestPDMetadataFallbackHandlerRejectsForbiddenForwardHeader(t *testing.T) {
+func TestRMMetadataFallbackHandlerRejectsForbiddenForwardHeader(t *testing.T) {
 	t.Parallel()
 
 	re := require.New(t)
@@ -65,7 +65,7 @@ func TestPDMetadataFallbackHandlerRejectsForbiddenForwardHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := newPDMetadataFallbackHandler(localHandler)
+	handler := newRMMetadataFallbackHandler(localHandler)
 	req := httptest.NewRequest(http.MethodPost, "/resource-manager/api/v1/config/group", nil)
 	req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
 	resp := httptest.NewRecorder()
