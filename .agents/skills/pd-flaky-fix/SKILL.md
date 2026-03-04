@@ -66,7 +66,8 @@ If corpus/playbook are missing or invalid, continue with root-cause-first flow a
 - Implement minimal change to address the hypothesis (must use `make gotest` for tests).
 - Run focused test and confirm green.
 9. Verification gate:
-- Run minimal required package/test commands (must use `make gotest`).
+- Run focused package/test commands (must use `make gotest` for tests).
+- Run baseline validation for touched scope: at least `make basic-test`; run `make check` when shared logic, dependencies, or tooling are touched.
 - Record full commands and outcomes.
 - Do not claim success without command evidence.
 10. Git + PR:

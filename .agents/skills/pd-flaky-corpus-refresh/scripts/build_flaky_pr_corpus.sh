@@ -56,7 +56,7 @@ def classify(title_lower, files, kws):
     joined_files = "\n".join(files).lower()
     if "data race" in title_lower or "data race" in kws:
         pats.append("race_elimination")
-    if "panic" in title_lower:
+    if "panic" in title_lower or re.search(r"\bnil\b", title_lower):
         pats.append("panic_guard")
     if "timeout" in title_lower:
         pats.append("timeout_budget")

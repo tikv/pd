@@ -10,8 +10,8 @@ description: Use when rebuilding the historical flaky-adjacent PR corpus and fix
 This skill is maintenance-only. It rebuilds the historical corpus and playbook consumed by `pd-flaky-fix`.
 
 Output targets (atomic replace):
-- `/Users/jiangxianjie/.codex/skills/pd-flaky-fix/references/flaky-pr-corpus.jsonl`
-- `/Users/jiangxianjie/.codex/skills/pd-flaky-fix/references/flaky-fix-playbook.md`
+- `${SKILLS_ROOT:-<repo-root>/.agents/skills}/pd-flaky-fix/references/flaky-pr-corpus.jsonl`
+- `${SKILLS_ROOT:-<repo-root>/.agents/skills}/pd-flaky-fix/references/flaky-fix-playbook.md`
 
 ## Hard Rules
 
@@ -28,21 +28,27 @@ Output targets (atomic replace):
 2. Run:
 
 ```bash
-PD_REPO=/Users/jiangxianjie/code/okjiang/pd.worktrees/flaky-fixer \
-  /Users/jiangxianjie/.codex/skills/pd-flaky-corpus-refresh/scripts/build_flaky_pr_corpus.sh
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SKILLS_ROOT="${SKILLS_ROOT:-$REPO_ROOT/.agents/skills}"
+PD_REPO="${PD_REPO:-$REPO_ROOT}" \
+  "$SKILLS_ROOT/pd-flaky-corpus-refresh/scripts/build_flaky_pr_corpus.sh"
 ```
 
 3. Verify:
 
 ```bash
-wc -l /Users/jiangxianjie/.codex/skills/pd-flaky-fix/references/flaky-pr-corpus.jsonl
-rg -n '^## Pattern ' /Users/jiangxianjie/.codex/skills/pd-flaky-fix/references/flaky-fix-playbook.md | wc -l
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SKILLS_ROOT="${SKILLS_ROOT:-$REPO_ROOT/.agents/skills}"
+wc -l "$SKILLS_ROOT/pd-flaky-fix/references/flaky-pr-corpus.jsonl"
+rg -n '^## Pattern ' "$SKILLS_ROOT/pd-flaky-fix/references/flaky-fix-playbook.md" | wc -l
 ```
 
 4. Read refresh summary:
 
 ```bash
-sed -n '1,220p' /Users/jiangxianjie/.codex/skills/pd-flaky-corpus-refresh/references/last-refresh-summary.md
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SKILLS_ROOT="${SKILLS_ROOT:-$REPO_ROOT/.agents/skills}"
+sed -n '1,220p' "$SKILLS_ROOT/pd-flaky-corpus-refresh/references/last-refresh-summary.md"
 ```
 
 ## Output Contract

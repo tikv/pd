@@ -52,8 +52,10 @@ Look for nearby stable tests in same suite/file and compare setup/cleanup/assert
 ## 6) Historical Analog Lookup (Read-Only)
 
 ```bash
-rg -n "<TestName>|<keyword>" /Users/jiangxianjie/.codex/skills/pd-flaky-fix/references/flaky-fix-playbook.md
-rg -n "\"pr_number\"|\"fix_patterns\"" /Users/jiangxianjie/.codex/skills/pd-flaky-fix/references/flaky-pr-corpus.jsonl
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SKILLS_ROOT="${SKILLS_ROOT:-$REPO_ROOT/.agents/skills}"
+rg -n "<TestName>|<keyword>" "$SKILLS_ROOT/pd-flaky-fix/references/flaky-fix-playbook.md"
+rg -n "\"pr_number\"|\"fix_patterns\"" "$SKILLS_ROOT/pd-flaky-fix/references/flaky-pr-corpus.jsonl"
 ```
 
 Do not modify corpus/playbook in runtime flow.
@@ -85,10 +87,11 @@ git push -u origin $(git branch --show-current)
 Create draft PR to upstream:
 
 ```bash
+GH_USER="${GH_USER:-$(gh api user --jq .login)}"
 GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 gh pr create \
   --repo tikv/pd \
   --base master \
-  --head okJiang:$(git branch --show-current) \
+  --head "${GH_USER}:$(git branch --show-current)" \
   --title "tests: stabilize <TestName>" \
   --body-file /tmp/pd_flaky_pr_body.md \
   --draft
