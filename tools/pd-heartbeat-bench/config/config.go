@@ -77,7 +77,7 @@ func NewConfig() *Config {
 	cfg := &Config{}
 	cfg.flagSet = flag.NewFlagSet("heartbeat-bench", flag.ContinueOnError)
 	fs := cfg.flagSet
-	fs.ParseErrorsAllowlist.UnknownFlags = true
+	fs.ParseErrorsWhitelist.UnknownFlags = true
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
 	fs.StringVar(&cfg.PDAddr, "pd-endpoints", "127.0.0.1:2379", "pd leader address")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
