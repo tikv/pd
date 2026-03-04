@@ -986,15 +986,6 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	})
 }
 
-func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) {
-	output, err := tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	if v == nil {
-		return
-	}
-	json.Unmarshal(output, v)
-}
-
 func checkSchedulerCommand(re *require.Assertions, cmd *cobra.Command, pdAddr string, args []string, expected map[string]bool) {
 	if args != nil {
 		echo := tests.MustExec(re, cmd, args, nil)
