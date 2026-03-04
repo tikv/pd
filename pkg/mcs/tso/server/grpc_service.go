@@ -77,6 +77,7 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
+	stream = newTsoMetricsStream(stream)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {

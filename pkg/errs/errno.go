@@ -86,6 +86,9 @@ var (
 	ErrNotStarted                 = status.Error(codes.Unavailable, "server not started")
 	ErrEtcdNotStarted             = status.Error(codes.Unavailable, "server is started, but etcd not started")
 	ErrFollowerHandlingNotAllowed = status.Error(codes.Unavailable, "not leader and follower handling not allowed")
+
+	// Unimplemented indicates operation is not implemented or not supported.
+	ErrRecvNotSupported = status.Error(codes.Unimplemented, "recv is not supported by this stream")
 )
 
 // common error in multiple packages
