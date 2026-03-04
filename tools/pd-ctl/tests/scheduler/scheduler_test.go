@@ -151,40 +151,42 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	schedulers := []string{"evict-leader-scheduler", "grant-leader-scheduler", "evict-leader-scheduler", "grant-leader-scheduler"}
 
 	checkStorePause := func(changedStores []uint64, schedulerName string) {
-		stores := leaderServer.GetStores()
-		for _, store := range stores {
-			storeInfo := cluster.GetLeaderServer().GetRaftCluster().GetStore(store.GetId())
-			status, isStorePaused := func() (string, bool) {
+		testutil.Eventually(re, func() bool {
+			stores := leaderServer.GetStores()
+			for _, store := range stores {
+				storeInfo := cluster.GetLeaderServer().GetRaftCluster().GetStore(store.GetId())
+				var isStorePaused bool
 				switch schedulerName {
 				case "evict-leader-scheduler":
-					return "paused", !storeInfo.AllowLeaderTransferIn()
+					isStorePaused = !storeInfo.AllowLeaderTransferIn()
 				case "grant-leader-scheduler":
-					return "paused", !storeInfo.AllowLeaderTransferOut()
+					isStorePaused = !storeInfo.AllowLeaderTransferOut()
 				default:
-					re.Failf("unknown scheduler %s", schedulerName)
-					return "", false
+					return false
 				}
-			}()
-			if slice.AnyOf(changedStores, func(i int) bool {
-				return store.GetId() == changedStores[i]
-			}) {
-				re.Truef(isStorePaused,
-					"store %d should be %s with %s", store.GetId(), status, schedulerName)
-			} else {
-				re.Falsef(isStorePaused,
-					"store %d should not be %s with %s", store.GetId(), status, schedulerName)
-			}
-			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-				switch schedulerName {
-				case "evict-leader-scheduler":
-					re.Equal(isStorePaused, !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransferIn())
-				case "grant-leader-scheduler":
-					re.Equal(isStorePaused, !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransferOut())
-				default:
-					re.Failf("unknown scheduler %s", schedulerName)
+				shouldBePaused := slice.AnyOf(changedStores, func(i int) bool {
+					return store.GetId() == changedStores[i]
+				})
+				if isStorePaused != shouldBePaused {
+					return false
+				}
+				if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+					var scheStorePaused bool
+					switch schedulerName {
+					case "evict-leader-scheduler":
+						scheStorePaused = !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransferIn()
+					case "grant-leader-scheduler":
+						scheStorePaused = !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransferOut()
+					default:
+						return false
+					}
+					if isStorePaused != scheStorePaused {
+						return false
+					}
 				}
 			}
-		}
+			return true
+		})
 	}
 
 	for idx := range schedulers {

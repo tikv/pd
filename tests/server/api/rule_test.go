@@ -1434,11 +1434,11 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	re.Len(fit.RuleFits, 1)
 	re.Len(fit.OrphanPeers, 1)
 	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 2)
-	fit = &placement.RegionFit{}
-	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
-	re.NoError(err)
-	re.Len(fit.RuleFits, 2)
-	re.Empty(fit.OrphanPeers)
+	testutil.Eventually(re, func() bool {
+		fit = &placement.RegionFit{}
+		return testutil.TryReadGetJSON(tests.TestDialClient, u, fit) == nil &&
+			len(fit.RuleFits) == 2 && len(fit.OrphanPeers) == 0
+	})
 	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 3)
 	fit = &placement.RegionFit{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
