@@ -3,22 +3,6 @@ name: add-metrics
 description: "Add or change Prometheus metrics — cache WithLabelValues, hot path, cleanup, avoid high cardinality, naming, MustRegister, backward compatibility. From tikv/pd metrics PRs."
 ---
 
-# Adding Metrics
-
-## PR summary (tikv/pd, latest ~100 metrics-related PRs)
-
-From [GitHub search](https://github.com/tikv/pd/pulls?q=is%3Apr+metrics) (600+ PRs), recurring themes:
-
-- **Cleanup on deletion** — Delete cluster/group metrics when store or resource is removed (e.g. [#9945](https://github.com/tikv/pd/pull/9945), [#9266](https://github.com/tikv/pd/pull/9266)).
-- **Reduce cardinality** — Reduce balance/filter metrics or avoid many unique label values ([#9537](https://github.com/tikv/pd/pull/9537), [#9536](https://github.com/tikv/pd/pull/9536)).
-- **Dashboard/panel alignment** — Align Grafana and metric semantics (e.g. store used vs user storage) ([#10277](https://github.com/tikv/pd/pull/10277), [#9891](https://github.com/tikv/pd/pull/9891)).
-- **Labels for observability** — Add keyspace/store labels where useful ([#9778](https://github.com/tikv/pd/pull/9778), [#9898](https://github.com/tikv/pd/pull/9898)).
-- **gRPC/stream metrics** — Per-service stream duration histograms, lifecycle instrumentation ([#10201](https://github.com/tikv/pd/pull/10201), [#9768](https://github.com/tikv/pd/pull/9768)).
-- **Client** — Don’t record when no retry; use const labels for resource group ([#9464](https://github.com/tikv/pd/pull/9464), [#9383](https://github.com/tikv/pd/pull/9383)).
-- **Fix wrong metrics** — Correct measurement or add new metric/version; don’t silently change semantics ([#9561](https://github.com/tikv/pd/pull/9561), [#3524](https://github.com/tikv/pd/pull/3524)).
-
----
-
 ## Principles (checklist + detail)
 
 Before adding or changing metrics, ensure:
