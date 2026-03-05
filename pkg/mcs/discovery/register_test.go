@@ -19,7 +19,6 @@ import (
 	"os"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -58,7 +57,10 @@ func TestRegister(t *testing.T) {
 	err = sr.Register()
 	re.NoError(err)
 	sr.cancel()
-	re.Empty(getKeyAfterLeaseExpired(ctx, re, client, sr.key))
+	testutil.Eventually(re, func() bool {
+		val, err := tryGetKey(ctx, client, sr.key)
+		return err == nil && val == ""
+	})
 
 	// Test the case that keepalive is failed when the etcd is restarted.
 	sr = NewServiceRegister(ctx, client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
@@ -67,7 +69,10 @@ func TestRegister(t *testing.T) {
 	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
 	for i := range 3 {
-		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(ctx, re, client, sr.key))
+		testutil.Eventually(re, func() bool {
+			val, err := tryGetKey(ctx, client, sr.key)
+			return err == nil && val == "127.0.0.1:2"
+		})
 		etcd.Server.HardStop() // close the etcd to make the keepalive failed
 		// ensure that the request is timeout
 		testutil.Eventually(re, func() bool {
@@ -94,17 +99,6 @@ func TestRegister(t *testing.T) {
 	// Close the last restarted etcd instance
 	etcd.Server.HardStop()
 	etcd.Close()
-}
-
-func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
-	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
-	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
-	resp, err := client.Get(ctx, key)
-	re.NoError(err)
-	if len(resp.Kvs) == 0 {
-		return ""
-	}
-	return string(resp.Kvs[0].Value)
 }
 
 // tryGetKey retrieves a key from etcd, returning an error instead of using
