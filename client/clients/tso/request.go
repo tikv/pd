@@ -65,8 +65,6 @@ func (req *Request) IsFrom(pool *sync.Pool) bool {
 
 // TryDone tries to send the result to the channel, it will not block.
 func (req *Request) TryDone(err error) {
-	req.mu.RLock()
-	defer req.mu.RUnlock()
 	select {
 	case req.done <- err:
 	default:
@@ -75,7 +73,11 @@ func (req *Request) TryDone(err error) {
 
 // Wait will block until the TSO result is ready.
 func (req *Request) Wait() (physical int64, logical int64, err error) {
-	return req.waitCtx(req.requestCtx)
+	req.mu.RLock()
+	ctx := req.requestCtx
+	req.mu.RUnlock()
+
+	return req.waitCtx(ctx)
 }
 
 // waitCtx waits for the TSO result with specified ctx, while not using req.requestCtx.
