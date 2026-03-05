@@ -615,7 +615,7 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 	}
 }
 
-// UpdateBuckets sets the buckets of the region, used by bucket report.
+// UpdateBuckets sets the buckets of the region, only use by tests.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 	if buckets == nil {
 		atomic.StorePointer(&r.buckets, nil)
@@ -628,6 +628,30 @@ func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 		Keys:     buckets.GetKeys(),
 	}
 	return atomic.CompareAndSwapPointer(&r.buckets, unsafe.Pointer(old), unsafe.Pointer(newBuckets))
+}
+
+// GetReportBuckets returns the buckets of the region, only use by tests.
+func (r *RegionInfo) GetReportBuckets() *metapb.Buckets {
+	return (*metapb.Buckets)(atomic.LoadPointer(&r.buckets))
+}
+
+func (r *RegionInfo) CompareAndSetBuckets(buckets *metapb.Buckets) bool {
+	old := (*metapb.Buckets)(atomic.LoadPointer(&r.buckets))
+	// region should not update if the version of the buckets is less than the old one.
+	if old != nil {
+		reportVersion := buckets.GetVersion()
+		if reportVersion < old.GetVersion() {
+			versionStaleCounter.Inc()
+			return true
+		} else if reportVersion == old.GetVersion() {
+			versionNotChangeCounter.Inc()
+			return true
+		}
+	}
+	failpoint.Inject("concurrentBucketHeartbeat", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
+	return atomic.CompareAndSwapPointer(&r.buckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
 // GetBuckets returns the buckets of the region.
