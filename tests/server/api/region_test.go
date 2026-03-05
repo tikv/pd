@@ -383,7 +383,6 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		r2.Adjust()
 		return reflect.DeepEqual(expected, r2)
 	})
-	re.Equal(expected, r2)
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "pending-peer")
 	r3 := &response.RegionsInfo{}
@@ -409,7 +408,6 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		r5.Adjust()
 		return reflect.DeepEqual(expected, r5)
 	})
-	re.Equal(expected, r5)
 
 	r = r.Clone(core.SetApproximateSize(1))
 	tests.MustPutRegionInfo(re, cluster, r)
@@ -422,7 +420,6 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		}
 		return reflect.DeepEqual(histSizes, r6)
 	})
-	re.Equal(histSizes, r6)
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	tests.MustPutRegionInfo(re, cluster, r)
@@ -435,7 +432,6 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		}
 		return reflect.DeepEqual(histKeys, r7)
 	})
-	re.Equal(histKeys, r7)
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
 	r = r.Clone(core.SetApproximateKeys(0))
@@ -455,7 +451,6 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		r8.Adjust()
 		return r8.Count == 1 && len(r8.Regions) > 0 && r.GetID() == r8.Regions[0].ID
 	})
-	re.Equal(r.GetID(), r8.Regions[0].ID)
 }
 
 func (suite *regionTestSuite) TestRegions() {
