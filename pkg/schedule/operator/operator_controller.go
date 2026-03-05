@@ -917,8 +917,6 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInflue
 							return true
 						}
 					}
-				}
-				if region != nil {
 					op.UnfinishedInfluence(influence, region)
 				}
 			}
