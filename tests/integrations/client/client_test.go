@@ -410,10 +410,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		var lastTS uint64
 		for range tsoRequestRound {
-			var physical, logical int64
-			var ts uint64
-			physical, logical, err = cli.GetTS(context.Background())
-			ts = tsoutil.ComposeTS(physical, logical)
+			physical, logical, err := cli.GetTS(context.Background())
+			ts := tsoutil.ComposeTS(physical, logical)
 			if err != nil {
 				maxUnavailableTime = time.Now()
 				continue
@@ -430,7 +428,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
-		err = leader.Stop()
+		err := leader.Stop()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
@@ -448,7 +446,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
-		err = leader.Stop()
+		err := leader.Stop()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
