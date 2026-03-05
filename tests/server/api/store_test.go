@@ -534,11 +534,8 @@ func tryRequestStatusBody(client *http.Client, method string, url string) (int, 
 	if err != nil {
 		return 0, err
 	}
+	defer resp.Body.Close()
 	_, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-	err = resp.Body.Close()
 	if err != nil {
 		return 0, err
 	}

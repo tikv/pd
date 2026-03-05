@@ -126,13 +126,15 @@ func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoun
 // tryRequest is a version of request that does not use testify assertions,
 // making it safe to use inside Eventually condition functions.
 func (suite *tsoServerTestSuite) tryRequest(ctx context.Context, count uint32) error {
+	attemptCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
 			Header: &pdpb.RequestHeader{ClusterId: clusterID},
 			Count:  count,
 		}
-		tsoClient, err := suite.pdClient.Tso(ctx)
+		tsoClient, err := suite.pdClient.Tso(attemptCtx)
 		if err != nil {
 			return err
 		}
@@ -149,7 +151,7 @@ func (suite *tsoServerTestSuite) tryRequest(ctx context.Context, count uint32) e
 		Header: &tsopb.RequestHeader{ClusterId: clusterID},
 		Count:  count,
 	}
-	tsoClient, err := suite.tsoClient.Tso(ctx)
+	tsoClient, err := suite.tsoClient.Tso(attemptCtx)
 	if err != nil {
 		return err
 	}

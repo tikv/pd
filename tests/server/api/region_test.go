@@ -190,7 +190,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		if err := testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
 			return false
 		}
 		return len(respBundle) == 1 && respBundle[0].ID == "5"
@@ -223,7 +223,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		if err := testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
 			return false
 		}
 		return len(respBundle) == 1 && len(respBundle[0].Rules) == 2
@@ -253,7 +253,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		if err := testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle); err != nil {
 			return false
 		}
 		if len(respBundle) != 2 {

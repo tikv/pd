@@ -870,10 +870,19 @@ func checkLoadRuleBundle(re *require.Assertions, pdAddr string, fname string, ex
 		if err != nil {
 			return false
 		}
+		bundles = nil
 		if json.Unmarshal(b, &bundles) != nil {
 			return false
 		}
-		return len(bundles) == len(expectValues)
+		if len(bundles) != len(expectValues) {
+			return false
+		}
+		for i := range expectValues {
+			if bundles[i].ID != expectValues[i].ID {
+				return false
+			}
+		}
+		return true
 	})
 	assertBundles(re, bundles, expectValues)
 }
@@ -890,22 +899,24 @@ func checkLoadRule(re *require.Assertions, pdAddr string, fname string, expectVa
 		if err != nil {
 			return false
 		}
+		rules = nil
 		if json.Unmarshal(b, &rules) != nil {
 			return false
 		}
-		return len(rules) == len(expectValues)
+		if len(rules) != len(expectValues) {
+			return false
+		}
+		for i, v := range expectValues {
+			if rules[i].Key() != v {
+				return false
+			}
+		}
+		return true
 	})
-	for i, v := range expectValues {
-		re.Equal(v, rules[i].Key())
-	}
 	return rules
 }
 
 func checkShowRuleKey(re *require.Assertions, pdAddr string, expectValues [][2]string, opts ...string) {
-	var (
-		rules []placement.Rule
-		fit   placement.RegionFit
-	)
 	cmd := ctl.GetRootCmd()
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show"}
@@ -913,25 +924,32 @@ func checkShowRuleKey(re *require.Assertions, pdAddr string, expectValues [][2]s
 		if err != nil {
 			return false
 		}
-		err = json.Unmarshal(output, &rules)
-		if err == nil {
-			return len(rules) == len(expectValues)
+		var rules []placement.Rule
+		if err = json.Unmarshal(output, &rules); err == nil {
+			if len(rules) != len(expectValues) {
+				return false
+			}
+			for i, v := range expectValues {
+				if rules[i].Key() != v {
+					return false
+				}
+			}
+			return true
 		}
+		var fit placement.RegionFit
 		if json.Unmarshal(output, &fit) != nil {
 			return false
 		}
-		return len(fit.RuleFits) != 0
+		if len(fit.RuleFits) != len(expectValues) {
+			return false
+		}
+		for i, v := range expectValues {
+			if fit.RuleFits[i].Rule.Key() != v {
+				return false
+			}
+		}
+		return true
 	})
-	if len(rules) != 0 {
-		for i, v := range expectValues {
-			re.Equal(v, rules[i].Key())
-		}
-	}
-	if len(fit.RuleFits) != 0 {
-		for i, v := range expectValues {
-			re.Equal(v, fit.RuleFits[i].Rule.Key())
-		}
-	}
 }
 
 func (suite *configTestSuite) TestReplicationMode() {

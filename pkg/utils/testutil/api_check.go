@@ -189,26 +189,6 @@ func TryReadGetJSON(client *http.Client, url string, data any) error {
 	return tryCheckResp(resp, data)
 }
 
-// TryReadGetJSONWithBody performs a GET request with body and unmarshals the JSON response.
-// Unlike ReadGetJSONWithBody, it returns an error instead of using testify assertions.
-func TryReadGetJSONWithBody(client *http.Client, url string, input []byte, data any) error {
-	resp, err := apiutil.GetJSON(client, url, input)
-	if err != nil {
-		return err
-	}
-	return tryCheckResp(resp, data)
-}
-
-// TryCheckGetJSON performs a GET request and checks the response status is OK.
-// Unlike CheckGetJSON with StatusOK/ExtractJSON, it returns an error instead of using testify assertions.
-func TryCheckGetJSON(client *http.Client, url string, data any) error {
-	resp, err := apiutil.GetJSON(client, url, nil)
-	if err != nil {
-		return err
-	}
-	return tryCheckResp(resp, data)
-}
-
 // TryCheckPostJSON performs a POST request, checks status is OK and unmarshals response.
 // Returns an error instead of using testify assertions, safe for use inside Eventually.
 func TryCheckPostJSON(client *http.Client, url string, reqData []byte, data any) error {

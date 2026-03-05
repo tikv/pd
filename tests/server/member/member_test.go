@@ -132,6 +132,7 @@ func tryCheckMemberList(clientURL string, configs []*config.Config) error {
 	if len(data.GetMembers()) != len(configs) {
 		return errors.Errorf("member length not match, %v vs %v", len(data.GetMembers()), len(configs))
 	}
+	matched := make(map[string]bool)
 	for _, member := range data.GetMembers() {
 		for _, cfg := range configs {
 			if member.GetName() == cfg.Name {
@@ -141,7 +142,13 @@ func tryCheckMemberList(clientURL string, configs []*config.Config) error {
 				if len(member.PeerUrls) != 1 || member.PeerUrls[0] != cfg.PeerUrls {
 					return errors.Errorf("peer urls mismatch for %s", cfg.Name)
 				}
+				matched[cfg.Name] = true
 			}
+		}
+	}
+	for _, cfg := range configs {
+		if !matched[cfg.Name] {
+			return errors.Errorf("member %s not found in response", cfg.Name)
 		}
 	}
 	return nil

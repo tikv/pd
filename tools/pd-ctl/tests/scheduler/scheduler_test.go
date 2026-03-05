@@ -383,13 +383,15 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	checkSchedulerWithStatusCommand("paused", []string{
 		"balance-leader-scheduler",
 	})
-	result := make(map[string]any)
 	testutil.Eventually(re, func() bool {
 		output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "describe", "balance-leader-scheduler"}...)
 		if err != nil {
 			return false
 		}
-		json.Unmarshal(output, &result)
+		result := make(map[string]any)
+		if err := json.Unmarshal(output, &result); err != nil {
+			return false
+		}
 		return len(result) != 0 && result["status"] == "paused" && result["summary"] == ""
 	}, testutil.WithWaitFor(30*time.Second))
 
@@ -560,18 +562,19 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	re.NotContains(echo, "Success!")
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "test", "a", "b"}, nil)
 	re.Contains(echo, "Success!")
-	var rangeConf []map[string]any
-	var jobConf map[string]any
 	testutil.Eventually(re, func() bool {
 		output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}...)
 		if err != nil {
 			return false
 		}
-		json.Unmarshal(output, &rangeConf)
+		var rangeConf []map[string]any
+		if err := json.Unmarshal(output, &rangeConf); err != nil {
+			return false
+		}
 		if len(rangeConf) == 0 {
 			return false
 		}
-		jobConf = rangeConf[0]
+		jobConf := rangeConf[0]
 		if jobConf["rule"] != "learner-scatter" || jobConf["engine"] != "tiflash" || jobConf["alias"] != "test" {
 			return false
 		}
@@ -600,7 +603,10 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		if err != nil {
 			return false
 		}
-		json.Unmarshal(output, &rangeConf)
+		var rangeConf []map[string]any
+		if err := json.Unmarshal(output, &rangeConf); err != nil {
+			return false
+		}
 		return len(rangeConf) == 2
 	})
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-range-scheduler"}, nil)
@@ -909,13 +915,15 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	cmd := ctl.GetRootCmd()
 
 	checkSchedulerDescribeCommand := func(schedulerName, expectedStatus, expectedSummary string) {
-		result := make(map[string]any)
 		testutil.Eventually(re, func() bool {
 			output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}...)
 			if err != nil {
 				return false
 			}
-			json.Unmarshal(output, &result)
+			result := make(map[string]any)
+			if err := json.Unmarshal(output, &result); err != nil {
+				return false
+			}
 			suite.T().Log(result)
 			return len(result) != 0 && expectedStatus == result["status"] && expectedSummary == result["summary"]
 		}, testutil.WithTickInterval(50*time.Millisecond))

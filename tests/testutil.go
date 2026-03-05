@@ -460,7 +460,7 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		re.NoError(err)
 		respBundle := make([]placement.GroupBundle, 0)
 		testutil.Eventually(re, func() bool {
-			if err := testutil.TryCheckGetJSON(TestDialClient, ruleURL, &respBundle); err != nil {
+			if err := testutil.TryReadGetJSON(TestDialClient, ruleURL, &respBundle); err != nil {
 				return false
 			}
 			return len(respBundle) == 1 && respBundle[0].ID == placement.DefaultGroupID && len(respBundle[0].Rules) == 1 &&
@@ -501,7 +501,7 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		testutil.Eventually(re, func() bool {
 			// get current schedulers
 			var currentSchedulers []string
-			if err := testutil.TryCheckGetJSON(http.DefaultClient, schedulerURL, &currentSchedulers); err != nil {
+			if err := testutil.TryReadGetJSON(http.DefaultClient, schedulerURL, &currentSchedulers); err != nil {
 				return false
 			}
 			// compare schedulers
@@ -557,7 +557,7 @@ func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
 		re.NoError(err)
 		testutil.Eventually(re, func() bool {
 			var operators []*operator.Operator
-			if err := testutil.TryCheckGetJSON(TestDialClient, operatorURL, &operators); err != nil {
+			if err := testutil.TryReadGetJSON(TestDialClient, operatorURL, &operators); err != nil {
 				return false
 			}
 			return len(operators) == 0

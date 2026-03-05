@@ -1048,7 +1048,7 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 
 		testutil.Eventually(re, func() bool {
 			respBundle := make([]placement.GroupBundle, 0)
-			if testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
+			if testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
 				return false
 			}
 			if len(respBundle) != 1 {
@@ -1221,7 +1221,7 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 	re.NotZero(expectResult.val)
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		if testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
+		if testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
 			return false
 		}
 		if len(respBundle) != 1 {
@@ -1321,7 +1321,7 @@ func (suite *ruleTestSuite) postAndCheckRuleBundle(urlPrefix string, bundle []pl
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		if testutil.TryCheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
+		if testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
 			return false
 		}
 		if len(respBundle) != len(bundle) {

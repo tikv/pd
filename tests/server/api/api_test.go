@@ -942,7 +942,11 @@ func TestRemovingProgress(t *testing.T) {
 				return false
 			}
 			// is not prepared
-			if json.Unmarshal(output, &p) != nil {
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return false
+			}
+			if json.Unmarshal(body, &p) != nil {
 				return false
 			}
 			return p.Action == "removing" && p.Progress == 0.0 && p.CurrentSpeed == 0.0 && p.LeftSeconds == math.MaxFloat64
