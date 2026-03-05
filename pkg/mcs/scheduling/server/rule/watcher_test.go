@@ -29,6 +29,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -38,6 +39,42 @@ import (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestParseRuleStoreKey(t *testing.T) {
+	re := require.New(t)
+
+	// Roundtrip test: Rule.StoreKey() -> parseRuleStoreKey should recover groupID and ruleID.
+	testCases := []struct {
+		groupID string
+		ruleID  string
+	}{
+		{"pd", "default"},
+		{"tiflash", "rule-1"},
+		{"", "id-only"},
+		{"group", ""},
+	}
+	for _, tc := range testCases {
+		rule := &placement.Rule{GroupID: tc.groupID, ID: tc.ruleID}
+		groupID, ruleID, err := parseRuleStoreKey(rule.StoreKey())
+		re.NoError(err)
+		re.Equal(tc.groupID, groupID)
+		re.Equal(tc.ruleID, ruleID)
+	}
+
+	// Invalid key format: no separator.
+	groupID, ruleID, err := parseRuleStoreKey("noseparator")
+	re.NoError(err)
+	re.Empty(groupID)
+	re.Empty(ruleID)
+
+	// Invalid hex in group.
+	_, _, err = parseRuleStoreKey("zzzz-6964")
+	re.Error(err)
+
+	// Invalid hex in id.
+	_, _, err = parseRuleStoreKey("6772-zzzz")
+	re.Error(err)
 }
 
 const (
