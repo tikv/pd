@@ -930,7 +930,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re.NoError(err)
 	leader := cluster.GetServer(cluster.WaitLeader())
 	re.NoError(leader.BootstrapCluster())
-	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=30", leader.GetAddr())
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
 		"schedule.max-snapshot-count":             999,
 		"schedule.enable-location-replacement":    false,
