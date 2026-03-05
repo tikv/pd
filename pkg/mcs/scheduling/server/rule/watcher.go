@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -157,19 +158,31 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
 			log.Debug("delete placement rule", zap.String("key", key))
-			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
+			// Parse groupID and ruleID from the store key (format: hex(groupID)-hex(ruleID))
+			// instead of loading from storage, which may already be deleted by the time
+			// the watcher processes the DELETE event.
+			storeKey := strings.TrimPrefix(key, rw.rulesPathPrefix)
+			groupHex, idHex, ok := strings.Cut(storeKey, "-")
+			if !ok {
+				log.Warn("invalid placement rule key format", zap.String("key", key))
+				return nil
+			}
+			groupBytes, err := hex.DecodeString(groupHex)
 			if err != nil {
 				return err
 			}
-			rule, err := placement.NewRuleFromJSON([]byte(ruleJSON))
+			idBytes, err := hex.DecodeString(idHex)
 			if err != nil {
 				return err
 			}
+			groupID, ruleID := string(groupBytes), string(idBytes)
 			// Try to add the rule change to the patch.
-			rw.patch.DeleteRule(rule.GroupID, rule.ID)
-			// Update the suspect key ranges
-			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
-			return err
+			rw.patch.DeleteRule(groupID, ruleID)
+			// Update the suspect key ranges from the cached rule if available.
+			if rule := rw.ruleManager.GetRuleLocked(groupID, ruleID); rule != nil {
+				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+			}
+			return nil
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
 			log.Debug("delete placement rule group", zap.String("key", key))
 			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
