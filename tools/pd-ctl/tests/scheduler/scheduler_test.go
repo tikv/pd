@@ -942,14 +942,22 @@ func compareGrantHotRegionSchedulerConfig(expect, actual map[string]any) bool {
 	}
 	count := map[float64]any{}
 	for _, id := range expectStoreID {
-		// check if the store id is duplicated
-		if _, ok := count[id.(float64)]; ok {
+		fID, ok := id.(float64)
+		if !ok {
 			return false
 		}
-		count[id.(float64)] = nil
+		// check if the store id is duplicated
+		if _, ok := count[fID]; ok {
+			return false
+		}
+		count[fID] = nil
 	}
 	for _, id := range actualStoreID {
-		if _, ok := count[id.(float64)]; !ok {
+		fID, ok := id.(float64)
+		if !ok {
+			return false
+		}
+		if _, ok := count[fID]; !ok {
 			return false
 		}
 	}
