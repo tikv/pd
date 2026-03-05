@@ -19,10 +19,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/keypath"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 type clusterSuite struct {
@@ -52,7 +53,7 @@ func (suite *clusterSuite) TestScanRegions() {
 	re := suite.Require()
 
 	for _, isFollower := range []bool{true, false} {
-		suite.T().Run("isFollower="+strconv.FormatBool(isFollower), func(t *testing.T) {
+		suite.Run("isFollower="+strconv.FormatBool(isFollower), func() {
 			resp, err := ScanRegions(suite.rc, &pdpb.ScanRegionsRequest{
 				StartKey: []byte("a"),
 				EndKey:   []byte("e"),
@@ -86,7 +87,7 @@ func (suite *clusterSuite) TestBatchScanRegions() {
 	re := suite.Require()
 
 	for _, isFollower := range []bool{true, false} {
-		suite.T().Run("isFollower="+strconv.FormatBool(isFollower), func(t *testing.T) {
+		suite.Run("isFollower="+strconv.FormatBool(isFollower), func() {
 			resp, err := BatchScanRegions(suite.rc, &pdpb.BatchScanRegionsRequest{
 				Ranges: []*pdpb.KeyRange{
 					{
@@ -128,7 +129,7 @@ func (suite *clusterSuite) TestGetRegion() {
 	re := suite.Require()
 
 	for _, isFollower := range []bool{true, false} {
-		suite.T().Run("isFollower="+strconv.FormatBool(isFollower), func(t *testing.T) {
+		suite.Run("isFollower="+strconv.FormatBool(isFollower), func() {
 			resp, err := GetRegion(suite.rc, &pdpb.GetRegionRequest{
 				RegionKey: []byte("c"),
 			}, isFollower)
@@ -157,7 +158,7 @@ func (suite *clusterSuite) TestGetRegionByID() {
 	re := suite.Require()
 
 	for _, isFollower := range []bool{true, false} {
-		suite.T().Run("isFollower="+strconv.FormatBool(isFollower), func(t *testing.T) {
+		suite.Run("isFollower="+strconv.FormatBool(isFollower), func() {
 			resp, err := GetRegionByID(suite.rc, &pdpb.GetRegionByIDRequest{
 				RegionId: 1,
 			}, isFollower)
@@ -186,7 +187,7 @@ func (suite *clusterSuite) TestGetRegionByPreKey() {
 	re := suite.Require()
 
 	for _, isFollower := range []bool{true, false} {
-		suite.T().Run("isFollower="+strconv.FormatBool(isFollower), func(t *testing.T) {
+		suite.Run("isFollower="+strconv.FormatBool(isFollower), func() {
 			resp, err := GetPrevRegion(suite.rc, &pdpb.GetRegionRequest{
 				RegionKey: []byte("g"),
 			}, isFollower)
