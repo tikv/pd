@@ -322,7 +322,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 		for _, testCase := range testCases {
 			filters[testCase.filterIdx].Source(opt, store)
 			re.Equal(testCase.sourceReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason.String())
-			filters[testCase.filterIdx].Source(opt, store)
+			filters[testCase.filterIdx].Target(opt, store)
 			re.Equal(testCase.targetReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason.String())
 		}
 	}
@@ -338,7 +338,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	testCases = []testCase{
 		{0, "store-state-disconnect-filter", "store-state-disconnect-filter"},
-		{1, "store-state-ok-filter", "store-state-ok-filter"},
+		{1, "store-state-ok-filter", "store-state-disconnect-filter"},
 		{2, "store-state-disconnect-filter", "store-state-disconnect-filter"},
 		{3, "store-state-ok-filter", "store-state-ok-filter"},
 	}
@@ -348,7 +348,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
 		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
 	testCases = []testCase{
-		{0, "store-state-ok-filter", "store-state-ok-filter"},
+		{0, "store-state-ok-filter", "store-state-busy-filter"},
 		{1, "store-state-busy-filter", "store-state-busy-filter"},
 		{2, "store-state-busy-filter", "store-state-busy-filter"},
 		{3, "store-state-ok-filter", "store-state-ok-filter"},

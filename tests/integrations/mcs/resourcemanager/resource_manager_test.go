@@ -529,6 +529,7 @@ func (suite *resourceManagerClientTestSuite) cleanupResourceGroups(re *require.A
 	for _, group := range groups {
 		deleteResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
 		if group.Name == server.DefaultResourceGroupName {
+			re.Error(err)
 			re.Contains(err.Error(), "cannot delete reserved group")
 			continue
 		}
@@ -860,7 +861,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	expectedErr := controller.NewResourceGroupNotExistErr(rg.Name)
 	testutil.Eventually(re, func() bool {
 		gc, err := rgsController.GetResourceGroup(rg.Name)
-		return err.Error() == expectedErr.Error() && gc == nil
+		return err != nil && err.Error() == expectedErr.Error() && gc == nil
 	}, testutil.WithTickInterval(50*time.Millisecond))
 	// Add the resource group again.
 	resp, err = cli.AddResourceGroup(suite.ctx, rg)
@@ -870,9 +871,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	testutil.Eventually(re, func() bool {
 		gc, err := rgsController.GetResourceGroup(rg.Name)
 		if err != nil {
-			re.EqualError(err, expectedErr.Error())
+			return false
 		}
-		return gc.GetName() == rg.Name
+		return gc != nil && gc.GetName() == rg.Name
 	}, testutil.WithTickInterval(50*time.Millisecond))
 }
 
@@ -1532,10 +1533,17 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		ClientUniqueId:        1,
 	})
 	re.NoError(err)
-	time.Sleep(10 * time.Millisecond)
-	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.NoError(err)
-	re.Equal(g.RUStats, testConsumption)
+	testutil.Eventually(re, func() bool {
+		g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		if err != nil {
+			return false
+		}
+		return g.RUStats != nil &&
+			g.RUStats.RRU == testConsumption.RRU &&
+			g.RUStats.WRU == testConsumption.WRU &&
+			g.RUStats.ReadBytes == testConsumption.ReadBytes &&
+			g.RUStats.WriteBytes == testConsumption.WriteBytes
+	})
 
 	// update resource group, ru stats not change
 	g.RUSettings.RU.Settings.FillRate = 12345
@@ -1554,9 +1562,17 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	suite.client = suite.setupPDClient(re)
 	cli = suite.client
 	// check ru stats not loss after restart
-	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.NoError(err)
-	re.Equal(g.RUStats, testConsumption)
+	testutil.Eventually(re, func() bool {
+		g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		if err != nil {
+			return false
+		}
+		return g.RUStats != nil &&
+			g.RUStats.RRU == testConsumption.RRU &&
+			g.RUStats.WRU == testConsumption.WRU &&
+			g.RUStats.ReadBytes == testConsumption.ReadBytes &&
+			g.RUStats.WriteBytes == testConsumption.WriteBytes
+	})
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
@@ -2184,8 +2200,9 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		expectedConsumption := consumptions[i]
 		testutil.Eventually(re, func() bool {
 			rg, err := client.GetResourceGroup(ctx, groupName, pd.WithRUStats)
-			re.NoError(err)
-			re.NotNil(rg)
+			if err != nil || rg == nil || rg.RUStats == nil {
+				return false
+			}
 			return expectedConsumption.RRU == rg.RUStats.RRU &&
 				expectedConsumption.WRU == rg.RUStats.WRU
 		})
@@ -2254,13 +2271,11 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 				meta := c.GetActiveResourceGroup(groupToFind.Name)
 				_, _, _, _, err := c.OnRequestWait(suite.ctx, groupToFind.Name, tcs.makeReadRequest())
 				if keyspaceToFind == keyspace {
-					re.NoError(err)
-					return meta != nil &&
+					return err == nil && meta != nil &&
 						meta.Name == groupToFind.Name &&
 						meta.RUSettings.RU.Settings.FillRate == groupToFind.RUSettings.RU.Settings.FillRate
 				}
-				re.Error(err)
-				return meta == nil
+				return err != nil && meta == nil
 			})
 		}
 		clientID += 1

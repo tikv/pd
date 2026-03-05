@@ -518,7 +518,11 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	})
 	re.Equal(float64(30*time.Minute.Nanoseconds()), jobConf["timeout"])
 	re.Equal("running", jobConf["status"])
-	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
+	rangesSlice, ok := jobConf["ranges"].([]any)
+	re.True(ok)
+	re.NotEmpty(rangesSlice)
+	ranges, ok := rangesSlice[0].(map[string]any)
+	re.True(ok)
 	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
 	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
 
@@ -925,8 +929,14 @@ func compareGrantHotRegionSchedulerConfig(expect, actual map[string]any) bool {
 	if expect["store-leader-id"] != actual["store-leader-id"] {
 		return false
 	}
-	expectStoreID := expect["store-id"].([]any)
-	actualStoreID := actual["store-id"].([]any)
+	expectStoreID, ok := expect["store-id"].([]any)
+	if !ok {
+		return false
+	}
+	actualStoreID, ok := actual["store-id"].([]any)
+	if !ok {
+		return false
+	}
 	if len(expectStoreID) != len(actualStoreID) {
 		return false
 	}

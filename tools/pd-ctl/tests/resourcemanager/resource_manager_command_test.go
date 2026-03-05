@@ -17,12 +17,14 @@ package resourcemanager_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -63,14 +65,18 @@ func (s *testResourceManagerSuite) TestConfigController() {
 	expectCfg.Adjust(nil)
 	// Show controller config
 	checkShow := func() {
-		args := []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "show"}
-		output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
-		re.NoError(err)
-
-		actualCfg := server.ControllerConfig{}
-		err = json.Unmarshal(output, &actualCfg)
-		re.NoError(err, string(output))
-		re.Equal(expectCfg.Controller, actualCfg)
+		testutil.Eventually(re, func() bool {
+			args := []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "show"}
+			output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+			if err != nil {
+				return false
+			}
+			actualCfg := server.ControllerConfig{}
+			if err = json.Unmarshal(output, &actualCfg); err != nil {
+				return false
+			}
+			return reflect.DeepEqual(expectCfg.Controller, actualCfg)
+		})
 	}
 
 	// Check default config

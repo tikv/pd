@@ -441,7 +441,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
 			case gc := <-c.tokenBucketUpdateChan:
-				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
+				c.wg.Add(1)
+				go func() {
+					defer c.wg.Done()
+					gc.handleTokenBucketUpdateEvent(c.loopCtx)
+				}()
 			}
 		}
 	}()

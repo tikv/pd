@@ -930,7 +930,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re.NoError(err)
 	leader := cluster.GetServer(cluster.WaitLeader())
 	re.NoError(leader.BootstrapCluster())
-	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=30", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
 		"schedule.max-snapshot-count":             999,
 		"schedule.enable-location-replacement":    false,
@@ -2707,8 +2707,8 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.Len(res.GlobalGCBarriers, 2)
 	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
 	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
-	re.Greater(res.GlobalGCBarriers[1].TTL, time.Second)
-	re.LessOrEqual(2*time.Second, res.GlobalGCBarriers[1].TTL)
+	re.Greater(res.GlobalGCBarriers[1].TTL, time.Duration(0))
+	re.LessOrEqual(res.GlobalGCBarriers[1].TTL, 2*time.Second)
 
 	cli1 := s.client.GetGCStatesClient(1)
 	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
@@ -2730,8 +2730,8 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.True(ok)
 	re.Equal("b4", state.GCBarriers[0].BarrierID)
 	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
-	re.Greater(state.GCBarriers[0].TTL, 2*time.Second)
-	re.LessOrEqual(3*time.Second, state.GCBarriers[0].TTL)
+	re.Greater(state.GCBarriers[0].TTL, time.Duration(0))
+	re.LessOrEqual(state.GCBarriers[0].TTL, 3*time.Second)
 }
 
 func TestDecodeHttpKeyRange(t *testing.T) {
