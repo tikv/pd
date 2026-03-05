@@ -153,15 +153,21 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	// Get all default scheduler names.
 	var namesFromPDService []string
 	testutil.Eventually(re, func() bool {
-		namesFromPDService, _, err = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
-		re.NoError(err)
+		var loadErr error
+		namesFromPDService, _, loadErr = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
+		if loadErr != nil {
+			return false
+		}
 		return len(namesFromPDService) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.
 	var namesFromSchedulingServer []string
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
-		re.NoError(err)
+		var loadErr error
+		namesFromSchedulingServer, _, loadErr = storage.LoadAllSchedulerConfigs()
+		if loadErr != nil {
+			return false
+		}
 		return len(namesFromSchedulingServer) == len(namesFromPDService)
 	})
 	re.Equal(namesFromPDService, namesFromSchedulingServer)
@@ -171,8 +177,11 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	// Check the new scheduler's config.
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
-		re.NoError(err)
+		var loadErr error
+		namesFromSchedulingServer, _, loadErr = storage.LoadAllSchedulerConfigs()
+		if loadErr != nil {
+			return false
+		}
 		return slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
@@ -199,8 +208,11 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	tests.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String())
 	// Check the removed scheduler's config.
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
-		re.NoError(err)
+		var loadErr error
+		namesFromSchedulingServer, _, loadErr = storage.LoadAllSchedulerConfigs()
+		if loadErr != nil {
+			return false
+		}
 		return !slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	watcher.Close()
@@ -214,9 +226,12 @@ func assertEvictLeaderStoreIDs(
 	}
 	testutil.Eventually(re, func() bool {
 		cfg, err := storage.LoadSchedulerConfig(types.EvictLeaderScheduler.String())
-		re.NoError(err)
-		err = schedulers.DecodeConfig([]byte(cfg), &evictLeaderCfg)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
+		if err = schedulers.DecodeConfig([]byte(cfg), &evictLeaderCfg); err != nil {
+			return false
+		}
 		return len(evictLeaderCfg.StoreIDWithRanges) == len(storeIDs)
 	})
 	// Validate the updated scheduler's config.

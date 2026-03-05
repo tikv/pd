@@ -90,8 +90,7 @@ func TestLevelDBBackend(t *testing.T) {
 	re.Empty(val)
 	testutil.Eventually(re, func() bool {
 		val, err = backend.Load(key)
-		re.NoError(err)
-		return value == val
+		return err == nil && value == val
 	}, testutil.WithWaitFor(defaultDirtyFlushTick*5), testutil.WithTickInterval(defaultDirtyFlushTick/2))
 	err = backend.Remove(key)
 	re.NoError(err)

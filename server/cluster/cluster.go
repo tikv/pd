@@ -2066,9 +2066,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
-		time.Sleep(500 * time.Millisecond)
-	})
+	failpoint.InjectCall("versionChangeConcurrency")
 	if minVersion == nil || clusterVersion.Equal(*minVersion) {
 		return
 	}

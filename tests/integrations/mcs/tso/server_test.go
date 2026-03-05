@@ -269,7 +269,9 @@ func (suite *PDServiceForward) ShutDown() {
 	etcdClient := suite.pdLeader.GetEtcdClient()
 	testutil.Eventually(re, func() bool {
 		endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return len(endpoints) == 0
 	})
 	suite.cluster.Destroy()
@@ -657,19 +659,29 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	check := func() {
 		testutil.Eventually(re, func() bool {
 			resp, err := tests.TestDialClient.Get(suite.pdLeader.GetServer().GetConfig().AdvertiseClientUrls + "/pd/api/v2/tso/keyspace-groups")
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			defer resp.Body.Close()
-			re.Equal(http.StatusOK, resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				return false
+			}
 			respString, err := io.ReadAll(resp.Body)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			var kgs []*endpoint.KeyspaceGroup
-			re.NoError(json.Unmarshal(respString, &kgs))
-			re.Len(kgs, 1)
-			re.Equal(constant.DefaultKeyspaceGroupID, kgs[0].ID)
-			re.Equal(endpoint.Basic.String(), kgs[0].UserKind)
-			re.Empty(kgs[0].SplitState)
-			re.Empty(kgs[0].KeyspaceLookupTable)
-			return len(kgs[0].Members) == 1
+			if err := json.Unmarshal(respString, &kgs); err != nil {
+				return false
+			}
+			if len(kgs) != 1 {
+				return false
+			}
+			return kgs[0].ID == constant.DefaultKeyspaceGroupID &&
+				kgs[0].UserKind == endpoint.Basic.String() &&
+				kgs[0].SplitState == nil &&
+				len(kgs[0].KeyspaceLookupTable) == 0 &&
+				len(kgs[0].Members) == 1
 		})
 	}
 	check()

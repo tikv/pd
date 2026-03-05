@@ -201,12 +201,17 @@ func setAllStoresMinResolvedTS(svr *tests.TestServer, ts uint64) error {
 func checkMinResolvedTS(re *require.Assertions, url string, expect *api.MinResolvedTS) {
 	re.Eventually(func() bool {
 		res, err := tests.TestDialClient.Get(url)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer res.Body.Close()
 		listResp := &api.MinResolvedTS{}
-		err = apiutil.ReadJSON(res.Body, listResp)
-		re.NoError(err)
-		re.Nil(listResp.StoresMinResolvedTS)
+		if err = apiutil.ReadJSON(res.Body, listResp); err != nil {
+			return false
+		}
+		if listResp.StoresMinResolvedTS != nil {
+			return false
+		}
 		return reflect.DeepEqual(expect, listResp)
 	}, time.Second*10, time.Millisecond*20)
 }
@@ -215,11 +220,14 @@ func checkMinResolvedTSByStores(re *require.Assertions, url string, expect *api.
 	re.Eventually(func() bool {
 		url := fmt.Sprintf("%s?scope=%s", url, scope)
 		res, err := tests.TestDialClient.Get(url)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer res.Body.Close()
 		listResp := &api.MinResolvedTS{}
-		err = apiutil.ReadJSON(res.Body, listResp)
-		re.NoError(err)
+		if err = apiutil.ReadJSON(res.Body, listResp); err != nil {
+			return false
+		}
 		return reflect.DeepEqual(expect, listResp)
 	}, time.Second*10, time.Millisecond*20)
 }

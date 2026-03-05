@@ -16,6 +16,7 @@ package testutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -173,6 +174,42 @@ func checkResp(resp *http.Response, checkOpts ...func([]byte, int, http.Header))
 	}
 	for _, opt := range checkOpts {
 		opt(res, resp.StatusCode, resp.Header)
+	}
+	return nil
+}
+
+// TryReadGetJSON performs a GET request and unmarshals the JSON response body.
+// Unlike ReadGetJSON, it returns an error instead of using testify assertions,
+// making it safe for use inside Eventually condition functions.
+func TryReadGetJSON(client *http.Client, url string, data any) error {
+	resp, err := apiutil.GetJSON(client, url, nil)
+	if err != nil {
+		return err
+	}
+	return tryCheckResp(resp, data)
+}
+
+// TryCheckPostJSON performs a POST request, checks status is OK and unmarshals response.
+// Returns an error instead of using testify assertions, safe for use inside Eventually.
+func TryCheckPostJSON(client *http.Client, url string, reqData []byte, data any) error {
+	resp, err := apiutil.PostJSON(client, url, reqData)
+	if err != nil {
+		return err
+	}
+	return tryCheckResp(resp, data)
+}
+
+func tryCheckResp(resp *http.Response, data any) error {
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("expected status %d, got %d: %s", http.StatusOK, resp.StatusCode, string(body))
+	}
+	if data != nil {
+		return json.Unmarshal(body, data)
 	}
 	return nil
 }

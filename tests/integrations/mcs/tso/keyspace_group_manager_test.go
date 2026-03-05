@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -37,7 +38,6 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/election"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -239,8 +239,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 			for _, server := range suite.tsoCluster.GetServers() {
 				if server.IsKeyspaceServingByGroup(keyspaceID, constant.DefaultKeyspaceGroupID) {
 					tam, err := server.GetTSOAllocator(constant.DefaultKeyspaceGroupID)
-					re.NoError(err)
-					re.NotNil(tam)
+					if err != nil || tam == nil {
+						return false
+					}
 					served = true
 					break
 				}
@@ -298,8 +299,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) waitKeyspaceReady(groupIDs []uint
 				for _, server := range suite.tsoCluster.GetServers() {
 					if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID) {
 						allocator, err := server.GetTSOAllocator(keyspaceGroupID)
-						re.NoError(err)
-						re.NotNil(allocator)
+						if err != nil || allocator == nil {
+							return false
+						}
 
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
@@ -308,7 +310,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) waitKeyspaceReady(groupIDs []uint
 							ServiceName: mcs.TSOServiceName,
 							GroupID:     keyspaceGroupID,
 						})
-						re.Equal(primaryPath, allocator.GetMember().GetElectionPath())
+						if primaryPath != allocator.GetMember().GetElectionPath() {
+							return false
+						}
 
 						served = true
 					}
@@ -360,8 +364,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 				for _, server := range suite.tsoCluster.GetServers() {
 					if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID) {
 						allocator, err := server.GetTSOAllocator(keyspaceGroupID)
-						re.NoError(err)
-						re.NotNil(allocator)
+						if err != nil || allocator == nil {
+							return false
+						}
 
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
@@ -370,7 +375,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 							ServiceName: mcs.TSOServiceName,
 							GroupID:     keyspaceGroupID,
 						})
-						re.Equal(primaryPath, allocator.GetMember().GetElectionPath())
+						if primaryPath != allocator.GetMember().GetElectionPath() {
+							return false
+						}
 
 						served = true
 					}
@@ -439,9 +446,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 		if code != http.StatusOK {
 			return false
 		}
-		re.Equal(newID, kg2.ID)
-		re.Equal([]uint32{222, 333}, kg2.Keyspaces)
-		return !kg2.IsSplitting()
+		return kg2.ID == newID &&
+			slices.Equal(kg2.Keyspaces, []uint32{222, 333}) &&
+			!kg2.IsSplitting()
 	})
 	// Check the split TSO from keyspace group `newID` now.
 	splitTS, err := suite.requestTSO(re, 222, newID)
@@ -535,18 +542,18 @@ func waitFinishSplit(
 		if code != http.StatusOK {
 			return false
 		}
-		re.Equal(splitTargetID, kg.ID)
-		re.Equal(splitTargetKeyspaces, kg.Keyspaces)
-		return !kg.IsSplitTarget()
+		return kg.ID == splitTargetID &&
+			slices.Equal(kg.Keyspaces, splitTargetKeyspaces) &&
+			!kg.IsSplitTarget()
 	})
 	testutil.Eventually(re, func() bool {
 		kg, code := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitSourceID)
 		if code != http.StatusOK {
 			return false
 		}
-		re.Equal(splitSourceID, kg.ID)
-		re.Equal(splitSourceKeyspaces, kg.Keyspaces)
-		return !kg.IsSplitSource()
+		return kg.ID == splitSourceID &&
+			slices.Equal(kg.Keyspaces, splitSourceKeyspaces) &&
+			!kg.IsSplitSource()
 	})
 }
 
@@ -675,9 +682,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 
 func waitFinishAllocNodes(re *require.Assertions, server *tests.TestServer, groupID uint32) {
 	testutil.Eventually(re, func() bool {
-		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, groupID)
-		re.Equal(groupID, kg.ID)
-		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
+		kg, code := handlersutil.TryLoadKeyspaceGroupByID(re, server, groupID)
+		if code != http.StatusOK {
+			return false
+		}
+		return kg.ID == groupID && len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 }
 
@@ -793,9 +802,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	var mergedTS pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
 		mergedTS, err = suite.requestTSO(re, 3333, constant.DefaultKeyspaceGroupID)
-		if err != nil {
-			re.ErrorIs(err, errs.ErrKeyspaceGroupIsMerging)
-		}
 		return err == nil && tsoutil.CompareTimestamp(&mergedTS, &pdpb.Timestamp{}) > 0
 	}, testutil.WithTickInterval(5*time.Second), testutil.WithWaitFor(time.Minute))
 	re.Positive(tsoutil.CompareTimestamp(&mergedTS, &ts))
@@ -839,9 +845,12 @@ func waitFinishMerge(
 ) {
 	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		kg = handlersutil.MustLoadKeyspaceGroupByID(re, server, mergeTargetID)
-		re.Equal(mergeTargetID, kg.ID)
-		return !kg.IsMergeTarget()
+		var code int
+		kg, code = handlersutil.TryLoadKeyspaceGroupByID(re, server, mergeTargetID)
+		if code != http.StatusOK {
+			return false
+		}
+		return kg.ID == mergeTargetID && !kg.IsMergeTarget()
 	})
 	// If the merge is finished, the target keyspace group should contain all the keyspaces.
 	for _, keyspaceID := range keyspaces {

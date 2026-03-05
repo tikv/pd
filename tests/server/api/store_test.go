@@ -371,8 +371,8 @@ func (suite *storeTestSuite) checkStoreDelete(cluster *tests.TestCluster) {
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/store/%d", urlPrefix, testCase.id)
 		testutil.Eventually(re, func() bool {
-			status := requestStatusBody(re, tests.TestDialClient, http.MethodDelete, url)
-			return testCase.status == status
+			status, err := tryRequestStatusBody(tests.TestDialClient, http.MethodDelete, url)
+			return err == nil && testCase.status == status
 		})
 	}
 	// store 1111 origin status:offline
@@ -514,15 +514,26 @@ func initStores() []*metapb.Store {
 }
 
 func requestStatusBody(re *require.Assertions, client *http.Client, method string, url string) int {
+	status, err := tryRequestStatusBody(client, method, url)
+	re.NoError(err)
+	return status
+}
+
+func tryRequestStatusBody(client *http.Client, method string, url string) (int, error) {
 	req, err := http.NewRequest(method, url, http.NoBody)
-	re.NoError(err)
+	if err != nil {
+		return 0, err
+	}
 	resp, err := client.Do(req)
-	re.NoError(err)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
 	_, err = io.ReadAll(resp.Body)
-	re.NoError(err)
-	err = resp.Body.Close()
-	re.NoError(err)
-	return resp.StatusCode
+	if err != nil {
+		return 0, err
+	}
+	return resp.StatusCode, nil
 }
 
 func checkStoresInfo(re *require.Assertions, ss []*response.StoreInfo, want []*metapb.Store) {

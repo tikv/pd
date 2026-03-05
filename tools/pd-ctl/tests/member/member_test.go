@@ -98,7 +98,9 @@ func TestMember(t *testing.T) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		members, err = etcdutil.ListEtcdMembers(ctx, client)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return len(members.Members) == 2
 	})
 
@@ -108,7 +110,9 @@ func TestMember(t *testing.T) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		members, err = etcdutil.ListEtcdMembers(ctx, client)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return len(members.Members) == 2
 	})
 }

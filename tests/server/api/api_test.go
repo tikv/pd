@@ -87,7 +87,9 @@ func TestReconnect(t *testing.T) {
 		if name != leader {
 			testutil.Eventually(re, func() bool {
 				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
-				re.NoError(err)
+				if err != nil {
+					return false
+				}
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusOK
 			})
@@ -102,7 +104,9 @@ func TestReconnect(t *testing.T) {
 		if name != leader && name != newLeader {
 			testutil.Eventually(re, func() bool {
 				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
-				re.NoError(err)
+				if err != nil {
+					return false
+				}
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusServiceUnavailable
 			})
@@ -702,12 +706,17 @@ func (suite *redirectorTestSuite) TestRedirect() {
 		url := fmt.Sprintf("%s/pd/api/v1/members", svr.GetServer().GetAddr())
 		testutil.Eventually(re, func() bool {
 			resp, err := tests.TestDialClient.Get(url)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			defer resp.Body.Close()
-			_, err = io.ReadAll(resp.Body)
-			re.NoError(err)
+			if _, err = io.ReadAll(resp.Body); err != nil {
+				return false
+			}
 			// Should not meet 503 since the retry logic ensure the request is sent to the new leader eventually.
-			re.NotEqual(http.StatusServiceUnavailable, resp.StatusCode)
+			if resp.StatusCode == http.StatusServiceUnavailable {
+				return false
+			}
 			return resp.StatusCode == http.StatusOK
 		})
 	}
@@ -921,20 +930,26 @@ func TestRemovingProgress(t *testing.T) {
 			}
 			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
 			req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			resp, err := tests.TestDialClient.Do(req)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
 				return false
 			}
 			// is not prepared
-			re.NoError(json.Unmarshal(output, &p))
-			re.Equal("removing", p.Action)
-			re.Equal(0.0, p.Progress)
-			re.Equal(0.0, p.CurrentSpeed)
-			re.Equal(math.MaxFloat64, p.LeftSeconds)
-			return true
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return false
+			}
+			if json.Unmarshal(body, &p) != nil {
+				return false
+			}
+			return p.Action == "removing" && p.Progress == 0.0 && p.CurrentSpeed == 0.0 && p.LeftSeconds == math.MaxFloat64
 		})
 	}
 
@@ -949,16 +964,24 @@ func TestRemovingProgress(t *testing.T) {
 		}
 		url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
 		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		resp, err := tests.TestDialClient.Do(req)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
 		output, err := io.ReadAll(resp.Body)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &p))
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(output, &p) != nil {
+			return false
+		}
 		t.Logf("progress: %v", p)
 		if p.Action != "removing" {
 			return false
@@ -985,8 +1008,12 @@ func TestRemovingProgress(t *testing.T) {
 		}
 
 		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusOK)
-		re.NoError(json.Unmarshal(output, &p))
-		re.Equal("removing", p.Action)
+		if json.Unmarshal(output, &p) != nil {
+			return false
+		}
+		if p.Action != "removing" {
+			return false
+		}
 		t.Logf("progress for store 2: %v", p)
 		// store 2: (30-10)/(30+40) ~= 0.285
 		// average progress ~= (0.36+0.28)/2 = 0.32
@@ -1130,8 +1157,9 @@ func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
 	re.NotEqual(followerName, resp.Header.Get(apiutil.XPDHandleHeader), "POST /config request should not be redirected")
 	testutil.Eventually(re, func() bool {
 		var followerCfg config.Config
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg)
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, followerURL, &followerCfg); err != nil {
+			return false
+		}
 		return followerCfg.Replication.MaxReplicas == 4.
 	})
 }
@@ -1250,7 +1278,9 @@ func TestPreparingProgress(t *testing.T) {
 	}
 	testutil.Eventually(re, func() bool {
 		if leader == nil {
-			re.NotEmpty(cluster.WaitLeader())
+			if len(cluster.WaitLeader()) == 0 {
+				return false
+			}
 			leader = cluster.GetLeaderServer()
 			return false
 		}
@@ -1291,10 +1321,11 @@ func TestPreparingProgress(t *testing.T) {
 
 			// no store preparing
 			output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
-			re.Contains(string(output), "no progress found for the action")
+			if !strings.Contains(string(output), "no progress found for the action") {
+				return false
+			}
 			output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-			re.Contains(string(output), "no progress found for the given store ID")
-			return true
+			return strings.Contains(string(output), "no progress found for the given store ID")
 		})
 	}
 
@@ -1315,23 +1346,27 @@ func TestPreparingProgress(t *testing.T) {
 		}
 		url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
 		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		resp, err := tests.TestDialClient.Do(req)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer resp.Body.Close()
 		output, err := io.ReadAll(resp.Body)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
-		re.NoError(json.Unmarshal(output, &p))
+		if json.Unmarshal(output, &p) != nil {
+			return false
+		}
 		t.Logf("progress: %v", p)
 
-		re.Equal("preparing", p.Action)
-		re.Equal(0.0, p.Progress)
-		re.Equal(0.0, p.CurrentSpeed)
-		re.Equal(math.MaxFloat64, p.LeftSeconds)
-		return true
+		return p.Action == "preparing" && p.Progress == 0.0 && p.CurrentSpeed == 0.0 && p.LeftSeconds == math.MaxFloat64
 	})
 
 	// update size
@@ -1341,7 +1376,9 @@ func TestPreparingProgress(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		defer triggerCheckStores()
 		output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
-		re.NoError(json.Unmarshal(output, &p))
+		if json.Unmarshal(output, &p) != nil {
+			return false
+		}
 		t.Logf("progress: %v", p)
 		if p.Action != "preparing" {
 			return false
@@ -1369,7 +1406,9 @@ func TestPreparingProgress(t *testing.T) {
 		}
 
 		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
-		re.NoError(json.Unmarshal(output, &p))
+		if json.Unmarshal(output, &p) != nil {
+			return false
+		}
 		t.Logf("progress for store 4: %v", p)
 		if p.Action != "preparing" {
 			return false
@@ -1410,8 +1449,7 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 			return false
 		}
 		output, err = io.ReadAll(resp.Body)
-		re.NoError(err)
-		return true
+		return err == nil
 	})
 
 	return output

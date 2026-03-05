@@ -99,12 +99,10 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 
 	// config show
 	args := []string{"-u", pdAddr, "config", "show"}
-	output, err := tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	var output []byte
+	var err error
 	cfg := config.Config{}
-	re.NoError(json.Unmarshal(output, &cfg))
 	scheduleConfig := svr.GetScheduleConfig()
-
 	// hidden config
 	scheduleConfig.Schedulers = nil
 	scheduleConfig.StoreLimit = nil
@@ -117,8 +115,18 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.Equal(uint64(0), scheduleConfig.MaxMergeRegionKeys)
 	// The result of config show doesn't be 0.
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
-	re.Equal(scheduleConfig, &cfg.Schedule)
-	re.Equal(svr.GetReplicationConfig(), &cfg.Replication)
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = tests.ExecuteCommand(cmd, args...)
+		if err != nil {
+			return false
+		}
+		cfg = config.Config{}
+		if json.Unmarshal(output, &cfg) != nil {
+			return false
+		}
+		return reflect.DeepEqual(scheduleConfig, &cfg.Schedule) &&
+			reflect.DeepEqual(svr.GetReplicationConfig(), &cfg.Replication)
+	})
 
 	// config set trace-region-flow <value>
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
@@ -140,9 +148,13 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		var conf config.PDServerConfig
-		re.NoError(json.Unmarshal(output, &conf))
+		if json.Unmarshal(output, &conf) != nil {
+			return false
+		}
 		return conf.FlowRoundByDigit == origin
 	})
 
@@ -655,7 +667,9 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 	var group placement.RuleGroup
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", placement.DefaultGroupID)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return !strings.Contains(string(output), "404")
 	})
 	re.NoError(json.Unmarshal(output, &group), string(output))
@@ -676,8 +690,12 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 	var groups []placement.RuleGroup
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show")
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &groups))
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(output, &groups) != nil {
+			return false
+		}
 		return reflect.DeepEqual([]placement.RuleGroup{
 			{ID: placement.DefaultGroupID, Index: 42, Override: true},
 			{ID: "group2", Index: 100, Override: false},
@@ -693,7 +711,9 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 	// show again
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "404")
 	})
 
@@ -703,7 +723,9 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return strings.Contains(string(output), "404")
 	})
 }
@@ -841,11 +863,26 @@ func checkLoadRuleBundle(re *require.Assertions, pdAddr string, fname string, ex
 	cmd := ctl.GetRootCmd()
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		b, err := os.ReadFile(fname)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(b, &bundles))
-		return len(bundles) == len(expectValues)
+		if err != nil {
+			return false
+		}
+		bundles = nil
+		if json.Unmarshal(b, &bundles) != nil {
+			return false
+		}
+		if len(bundles) != len(expectValues) {
+			return false
+		}
+		for i := range expectValues {
+			if bundles[i].ID != expectValues[i].ID {
+				return false
+			}
+		}
+		return true
 	})
 	assertBundles(re, bundles, expectValues)
 }
@@ -855,45 +892,64 @@ func checkLoadRule(re *require.Assertions, pdAddr string, fname string, expectVa
 	cmd := ctl.GetRootCmd()
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		b, err := os.ReadFile(fname)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(b, &rules))
-		return len(rules) == len(expectValues)
+		if err != nil {
+			return false
+		}
+		rules = nil
+		if json.Unmarshal(b, &rules) != nil {
+			return false
+		}
+		if len(rules) != len(expectValues) {
+			return false
+		}
+		for i, v := range expectValues {
+			if rules[i].Key() != v {
+				return false
+			}
+		}
+		return true
 	})
-	for i, v := range expectValues {
-		re.Equal(v, rules[i].Key())
-	}
 	return rules
 }
 
 func checkShowRuleKey(re *require.Assertions, pdAddr string, expectValues [][2]string, opts ...string) {
-	var (
-		rules []placement.Rule
-		fit   placement.RegionFit
-	)
 	cmd := ctl.GetRootCmd()
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show"}
 		output, err := tests.ExecuteCommand(cmd, append(args, opts...)...)
-		re.NoError(err)
-		err = json.Unmarshal(output, &rules)
-		if err == nil {
-			return len(rules) == len(expectValues)
+		if err != nil {
+			return false
 		}
-		re.NoError(json.Unmarshal(output, &fit))
-		return len(fit.RuleFits) != 0
+		var rules []placement.Rule
+		if err = json.Unmarshal(output, &rules); err == nil {
+			if len(rules) != len(expectValues) {
+				return false
+			}
+			for i, v := range expectValues {
+				if rules[i].Key() != v {
+					return false
+				}
+			}
+			return true
+		}
+		var fit placement.RegionFit
+		if json.Unmarshal(output, &fit) != nil {
+			return false
+		}
+		if len(fit.RuleFits) < len(expectValues) {
+			return false
+		}
+		for i, v := range expectValues {
+			if fit.RuleFits[i].Rule.Key() != v {
+				return false
+			}
+		}
+		return true
 	})
-	if len(rules) != 0 {
-		for i, v := range expectValues {
-			re.Equal(v, rules[i].Key())
-		}
-	}
-	if len(fit.RuleFits) != 0 {
-		for i, v := range expectValues {
-			re.Equal(v, fit.RuleFits[i].Rule.Key())
-		}
-	}
 }
 
 func (suite *configTestSuite) TestReplicationMode() {

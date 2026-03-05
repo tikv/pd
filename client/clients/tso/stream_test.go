@@ -356,11 +356,11 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 	s.re.Equal("mock rpc error", res.err.Error())
 
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
-	// new request anymore.
+	// new request anymore. Note: when the stream is in closing state, processRequests returns an error immediately
+	// without invoking the callback, so we only check processErr here.
 	testutil.Eventually(s.re, func() bool {
-		return s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
-			s.re.Error(err)
-		}) != nil
+		processErr := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {})
+		return processErr != nil
 	})
 }
 

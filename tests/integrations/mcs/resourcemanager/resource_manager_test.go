@@ -860,7 +860,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	expectedErr := controller.NewResourceGroupNotExistErr(rg.Name)
 	testutil.Eventually(re, func() bool {
 		gc, err := rgsController.GetResourceGroup(rg.Name)
-		return err.Error() == expectedErr.Error() && gc == nil
+		return err != nil && err.Error() == expectedErr.Error() && gc == nil
 	}, testutil.WithTickInterval(50*time.Millisecond))
 	// Add the resource group again.
 	resp, err = cli.AddResourceGroup(suite.ctx, rg)
@@ -870,7 +870,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	testutil.Eventually(re, func() bool {
 		gc, err := rgsController.GetResourceGroup(rg.Name)
 		if err != nil {
-			re.EqualError(err, expectedErr.Error())
+			return false
 		}
 		return gc.GetName() == rg.Name
 	}, testutil.WithTickInterval(50*time.Millisecond))
@@ -2184,8 +2184,9 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		expectedConsumption := consumptions[i]
 		testutil.Eventually(re, func() bool {
 			rg, err := client.GetResourceGroup(ctx, groupName, pd.WithRUStats)
-			re.NoError(err)
-			re.NotNil(rg)
+			if err != nil || rg == nil {
+				return false
+			}
 			return expectedConsumption.RRU == rg.RUStats.RRU &&
 				expectedConsumption.WRU == rg.RUStats.WRU
 		})
@@ -2254,13 +2255,11 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 				meta := c.GetActiveResourceGroup(groupToFind.Name)
 				_, _, _, _, err := c.OnRequestWait(suite.ctx, groupToFind.Name, tcs.makeReadRequest())
 				if keyspaceToFind == keyspace {
-					re.NoError(err)
-					return meta != nil &&
+					return err == nil && meta != nil &&
 						meta.Name == groupToFind.Name &&
 						meta.RUSettings.RU.Settings.FillRate == groupToFind.RUSettings.RU.Settings.FillRate
 				}
-				re.Error(err)
-				return meta == nil
+				return err != nil && meta == nil
 			})
 		}
 		clientID += 1

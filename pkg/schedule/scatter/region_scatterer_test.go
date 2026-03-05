@@ -917,8 +917,7 @@ func TestScatterReplace(t *testing.T) {
 
 	testutil.Eventually(re, func() bool {
 		op, err = scatterer.Scatter(tc.GetRegion(1), "", true)
-		re.NoError(err)
-		return op != nil
+		return err == nil && op != nil
 	})
 }
 

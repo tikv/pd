@@ -178,8 +178,9 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	// Verify consumption was added to the resource group.
 	testutil.Eventually(re, func() bool {
 		updatedGroup, err := manager.GetResourceGroup(keyspaceID, req.GetResourceGroupName(), true)
-		re.NoError(err)
-		re.NotNil(updatedGroup)
+		if err != nil || updatedGroup == nil {
+			return false
+		}
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
 	})
@@ -245,8 +246,9 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 	keyspaceID := ExtractKeyspaceID(keyspaceIDValue)
 	testutil.Eventually(re, func() bool {
 		rg, err := manager.GetResourceGroup(keyspaceID, group.Name, true)
-		re.NoError(err)
-		re.NotNil(rg)
+		if err != nil || rg == nil {
+			return false
+		}
 		return rg.Priority == group.Priority &&
 			rg.RUSettings.RU.getBurstLimitSetting() == group.RUSettings.RU.Settings.BurstLimit
 	})

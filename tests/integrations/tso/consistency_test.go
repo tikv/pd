@@ -133,12 +133,15 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 	var resp *tsopb.TsoResponse
 	testutil.Eventually(re, func() bool {
 		tsoClient, err := suite.tsoClient.Tso(ctx)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer func() {
-			err := tsoClient.CloseSend()
-			re.NoError(err)
+			_ = tsoClient.CloseSend()
 		}()
-		re.NoError(tsoClient.Send(req))
+		if err := tsoClient.Send(req); err != nil {
+			return false
+		}
 		resp, err = tsoClient.Recv()
 		return err == nil && resp != nil
 	})

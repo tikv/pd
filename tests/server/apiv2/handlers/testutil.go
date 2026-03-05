@@ -218,33 +218,44 @@ func tryCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, re
 
 // MustLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
 func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) *endpoint.KeyspaceGroup {
-	var (
-		kg   *endpoint.KeyspaceGroup
-		code int
-	)
+	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		kg, code = TryLoadKeyspaceGroupByID(re, server, id)
-		return code == http.StatusOK
+		var err error
+		kg, _, err = loadKeyspaceGroupByIDNoAssert(server, id)
+		return err == nil && kg != nil
 	})
 	return kg
 }
 
-// TryLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
-func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int) {
+func loadKeyspaceGroupByIDNoAssert(server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int, error) {
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
-	re.NoError(err)
+	if err != nil {
+		return nil, 0, err
+	}
 	resp, err := tests.TestDialClient.Do(httpReq)
-	re.NoError(err)
+	if err != nil {
+		return nil, 0, err
+	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	if resp.StatusCode != http.StatusOK {
-		return nil, resp.StatusCode
+	if err != nil {
+		return nil, resp.StatusCode, err
 	}
-
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode, nil
+	}
 	var kg endpoint.KeyspaceGroup
-	re.NoError(json.Unmarshal(data, &kg))
-	return &kg, resp.StatusCode
+	if err := json.Unmarshal(data, &kg); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return &kg, resp.StatusCode, nil
+}
+
+// TryLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
+func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int) {
+	kg, code, err := loadKeyspaceGroupByIDNoAssert(server, id)
+	re.NoError(err)
+	return kg, code
 }
 
 // MustCreateKeyspaceGroup creates a keyspace group with HTTP API.
@@ -299,16 +310,14 @@ func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServ
 			return false
 		}
 		defer resp.Body.Close()
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
+		if _, err := io.ReadAll(resp.Body); err != nil {
 			return false
 		}
 		if resp.StatusCode == http.StatusServiceUnavailable ||
 			resp.StatusCode == http.StatusInternalServerError {
 			return false
 		}
-		re.Equal(http.StatusOK, resp.StatusCode, string(data))
-		return true
+		return resp.StatusCode == http.StatusOK
 	})
 }
 

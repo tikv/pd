@@ -182,9 +182,9 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	//	"/schedulers", http.MethodPost
 	//	"/schedulers/{name}", http.MethodDelete
 	testutil.Eventually(re, func() bool {
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &respSlice,
-			testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &respSlice); err != nil {
+			return false
+		}
 		return slice.Contains(respSlice, "balance-leader-scheduler")
 	})
 
@@ -428,11 +428,11 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	// Test config forward
 	// Expect to get same config in scheduling server and PD
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
-		re.NoError(err)
-		re.Equal(cfg["schedule"].(map[string]any)["leader-schedule-limit"],
-			float64(opts.GetLeaderScheduleLimit()))
-		return cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix, &cfg); err != nil {
+			return false
+		}
+		return cfg["schedule"].(map[string]any)["leader-schedule-limit"] == float64(opts.GetLeaderScheduleLimit()) &&
+			cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
 	})
 
 	// Test to change config in PD
@@ -444,8 +444,9 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, reqData, testutil.StatusOK(re))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
-		re.NoError(err)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix, &cfg); err != nil {
+			return false
+		}
 		return cfg["replication"].(map[string]any)["max-replicas"] == 4. &&
 			opts.GetReplicationConfig().MaxReplicas == 4.
 	})
@@ -861,9 +862,9 @@ func (suite *schedulingForwardingTestSuite) TestForwardingAndLocalBehavior() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		var followerCfg config.Config
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL("/config"), &followerCfg)
-		re.NoError(err)
-		fmt.Println(followerCfg.Replication.MaxReplicas)
+		if err := testutil.TryReadGetJSON(tests.TestDialClient, followerURL("/config"), &followerCfg); err != nil {
+			return false
+		}
 		return followerCfg.Replication.MaxReplicas == 4.
 	})
 

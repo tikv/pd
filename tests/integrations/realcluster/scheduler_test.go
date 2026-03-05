@@ -131,7 +131,9 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	// wait leader transfer
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		for _, region := range regions.Regions {
 			if region.Leader.StoreID != region1.Leader.StoreID {
 				return false
@@ -173,7 +175,9 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		for _, region := range regions.Regions {
 			if region.Leader.StoreID == region1.Leader.StoreID {
 				return false
@@ -192,7 +196,9 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		for _, region := range regions.Regions {
 			if region.ID == region1.ID {
 				continue
@@ -212,7 +218,9 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		for _, region := range regions.Regions {
 			if region.Leader.StoreID != region1.Leader.StoreID {
 				return false

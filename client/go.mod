@@ -13,7 +13,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20260106110113-438649d89ee7
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.1.11
 	go.uber.org/zap v1.24.0
 	google.golang.org/grpc v1.75.1

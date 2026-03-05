@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -157,19 +158,22 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
 			log.Debug("delete placement rule", zap.String("key", key))
-			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
+			storeKey := strings.TrimPrefix(key, rw.rulesPathPrefix)
+			groupID, ruleID, ok, err := parseRuleStoreKey(storeKey)
 			if err != nil {
 				return err
 			}
-			rule, err := placement.NewRuleFromJSON([]byte(ruleJSON))
-			if err != nil {
-				return err
+			if !ok {
+				log.Warn("invalid placement rule key format", zap.String("key", key))
+				return nil
 			}
 			// Try to add the rule change to the patch.
-			rw.patch.DeleteRule(rule.GroupID, rule.ID)
-			// Update the suspect key ranges
-			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
-			return err
+			rw.patch.DeleteRule(groupID, ruleID)
+			// Update the suspect key ranges from the cached rule if available.
+			if rule := rw.ruleManager.GetRuleLocked(groupID, ruleID); rule != nil {
+				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+			}
+			return nil
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
 			log.Debug("delete placement rule group", zap.String("key", key))
 			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
@@ -275,6 +279,25 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()
+}
+
+// parseRuleStoreKey parses the groupID and ruleID from a placement rule store key.
+// The store key format is: hex(groupID)-hex(ruleID)
+// Returns ok=false if the key format is invalid (no "-" separator).
+func parseRuleStoreKey(storeKey string) (groupID, ruleID string, ok bool, err error) {
+	groupHex, idHex, found := strings.Cut(storeKey, "-")
+	if !found {
+		return "", "", false, nil
+	}
+	groupBytes, err := hex.DecodeString(groupHex)
+	if err != nil {
+		return "", "", false, err
+	}
+	idBytes, err := hex.DecodeString(idHex)
+	if err != nil {
+		return "", "", false, err
+	}
+	return string(groupBytes), string(idBytes), true, nil
 }
 
 // Close closes the watcher.

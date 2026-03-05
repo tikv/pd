@@ -288,7 +288,9 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 		url := fmt.Sprintf("%s/rule/%s/%s", urlPrefix, testCase.rule.GroupID, testCase.rule.ID)
 		if testCase.found {
 			testutil.Eventually(re, func() bool {
-				err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &resp)
+				if testutil.TryReadGetJSON(tests.TestDialClient, url, &resp) != nil {
+					return false
+				}
 				return compareRule(&resp, &testCases[i].rule)
 			})
 		} else {
@@ -481,8 +483,9 @@ func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
 		var resp []*placement.Rule
 		url := fmt.Sprintf("%s/rules/group/%s", urlPrefix, testCase.groupID)
 		testutil.Eventually(re, func() bool {
-			err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &resp)
-			re.NoError(err)
+			if testutil.TryReadGetJSON(tests.TestDialClient, url, &resp) != nil {
+				return false
+			}
 			if len(resp) != testCase.count {
 				return false
 			}
@@ -544,7 +547,9 @@ func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 
 		if testCase.success {
 			testutil.Eventually(re, func() bool {
-				err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &resp)
+				if testutil.TryReadGetJSON(tests.TestDialClient, url, &resp) != nil {
+					return false
+				}
 				for _, r := range resp {
 					if r.GroupID == "e" {
 						return compareRule(r, &rule)
@@ -608,7 +613,9 @@ func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 		url := fmt.Sprintf("%s/rules/key/%s", urlPrefix, testCase.key)
 		if testCase.success {
 			testutil.Eventually(re, func() bool {
-				err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &resp)
+				if testutil.TryReadGetJSON(tests.TestDialClient, url, &resp) != nil {
+					return false
+				}
 				return len(resp) == testCase.respSize
 			})
 		} else {
@@ -1041,10 +1048,12 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 
 		testutil.Eventually(re, func() bool {
 			respBundle := make([]placement.GroupBundle, 0)
-			err := testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", nil,
-				testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-			re.NoError(err)
-			re.Len(respBundle, 1)
+			if testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
+				return false
+			}
+			if len(respBundle) != 1 {
+				return false
+			}
 			return compareBundle(respBundle[0], bundle[0])
 		})
 	}
@@ -1212,10 +1221,12 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 	re.NotZero(expectResult.val)
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		err := testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
-		re.Len(respBundle, 1)
+		if testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
+			return false
+		}
+		if len(respBundle) != 1 {
+			return false
+		}
 		return checkBundle(respBundle, expectResult.val)
 	})
 }
@@ -1251,8 +1262,7 @@ func (suite *ruleTestSuite) checkLargeRules(cluster *tests.TestCluster) {
 func assertBundleEqual(re *require.Assertions, url string, expectedBundle placement.GroupBundle) {
 	var bundle placement.GroupBundle
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &bundle)
-		if err != nil {
+		if testutil.TryReadGetJSON(tests.TestDialClient, url, &bundle) != nil {
 			return false
 		}
 		return compareBundle(bundle, expectedBundle)
@@ -1262,8 +1272,7 @@ func assertBundleEqual(re *require.Assertions, url string, expectedBundle placem
 func assertBundlesEqual(re *require.Assertions, url string, expectedBundles []placement.GroupBundle, expectedLen int) {
 	var bundles []placement.GroupBundle
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &bundles)
-		if err != nil {
+		if testutil.TryReadGetJSON(tests.TestDialClient, url, &bundles) != nil {
 			return false
 		}
 		if len(bundles) != expectedLen {
@@ -1312,9 +1321,9 @@ func (suite *ruleTestSuite) postAndCheckRuleBundle(urlPrefix string, bundle []pl
 
 	testutil.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
-		err = testutil.CheckGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", nil,
-			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
-		re.NoError(err)
+		if testutil.TryReadGetJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", &respBundle) != nil {
+			return false
+		}
 		if len(respBundle) != len(bundle) {
 			return false
 		}
@@ -1425,11 +1434,11 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	re.Len(fit.RuleFits, 1)
 	re.Len(fit.OrphanPeers, 1)
 	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 2)
-	fit = &placement.RegionFit{}
-	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)
-	re.NoError(err)
-	re.Len(fit.RuleFits, 2)
-	re.Empty(fit.OrphanPeers)
+	testutil.Eventually(re, func() bool {
+		fit = &placement.RegionFit{}
+		return testutil.TryReadGetJSON(tests.TestDialClient, u, fit) == nil &&
+			len(fit.RuleFits) == 2 && len(fit.OrphanPeers) == 0
+	})
 	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 3)
 	fit = &placement.RegionFit{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, u, fit)

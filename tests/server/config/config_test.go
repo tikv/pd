@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
-	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -110,8 +109,9 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	addr := fmt.Sprintf("%s/pd/api/v1/config", urlPrefix)
 	cfg := &config.Config{}
 	testutil.Eventually(re, func() bool {
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, addr, cfg)
-		re.NoError(err)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, cfg) != nil {
+			return false
+		}
 		return cfg.PDServerCfg.DashboardAddress != "auto"
 	})
 
@@ -144,9 +144,10 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 
 	testutil.Eventually(re, func() bool {
 		newCfg := &config.Config{}
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, addr, newCfg)
-		re.NoError(err)
-		return suite.Equal(newCfg, cfg)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, newCfg) != nil {
+			return false
+		}
+		return reflect.DeepEqual(newCfg, cfg)
 	})
 	// the new way
 	l = map[string]any{
@@ -175,9 +176,10 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	cfg.ClusterVersion = *v
 	testutil.Eventually(re, func() bool {
 		newCfg1 := &config.Config{}
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, addr, newCfg1)
-		re.NoError(err)
-		return suite.Equal(cfg, newCfg1)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, newCfg1) != nil {
+			return false
+		}
+		return reflect.DeepEqual(cfg, newCfg1)
 	})
 
 	// revert this to avoid it affects TestConfigTTL
@@ -240,7 +242,9 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 
 	testutil.Eventually(re, func() bool {
 		scheduleConfig1 := &sc.ScheduleConfig{}
-		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, addr, scheduleConfig1))
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, scheduleConfig1) != nil {
+			return false
+		}
 		return reflect.DeepEqual(*scheduleConfig1, *scheduleConfig)
 	})
 }
@@ -282,8 +286,9 @@ func (suite *configTestSuite) checkConfigReplication(cluster *tests.TestCluster)
 
 	rc4 := &sc.ReplicationConfig{}
 	testutil.Eventually(re, func() bool {
-		err = testutil.ReadGetJSON(re, tests.TestDialClient, addr, rc4)
-		re.NoError(err)
+		if testutil.TryReadGetJSON(tests.TestDialClient, addr, rc4) != nil {
+			return false
+		}
 		return reflect.DeepEqual(*rc4, *rc)
 	})
 }
@@ -447,40 +452,39 @@ type ttlConfigInterface interface {
 	IsTikvRegionSplitEnabled() bool
 }
 
+func checkTTLConfig(options ttlConfigInterface, expectedEqual bool) bool {
+	eq := func(expected, actual any) bool {
+		if expectedEqual {
+			return expected == actual
+		}
+		return expected != actual
+	}
+	return eq(uint64(999), options.GetMaxSnapshotCount()) &&
+		eq(false, options.IsLocationReplacementEnabled()) &&
+		eq(uint64(999), options.GetMaxMergeRegionSize()) &&
+		eq(uint64(999), options.GetMaxMergeRegionKeys()) &&
+		eq(uint64(999), options.GetSchedulerMaxWaitingOperator()) &&
+		eq(uint64(999), options.GetLeaderScheduleLimit()) &&
+		eq(uint64(999), options.GetRegionScheduleLimit()) &&
+		eq(uint64(999), options.GetHotRegionScheduleLimit()) &&
+		eq(uint64(999), options.GetReplicaScheduleLimit()) &&
+		eq(uint64(999), options.GetMergeScheduleLimit()) &&
+		eq(false, options.IsTikvRegionSplitEnabled())
+}
+
 func assertTTLConfig(
 	re *require.Assertions,
 	cluster *tests.TestCluster,
 	expectedEqual bool,
 ) {
-	equality := re.Equal
-	if !expectedEqual {
-		equality = re.NotEqual
-	}
-	checkFunc := func(options ttlConfigInterface) {
-		equality(uint64(999), options.GetMaxSnapshotCount())
-		equality(false, options.IsLocationReplacementEnabled())
-		equality(uint64(999), options.GetMaxMergeRegionSize())
-		equality(uint64(999), options.GetMaxMergeRegionKeys())
-		equality(uint64(999), options.GetSchedulerMaxWaitingOperator())
-		equality(uint64(999), options.GetLeaderScheduleLimit())
-		equality(uint64(999), options.GetRegionScheduleLimit())
-		equality(uint64(999), options.GetHotRegionScheduleLimit())
-		equality(uint64(999), options.GetReplicaScheduleLimit())
-		equality(uint64(999), options.GetMergeScheduleLimit())
-		equality(false, options.IsTikvRegionSplitEnabled())
-	}
-	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())
+	testutil.Eventually(re, func() bool {
+		return checkTTLConfig(cluster.GetLeaderServer().GetServer().GetPersistOptions(), expectedEqual)
+	})
 	if cluster.GetSchedulingPrimaryServer() != nil {
-		var options *cfg.PersistConfig
 		testutil.Eventually(re, func() bool {
 			// wait for the scheduling primary server to be synced
-			options = cluster.GetSchedulingPrimaryServer().GetPersistConfig()
-			if expectedEqual {
-				return uint64(999) == options.GetMaxSnapshotCount()
-			}
-			return uint64(999) != options.GetMaxSnapshotCount()
+			return checkTTLConfig(cluster.GetSchedulingPrimaryServer().GetPersistConfig(), expectedEqual)
 		})
-		checkFunc(options)
 	}
 }
 
