@@ -544,18 +544,9 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(re *require.Assertio
 }
 
 func (suite *keyspaceGroupTestSuite) tryGetKeyspaceGroup(re *require.Assertions, id uint32) (*endpoint.KeyspaceGroup, int) {
-	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
+	kg, code, err := suite.getKeyspaceGroup(id)
 	re.NoError(err)
-	resp, err := tests.TestDialClient.Do(httpReq)
-	re.NoError(err)
-	defer resp.Body.Close()
-	kg := &endpoint.KeyspaceGroup{}
-	if resp.StatusCode == http.StatusOK {
-		bodyBytes, err := io.ReadAll(resp.Body)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(bodyBytes, kg))
-	}
-	return kg, resp.StatusCode
+	return kg, code
 }
 
 // getKeyspaceGroup is a non-asserting version of tryGetKeyspaceGroup, safe to use inside

@@ -221,52 +221,41 @@ func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer,
 	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
 		var err error
-		kg, err = loadKeyspaceGroupByIDNoAssert(server, id)
+		kg, _, err = loadKeyspaceGroupByIDNoAssert(server, id)
 		return err == nil && kg != nil
 	})
 	return kg
 }
 
-func loadKeyspaceGroupByIDNoAssert(server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, error) {
+func loadKeyspaceGroupByIDNoAssert(server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int, error) {
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	resp, err := tests.TestDialClient.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, resp.StatusCode, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, resp.StatusCode, nil
 	}
 	var kg endpoint.KeyspaceGroup
 	if err := json.Unmarshal(data, &kg); err != nil {
-		return nil, err
+		return nil, resp.StatusCode, err
 	}
-	return &kg, nil
+	return &kg, resp.StatusCode, nil
 }
 
 // TryLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
 func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int) {
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
+	kg, code, err := loadKeyspaceGroupByIDNoAssert(server, id)
 	re.NoError(err)
-	resp, err := tests.TestDialClient.Do(httpReq)
-	re.NoError(err)
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	if resp.StatusCode != http.StatusOK {
-		return nil, resp.StatusCode
-	}
-
-	var kg endpoint.KeyspaceGroup
-	re.NoError(json.Unmarshal(data, &kg))
-	return &kg, resp.StatusCode
+	return kg, code
 }
 
 // MustCreateKeyspaceGroup creates a keyspace group with HTTP API.

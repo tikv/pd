@@ -514,15 +514,9 @@ func initStores() []*metapb.Store {
 }
 
 func requestStatusBody(re *require.Assertions, client *http.Client, method string, url string) int {
-	req, err := http.NewRequest(method, url, http.NoBody)
+	status, err := tryRequestStatusBody(client, method, url)
 	re.NoError(err)
-	resp, err := client.Do(req)
-	re.NoError(err)
-	_, err = io.ReadAll(resp.Body)
-	re.NoError(err)
-	err = resp.Body.Close()
-	re.NoError(err)
-	return resp.StatusCode
+	return status
 }
 
 func tryRequestStatusBody(client *http.Client, method string, url string) (int, error) {
