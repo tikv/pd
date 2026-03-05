@@ -708,6 +708,8 @@ func checkTSO(
 			for {
 				select {
 				case <-ctx.Done():
+					// Make sure the lastTS is not empty
+					re.NotEmpty(lastTS)
 					return
 				default:
 				}
@@ -717,12 +719,7 @@ func checkTSO(
 					continue
 				}
 				ts = tsoutil.ComposeTS(physical, logical)
-				// Use plain Go comparison instead of re.Less() to avoid
-				// permanently marking the test as failed during transient
-				// TSO disruptions (e.g., leader election, server shutdown).
-				if lastTS >= ts {
-					continue
-				}
+				re.Less(lastTS, ts)
 				lastTS = ts
 			}
 		}()

@@ -1535,14 +1535,17 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-		if err != nil {
+		if err != nil || g.RUStats == nil {
 			return false
 		}
-		return g.RUStats != nil &&
-			g.RUStats.RRU == testConsumption.RRU &&
+		return g.RUStats.RRU == testConsumption.RRU &&
 			g.RUStats.WRU == testConsumption.WRU &&
 			g.RUStats.ReadBytes == testConsumption.ReadBytes &&
-			g.RUStats.WriteBytes == testConsumption.WriteBytes
+			g.RUStats.WriteBytes == testConsumption.WriteBytes &&
+			g.RUStats.TotalCpuTimeMs == testConsumption.TotalCpuTimeMs &&
+			g.RUStats.SqlLayerCpuTimeMs == testConsumption.SqlLayerCpuTimeMs &&
+			g.RUStats.KvReadRpcCount == testConsumption.KvReadRpcCount &&
+			g.RUStats.KvWriteRpcCount == testConsumption.KvWriteRpcCount
 	})
 
 	// update resource group, ru stats not change
@@ -1564,14 +1567,17 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	// check ru stats not loss after restart
 	testutil.Eventually(re, func() bool {
 		g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-		if err != nil {
+		if err != nil || g.RUStats == nil {
 			return false
 		}
-		return g.RUStats != nil &&
-			g.RUStats.RRU == testConsumption.RRU &&
+		return g.RUStats.RRU == testConsumption.RRU &&
 			g.RUStats.WRU == testConsumption.WRU &&
 			g.RUStats.ReadBytes == testConsumption.ReadBytes &&
-			g.RUStats.WriteBytes == testConsumption.WriteBytes
+			g.RUStats.WriteBytes == testConsumption.WriteBytes &&
+			g.RUStats.TotalCpuTimeMs == testConsumption.TotalCpuTimeMs &&
+			g.RUStats.SqlLayerCpuTimeMs == testConsumption.SqlLayerCpuTimeMs &&
+			g.RUStats.KvReadRpcCount == testConsumption.KvReadRpcCount &&
+			g.RUStats.KvWriteRpcCount == testConsumption.KvWriteRpcCount
 	})
 }
 

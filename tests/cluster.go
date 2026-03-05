@@ -153,8 +153,14 @@ func (s *TestServer) Run() error {
 		return err
 	}
 	s.Lock()
+	defer s.Unlock()
+	// Re-check state: if Destroy() was called concurrently while we were
+	// starting, do not overwrite the state back to Running.
+	if s.state == Destroy {
+		s.server.Close()
+		return errors.Errorf("server was destroyed while starting")
+	}
 	s.state = Running
-	s.Unlock()
 	return nil
 }
 
