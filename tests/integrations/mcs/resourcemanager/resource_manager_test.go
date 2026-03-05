@@ -1536,7 +1536,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	checkRUStats := func() {
 		testutil.Eventually(re, func() bool {
 			g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-			if err != nil || g.RUStats == nil {
+			if err != nil || g == nil || g.RUStats == nil {
 				return false
 			}
 			return g.RUStats.RRU == testConsumption.RRU &&
