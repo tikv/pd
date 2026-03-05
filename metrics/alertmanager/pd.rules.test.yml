@@ -1,0 +1,116 @@
+rule_files:
+  - pd.rules.yml
+
+# Use 15s to match typical scrape interval.
+evaluation_interval: 15s
+
+tests:
+  - interval: 15s
+    name: pd-leader-lease-drop-without-failover
+    input_series:
+      # PD leader metric (service_member_role) flaps on pd-1: 1 -> 0 -> 1.
+      - series: 'service_member_role{job="pd",service="PD",instance="pd-1"}'
+        # 20m total at 15s step: 80 samples. Drop at minute 5 for 1m.
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      # Embedded etcd leader stays stable on pd-1.
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      # No PD restarts in the window.
+      - series: 'process_start_time_seconds{job="pd",instance="pd-1"}'
+        values: '100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100'
+
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PD_leader_lease_drop_without_failover
+        exp_alerts:
+          - exp_labels:
+              env: ENV_LABELS_ENV
+              level: warning
+              job: pd
+              service: PD
+              instance: pd-1
+              expr: '(changes(service_member_role{job="pd",service="PD"}[10m]) >= 2) and (min_over_time(service_member_role{job="pd",service="PD"}[10m]) == 0) and (service_member_role{job="pd",service="PD"} == 1) and on() (sum(changes(etcd_server_is_leader{job="pd"}[10m])) == 0) and on() (sum(changes(process_start_time_seconds{job="pd"}[10m]) * on(instance,job) etcd_server_is_leader{job="pd"}) == 0)'
+            exp_annotations:
+              summary: 'PD leader lease dropped without failover'
+              description: 'cluster: ENV_LABELS_ENV, instance: pd-1, PD leader lease dropped and recovered on the same node, while embedded etcd leader stayed stable; values:2'
+              value: '2'
+
+  - interval: 15s
+    name: pd-leader-lease-drop-suppressed-by-leader-restart
+    input_series:
+      - series: 'service_member_role{job="pd",service="PD",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      # pd-1 restarted within 15m (start_time changes).
+      - series: 'process_start_time_seconds{job="pd",instance="pd-1"}'
+        # Change at minute 9.
+        values: '100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500 500'
+
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PD_leader_lease_drop_without_failover
+        exp_alerts: []
+
+  - interval: 15s
+    name: pd-leader-lease-drop-not-suppressed-by-follower-restart
+    input_series:
+      - series: 'service_member_role{job="pd",service="PD",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-2"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+
+      - series: 'process_start_time_seconds{job="pd",instance="pd-1"}'
+        values: '100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100'
+
+      # Follower restart should NOT suppress when embedded etcd leader is stable.
+      - series: 'process_start_time_seconds{job="pd",instance="pd-2"}'
+        # Change at minute 10.
+        values: '200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600 600'
+
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PD_leader_lease_drop_without_failover
+        exp_alerts:
+          - exp_labels:
+              env: ENV_LABELS_ENV
+              level: warning
+              job: pd
+              service: PD
+              instance: pd-1
+              expr: '(changes(service_member_role{job="pd",service="PD"}[10m]) >= 2) and (min_over_time(service_member_role{job="pd",service="PD"}[10m]) == 0) and (service_member_role{job="pd",service="PD"} == 1) and on() (sum(changes(etcd_server_is_leader{job="pd"}[10m])) == 0) and on() (sum(changes(process_start_time_seconds{job="pd"}[10m]) * on(instance,job) etcd_server_is_leader{job="pd"}) == 0)'
+            exp_annotations:
+              summary: 'PD leader lease dropped without failover'
+              description: 'cluster: ENV_LABELS_ENV, instance: pd-1, PD leader lease dropped and recovered on the same node, while embedded etcd leader stayed stable; values:2'
+              value: '2'
+
+  - interval: 15s
+    name: pd-leader-lease-drop-suppressed-by-etcd-leader-change
+    input_series:
+      - series: 'service_member_role{job="pd",service="PD",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      # Embedded etcd leader changes from pd-1 to pd-2 at minute 6.
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-1"}'
+        # minute 0-6: 1 (24 samples), after: 0
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-2"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+      - series: 'process_start_time_seconds{job="pd",instance="pd-1"}'
+        values: '100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100 100'
+      - series: 'process_start_time_seconds{job="pd",instance="pd-2"}'
+        values: '200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200 200'
+
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PD_leader_lease_drop_without_failover
+        exp_alerts: []
