@@ -166,9 +166,7 @@ func (t *timestampOracle) syncTimestamp() error {
 	log.Info("start to sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.metrics.syncEvent.Inc()
 
-	failpoint.Inject("delaySyncTimestamp", func() {
-		time.Sleep(time.Second)
-	})
+	failpoint.InjectCall("delaySyncTimestamp")
 
 	last, err := t.storage.LoadTimestamp(t.keyspaceGroupID)
 	if err != nil {

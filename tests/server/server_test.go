@@ -222,7 +222,8 @@ func TestGRPCRateLimit(t *testing.T) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
 		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is updated"))
 	re.NoError(err)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayProcess", `pause`))
+	ch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayProcess", func() { <-ch }))
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -256,6 +257,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	}()
 	errStr := <-errCh
 	re.Contains(errStr, "rate limit exceeded")
+	close(ch)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayProcess"))
 	<-okCh
 	wg.Wait()

@@ -452,9 +452,7 @@ func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 			}
 		}
 	}
-	failpoint.Inject("memberNil", func() {
-		time.Sleep(1500 * time.Millisecond)
-	})
+	failpoint.InjectCall("memberNil")
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
 	return nil
 }
@@ -662,9 +660,7 @@ func (s *Server) Run() error {
 
 	s.cgMonitor.StartMonitor(s.ctx)
 
-	failpoint.Inject("delayStartServerLoop", func() {
-		time.Sleep(2 * time.Second)
-	})
+	failpoint.InjectCall("delayStartServerLoop")
 	s.startServerLoop(s.ctx)
 
 	return nil
@@ -835,7 +831,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Inject("raftclusterIsBusy", func() {})
+	failpoint.InjectCall("raftclusterIsBusy")
 	s.cluster.Stop()
 }
 

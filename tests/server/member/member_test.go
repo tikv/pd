@@ -239,11 +239,13 @@ func TestLeaderResignWithBlock(t *testing.T) {
 	re.NotEmpty(leader1)
 	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/raftclusterIsBusy", `pause`))
+	ch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/raftclusterIsBusy", func() { <-ch }))
 	post(t, re, addr1+"/pd/api/v1/leader/resign", "")
 	leader2 := waitLeaderChange(re, cluster, leader1)
 	t.Log("leader2:", leader2)
 	re.NotEqual(leader1, leader2)
+	close(ch)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy"))
 }
 

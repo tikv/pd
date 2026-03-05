@@ -819,9 +819,7 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 				return nil
 			}
 		}
-		failpoint.Inject("concurrentBucketHeartbeat", func() {
-			time.Sleep(500 * time.Millisecond)
-		})
+		failpoint.InjectCall("concurrentBucketHeartbeat")
 		if ok := region.UpdateBuckets(buckets, old); ok {
 			return nil
 		}

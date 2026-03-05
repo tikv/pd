@@ -701,7 +701,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint32]GCState, error) {
 	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
 		result, err := m.getAllKeyspacesGCStatesImpl(execCtx)
-		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
+		failpoint.InjectCall("onGetAllKeyspacesGCStatesFinish")
 		return result, err
 	})
 }

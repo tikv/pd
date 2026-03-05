@@ -613,7 +613,7 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	doneCh := make(chan struct{}, 1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/slowRequest", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/api/slowRequest", func() { time.Sleep(5 * time.Second) }))
 	go func() {
 		resp, err := tests.TestDialClient.Do(req)
 		defer func() {

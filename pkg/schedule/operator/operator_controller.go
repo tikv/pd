@@ -151,9 +151,7 @@ func (oc *Controller) GetHBStreams() *hbstream.HeartbeatStreams {
 func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpStepWithTTL func(regionID uint64)) {
 	// Check existed
 	if op := oc.GetOperator(region.GetID()); op != nil {
-		failpoint.Inject("concurrentRemoveOperator", func() {
-			time.Sleep(500 * time.Millisecond)
-		})
+		failpoint.InjectCall("concurrentRemoveOperator")
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
