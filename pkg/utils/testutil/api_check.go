@@ -199,16 +199,6 @@ func TryCheckPostJSON(client *http.Client, url string, reqData []byte, data any)
 	return tryCheckResp(resp, data)
 }
 
-// TryCheckPatchJSON performs a PATCH request, checks status is OK and unmarshals response.
-// Returns an error instead of using testify assertions, safe for use inside Eventually.
-func TryCheckPatchJSON(client *http.Client, url string, reqData []byte, data any) error {
-	resp, err := apiutil.PatchJSON(client, url, reqData)
-	if err != nil {
-		return err
-	}
-	return tryCheckResp(resp, data)
-}
-
 func tryCheckResp(resp *http.Response, data any) error {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)

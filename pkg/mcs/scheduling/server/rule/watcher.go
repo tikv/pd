@@ -159,11 +159,11 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
 			log.Debug("delete placement rule", zap.String("key", key))
 			storeKey := strings.TrimPrefix(key, rw.rulesPathPrefix)
-			groupID, ruleID, err := parseRuleStoreKey(storeKey)
+			groupID, ruleID, ok, err := parseRuleStoreKey(storeKey)
 			if err != nil {
 				return err
 			}
-			if groupID == "" {
+			if !ok {
 				log.Warn("invalid placement rule key format", zap.String("key", key))
 				return nil
 			}
@@ -283,21 +283,21 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 
 // parseRuleStoreKey parses the groupID and ruleID from a placement rule store key.
 // The store key format is: hex(groupID)-hex(ruleID)
-// Returns empty strings if the key format is invalid (no separator).
-func parseRuleStoreKey(storeKey string) (groupID, ruleID string, err error) {
-	groupHex, idHex, ok := strings.Cut(storeKey, "-")
-	if !ok {
-		return "", "", nil
+// Returns ok=false if the key format is invalid (no "-" separator).
+func parseRuleStoreKey(storeKey string) (groupID, ruleID string, ok bool, err error) {
+	groupHex, idHex, found := strings.Cut(storeKey, "-")
+	if !found {
+		return "", "", false, nil
 	}
 	groupBytes, err := hex.DecodeString(groupHex)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	idBytes, err := hex.DecodeString(idHex)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
-	return string(groupBytes), string(idBytes), nil
+	return string(groupBytes), string(idBytes), true, nil
 }
 
 // Close closes the watcher.

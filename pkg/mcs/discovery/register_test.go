@@ -87,7 +87,7 @@ func TestRegister(t *testing.T) {
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		testutil.Eventually(re, func() bool {
-			val, err := tryGetKeyAfterLeaseExpired(ctx, client, sr.key)
+			val, err := tryGetKey(ctx, client, sr.key)
 			return err == nil && val == "127.0.0.1:2"
 		})
 	}
@@ -107,11 +107,9 @@ func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client
 	return string(resp.Kvs[0].Value)
 }
 
-// tryGetKeyAfterLeaseExpired is like getKeyAfterLeaseExpired but returns an error
-// instead of using testify assertions, making it safe to use inside Eventually.
-func tryGetKeyAfterLeaseExpired(ctx context.Context, client *clientv3.Client, key string) (string, error) {
-	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
-	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
+// tryGetKey retrieves a key from etcd, returning an error instead of using
+// testify assertions. Safe to use inside Eventually condition functions.
+func tryGetKey(ctx context.Context, client *clientv3.Client, key string) (string, error) {
 	resp, err := client.Get(ctx, key)
 	if err != nil {
 		return "", err

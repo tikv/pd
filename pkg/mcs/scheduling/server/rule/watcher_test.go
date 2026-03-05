@@ -56,24 +56,24 @@ func TestParseRuleStoreKey(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		rule := &placement.Rule{GroupID: tc.groupID, ID: tc.ruleID}
-		groupID, ruleID, err := parseRuleStoreKey(rule.StoreKey())
+		groupID, ruleID, ok, err := parseRuleStoreKey(rule.StoreKey())
 		re.NoError(err)
+		re.True(ok)
 		re.Equal(tc.groupID, groupID)
 		re.Equal(tc.ruleID, ruleID)
 	}
 
 	// Invalid key format: no separator.
-	groupID, ruleID, err := parseRuleStoreKey("noseparator")
+	_, _, ok, err := parseRuleStoreKey("noseparator")
 	re.NoError(err)
-	re.Empty(groupID)
-	re.Empty(ruleID)
+	re.False(ok)
 
 	// Invalid hex in group.
-	_, _, err = parseRuleStoreKey("zzzz-6964")
+	_, _, _, err = parseRuleStoreKey("zzzz-6964")
 	re.Error(err)
 
 	// Invalid hex in id.
-	_, _, err = parseRuleStoreKey("6772-zzzz")
+	_, _, _, err = parseRuleStoreKey("6772-zzzz")
 	re.Error(err)
 }
 
