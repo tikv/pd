@@ -80,6 +80,12 @@ linters:
         - G402
         - G404
         - G115
+        - G602
+        - G702
+        - G703
+        - G704
+        - G705
+        - G706
     perfsprint:
       string-format: false
     revive:
