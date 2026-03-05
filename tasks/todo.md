@@ -7,7 +7,7 @@
 - [x] #9316 TestMergeKeyspaceGroup - Replaced re.NoError inside Eventually with plain Go checks
 - [x] #8792 TestResourceManagerClientTestSuite panic - Added re.Error() before err.Error() call
 - [x] #9583 Go leak in resource_group/controller - Tracked goroutine with c.wg
-- [x] #10244 TestGetAllKeyspaceGCStates - Relaxed TTL bounds to handle elapsed time
+- [x] #10244 TestGetAllKeyspaceGCStates - Dropped from this PR (fixed in #10244)
 - [x] #10247 TestConfigTTLAfterTransferLeader - Dropped from this PR (fixed in #10274)
 - [x] #8035 TestConfigController - Wrapped checkShow with testutil.Eventually
 - [x] #8739 TestResourceGroupRUConsumption - Replaced hard sleep with Eventually
