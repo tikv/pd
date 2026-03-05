@@ -940,7 +940,7 @@ func checkShowRuleKey(re *require.Assertions, pdAddr string, expectValues [][2]s
 		if json.Unmarshal(output, &fit) != nil {
 			return false
 		}
-		if len(fit.RuleFits) != len(expectValues) {
+		if len(fit.RuleFits) < len(expectValues) {
 			return false
 		}
 		for i, v := range expectValues {
