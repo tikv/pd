@@ -149,6 +149,9 @@ func (s *TestServer) Run() error {
 	s.Unlock()
 	// Run the server without holding the lock to avoid deadlock with
 	// Stop/Destroy which also need to acquire the lock.
+	// This is safe because s.server is assigned once in NewTestServer and never
+	// mutated, and server.Server.Run/Close are internally concurrent-safe
+	// (Close uses atomic CAS on isRunning; Run is guarded by context cancellation).
 	if err := s.server.Run(); err != nil {
 		return err
 	}
