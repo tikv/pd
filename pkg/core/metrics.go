@@ -117,11 +117,14 @@ var (
 			Help:      "Counter of the bucket event",
 		}, []string{"event"})
 
-	RegionCacheMissCounter  = bucketEventCounter.WithLabelValues("region_cache_miss")
 	versionStaleCounter     = bucketEventCounter.WithLabelValues("version_stale")
 	versionNotChangeCounter = bucketEventCounter.WithLabelValues("version_no_change")
-	UpdateFailedCounter     = bucketEventCounter.WithLabelValues("update_failed")
-	UpdateSuccessCounter    = bucketEventCounter.WithLabelValues("update_success")
+	// RegionCacheMissCounter  is the counter of region cache miss when processing report bucket.
+	RegionCacheMissCounter = bucketEventCounter.WithLabelValues("region_cache_miss")
+	// UpdateFailedCounter is the counter of region bucket update failed when processing report bucket.
+	UpdateFailedCounter = bucketEventCounter.WithLabelValues("update_failed")
+	// UpdateSuccessCounter is the counter of cas report bucket point success.
+	UpdateSuccessCounter = bucketEventCounter.WithLabelValues("update_success")
 )
 
 func init() {

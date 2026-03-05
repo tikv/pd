@@ -709,11 +709,12 @@ func TestStaleBucketMeta(t *testing.T) {
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 
 	// region heartbeat with bucket meta
-	bucket2 := &metapb.BucketMeta{
-		Version: 3,
-		Keys:    [][]byte{{'c'}, {'d'}},
+	bucket2 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  3,
+		Keys:     [][]byte{{'c'}, {'d'}},
 	}
-	region2 := newRegion.Clone(core.WithIncVersion(), core.WithBucketMeta(bucket2))
+	region2 := newRegion.Clone(core.WithIncVersion(), core.SetBuckets(bucket2))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
 	region1 := cluster.GetRegion(1)
 	re.NotEqual(bucket1, region1.GetBuckets())
@@ -1191,14 +1192,14 @@ func TestConcurrentReportBucket(t *testing.T) {
 	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionBuckets(bucket1)
 		re.NoError(err)
 	}()
 	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
 	re.NoError(cluster.processRegionBuckets(bucket2))
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())

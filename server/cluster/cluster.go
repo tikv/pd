@@ -1171,7 +1171,7 @@ func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
-		if success := region.CompareAndSetBuckets(buckets); success {
+		if success := region.CompareAndSetReportBuckets(buckets); success {
 			core.UpdateSuccessCounter.Inc()
 			return nil
 		}
