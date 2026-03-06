@@ -2609,11 +2609,6 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 	return nil
 }
 
-<<<<<<< HEAD
-// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
-func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
-	return c.opt.SetAllStoresLimitTTL(c.ctx, c.etcdClient, typ, ratePerMin, ttl)
-=======
 // refreshStoreRateLimit applies the schedule config's store limit to the in-memory store limiter.
 func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit.Type) {
 	store := c.GetStore(storeID)
@@ -2630,7 +2625,11 @@ func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit
 	if limit.Rate(limitType) != ratePerSec {
 		c.ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
->>>>>>> 31f65300d6 (storelimit: refresh store limit once updating (#10131))
+}
+
+// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
+func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
+	return c.opt.SetAllStoresLimitTTL(c.ctx, c.etcdClient, typ, ratePerMin, ttl)
 }
 
 // GetClusterVersion returns the current cluster version.
