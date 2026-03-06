@@ -223,9 +223,14 @@ func (m *Manager) Init(ctx context.Context) error {
 		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
 
+	// This context is derived from the leader/primary context, it will be canceled
+	// from the outside loop when the leader/primary step down.
+	ctx, m.cancel = context.WithCancel(ctx)
+
 	// re-save the config to make sure the config has been persisted.
 	if m.writeRole.AllowsMetadataWrite() {
 		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+			m.cancel()
 			return err
 		}
 	}
@@ -233,17 +238,16 @@ func (m *Manager) Init(ctx context.Context) error {
 	// Load keyspace resource groups from the storage.
 	if m.enableMetadataWatcher {
 		if err := m.initializeMetadataWatcher(ctx); err != nil {
+			m.cancel()
+			m.wg.Wait()
 			return err
 		}
 	} else {
 		if err := m.loadKeyspaceResourceGroups(); err != nil {
+			m.cancel()
 			return err
 		}
 	}
-
-	// This context is derived from the leader/primary context, it will be canceled
-	// from the outside loop when the leader/primary step down.
-	ctx, m.cancel = context.WithCancel(ctx)
 	m.wg.Add(1)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)

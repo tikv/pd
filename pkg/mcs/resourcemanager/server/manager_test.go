@@ -16,10 +16,15 @@ package server
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -67,11 +72,127 @@ func (*mockRoleConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockRoleConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
 
+type testBasicServer struct{}
+
+func (*testBasicServer) Name() string { return "test-rm" }
+
+func (*testBasicServer) GetAddr() string { return "" }
+
+func (*testBasicServer) Context() context.Context { return context.Background() }
+
+func (*testBasicServer) Run() error { return nil }
+
+func (*testBasicServer) Close() {}
+
+func (*testBasicServer) GetServingUrls() []string { return nil }
+
+func (*testBasicServer) GetClient() *clientv3.Client { return nil }
+
+func (*testBasicServer) GetHTTPClient() *http.Client { return nil }
+
+func (*testBasicServer) AddStartCallback(...func()) {}
+
+func (*testBasicServer) IsServing() bool { return true }
+
+func (*testBasicServer) AddServiceReadyCallback(...func(context.Context) error) {}
+
+type fakeMetadataLoopWatcher struct {
+	startWatchLoopFn func()
+	waitLoadFn       func() error
+}
+
+func (w *fakeMetadataLoopWatcher) StartWatchLoop() {
+	if w.startWatchLoopFn != nil {
+		w.startWatchLoopFn()
+	}
+}
+
+func (w *fakeMetadataLoopWatcher) WaitLoad() error {
+	if w.waitLoadFn != nil {
+		return w.waitLoadFn()
+	}
+	return nil
+}
+
 func prepareManager() *Manager {
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 	return m
+}
+
+func TestInitMetadataWatcherUsesManagerOwnedContextAndCancelsOnError(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	m.enableMetadataWatcher = true
+	m.srv = &testBasicServer{}
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+
+	watcherErr := errors.New("watcher load failed")
+	var capturedCtx context.Context
+	originalFactory := newMetadataLoopWatcher
+	defer func() { newMetadataLoopWatcher = originalFactory }()
+	newMetadataLoopWatcher = func(
+		ctx context.Context,
+		wg *sync.WaitGroup,
+		client *clientv3.Client,
+		name, key string,
+		preEventsFn func([]*clientv3.Event) error,
+		putFn, deleteFn func(*mvccpb.KeyValue) error,
+		postEventsFn func([]*clientv3.Event) error,
+		isWithPrefix bool,
+	) metadataLoopWatcher {
+		capturedCtx = ctx
+		return &fakeMetadataLoopWatcher{
+			waitLoadFn: func() error { return watcherErr },
+		}
+	}
+
+	err := m.Init(parentCtx)
+	re.ErrorIs(err, watcherErr)
+	re.NotNil(m.cancel)
+	re.NotNil(capturedCtx)
+	re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+	re.NoError(parentCtx.Err())
+	re.ErrorIs(capturedCtx.Err(), context.Canceled)
+}
+
+func TestCloseCancelsMetadataWatcherContext(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	m.enableMetadataWatcher = true
+	m.srv = &testBasicServer{}
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+
+	var capturedCtx context.Context
+	originalFactory := newMetadataLoopWatcher
+	defer func() { newMetadataLoopWatcher = originalFactory }()
+	newMetadataLoopWatcher = func(
+		ctx context.Context,
+		wg *sync.WaitGroup,
+		client *clientv3.Client,
+		name, key string,
+		preEventsFn func([]*clientv3.Event) error,
+		putFn, deleteFn func(*mvccpb.KeyValue) error,
+		postEventsFn func([]*clientv3.Event) error,
+		isWithPrefix bool,
+	) metadataLoopWatcher {
+		capturedCtx = ctx
+		return &fakeMetadataLoopWatcher{}
+	}
+
+	re.NoError(m.Init(parentCtx))
+	re.NotNil(capturedCtx)
+	re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+	re.NoError(capturedCtx.Err())
+
+	m.close()
+
+	re.ErrorIs(capturedCtx.Err(), context.Canceled)
 }
 
 func TestInitManager(t *testing.T) {

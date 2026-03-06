@@ -16,8 +16,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -32,18 +34,22 @@ import (
 const (
 	resourceGroupWatchPrefix = "resource_group/"
 
+	controllerConfigWatchKey            = "controller"
 	legacyResourceGroupSettingsPrefix   = "settings/"
 	legacyResourceGroupStatesPrefix     = "states/"
 	keyspaceResourceGroupSettingsPrefix = "keyspace/settings/"
 	keyspaceResourceGroupStatesPrefix   = "keyspace/states/"
+	keyspaceServiceLimitPrefix          = "keyspace/service_limits/"
 )
 
 type resourceGroupWatchEntryType uint8
 
 const (
 	resourceGroupWatchEntryUnknown resourceGroupWatchEntryType = iota
+	resourceGroupWatchEntryController
 	resourceGroupWatchEntrySettings
 	resourceGroupWatchEntryStates
+	resourceGroupWatchEntryServiceLimit
 )
 
 type resourceGroupWatchTarget struct {
@@ -52,11 +58,45 @@ type resourceGroupWatchTarget struct {
 	groupName  string
 }
 
+type metadataLoopWatcher interface {
+	StartWatchLoop()
+	WaitLoad() error
+}
+
+var newMetadataLoopWatcher = func(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	preEventsFn func([]*clientv3.Event) error,
+	putFn, deleteFn func(*mvccpb.KeyValue) error,
+	postEventsFn func([]*clientv3.Event) error,
+	isWithPrefix bool,
+) metadataLoopWatcher {
+	return etcdutil.NewLoopWatcher(
+		ctx,
+		wg,
+		client,
+		name,
+		key,
+		preEventsFn,
+		putFn,
+		deleteFn,
+		postEventsFn,
+		isWithPrefix,
+	)
+}
+
 func parseResourceGroupWatchPath(path string) (resourceGroupWatchTarget, bool) {
 	if !strings.HasPrefix(path, resourceGroupWatchPrefix) {
 		return resourceGroupWatchTarget{}, false
 	}
 	trimmed := strings.TrimPrefix(path, resourceGroupWatchPrefix)
+	if trimmed == controllerConfigWatchKey {
+		return resourceGroupWatchTarget{
+			entryType: resourceGroupWatchEntryController,
+		}, true
+	}
 	if strings.HasPrefix(trimmed, legacyResourceGroupSettingsPrefix) {
 		name := strings.TrimPrefix(trimmed, legacyResourceGroupSettingsPrefix)
 		if name == "" {
@@ -85,6 +125,9 @@ func parseResourceGroupWatchPath(path string) (resourceGroupWatchTarget, bool) {
 	if strings.HasPrefix(trimmed, keyspaceResourceGroupStatesPrefix) {
 		return parseKeyspaceWatchPath(strings.TrimPrefix(trimmed, keyspaceResourceGroupStatesPrefix), resourceGroupWatchEntryStates)
 	}
+	if strings.HasPrefix(trimmed, keyspaceServiceLimitPrefix) {
+		return parseKeyspaceIDWatchPath(strings.TrimPrefix(trimmed, keyspaceServiceLimitPrefix), resourceGroupWatchEntryServiceLimit)
+	}
 	return resourceGroupWatchTarget{}, false
 }
 
@@ -104,6 +147,20 @@ func parseKeyspaceWatchPath(path string, entryType resourceGroupWatchEntryType) 
 	}, true
 }
 
+func parseKeyspaceIDWatchPath(path string, entryType resourceGroupWatchEntryType) (resourceGroupWatchTarget, bool) {
+	if path == "" || strings.Contains(path, "/") {
+		return resourceGroupWatchTarget{}, false
+	}
+	keyspaceID, err := strconv.ParseUint(path, 10, 32)
+	if err != nil {
+		return resourceGroupWatchTarget{}, false
+	}
+	return resourceGroupWatchTarget{
+		entryType:  entryType,
+		keyspaceID: uint32(keyspaceID),
+	}, true
+}
+
 func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 	m.Lock()
 	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
@@ -115,7 +172,7 @@ func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		return m.handleMetadataWatchDelete(string(kv.Key))
 	}
-	watcher := etcdutil.NewLoopWatcher(
+	watcher := newMetadataLoopWatcher(
 		ctx,
 		&m.wg,
 		m.srv.GetClient(),
@@ -142,10 +199,14 @@ func (m *Manager) handleMetadataWatchPut(key, rawValue string) error {
 		return nil
 	}
 	switch target.entryType {
+	case resourceGroupWatchEntryController:
+		return m.applyControllerConfigFromRaw(rawValue)
 	case resourceGroupWatchEntrySettings:
 		return m.applyResourceGroupSettingFromRaw(target.keyspaceID, target.groupName, rawValue)
 	case resourceGroupWatchEntryStates:
 		return m.applyResourceGroupStatesFromRaw(target.keyspaceID, target.groupName, rawValue)
+	case resourceGroupWatchEntryServiceLimit:
+		return m.applyServiceLimitFromRaw(target.keyspaceID, rawValue)
 	default:
 		return nil
 	}
@@ -156,7 +217,16 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 	if !ok {
 		return nil
 	}
-	if target.entryType != resourceGroupWatchEntrySettings {
+	switch target.entryType {
+	case resourceGroupWatchEntryServiceLimit:
+		krgm := m.getKeyspaceResourceGroupManager(target.keyspaceID)
+		if krgm == nil {
+			return nil
+		}
+		krgm.setServiceLimitFromStorage(0)
+		return nil
+	case resourceGroupWatchEntrySettings:
+	default:
 		return nil
 	}
 	// Keep the reserved group alive.
@@ -171,6 +241,20 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 	return nil
 }
 
+func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
+	controllerConfig := &ControllerConfig{}
+	if err := json.Unmarshal([]byte(rawValue), controllerConfig); err != nil {
+		log.Error("failed to apply controller config from watcher",
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	m.Lock()
+	m.controllerConfig = controllerConfig
+	m.Unlock()
+	return nil
+}
+
 func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawValue string) error {
 	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
 	if err := krgm.upsertResourceGroupFromRaw(name, rawValue); err != nil {
@@ -181,6 +265,19 @@ func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawV
 			zap.Error(err))
 		return err
 	}
+	return nil
+}
+
+func (m *Manager) applyServiceLimitFromRaw(keyspaceID uint32, rawValue string) error {
+	var serviceLimit float64
+	if err := json.Unmarshal([]byte(rawValue), &serviceLimit); err != nil {
+		log.Error("failed to apply service limit from watcher",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	return nil
 }
 

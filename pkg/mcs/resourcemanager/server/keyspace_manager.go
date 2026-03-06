@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -111,6 +112,16 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 	if err := proto.Unmarshal([]byte(rawValue), group); err != nil {
 		log.Error("failed to parse the keyspace resource group meta info",
 			zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
+		return err
+	}
+	if group.Name != name {
+		err := errors.Errorf("resource group key name %s does not match payload name %s", name, group.Name)
+		log.Error("resource group name mismatch in watcher payload",
+			zap.Uint32("keyspace-id", krgm.keyspaceID),
+			zap.String("name", name),
+			zap.String("payload-name", group.Name),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
 		return err
 	}
 
@@ -240,9 +251,7 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
 		return err
 	}
-	krgm.Lock()
-	delete(krgm.groups, name)
-	krgm.Unlock()
+	krgm.deleteResourceGroupFromCache(name)
 	return nil
 }
 

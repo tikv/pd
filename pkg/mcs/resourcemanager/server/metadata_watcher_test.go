@@ -37,6 +37,13 @@ func TestParseResourceGroupWatchPath(t *testing.T) {
 		target resourceGroupWatchTarget
 	}{
 		{
+			path: "resource_group/controller",
+			ok:   true,
+			target: resourceGroupWatchTarget{
+				entryType: resourceGroupWatchEntryController,
+			},
+		},
+		{
 			path: "resource_group/settings/default",
 			ok:   true,
 			target: resourceGroupWatchTarget{
@@ -73,8 +80,12 @@ func TestParseResourceGroupWatchPath(t *testing.T) {
 			},
 		},
 		{
-			path: "resource_group/controller",
-			ok:   false,
+			path: "resource_group/keyspace/service_limits/7",
+			ok:   true,
+			target: resourceGroupWatchTarget{
+				entryType:  resourceGroupWatchEntryServiceLimit,
+				keyspaceID: 7,
+			},
 		},
 		{
 			path: "settings/default",
@@ -107,8 +118,9 @@ func TestHandleMetadataWatchPutAndDelete(t *testing.T) {
 	re := require.New(t)
 
 	m := &Manager{
-		storage: storage.NewStorageWithMemoryBackend(),
-		krgms:   make(map[uint32]*keyspaceResourceGroupManager),
+		storage:          storage.NewStorageWithMemoryBackend(),
+		krgms:            make(map[uint32]*keyspaceResourceGroupManager),
+		controllerConfig: &ControllerConfig{},
 	}
 
 	group := &rmpb.ResourceGroup{
@@ -155,10 +167,27 @@ func TestHandleMetadataWatchPutAndDelete(t *testing.T) {
 	re.Equal(float64(22), cachedGroup.RUConsumption.WRU)
 
 	re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/states/99/ghost", string(rawStates)))
-	re.NoError(m.handleMetadataWatchPut("resource_group/controller", "ignored"))
+
+	controllerConfig := &ControllerConfig{
+		RequestUnit: RequestUnitConfig{
+			ReadBaseCost:  0.5,
+			WriteBaseCost: 2.0,
+		},
+	}
+	rawControllerConfig, err := json.Marshal(controllerConfig)
+	re.NoError(err)
+	re.NoError(m.handleMetadataWatchPut("resource_group/controller", string(rawControllerConfig)))
+	re.InDelta(0.5, m.GetControllerConfig().RequestUnit.ReadBaseCost, 0.00001)
+	re.InDelta(2.0, m.GetControllerConfig().RequestUnit.WriteBaseCost, 0.00001)
+
+	re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/service_limits/10", "123.5"))
+	re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 
 	re.NoError(m.handleMetadataWatchDelete("resource_group/keyspace/settings/10/test_group"))
 	re.Nil(krgm.getResourceGroup("test_group", false))
+
+	re.NoError(m.handleMetadataWatchDelete("resource_group/keyspace/service_limits/10"))
+	re.InDelta(0.0, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 
 	defaultGroup := &rmpb.ResourceGroup{
 		Name: DefaultResourceGroupName,

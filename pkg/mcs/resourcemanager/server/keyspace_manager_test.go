@@ -179,6 +179,7 @@ func TestDeleteResourceGroup(t *testing.T) {
 	}
 	err := krgm.addResourceGroup(group)
 	re.NoError(err)
+	krgm.groupRUTrackers[group.GetName()] = newGroupRUTracker()
 
 	// Verify the group exists.
 	re.NotNil(krgm.getResourceGroup(group.GetName(), false))
@@ -189,6 +190,8 @@ func TestDeleteResourceGroup(t *testing.T) {
 
 	// Verify the group was deleted.
 	re.Nil(krgm.getResourceGroup(group.GetName(), false))
+	_, ok := krgm.groupRUTrackers[group.GetName()]
+	re.False(ok)
 
 	// Try to delete the default group.
 	krgm.initDefaultResourceGroup()
@@ -376,6 +379,18 @@ func TestUpsertResourceGroupFromRaw(t *testing.T) {
 
 	err = krgm.upsertResourceGroupFromRaw(group.GetName(), "invalid_data")
 	re.Error(err)
+
+	mismatchedGroup := &rmpb.ResourceGroup{
+		Name:     "payload_name",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 1,
+	}
+	rawMismatched, err := proto.Marshal(mismatchedGroup)
+	re.NoError(err)
+	err = krgm.upsertResourceGroupFromRaw("key_name", string(rawMismatched))
+	re.Error(err)
+	re.Nil(krgm.getMutableResourceGroup("key_name"))
+	re.Nil(krgm.getMutableResourceGroup("payload_name"))
 }
 
 func TestDeleteResourceGroupFromCache(t *testing.T) {
