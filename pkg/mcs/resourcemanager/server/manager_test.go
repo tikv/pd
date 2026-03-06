@@ -136,13 +136,13 @@ func TestInitMetadataWatcherUsesManagerOwnedContextAndCancelsOnError(t *testing.
 	defer func() { newMetadataLoopWatcher = originalFactory }()
 	newMetadataLoopWatcher = func(
 		ctx context.Context,
-		wg *sync.WaitGroup,
-		client *clientv3.Client,
-		name, key string,
-		preEventsFn func([]*clientv3.Event) error,
-		putFn, deleteFn func(*mvccpb.KeyValue) error,
-		postEventsFn func([]*clientv3.Event) error,
-		isWithPrefix bool,
+		_ *sync.WaitGroup,
+		_ *clientv3.Client,
+		_, _ string,
+		_ func([]*clientv3.Event) error,
+		_, _ func(*mvccpb.KeyValue) error,
+		_ func([]*clientv3.Event) error,
+		_ bool,
 	) metadataLoopWatcher {
 		capturedCtx = ctx
 		return &fakeMetadataLoopWatcher{
@@ -173,13 +173,13 @@ func TestCloseCancelsMetadataWatcherContext(t *testing.T) {
 	defer func() { newMetadataLoopWatcher = originalFactory }()
 	newMetadataLoopWatcher = func(
 		ctx context.Context,
-		wg *sync.WaitGroup,
-		client *clientv3.Client,
-		name, key string,
-		preEventsFn func([]*clientv3.Event) error,
-		putFn, deleteFn func(*mvccpb.KeyValue) error,
-		postEventsFn func([]*clientv3.Event) error,
-		isWithPrefix bool,
+		_ *sync.WaitGroup,
+		_ *clientv3.Client,
+		_, _ string,
+		_ func([]*clientv3.Event) error,
+		_, _ func(*mvccpb.KeyValue) error,
+		_ func([]*clientv3.Event) error,
+		_ bool,
 	) metadataLoopWatcher {
 		capturedCtx = ctx
 		return &fakeMetadataLoopWatcher{}
