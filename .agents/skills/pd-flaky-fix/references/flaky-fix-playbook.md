@@ -2,25 +2,26 @@
 
 Generated from 218 merged flaky-adjacent PRs.
 
-Use these templates as hypothesis starters. Always validate against current issue evidence.
+This checked-in playbook is the maintained summary artifact for the skill; the raw corpus is intentionally kept out of the repository in this iteration.
 
-## Pattern 1: Data Race Elimination
+Use these patterns as hypothesis starters. Always validate against current issue evidence before changing code.
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
+## Shared Guidance
 
-**Minimal fix strategy**
-- Remove shared mutable access races with scoped locks/atomics or isolated test fixtures.
+- Compare the failing test against nearby stable tests before choosing a fix shape.
+- Add or strengthen a focused failing test or assertion before changing implementation.
+- Prefer narrow verification:
 
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
 ```bash
 make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 ```
+
+- Representative PR titles below are copied verbatim from upstream for traceability, including original spelling in the source title.
+
+## Pattern 1: Data Race Elimination
+
+- Fit signals: race detector output or unsynchronized shared mutable state across goroutines.
+- Minimal fix shape: remove shared mutable access races with scoped locks, atomics, or isolated test fixtures.
 
 **Representative PRs**
 - #10184: tests: fix data race in TestOnlineProgress (https://github.com/tikv/pd/pull/10184)
@@ -31,21 +32,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 ## Pattern 2: Panic Guarding and Nil Safety
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
-
-**Minimal fix strategy**
-- Add nil/state guards before dereference and preserve existing control flow.
-
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
-```bash
-make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
-```
+- Fit signals: panic stacks show nil dereference, stale state access, or missing lifecycle guards.
+- Minimal fix shape: add nil or state guards before dereference while preserving existing control flow.
 
 **Representative PRs**
 - #10073: resource control: avoid panic when reservation is nil (https://github.com/tikv/pd/pull/10073)
@@ -56,21 +44,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 ## Pattern 3: Timeout and Retry Budget Tuning
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
-
-**Minimal fix strategy**
-- Replace brittle hard timeout assumptions with condition-aware waits and bounded retries.
-
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
-```bash
-make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
-```
+- Fit signals: failures depend on elapsed-time assumptions, hard sleeps, or brittle retry windows.
+- Minimal fix shape: replace fixed timeouts with condition-aware waits and bounded retries.
 
 **Representative PRs**
 - #9986: tso: improve the high availability of etcd client for etcd save timestamp (https://github.com/tikv/pd/pull/9986)
@@ -81,21 +56,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 ## Pattern 4: Deadlock Avoidance
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
-
-**Minimal fix strategy**
-- Break circular waits by adjusting lock/order or test orchestration points.
-
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
-```bash
-make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
-```
+- Fit signals: blocked goroutines, lock-order inversions, or orchestration steps that wait on each other.
+- Minimal fix shape: break circular waits by adjusting lock order or test orchestration points.
 
 **Representative PRs**
 - #10037: *: upgrade deadlock to v0.3.6 (https://github.com/tikv/pd/pull/10037)
@@ -106,21 +68,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 ## Pattern 5: Flaky and Unstable Test Stabilization
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
-
-**Minimal fix strategy**
-- Remove non-determinism by making readiness/ownership checks explicit.
-
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
-```bash
-make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
-```
+- Fit signals: failures depend on non-deterministic readiness, ownership, ordering, or background progress.
+- Minimal fix shape: remove non-determinism by making readiness and ownership checks explicit.
 
 **Representative PRs**
 - #10203: test: fix flaky test TestForwardTestSuite in next-gen (https://github.com/tikv/pd/pull/10203)
@@ -131,21 +80,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 ## Pattern 6: Goroutine/Leak Cleanup
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
-
-**Minimal fix strategy**
-- Ensure goroutine/resource teardown happens on every exit path.
-
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
-```bash
-make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
-```
+- Fit signals: goleak failures, hanging tests, or teardown paths that miss cancellation and close.
+- Minimal fix shape: ensure goroutine and resource teardown happens on every exit path.
 
 **Representative PRs**
 - #10203: test: fix flaky test TestForwardTestSuite in next-gen (https://github.com/tikv/pd/pull/10203)
@@ -154,21 +90,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 ## Pattern 7: Leadership/Watch Synchronization
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
-
-**Minimal fix strategy**
-- Wait on concrete leader/watch state transitions rather than elapsed time.
-
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
-```bash
-make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
-```
+- Fit signals: test behavior races leader election, watch propagation, or redirect readiness.
+- Minimal fix shape: wait on concrete leader or watch state transitions instead of elapsed time.
 
 **Representative PRs**
 - #9241: test: fix flaky test `TestTSONotLeader` (https://github.com/tikv/pd/pull/9241)
@@ -179,21 +102,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 ## Pattern 8: Test Harness and Fixture Alignment
 
-**Trigger signals**
-- Failure signature and code shape match this class.
-- Nearby stable tests use stricter synchronization or cleanup patterns.
-
-**Minimal fix strategy**
-- Align setup/teardown and assertion semantics with stable tests in same suite.
-
-**TDD guidance**
-- Add a focused failing test/assertion first.
-- Keep implementation change minimal and rerun focused test to green.
-
-**Verification commands (example)**
-```bash
-make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
-```
+- Fit signals: the failing test diverges from stable suite setup, teardown, or assertion patterns.
+- Minimal fix shape: align setup, teardown, and assertion semantics with stable tests in the same suite.
 
 **Representative PRs**
 - #10203: test: fix flaky test TestForwardTestSuite in next-gen (https://github.com/tikv/pd/pull/10203)
@@ -201,4 +111,3 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 - #10176: fix(resourcemanager): call getServiceLimit to prevent data race (https://github.com/tikv/pd/pull/10176)
 - #10134: tests: fix some unstable tests (https://github.com/tikv/pd/pull/10134)
 - #10073: resource control: avoid panic when reservation is nil (https://github.com/tikv/pd/pull/10073)
-
