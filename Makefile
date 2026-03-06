@@ -204,7 +204,7 @@ static: install-tools pre-build
 	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
 	@ echo "promtool ..."
 	@ promtool check rules metrics/alertmanager/pd.rules.yml
-	@ promtool test rules metrics/alertmanager/pd.rules.test.yml
+	@ promtool test rules tests/alertmanager/pd.rules.test.yml
 
 
 # Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
