@@ -1,5 +1,5 @@
 rule_files:
-  - pd.rules.yml
+  - ../../metrics/alertmanager/pd.rules.yml
 
 # Use 15s to match typical scrape interval.
 evaluation_interval: 15s
