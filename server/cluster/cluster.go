@@ -344,6 +344,14 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	if err != nil {
 		return err
 	}
+	// `Start` may create components that start background goroutines using `c.ctx`.
+	// If a later step fails before `running` is set to true, `Stop` will return
+	// early and cannot reliably clean them up.
+	defer func() {
+		if err != nil {
+			c.cancel()
+		}
+	}()
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
