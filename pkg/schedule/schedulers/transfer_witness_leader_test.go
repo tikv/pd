@@ -89,3 +89,11 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	ops, _ = sl.Schedule(tc, false)
 	re.Empty(ops)
 }
+
+func TestRecvRegionInfoWithWrongSchedulerType(t *testing.T) {
+	re := require.New(t)
+	var s Scheduler = &balanceRangeScheduler{}
+	re.NotPanics(func() {
+		re.Nil(RecvRegionInfo(s))
+	})
+}
