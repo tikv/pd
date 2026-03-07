@@ -718,25 +718,12 @@ func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
 	op.Start()
 	inf := controller.GetOpInfluence(cluster.GetBasicCluster())
 	re.Len(inf.StoresInfluence, 1)
-<<<<<<< HEAD
-	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("300"), EndKey: []byte("400")}}))
-	re.Empty(inf.StoresInfluence)
-	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("199")}}))
-	re.Empty(inf.StoresInfluence)
-=======
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), nil)
 	re.Len(inf.StoresInfluence, 1)
->>>>>>> 79149a25ab (operator: fix panic for `WithRangeOption` (#10292))
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("200")}}))
 	re.Empty(inf.StoresInfluence)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
 	re.Len(inf.StoresInfluence, 1)
-<<<<<<< HEAD
-	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("200"), EndKey: []byte("300")}}))
-	re.Len(inf.StoresInfluence, 1)
-	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("200"), EndKey: []byte("299")}}))
-	re.Len(inf.StoresInfluence, 1)
-=======
 	cluster.ResetRegionCache()
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
 	re.Empty(inf.StoresInfluence)
@@ -744,7 +731,6 @@ func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
 	re.Empty(inf.StoresInfluence)
 	opt := WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}})
 	re.False(opt(nil))
->>>>>>> 79149a25ab (operator: fix panic for `WithRangeOption` (#10292))
 }
 
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {

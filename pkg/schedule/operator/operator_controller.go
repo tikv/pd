@@ -864,13 +864,10 @@ type OpInfluenceOption func(region *core.RegionInfo) bool
 // WithRangeOption returns an OpInfluenceOption that filters the region by the key ranges.
 func WithRangeOption(ranges []keyutil.KeyRange) OpInfluenceOption {
 	return func(region *core.RegionInfo) bool {
-<<<<<<< HEAD
-		kr := keyutil.NewKeyRange(string(region.GetStartKey()), string(region.GetEndKey()))
-=======
 		if region == nil {
 			return false
 		}
->>>>>>> 79149a25ab (operator: fix panic for `WithRangeOption` (#10292))
+		kr := keyutil.NewKeyRange(string(region.GetStartKey()), string(region.GetEndKey()))
 		for _, r := range ranges {
 			// exclude the continued range
 			if r.OverLapped(&kr) && !(bytes.Equal(r.StartKey, kr.EndKey) || bytes.Equal(r.EndKey, kr.StartKey)) {
