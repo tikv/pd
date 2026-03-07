@@ -77,9 +77,8 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegion(regionID)
-	failpoint.Inject("skipRegionInfo", func(val failpoint.Value) {
-		addr, ok := val.(string)
-		if ok && addr == h.svr.GetAddr() {
+	failpoint.Inject("RejectGetRegionByIDWhenAccessLeader", func() {
+		if h.svr.GetMember().IsServing() {
 			regionInfo = nil
 		}
 	})

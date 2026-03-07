@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -510,6 +511,9 @@ func (suite *regionTestSuite) TestFollowerDirect() {
 func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	re.NotEmpty(cluster.WaitLeader())
+	if err := cluster.GetLeaderServer().BootstrapCluster(); err != nil {
+		re.Contains(err.Error(), "already bootstrapped")
+	}
 	cmd := ctl.GetRootCmd()
 	stores := []*metapb.Store{
 		{
@@ -542,19 +546,22 @@ func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
 	region := core.NewRegionInfo(metaRegion, metaRegion.Peers[0])
 	re.NoError(cluster.HandleRegionHeartbeat(region))
 	pdAddr := cluster.GetLeaderServer().GetAddr()
-	pointValue := fmt.Sprintf("return(%s)", pdAddr)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/skipRegionInfo", pointValue))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/RejectGetRegionByIDWhenAccessLeader", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/skipRegionInfo"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/RejectGetRegionByIDWhenAccessLeader"))
 	}()
 	for _, server := range cluster.GetServers() {
+		serverAddr := server.GetAddr()
 		// leader reject any region info request with --direct, followers should work normally.
-		if server.GetAddr() == pdAddr {
-			_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "region", "100", "--direct")
-			re.Error(err)
-		} else {
-			_, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "region", "100", "--direct")
+		if serverAddr == pdAddr {
+			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--direct")
 			re.NoError(err)
+			re.Contains(string(output), "Failed to get region")
+		} else {
+			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--direct")
+			re.NoError(err)
+			outputStr := string(output)
+			re.True(strings.Contains(outputStr, "\"id\":100") || strings.Contains(outputStr, "TiKV cluster not bootstrapped"), outputStr)
 		}
 	}
 }
