@@ -1652,7 +1652,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	id = leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc1, id, 1)
 	testutil.Eventually(re, func() bool {
-		return leaderServer.GetRaftCluster().IsPrepared()
+		return rc1.GetCoordinator().AreSchedulersInitialized()
 	})
 	// Check scheduler updated.
 	schedulersController = rc1.GetCoordinator().GetSchedulersController()
@@ -1677,7 +1677,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	id = leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
 	testutil.Eventually(re, func() bool {
-		return leaderServer.GetRaftCluster().IsPrepared()
+		return rc.GetCoordinator().AreSchedulersInitialized()
 	})
 	// Check scheduler updated
 	schedulersController = rc.GetCoordinator().GetSchedulersController()
