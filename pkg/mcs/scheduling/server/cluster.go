@@ -796,20 +796,7 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
-		old := region.GetBuckets()
-		// region should not update if the version of the buckets is less than the old one.
-		if old != nil {
-			reportVersion := buckets.GetVersion()
-			if reportVersion < old.GetVersion() {
-				return nil
-			} else if reportVersion == old.GetVersion() {
-				return nil
-			}
-		}
-		failpoint.Inject("concurrentBucketHeartbeat", func() {
-			time.Sleep(500 * time.Millisecond)
-		})
-		if ok := region.UpdateBuckets(buckets, old); ok {
+		if success := region.CompareAndSetReportBuckets(buckets); success {
 			return nil
 		}
 	}

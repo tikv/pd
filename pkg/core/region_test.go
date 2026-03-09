@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -247,6 +248,28 @@ func TestInherit(t *testing.T) {
 			re.NotEqual(d.originBuckets, newRegion.GetBuckets())
 		}
 	}
+
+	origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(&metapb.Buckets{
+		Version: 2,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	}))
+	origin.reportBuckets = unsafe.Pointer(&metapb.Buckets{
+		Version: 1,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	})
+
+	// region hasn't bucket meta, report buckets should be inherited.
+	new := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+	new.Inherit(origin, true)
+	re.Equal(uint64(1), new.GetReportBuckets().Version)
+
+	// region has bucket meta, report buckets should be inherited also.
+	new1 := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(&metapb.Buckets{
+		Version: 2,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	}))
+	new1.Inherit(origin, true)
+	re.Equal(uint64(1), new1.GetReportBuckets().Version)
 }
 
 func TestRegionRoundingFlow(t *testing.T) {
