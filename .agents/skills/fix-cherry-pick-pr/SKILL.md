@@ -1,9 +1,9 @@
 ---
-name: pd-fix-cherry-pick-pr
+name: fix-cherry-pick-pr
 description: Repair cherry-pick pull requests in tikv/pd when automated cherry-picks leave committed conflict markers, drift from the source PR, or need parity verification against the original PR. Use when given a source PD PR and its cherry-pick PR, or a cherry-pick PR that references an original PR, and asked to compare diffs, resolve release-branch cherry-pick conflicts, run failpoint-aware verification, and push the fixed cherry-pick branch.
 ---
 
-# PD Fix Cherry-Pick PR
+# Fix Cherry-Pick PR
 
 ## Overview
 
