@@ -202,6 +202,55 @@ func TestDeleteResourceGroup(t *testing.T) {
 	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
 }
 
+func TestDeleteResourceGroupClearsPersistedStatesInMetadataOnlyRole(t *testing.T) {
+	re := require.New(t)
+
+	memStorage := storage.NewStorageWithMemoryBackend()
+	krgm := newKeyspaceResourceGroupManager(1, memStorage, ResourceGroupWriteRolePDMetaOnly)
+	group := &rmpb.ResourceGroup{
+		Name:     "test_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 5,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+			},
+		},
+	}
+
+	re.NoError(krgm.addResourceGroup(group))
+
+	now := time.Now()
+	re.NoError(memStorage.SaveResourceGroupStates(1, group.Name, &GroupStates{
+		RU: &GroupTokenBucketState{
+			Tokens:     321,
+			LastUpdate: &now,
+		},
+		RUConsumption: &rmpb.Consumption{RRU: 11, WRU: 22},
+	}))
+
+	stateCount := 0
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == 1 && name == group.Name {
+			stateCount++
+		}
+	}))
+	re.Equal(1, stateCount)
+
+	re.NoError(krgm.deleteResourceGroup(group.Name))
+
+	stateCount = 0
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == 1 && name == group.Name {
+			stateCount++
+		}
+	}))
+	re.Zero(stateCount)
+}
+
 func TestGetResourceGroup(t *testing.T) {
 	re := require.New(t)
 

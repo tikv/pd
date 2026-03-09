@@ -231,6 +231,7 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 	}
 	// Keep the reserved group alive.
 	if target.groupName == DefaultResourceGroupName {
+		m.getOrCreateKeyspaceResourceGroupManager(target.keyspaceID, false).restoreDefaultResourceGroupFromReserved()
 		return nil
 	}
 	krgm := m.getKeyspaceResourceGroupManager(target.keyspaceID)

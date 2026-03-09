@@ -172,22 +172,30 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	if ok {
 		return
 	}
-	defaultGroup := &ResourceGroup{
-		Name: DefaultResourceGroupName,
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &RequestUnitSettings{
-			RU: &GroupTokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   UnlimitedRate,
-					BurstLimit: UnlimitedBurstLimit,
-				},
-			},
-		},
-		Priority: middlePriority,
-	}
+	defaultGroup := newDefaultResourceGroup()
 	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
 		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
 	}
+}
+
+func newDefaultResourceGroup() *ResourceGroup {
+	return &ResourceGroup{
+		Name: DefaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: NewRequestUnitSettings(DefaultResourceGroupName, &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   UnlimitedRate,
+				BurstLimit: UnlimitedBurstLimit,
+			},
+		}),
+		Priority: middlePriority,
+	}
+}
+
+func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserved() {
+	krgm.Lock()
+	krgm.groups[DefaultResourceGroupName] = newDefaultResourceGroup()
+	krgm.Unlock()
 }
 
 func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
@@ -247,6 +255,9 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 	}
 	if !krgm.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
+	}
+	if err := krgm.storage.DeleteResourceGroupStates(krgm.keyspaceID, name); err != nil {
+		return err
 	}
 	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
 		return err
