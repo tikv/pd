@@ -307,6 +307,11 @@ func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
 	return ResourceGroupWriteRoleLegacyAll
 }
 
+// EnableResourceGroupMetadataWatcher reports whether the manager should bootstrap from the metadata watcher.
+func (*Server) EnableResourceGroupMetadataWatcher() bool {
+	return true
+}
+
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	return !s.IsClosed() && s.participant.IsServing()

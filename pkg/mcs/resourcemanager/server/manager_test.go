@@ -33,6 +33,7 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcsserver "github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -121,7 +122,16 @@ func prepareManager() *Manager {
 	return m
 }
 
-func TestInitMetadataWatcherUsesManagerOwnedContextAndCancelsOnError(t *testing.T) {
+func TestNewManagerEnablesMetadataWatcherForServer(t *testing.T) {
+	re := require.New(t)
+	m := NewManager[*Server](&Server{
+		BaseServer: &mcsserver.BaseServer{},
+		cfg:        &Config{},
+	})
+	re.True(m.enableMetadataWatcher)
+}
+
+func TestInitMetadataWatcherCancelsOnError(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 	m.enableMetadataWatcher = true

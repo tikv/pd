@@ -309,6 +309,64 @@ func (m *Manager) loadServiceLimits() error {
 	})
 }
 
+func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
+	controllerConfig := &ControllerConfig{}
+	if err := json.Unmarshal([]byte(rawValue), controllerConfig); err != nil {
+		log.Error("failed to apply controller config from watcher",
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	m.Lock()
+	m.controllerConfig = controllerConfig
+	m.Unlock()
+	return nil
+}
+
+func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawValue string) error {
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+	if err := krgm.upsertResourceGroupFromRaw(name, rawValue); err != nil {
+		log.Error("failed to apply resource group settings from watcher",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", name),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) applyServiceLimitFromRaw(keyspaceID uint32, rawValue string) error {
+	var serviceLimit float64
+	if err := json.Unmarshal([]byte(rawValue), &serviceLimit); err != nil {
+		log.Error("failed to apply service limit from watcher",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
+	return nil
+}
+
+func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawValue string) error {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		log.Debug("skip applying resource group states without corresponding manager",
+			zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name))
+		return nil
+	}
+	if err := krgm.setRawStatesIntoResourceGroup(name, rawValue); err != nil {
+		log.Error("failed to apply resource group states from watcher",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", name),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) initReserved() {
 	// Initialize the null keyspace resource group manager if it doesn't exist.
 	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, true)

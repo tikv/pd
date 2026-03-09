@@ -16,39 +16,33 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 const (
 	resourceGroupWatchPrefix = "resource_group/"
-
-	controllerConfigWatchKey            = "controller"
-	legacyResourceGroupSettingsPrefix   = "settings/"
-	legacyResourceGroupStatesPrefix     = "states/"
-	keyspaceResourceGroupSettingsPrefix = "keyspace/settings/"
-	keyspaceResourceGroupStatesPrefix   = "keyspace/states/"
-	keyspaceServiceLimitPrefix          = "keyspace/service_limits/"
 )
 
 type resourceGroupWatchEntryType uint8
 
 const (
 	resourceGroupWatchEntryUnknown resourceGroupWatchEntryType = iota
+	// keypath.ControllerConfigPath()
 	resourceGroupWatchEntryController
+	// keypath.ResourceGroupSettingPrefix() and keypath.KeyspaceResourceGroupSettingPrefix()
 	resourceGroupWatchEntrySettings
+	// keypath.ResourceGroupStatePrefix() and keypath.KeyspaceResourceGroupStatePrefix()
 	resourceGroupWatchEntryStates
+	// keypath.KeyspaceServiceLimitPrefix()
 	resourceGroupWatchEntryServiceLimit
 )
 
@@ -88,62 +82,46 @@ var newMetadataLoopWatcher = func(
 }
 
 func parseResourceGroupWatchPath(path string) (resourceGroupWatchTarget, bool) {
-	if !strings.HasPrefix(path, resourceGroupWatchPrefix) {
-		return resourceGroupWatchTarget{}, false
-	}
-	trimmed := strings.TrimPrefix(path, resourceGroupWatchPrefix)
-	if trimmed == controllerConfigWatchKey {
+	switch {
+	case path == keypath.ControllerConfigPath():
 		return resourceGroupWatchTarget{
 			entryType: resourceGroupWatchEntryController,
 		}, true
-	}
-	if strings.HasPrefix(trimmed, legacyResourceGroupSettingsPrefix) {
-		name := strings.TrimPrefix(trimmed, legacyResourceGroupSettingsPrefix)
-		if name == "" {
-			return resourceGroupWatchTarget{}, false
-		}
-		return resourceGroupWatchTarget{
-			entryType:  resourceGroupWatchEntrySettings,
-			keyspaceID: constant.NullKeyspaceID,
-			groupName:  name,
-		}, true
-	}
-	if strings.HasPrefix(trimmed, legacyResourceGroupStatesPrefix) {
-		name := strings.TrimPrefix(trimmed, legacyResourceGroupStatesPrefix)
-		if name == "" {
-			return resourceGroupWatchTarget{}, false
-		}
-		return resourceGroupWatchTarget{
-			entryType:  resourceGroupWatchEntryStates,
-			keyspaceID: constant.NullKeyspaceID,
-			groupName:  name,
-		}, true
-	}
-	if strings.HasPrefix(trimmed, keyspaceResourceGroupSettingsPrefix) {
-		return parseKeyspaceWatchPath(strings.TrimPrefix(trimmed, keyspaceResourceGroupSettingsPrefix), resourceGroupWatchEntrySettings)
-	}
-	if strings.HasPrefix(trimmed, keyspaceResourceGroupStatesPrefix) {
-		return parseKeyspaceWatchPath(strings.TrimPrefix(trimmed, keyspaceResourceGroupStatesPrefix), resourceGroupWatchEntryStates)
-	}
-	if strings.HasPrefix(trimmed, keyspaceServiceLimitPrefix) {
-		return parseKeyspaceIDWatchPath(strings.TrimPrefix(trimmed, keyspaceServiceLimitPrefix), resourceGroupWatchEntryServiceLimit)
-	}
-	return resourceGroupWatchTarget{}, false
-}
-
-func parseKeyspaceWatchPath(path string, entryType resourceGroupWatchEntryType) (resourceGroupWatchTarget, bool) {
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	case strings.HasPrefix(path, keypath.ResourceGroupSettingPrefix()):
+		return parseLegacyResourceGroupWatchPath(strings.TrimPrefix(path, keypath.ResourceGroupSettingPrefix()), resourceGroupWatchEntrySettings)
+	case strings.HasPrefix(path, keypath.ResourceGroupStatePrefix()):
+		return parseLegacyResourceGroupWatchPath(strings.TrimPrefix(path, keypath.ResourceGroupStatePrefix()), resourceGroupWatchEntryStates)
+	case strings.HasPrefix(path, keypath.KeyspaceResourceGroupSettingPrefix()):
+		return parseKeyspaceWatchPath(strings.TrimPrefix(path, keypath.KeyspaceResourceGroupSettingPrefix()), resourceGroupWatchEntrySettings)
+	case strings.HasPrefix(path, keypath.KeyspaceResourceGroupStatePrefix()):
+		return parseKeyspaceWatchPath(strings.TrimPrefix(path, keypath.KeyspaceResourceGroupStatePrefix()), resourceGroupWatchEntryStates)
+	case strings.HasPrefix(path, keypath.KeyspaceServiceLimitPrefix()):
+		return parseKeyspaceIDWatchPath(strings.TrimPrefix(path, keypath.KeyspaceServiceLimitPrefix()), resourceGroupWatchEntryServiceLimit)
+	default:
 		return resourceGroupWatchTarget{}, false
 	}
-	keyspaceID, err := strconv.ParseUint(parts[0], 10, 32)
-	if err != nil {
+}
+
+func parseLegacyResourceGroupWatchPath(groupName string, entryType resourceGroupWatchEntryType) (resourceGroupWatchTarget, bool) {
+	if groupName == "" {
 		return resourceGroupWatchTarget{}, false
 	}
 	return resourceGroupWatchTarget{
 		entryType:  entryType,
-		keyspaceID: uint32(keyspaceID),
-		groupName:  parts[1],
+		keyspaceID: constant.NullKeyspaceID,
+		groupName:  groupName,
+	}, true
+}
+
+func parseKeyspaceWatchPath(path string, entryType resourceGroupWatchEntryType) (resourceGroupWatchTarget, bool) {
+	keyspaceID, groupName, err := keypath.ParseKeyspaceResourceGroupPath(path)
+	if err != nil || groupName == "" {
+		return resourceGroupWatchTarget{}, false
+	}
+	return resourceGroupWatchTarget{
+		entryType:  entryType,
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
 	}, true
 }
 
@@ -239,63 +217,5 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 		return nil
 	}
 	krgm.deleteResourceGroupFromCache(target.groupName)
-	return nil
-}
-
-func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
-	controllerConfig := &ControllerConfig{}
-	if err := json.Unmarshal([]byte(rawValue), controllerConfig); err != nil {
-		log.Error("failed to apply controller config from watcher",
-			zap.String("raw-value", rawValue),
-			zap.Error(err))
-		return err
-	}
-	m.Lock()
-	m.controllerConfig = controllerConfig
-	m.Unlock()
-	return nil
-}
-
-func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawValue string) error {
-	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
-	if err := krgm.upsertResourceGroupFromRaw(name, rawValue); err != nil {
-		log.Error("failed to apply resource group settings from watcher",
-			zap.Uint32("keyspace-id", keyspaceID),
-			zap.String("group-name", name),
-			zap.String("raw-value", rawValue),
-			zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-func (m *Manager) applyServiceLimitFromRaw(keyspaceID uint32, rawValue string) error {
-	var serviceLimit float64
-	if err := json.Unmarshal([]byte(rawValue), &serviceLimit); err != nil {
-		log.Error("failed to apply service limit from watcher",
-			zap.Uint32("keyspace-id", keyspaceID),
-			zap.String("raw-value", rawValue),
-			zap.Error(err))
-		return err
-	}
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
-	return nil
-}
-
-func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawValue string) error {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		log.Debug("skip applying resource group states without corresponding manager",
-			zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name))
-		return nil
-	}
-	if err := krgm.setRawStatesIntoResourceGroup(name, rawValue); err != nil {
-		log.Error("failed to apply resource group states from watcher",
-			zap.Uint32("keyspace-id", keyspaceID),
-			zap.String("group-name", name),
-			zap.String("raw-value", rawValue),
-			zap.Error(err))
-		return err
-	}
 	return nil
 }
