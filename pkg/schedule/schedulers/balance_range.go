@@ -90,19 +90,33 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		Status:  pending,
 		Timeout: defaultJobTimeout,
 	}
-	job.Engine = input["engine"].(string)
-	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", input["engine"].(string)))
+	engine, ok := input["engine"].(string)
+	if !ok || len(engine) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "engine is required")
 		return
 	}
-	job.Rule = core.NewRule(input["rule"].(string))
+	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", engine))
+		return
+	}
+	job.Engine = engine
+
+	rule, ok := input["rule"].(string)
+	if !ok || len(rule) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "rule is required")
+		return
+	}
+	job.Rule = core.NewRule(rule)
 	if job.Rule != core.LeaderScatter && job.Rule != core.PeerScatter && job.Rule != core.LearnerScatter {
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule:%s must be leader-scatter, learner-scatter or peer-scatter",
-			input["engine"].(string)))
+			rule))
 		return
 	}
 
-	job.Alias = input["alias"].(string)
+	alias, ok := input["alias"].(string)
+	if ok && len(alias) > 0 {
+		job.Alias = alias
+	}
 	timeoutStr, ok := input["timeout"].(string)
 	if ok && len(timeoutStr) > 0 {
 		timeout, err := time.ParseDuration(timeoutStr)

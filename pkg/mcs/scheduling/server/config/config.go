@@ -304,6 +304,11 @@ func (o *PersistConfig) setServerConfig(cfg *sc.ServerConfig) {
 	o.serverConfig.Store(cfg)
 }
 
+// GetServerConfig returns the server configuration.
+func (o *PersistConfig) GetServerConfig() *sc.ServerConfig {
+	return o.serverConfig.Load().(*sc.ServerConfig)
+}
+
 // GetStoreConfig returns the TiKV store configuration.
 func (o *PersistConfig) GetStoreConfig() *sc.StoreConfig {
 	return o.storeConfig.Load().(*sc.StoreConfig)
