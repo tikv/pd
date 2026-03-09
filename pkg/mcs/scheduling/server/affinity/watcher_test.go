@@ -96,7 +96,7 @@ func TestAffinityWatcherLifecycle(t *testing.T) {
 	})
 
 	// Step 5: Delete the label rule
-	_, err = client.Delete(ctx, keypath.RegionLabelKeyPath(labelRule.ID))
+	_, err = client.Delete(ctx, keypath.RegionLabelPathPrefix()+"/"+labelRule.ID)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		groupState := affinityManager.GetAffinityGroupState(testGroup.ID)
@@ -139,7 +139,7 @@ func TestOnlyProcessAffinityGroupLabelRules(t *testing.T) {
 		Data:     labeler.MakeKeyRanges("7480000000000000ff0000000000000000f8", "7480000000000000ff1000000000000000f8"),
 	}
 
-	labelKey := keypath.RegionLabelKeyPath(nonStandardRule.ID)
+	labelKey := keypath.RegionLabelPathPrefix() + "/" + nonStandardRule.ID
 	labelValue, err := json.Marshal(nonStandardRule)
 	re.NoError(err)
 	_, err = client.Put(ctx, labelKey, string(labelValue))
