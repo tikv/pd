@@ -15,6 +15,7 @@
 package redirector
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,12 +61,15 @@ func TestRMMetadataFallbackHandlerRejectsForbiddenForwardHeader(t *testing.T) {
 
 	re := require.New(t)
 	localCalled := false
-	localHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		localCalled = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := newRMMetadataFallbackHandler(localHandler)
+	handler := newRMMetadataFallbackHandler(
+		func(*http.Request) bool { return true },
+		func() (http.Handler, error) {
+			localCalled = true
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}), nil
+		},
+	)
 	req := httptest.NewRequest(http.MethodPost, "/resource-manager/api/v1/config/group", nil)
 	req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
 	resp := httptest.NewRecorder()
@@ -73,4 +77,68 @@ func TestRMMetadataFallbackHandlerRejectsForbiddenForwardHeader(t *testing.T) {
 	handler.ServeHTTP(resp, req)
 	re.Equal(http.StatusNotFound, resp.Code)
 	re.False(localCalled)
+}
+
+func TestRMMetadataFallbackHandlerSkipsLocalHandlerWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	localCalled := false
+	handler := newRMMetadataFallbackHandler(
+		func(*http.Request) bool { return false },
+		func() (http.Handler, error) {
+			localCalled = true
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}), nil
+		},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/resource-manager/api/v1/config/groups", nil)
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+	re.Equal(http.StatusNotFound, resp.Code)
+	re.False(localCalled)
+}
+
+func TestRMMetadataFallbackHandlerInitializesLocalHandlerOnce(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	initCount := 0
+	handler := newRMMetadataFallbackHandler(
+		func(*http.Request) bool { return true },
+		func() (http.Handler, error) {
+			initCount++
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusAccepted)
+			}), nil
+		},
+	)
+
+	for range 2 {
+		req := httptest.NewRequest(http.MethodGet, "/resource-manager/api/v1/config/groups", nil)
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		re.Equal(http.StatusAccepted, resp.Code)
+	}
+	re.Equal(1, initCount)
+}
+
+func TestRMMetadataFallbackHandlerReturnsInitError(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	handler := newRMMetadataFallbackHandler(
+		func(*http.Request) bool { return true },
+		func() (http.Handler, error) {
+			return nil, errors.New("init failed")
+		},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/resource-manager/api/v1/config/groups", nil)
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+	re.Equal(http.StatusInternalServerError, resp.Code)
+	re.Equal("init failed", resp.Body.String())
 }

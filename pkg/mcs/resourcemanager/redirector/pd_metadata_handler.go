@@ -29,8 +29,12 @@ type rmMetadataHandler struct {
 	engine        *gin.Engine
 }
 
-func newRMMetadataHandler(manager *rmserver.Manager) http.Handler {
-	return newRMMetadataHandlerWithStore(metadataapi.NewManagerStore(manager))
+func newRMMetadataHandler(provider *rmMetadataManagerProvider) (http.Handler, error) {
+	manager, err := rmserver.NewMetadataOnlyManager[*rmMetadataManagerProvider](provider)
+	if err != nil {
+		return nil, err
+	}
+	return newRMMetadataHandlerWithStore(metadataapi.NewManagerStore(manager)), nil
 }
 
 func newRMMetadataHandlerWithStore(store metadataapi.Store) http.Handler {

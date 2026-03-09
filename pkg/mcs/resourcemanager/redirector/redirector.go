@@ -17,6 +17,7 @@ package redirector
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/urfave/negroni/v3"
 
@@ -39,8 +40,6 @@ func (*rmMetadataManagerProvider) GetResourceGroupWriteRole() rm_server.Resource
 
 // NewHandler creates a new redirector handler for resource manager.
 func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
-	manager := rm_server.NewManager[*rmMetadataManagerProvider](&rmMetadataManagerProvider{Server: svr})
-	localHandler := newRMMetadataHandler(manager)
 	redirector := negroni.New(
 		serverapi.NewRedirector(svr,
 			serverapi.MicroserviceRedirectRule(
@@ -53,7 +52,14 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				}),
 		),
 	)
-	redirector.UseHandler(newRMMetadataFallbackHandler(localHandler))
+	// Build the local RM metadata handler lazily so standalone mode does not
+	// register RM manager lifecycle callbacks during PD startup.
+	redirector.UseHandler(newRMMetadataFallbackHandler(
+		shouldHandleRMMetadataLocally,
+		func() (http.Handler, error) {
+			return newRMMetadataHandler(&rmMetadataManagerProvider{Server: svr})
+		},
+	))
 	return redirector, apiutil.APIServiceGroup{
 		Name:       "resource-manager",
 		Version:    "v1",
@@ -69,15 +75,31 @@ func shouldHandleRMMetadataLocally(r *http.Request) bool {
 	return false
 }
 
-func newRMMetadataFallbackHandler(localHandler http.Handler) http.Handler {
+func newRMMetadataFallbackHandler(
+	shouldHandle func(*http.Request) bool,
+	localHandlerFactory func() (http.Handler, error),
+) http.Handler {
+	var (
+		initOnce     sync.Once
+		initErr      error
+		localHandler http.Handler
+	)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Prevent bypassing RM metadata fallback guard via an injected "forbidden forward" header.
 		if r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) == "true" {
 			http.NotFound(w, r)
 			return
 		}
-		if !shouldHandleRMMetadataLocally(r) {
+		if !shouldHandle(r) {
 			http.NotFound(w, r)
+			return
+		}
+		initOnce.Do(func() {
+			localHandler, initErr = localHandlerFactory()
+		})
+		if initErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(initErr.Error()))
 			return
 		}
 		localHandler.ServeHTTP(w, r)
