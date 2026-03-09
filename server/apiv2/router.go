@@ -57,6 +57,7 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
 	handlers.RegisterMicroService(root)
+	root.Use(middlewares.AffinityMicroserviceRedirector())
 	handlers.RegisterAffinity(root)
 	return router, group, nil
 }
