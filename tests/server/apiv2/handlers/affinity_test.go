@@ -637,7 +637,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupDuplicateErrorMessage() 
 
 // TestAffinityGroupCreateSkipExistCheck verifies skip_exist_check ignores existing groups.
 func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
@@ -674,7 +674,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 
 // TestAffinityGroupCreateSkipExistCheckInvalidBool verifies invalid bool value is rejected.
 func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheckInvalidBool() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
@@ -847,7 +847,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGetInvalidGroupID() {
 
 // TestAffinityListWithIDs verifies listing affinity groups with ids filter.
 func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
@@ -872,7 +872,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
 
 // TestAffinityListWithInvalidIDs verifies invalid ID values are rejected.
 func (suite *affinityHandlerTestSuite) TestAffinityListWithInvalidIDs() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
@@ -892,7 +892,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithInvalidIDs() {
 
 // TestAffinityListWithEmptyID verifies empty ID entries are ignored.
 func (suite *affinityHandlerTestSuite) TestAffinityListWithEmptyID() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		serverAddr := leader.GetAddr()
