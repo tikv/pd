@@ -179,7 +179,7 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 	if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 		return false, err
 	}
-	return false, nil
+	return true, nil
 }
 
 func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {

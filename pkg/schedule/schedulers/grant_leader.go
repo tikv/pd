@@ -265,32 +265,8 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, strconv.FormatUint(id, 10))
 	}
 
-	rangesVal, hasRanges := input["ranges"]
-	if hasRanges {
-		var ranges []string
-		switch val := rangesVal.(type) {
-		case []string:
-			ranges = val
-		case []any:
-			ranges = make([]string, 0, len(val))
-			for _, item := range val {
-				s, ok := item.(string)
-				if !ok {
-					handler.config.Lock()
-					handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
-					handler.config.Unlock()
-					handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("ranges"))
-					return
-				}
-				ranges = append(ranges, s)
-			}
-		default:
-			handler.config.Lock()
-			handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
-			handler.config.Unlock()
-			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("ranges"))
-			return
-		}
+	ranges, ok := (input["ranges"]).([]string)
+	if ok {
 		args = append(args, ranges...)
 	} else if exists {
 		args = append(args, handler.config.getRanges(id)...)

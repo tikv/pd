@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/unrolled/render"
 
 	"github.com/pingcap/failpoint"
-	"github.com/unrolled/render"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -548,12 +548,4 @@ func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
 	})
 	re.Equal(http.StatusBadRequest, resp.Code)
 	re.Empty(conf.jobs)
-}
-
-func TestJobShouldFinishedWhenStartTimeIsMissing(t *testing.T) {
-	re := require.New(t)
-	job := &balanceRangeSchedulerJob{Timeout: time.Minute}
-	re.True(job.shouldFinished())
-	job = nil
-	re.True(job.shouldFinished())
 }

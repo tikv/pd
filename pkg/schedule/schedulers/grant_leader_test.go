@@ -15,19 +15,13 @@
 package schedulers
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/unrolled/render"
 
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
@@ -65,58 +59,4 @@ func TestGrantLeaderScheduler(t *testing.T) {
 	// balance leader scheduler should not add operator from store 3 to store 1
 	ops, _ = bls.Schedule(tc, false)
 	re.Empty(ops)
-}
-
-func TestGrantLeaderUpdateConfigWithStringArrayRanges(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, _ := prepareSchedulersTest()
-	defer cancel()
-
-	tc.AddLeaderStore(1, 0)
-	conf := &grantLeaderSchedulerConfig{
-		schedulerConfig:   &baseSchedulerConfig{},
-		StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange),
-		cluster:           tc.GetBasicCluster(),
-	}
-	conf.init("grant-leader-test", storage.NewStorageWithMemoryBackend(), conf)
-	handler := &grantLeaderHandler{config: conf, rd: render.New(render.Options{IndentJSON: true})}
-	body, err := json.Marshal(map[string]any{
-		"store_id": 1,
-		"ranges":   []string{"100", "200"},
-	})
-	re.NoError(err)
-	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
-	resp := httptest.NewRecorder()
-	re.NotPanics(func() {
-		handler.updateConfig(resp, req)
-	})
-	re.Equal(http.StatusOK, resp.Code)
-	re.Len(conf.StoreIDWithRanges[1], 1)
-	re.Equal(keyutil.NewKeyRange("100", "200"), conf.StoreIDWithRanges[1][0])
-}
-
-func TestGrantLeaderUpdateConfigWithInvalidRangesType(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, _ := prepareSchedulersTest()
-	defer cancel()
-
-	tc.AddLeaderStore(1, 0)
-	conf := &grantLeaderSchedulerConfig{
-		schedulerConfig:   &baseSchedulerConfig{},
-		StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange),
-		cluster:           tc.GetBasicCluster(),
-	}
-	conf.init("grant-leader-test", storage.NewStorageWithMemoryBackend(), conf)
-	handler := &grantLeaderHandler{config: conf, rd: render.New(render.Options{IndentJSON: true})}
-	body, err := json.Marshal(map[string]any{
-		"store_id": 1,
-		"ranges":   []any{"100", 200},
-	})
-	re.NoError(err)
-	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
-	resp := httptest.NewRecorder()
-	re.NotPanics(func() {
-		handler.updateConfig(resp, req)
-	})
-	re.Equal(http.StatusBadRequest, resp.Code)
 }

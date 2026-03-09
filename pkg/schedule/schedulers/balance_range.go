@@ -130,6 +130,10 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 				handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", timeoutStr))
 				return
 			}
+			if timeout <= 0 {
+				handler.rd.JSON(w, http.StatusBadRequest, "timeout must be positive")
+				return
+			}
 			job.Timeout = timeout
 		}
 	}
@@ -348,9 +352,6 @@ func (job *balanceRangeSchedulerJob) expired(dur time.Duration) bool {
 }
 
 func (job *balanceRangeSchedulerJob) shouldFinished() bool {
-	if job == nil || job.Start == nil {
-		return true
-	}
 	return time.Since(*job.Start) > job.Timeout
 }
 
