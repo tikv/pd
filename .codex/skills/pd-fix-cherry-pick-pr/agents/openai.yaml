@@ -1,4 +1,0 @@
-interface:
-  display_name: "PD Fix Cherry-Pick PR"
-  short_description: "Repair PD cherry-pick PRs and verify diff parity"
-  default_prompt: "Use $pd-fix-cherry-pick-pr to repair this PD cherry-pick PR and verify it matches the source PR."
