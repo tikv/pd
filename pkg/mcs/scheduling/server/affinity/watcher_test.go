@@ -17,14 +17,12 @@ package affinity
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/core"
@@ -106,7 +104,7 @@ func TestAffinityWatcherLifecycle(t *testing.T) {
 	})
 
 	// Step 6: Delete the affinity group
-	_, err = client.Delete(ctx, keypath.AffinityGroupPath(testGroup.ID))
+	_, err = client.Delete(ctx, keypath.AffinityGroupsPathPrefix()+"/"+testGroup.ID)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !affinityManager.IsGroupExist(testGroup.ID)
@@ -304,25 +302,13 @@ func TestLabelRuleBeforeGroup(t *testing.T) {
 	})
 }
 
-func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
-	re := require.New(t)
+func prepare(t *testing.T) (context.Context, *clientv3.Client, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestEtcdConfig()
-	var err error
-	cfg.Dir, err = os.MkdirTemp("", "pd_affinity_watcher_tests")
-	re.NoError(err)
-	os.RemoveAll(cfg.Dir)
-	etcd, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
-	re.NoError(err)
-	<-etcd.Server.ReadyNotify()
+	_, client, cleanEtcd := etcdutil.NewTestEtcdCluster(t, 1)
 
 	return ctx, client, func() {
 		cancel()
-		etcd.Close()
-		client.Close()
-		os.RemoveAll(cfg.Dir)
+		cleanEtcd()
 	}
 }
 
@@ -357,7 +343,7 @@ func setupAffinityManagerWithComponents(ctx context.Context, client *clientv3.Cl
 
 // putGroup writes an affinity group to etcd.
 func putGroup(ctx context.Context, client *clientv3.Client, group *affinity.Group) error {
-	groupKey := keypath.AffinityGroupPath(group.ID)
+	groupKey := keypath.AffinityGroupsPathPrefix() + "/" + group.ID
 	groupValue, err := json.Marshal(group)
 	if err != nil {
 		return err
@@ -368,7 +354,7 @@ func putGroup(ctx context.Context, client *clientv3.Client, group *affinity.Grou
 
 // putLabelRule writes a label rule to etcd.
 func putLabelRule(ctx context.Context, client *clientv3.Client, labelRule *labeler.LabelRule) error {
-	labelKey := keypath.RegionLabelKeyPath(labelRule.ID)
+	labelKey := keypath.RegionLabelPathPrefix() + "/" + labelRule.ID
 	labelValue, err := json.Marshal(labelRule)
 	if err != nil {
 		return err

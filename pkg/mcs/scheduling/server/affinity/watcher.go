@@ -96,7 +96,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("delete affinity group", zap.String("key", key))
-		groupID := strings.TrimPrefix(key, keypath.AffinityGroupsPrefix())
+		groupID := strings.TrimPrefix(key, keypath.AffinityGroupsPathPrefix()+"/")
 		w.affinityManager.SyncGroupDeleteFromEtcd(groupID)
 		return nil
 	}
@@ -105,7 +105,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 		ctx, w.wg,
 		w.etcdClient,
 		"scheduling-affinity-group-watcher",
-		strings.TrimSuffix(keypath.AffinityGroupsPrefix(), "/"),
+		keypath.AffinityGroupsPathPrefix(),
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },
@@ -135,7 +135,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("delete affinity label rule", zap.String("key", key))
-		ruleID := strings.TrimPrefix(key, keypath.RegionLabelPathPrefix())
+		ruleID := strings.TrimPrefix(key, keypath.RegionLabelPathPrefix()+"/")
 		w.affinityManager.SyncKeyRangesDeleteFromEtcd(ruleID)
 		return nil
 	}
@@ -144,7 +144,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		ctx, w.wg,
 		w.etcdClient,
 		"scheduling-affinity-label-watcher",
-		strings.TrimSuffix(keypath.RegionLabelKeyPath(affinity.LabelRuleIDPrefix), "/"), // Filter: only process affinity group label rules
+		keypath.RegionLabelPathPrefix()+"/"+affinity.LabelRuleIDPrefix, // Filter: only process affinity group label rules
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },

@@ -261,8 +261,6 @@ func (s *Service) RegisterPrimaryRouter() {
 	router.POST("transfer", transferPrimary)
 }
 
-<<<<<<< HEAD
-=======
 // RegisterAffinityRouter registers affinity routes to the v1 API group.
 func (s *Service) RegisterAffinityRouter() {
 	redirector := multiservicesapi.ServiceRedirector()
@@ -272,22 +270,6 @@ func (s *Service) RegisterAffinityRouter() {
 	router.GET("/:group_id", getAffinityGroup)
 }
 
-// getHealth returns the health status of the TSO service.
-func getHealth(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	if svr.IsClosed() {
-		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
-		return
-	}
-	if svr.GetParticipant().IsPrimaryElected() {
-		c.String(http.StatusOK, "ok")
-		return
-	}
-
-	c.String(http.StatusInternalServerError, "no primary elected")
-}
-
->>>>>>> 31fc48f714 (mcs: add affinity redirect and scheduling watcher  (#10042))
 // @Tags     admin
 // @Summary  Change the log level.
 // @Produce  json
@@ -1654,7 +1636,7 @@ func getAllAffinityGroups(c *gin.Context) {
 // @Summary  Get an affinity group by group id.
 // @Param    group_id  path  string  true  "The group id of the affinity group"
 // @Produce  json
-// @Success  200  {object}  *affinity.GroupState
+// @Success  200  {object}  affinity.GroupState
 // @Failure  404  {string}  string  "Affinity group not found."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /affinity-groups/{group_id} [get]

@@ -58,7 +58,7 @@ func TestMatchMicroserviceRedirectForbiddenHeader(t *testing.T) {
 	re := require.New(t)
 	req, err := http.NewRequest(http.MethodGet, "/pd/api/v1/foo", http.NoBody)
 	re.NoError(err)
-	req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
+	req.Header.Set(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
 
 	matched, addr := MatchMicroserviceRedirect(
 		req,

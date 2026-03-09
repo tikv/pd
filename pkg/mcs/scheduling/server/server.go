@@ -109,21 +109,11 @@ type Server struct {
 	hbStreams *hbstream.HeartbeatStreams
 	storage   *endpoint.StorageEndpoint
 
-<<<<<<< HEAD
-	// for watching the PD API server meta info updates that are related to the scheduling.
-	configWatcher *config.Watcher
-	ruleWatcher   *rule.Watcher
-	metaWatcher   *meta.Watcher
-=======
 	// for watching the PD meta info updates that are related to the scheduling.
 	configWatcher   *config.Watcher
 	ruleWatcher     *rule.Watcher
 	metaWatcher     *meta.Watcher
 	affinityWatcher *affinity.Watcher
-
-	// Cgroup Monitor
-	cgMonitor cgroup.Monitor
->>>>>>> 31fc48f714 (mcs: add affinity redirect and scheduling watcher  (#10042))
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -516,16 +506,12 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
-<<<<<<< HEAD
-	s.cluster.StartBackgroundJobs()
-=======
 	// Start the affinity watcher after the cluster is created.
-	s.affinityWatcher, err = affinity.NewWatcher(s.Context(), s.GetClient(), cluster.GetAffinityManager())
+	s.affinityWatcher, err = affinity.NewWatcher(s.Context(), s.GetClient(), s.cluster.GetAffinityManager())
 	if err != nil {
 		return err
 	}
-	cluster.StartBackgroundJobs()
->>>>>>> 31fc48f714 (mcs: add affinity redirect and scheduling watcher  (#10042))
+	s.cluster.StartBackgroundJobs()
 	return nil
 }
 

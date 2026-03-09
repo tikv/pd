@@ -115,18 +115,14 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 	}
 }
 
-<<<<<<< HEAD
 func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
 	if !h.s.IsAPIServiceMode() {
 		return false, ""
 	}
-	if len(h.microserviceRedirectRules) == 0 {
-=======
-func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, string) {
 	return MatchMicroserviceRedirect(
 		r,
 		h.microserviceRedirectRules,
-		h.s.IsKeyspaceGroupEnabled(),
+		h.s.IsAPIServiceMode(),
 		h.s.IsServiceIndependent,
 		h.s.GetServicePrimaryAddr)
 }
@@ -136,12 +132,11 @@ func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, stri
 func MatchMicroserviceRedirect(
 	r *http.Request,
 	rules []RedirectRule,
-	isKeyspaceGroupEnabled bool,
+	isMicroserviceRedirectEnabled bool,
 	isServiceIndependent func(string) bool,
 	getPrimary func(context.Context, string) (string, bool),
 ) (bool, string) {
-	if !isKeyspaceGroupEnabled || len(rules) == 0 {
->>>>>>> 31fc48f714 (mcs: add affinity redirect and scheduling watcher  (#10042))
+	if !isMicroserviceRedirectEnabled || len(rules) == 0 {
 		return false, ""
 	}
 	if r.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) == "true" {
@@ -155,45 +150,8 @@ func MatchMicroserviceRedirect(
 		if rule.TargetServiceName == constant.SchedulingServiceName && !isServiceIndependent(constant.SchedulingServiceName) {
 			continue
 		}
-<<<<<<< HEAD
-		if strings.HasPrefix(r.URL.Path, rule.matchPath) &&
-			slice.Contains(rule.matchMethods, r.Method) {
-			if rule.filter != nil && !rule.filter(r) {
-				continue
-			}
-			// we check the service primary addr here,
-			// if the service is not available, we will return ErrRedirect by returning an empty addr.
-			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
-			if !ok || addr == "" {
-				log.Warn("failed to get the service primary addr when trying to match redirect rules",
-					zap.String("path", r.URL.Path))
-				return true, ""
-			}
-			// If the URL contains escaped characters, use RawPath instead of Path
-			origin := r.URL.Path
-			path := r.URL.Path
-			if r.URL.RawPath != "" {
-				path = r.URL.RawPath
-			}
-			// Extract parameters from the URL path
-			// e.g. r.URL.Path = /pd/api/v1/operators/1 (before redirect)
-			//      matchPath  = /pd/api/v1/operators
-			//      targetPath = /scheduling/api/v1/operators
-			//      r.URL.Path = /scheduling/api/v1/operator/1 (after redirect)
-			pathParams := strings.TrimPrefix(path, rule.matchPath)
-			pathParams = strings.Trim(pathParams, "/") // Remove leading and trailing '/'
-			if len(pathParams) > 0 {
-				r.URL.Path = rule.targetPath + "/" + pathParams
-			} else {
-				r.URL.Path = rule.targetPath
-			}
-			log.Debug("redirect to micro service", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
-				zap.String("target", addr), zap.String("method", r.Method))
-			return true, addr
-=======
 		if !strings.HasPrefix(r.URL.Path, rule.MatchPath) || !slice.Contains(rule.MatchMethods, r.Method) {
 			continue
->>>>>>> 31fc48f714 (mcs: add affinity redirect and scheduling watcher  (#10042))
 		}
 		if rule.Filter != nil && !rule.Filter(r) {
 			continue
@@ -224,7 +182,7 @@ func MatchMicroserviceRedirect(
 		} else {
 			r.URL.Path = rule.TargetPath
 		}
-		log.Debug("redirect to microservice", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
+		log.Debug("redirect to micro service", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
 			zap.String("target", addr), zap.String("method", r.Method))
 		return true, addr
 	}

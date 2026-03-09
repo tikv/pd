@@ -39,7 +39,7 @@ func MicroserviceRedirector(rules ...serverapi.RedirectRule) gin.HandlerFunc {
 		redirectToMicroservice, targetAddr := serverapi.MatchMicroserviceRedirect(
 			c.Request,
 			rules,
-			svr.IsKeyspaceGroupEnabled(),
+			svr.IsAPIServiceMode(),
 			svr.IsServiceIndependent,
 			svr.GetServicePrimaryAddr)
 		if !redirectToMicroservice {
@@ -67,7 +67,7 @@ func MicroserviceRedirector(rules ...serverapi.RedirectRule) gin.HandlerFunc {
 		if len(forwardedPort) > 0 {
 			c.Request.Header.Add(apiutil.XForwardedPortHeader, forwardedPort)
 		}
-		c.Writer.Header().Add(apiutil.XForwardedToMicroserviceHeader, "true")
+		c.Writer.Header().Add(apiutil.XForwardedToMicroServiceHeader, "true")
 		apiutil.NewCustomReverseProxies(client, []url.URL{*u}).ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}
