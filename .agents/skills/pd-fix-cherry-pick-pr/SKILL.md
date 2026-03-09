@@ -34,8 +34,18 @@ gh pr diff <cherry-pick-pr> --repo tikv/pd --name-only
 
 ```bash
 diff -u \
-  <(gh pr diff <source-pr> --repo tikv/pd | rg '^[+-][^+-]' | sort) \
-  <(gh pr diff <cherry-pick-pr> --repo tikv/pd | rg '^[+-][^+-]' | sort)
+  <(gh pr diff <source-pr> --repo tikv/pd | awk '
+      /^diff --git a\// { file = $4; sub("^b/", "", file); next }
+      /^\+\+\+ b\// { file = substr($0, 7); next }
+      /^--- a\// { next }
+      /^[+-][^+-]/ && file != "" { print file ":" $0 }
+    ' | sort) \
+  <(gh pr diff <cherry-pick-pr> --repo tikv/pd | awk '
+      /^diff --git a\// { file = $4; sub("^b/", "", file); next }
+      /^\+\+\+ b\// { file = substr($0, 7); next }
+      /^--- a\// { next }
+      /^[+-][^+-]/ && file != "" { print file ":" $0 }
+    ' | sort)
 ```
 
 - Accept differences caused only by base-branch context:
