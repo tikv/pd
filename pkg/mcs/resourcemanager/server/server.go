@@ -307,7 +307,9 @@ func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
 	return ResourceGroupWriteRoleLegacyAll
 }
 
-// EnableResourceGroupMetadataWatcher reports whether the manager should bootstrap from the metadata watcher.
+// EnableResourceGroupMetadataWatcher reports whether the independent RM service
+// should bootstrap manager state from the metadata watcher.
+// The PD server path does not implement this hook and keeps the legacy bootstrap path.
 func (*Server) EnableResourceGroupMetadataWatcher() bool {
 	return true
 }

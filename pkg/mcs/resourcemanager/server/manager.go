@@ -89,7 +89,9 @@ type writeRoleProvider interface {
 	GetResourceGroupWriteRole() ResourceGroupWriteRole
 }
 
-// metadataWatcherProvider is an optional provider used to toggle RM metadata watcher.
+// metadataWatcherProvider is an optional provider used by the independent RM service
+// to switch manager bootstrap from full storage load to metadata watcher mode.
+// The PD server does not implement this hook and keeps the legacy bootstrap path.
 type metadataWatcherProvider interface {
 	EnableResourceGroupMetadataWatcher() bool
 }

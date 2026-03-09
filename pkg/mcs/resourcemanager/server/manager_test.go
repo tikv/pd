@@ -122,7 +122,7 @@ func prepareManager() *Manager {
 	return m
 }
 
-func TestNewManagerEnablesMetadataWatcherForServer(t *testing.T) {
+func TestNewManagerEnablesMetadataWatcherForRMServiceServer(t *testing.T) {
 	re := require.New(t)
 	m := NewManager[*Server](&Server{
 		BaseServer: &mcsserver.BaseServer{},
