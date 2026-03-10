@@ -117,6 +117,15 @@ func (w *fakeMetadataLoopWatcher) WaitLoad() error {
 	return nil
 }
 
+type failingControllerConfigStorage struct {
+	storage.Storage
+	err error
+}
+
+func (s failingControllerConfigStorage) SaveControllerConfig(any) error {
+	return s.err
+}
+
 func prepareManager() *Manager {
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
@@ -264,6 +273,28 @@ func TestUpdateControllerConfigItemPublishesNewSnapshot(t *testing.T) {
 	re.NotSame(previous, m.controllerConfig)
 	re.InDelta(0.5, previous.RequestUnit.ReadBaseCost, 0.00001)
 	re.InDelta(1.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+}
+
+func TestUpdateControllerConfigItemDoesNotPublishUnsavedSnapshot(t *testing.T) {
+	re := require.New(t)
+
+	expectedErr := errors.New("save controller config failed")
+	m := prepareManager()
+	m.storage = failingControllerConfigStorage{
+		Storage: storage.NewStorageWithMemoryBackend(),
+		err:     expectedErr,
+	}
+	m.controllerConfig = &ControllerConfig{
+		RequestUnit: RequestUnitConfig{
+			ReadBaseCost: 0.5,
+		},
+	}
+
+	previous := m.controllerConfig
+	err := m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
+	re.ErrorIs(err, expectedErr)
+	re.Same(previous, m.controllerConfig)
+	re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
 }
 
 func TestInitManager(t *testing.T) {

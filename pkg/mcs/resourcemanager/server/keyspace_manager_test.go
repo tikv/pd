@@ -28,6 +28,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -402,6 +403,32 @@ func TestAddResourceGroupFromRaw(t *testing.T) {
 	re.Error(err)
 }
 
+func TestAddResourceGroupFromRawRejectsInvalidGroup(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	group := &rmpb.ResourceGroup{
+		Name:     "invalid_priority_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: maxPriority + 1,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+			},
+		},
+	}
+
+	data, err := proto.Marshal(group)
+	re.NoError(err)
+
+	err = krgm.addResourceGroupFromRaw(group.GetName(), string(data))
+	re.ErrorIs(err, errs.ErrInvalidGroup)
+	re.Nil(krgm.getMutableResourceGroup(group.GetName()))
+}
+
 func TestUpsertResourceGroupFromRaw(t *testing.T) {
 	re := require.New(t)
 
@@ -484,6 +511,32 @@ func TestUpsertResourceGroupFromRaw(t *testing.T) {
 	re.Error(err)
 	re.Nil(krgm.getMutableResourceGroup("key_name"))
 	re.Nil(krgm.getMutableResourceGroup("payload_name"))
+}
+
+func TestUpsertResourceGroupFromRawRejectsInvalidNewGroup(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	group := &rmpb.ResourceGroup{
+		Name:     "invalid_priority_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: maxPriority + 1,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+			},
+		},
+	}
+
+	data, err := proto.Marshal(group)
+	re.NoError(err)
+
+	err = krgm.upsertResourceGroupFromRaw(group.GetName(), string(data))
+	re.ErrorIs(err, errs.ErrInvalidGroup)
+	re.Nil(krgm.getMutableResourceGroup(group.GetName()))
 }
 
 func TestDeleteResourceGroupFromCache(t *testing.T) {

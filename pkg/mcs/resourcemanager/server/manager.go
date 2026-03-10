@@ -416,7 +416,9 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	}
 	if updated {
 		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+			m.Unlock()
 			log.Error("save controller config failed", zap.Error(err))
+			return err
 		}
 		m.controllerConfig = controllerConfig
 	}

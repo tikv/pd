@@ -117,9 +117,22 @@ func (krgm *keyspaceResourceGroupManager) parseResourceGroupFromRaw(name, rawVal
 	return group, nil
 }
 
+func validateResourceGroupProto(grouppb *rmpb.ResourceGroup) error {
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > maxGroupNameLength {
+		return errs.ErrInvalidGroup
+	}
+	if grouppb.GetPriority() > maxPriority {
+		return errs.ErrInvalidGroup
+	}
+	return nil
+}
+
 func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, rawValue string) error {
 	group, err := krgm.parseResourceGroupFromRaw(name, rawValue)
 	if err != nil {
+		return err
+	}
+	if err := validateResourceGroupProto(group); err != nil {
 		return err
 	}
 	resourceGroup := FromProtoResourceGroup(group)
@@ -133,6 +146,9 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, r
 func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string, rawValue string) error {
 	group, err := krgm.parseResourceGroupFromRaw(name, rawValue)
 	if err != nil {
+		return err
+	}
+	if err := validateResourceGroupProto(group); err != nil {
 		return err
 	}
 
@@ -216,12 +232,8 @@ func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserve
 }
 
 func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
-	if len(grouppb.Name) == 0 || len(grouppb.Name) > maxGroupNameLength {
-		return errs.ErrInvalidGroup
-	}
-	// Check the Priority.
-	if grouppb.GetPriority() > maxPriority {
-		return errs.ErrInvalidGroup
+	if err := validateResourceGroupProto(grouppb); err != nil {
+		return err
 	}
 	group := FromProtoResourceGroup(grouppb)
 	if krgm.writeRole.AllowsMetadataWrite() {
