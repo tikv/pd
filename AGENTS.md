@@ -144,6 +144,7 @@ Reusable agent skills live under `.agents/skills/`. Each skill has a `SKILL.md` 
 | Skill | Purpose | Prerequisites | Docs |
 |---|---|---|---|
 | `create-pr` | Push the current branch and open a well-formatted PR on tikv/pd. Analyzes commits, generates PR title/body following the repository template, and submits via `gh pr create`. | `gh` CLI authenticated with tikv/pd repo access; local commits on a non-master branch. | [`.agents/skills/create-pr/SKILL.md`](.agents/skills/create-pr/SKILL.md) |
+| `pd-ci-flaky-triage` | Triage recent PD flaky CI failures, classify issue actions, and validate generated flaky snippets before any GitHub write. | `gh` CLI authenticated with tikv/pd repo access; Python 3 and `jq` in PATH. | [`.agents/skills/pd-ci-flaky-triage/SKILL.md`](.agents/skills/pd-ci-flaky-triage/SKILL.md) |
 
 ## Microservices / NextGen
 - `NEXT_GEN=1` builds/tests use `nextgen` tag and disable dashboard; ensure compatibility.
