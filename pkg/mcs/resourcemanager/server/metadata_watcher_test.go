@@ -49,7 +49,7 @@ func newMetadataWatcherTestManager(store storage.Storage) *Manager {
 	}
 }
 
-func newMetadataWatcherResourceGroup(keyspaceID uint32, name string, priority uint32, fillRate uint64, burstLimit int64) *rmpb.ResourceGroup {
+func newMetadataWatcherResourceGroup(name string, priority uint32, fillRate uint64, burstLimit int64) *rmpb.ResourceGroup {
 	return &rmpb.ResourceGroup{
 		Name:     name,
 		Mode:     rmpb.GroupMode_RUMode,
@@ -62,7 +62,7 @@ func newMetadataWatcherResourceGroup(keyspaceID uint32, name string, priority ui
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 10},
 	}
 }
 
@@ -157,7 +157,7 @@ func TestMetadataWatcherHandlePut(t *testing.T) {
 		re := require.New(t)
 
 		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
-		group := newMetadataWatcherResourceGroup(10, "test_group", 5, 100, 200)
+		group := newMetadataWatcherResourceGroup("test_group", 5, 100, 200)
 		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/10/test_group", mustMarshalResourceGroup(t, group)))
 
 		krgm := m.getKeyspaceResourceGroupManager(10)
@@ -207,7 +207,7 @@ func TestMetadataWatcherHandlePut(t *testing.T) {
 		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
 		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/service_limits/10", "123.5"))
 
-		group := newMetadataWatcherResourceGroup(10, "burstable_group", 5, 100, -1)
+		group := newMetadataWatcherResourceGroup("burstable_group", 5, 100, -1)
 		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/10/burstable_group", mustMarshalResourceGroup(t, group)))
 
 		krgm := m.getKeyspaceResourceGroupManager(10)
@@ -224,7 +224,7 @@ func TestMetadataWatcherHandleDelete(t *testing.T) {
 		re := require.New(t)
 
 		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
-		group := newMetadataWatcherResourceGroup(10, "test_group", 5, 100, 200)
+		group := newMetadataWatcherResourceGroup("test_group", 5, 100, 200)
 		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/10/test_group", mustMarshalResourceGroup(t, group)))
 		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/service_limits/10", "123.5"))
 
@@ -242,7 +242,7 @@ func TestMetadataWatcherHandleDelete(t *testing.T) {
 		re := require.New(t)
 
 		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
-		defaultGroup := newMetadataWatcherResourceGroup(10, DefaultResourceGroupName, middlePriority, 1000, -1)
+		defaultGroup := newMetadataWatcherResourceGroup(DefaultResourceGroupName, middlePriority, 1000, -1)
 		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/10/default", mustMarshalResourceGroup(t, defaultGroup)))
 
 		krgm := m.getKeyspaceResourceGroupManager(10)
