@@ -126,6 +126,17 @@ func (s failingControllerConfigStorage) SaveControllerConfig(any) error {
 	return s.err
 }
 
+type testMetadataLoopWatcherFactory func(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	preEventsFn func([]*clientv3.Event) error,
+	putFn, deleteFn func(*mvccpb.KeyValue) error,
+	postEventsFn func([]*clientv3.Event) error,
+	isWithPrefix bool,
+) metadataLoopWatcher
+
 func prepareManager() *Manager {
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
@@ -133,87 +144,97 @@ func prepareManager() *Manager {
 	return m
 }
 
-func TestNewManagerEnablesMetadataWatcherForRMServiceServer(t *testing.T) {
-	re := require.New(t)
-	m := NewManager[*Server](&Server{
-		BaseServer: &mcsserver.BaseServer{},
-		cfg:        &Config{},
+func prepareMetadataWatcherManager() *Manager {
+	m := prepareManager()
+	m.enableMetadataWatcher = true
+	m.srv = &testBasicServer{}
+	return m
+}
+
+func withMetadataLoopWatcherFactory(t *testing.T, factory testMetadataLoopWatcherFactory) {
+	t.Helper()
+	originalFactory := newMetadataLoopWatcher
+	newMetadataLoopWatcher = factory
+	t.Cleanup(func() {
+		newMetadataLoopWatcher = originalFactory
 	})
-	re.True(m.enableMetadataWatcher)
 }
 
-func TestInitMetadataWatcherCancelsOnError(t *testing.T) {
-	re := require.New(t)
-	m := prepareManager()
-	m.enableMetadataWatcher = true
-	m.srv = &testBasicServer{}
+func TestManagerMetadataWatcherLifecycle(t *testing.T) {
+	t.Run("enables_metadata_watcher_for_rm_service_server", func(t *testing.T) {
+		re := require.New(t)
+		m := NewManager[*Server](&Server{
+			BaseServer: &mcsserver.BaseServer{},
+			cfg:        &Config{},
+		})
+		re.True(m.enableMetadataWatcher)
+	})
 
-	parentCtx, parentCancel := context.WithCancel(context.Background())
-	defer parentCancel()
+	t.Run("cancels_metadata_watcher_context_on_init_error", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareMetadataWatcherManager()
 
-	watcherErr := errors.New("watcher load failed")
-	var capturedCtx context.Context
-	originalFactory := newMetadataLoopWatcher
-	defer func() { newMetadataLoopWatcher = originalFactory }()
-	newMetadataLoopWatcher = func(
-		ctx context.Context,
-		_ *sync.WaitGroup,
-		_ *clientv3.Client,
-		_, _ string,
-		_ func([]*clientv3.Event) error,
-		_, _ func(*mvccpb.KeyValue) error,
-		_ func([]*clientv3.Event) error,
-		_ bool,
-	) metadataLoopWatcher {
-		capturedCtx = ctx
-		return &fakeMetadataLoopWatcher{
-			waitLoadFn: func() error { return watcherErr },
-		}
-	}
+		parentCtx, parentCancel := context.WithCancel(context.Background())
+		defer parentCancel()
 
-	err := m.Init(parentCtx)
-	re.ErrorIs(err, watcherErr)
-	re.NotNil(m.cancel)
-	re.NotNil(capturedCtx)
-	re.NotEqual(parentCtx.Done(), capturedCtx.Done())
-	re.NoError(parentCtx.Err())
-	re.ErrorIs(capturedCtx.Err(), context.Canceled)
-}
+		watcherErr := errors.New("watcher load failed")
+		var capturedCtx context.Context
+		withMetadataLoopWatcherFactory(t, func(
+			ctx context.Context,
+			_ *sync.WaitGroup,
+			_ *clientv3.Client,
+			_, _ string,
+			_ func([]*clientv3.Event) error,
+			_, _ func(*mvccpb.KeyValue) error,
+			_ func([]*clientv3.Event) error,
+			_ bool,
+		) metadataLoopWatcher {
+			capturedCtx = ctx
+			return &fakeMetadataLoopWatcher{
+				waitLoadFn: func() error { return watcherErr },
+			}
+		})
 
-func TestCloseCancelsMetadataWatcherContext(t *testing.T) {
-	re := require.New(t)
-	m := prepareManager()
-	m.enableMetadataWatcher = true
-	m.srv = &testBasicServer{}
+		err := m.Init(parentCtx)
+		re.ErrorIs(err, watcherErr)
+		re.NotNil(m.cancel)
+		re.NotNil(capturedCtx)
+		re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+		re.NoError(parentCtx.Err())
+		re.ErrorIs(capturedCtx.Err(), context.Canceled)
+	})
 
-	parentCtx, parentCancel := context.WithCancel(context.Background())
-	defer parentCancel()
+	t.Run("cancels_metadata_watcher_context_on_close", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareMetadataWatcherManager()
 
-	var capturedCtx context.Context
-	originalFactory := newMetadataLoopWatcher
-	defer func() { newMetadataLoopWatcher = originalFactory }()
-	newMetadataLoopWatcher = func(
-		ctx context.Context,
-		_ *sync.WaitGroup,
-		_ *clientv3.Client,
-		_, _ string,
-		_ func([]*clientv3.Event) error,
-		_, _ func(*mvccpb.KeyValue) error,
-		_ func([]*clientv3.Event) error,
-		_ bool,
-	) metadataLoopWatcher {
-		capturedCtx = ctx
-		return &fakeMetadataLoopWatcher{}
-	}
+		parentCtx, parentCancel := context.WithCancel(context.Background())
+		defer parentCancel()
 
-	re.NoError(m.Init(parentCtx))
-	re.NotNil(capturedCtx)
-	re.NotEqual(parentCtx.Done(), capturedCtx.Done())
-	re.NoError(capturedCtx.Err())
+		var capturedCtx context.Context
+		withMetadataLoopWatcherFactory(t, func(
+			ctx context.Context,
+			_ *sync.WaitGroup,
+			_ *clientv3.Client,
+			_, _ string,
+			_ func([]*clientv3.Event) error,
+			_, _ func(*mvccpb.KeyValue) error,
+			_ func([]*clientv3.Event) error,
+			_ bool,
+		) metadataLoopWatcher {
+			capturedCtx = ctx
+			return &fakeMetadataLoopWatcher{}
+		})
 
-	m.close()
+		re.NoError(m.Init(parentCtx))
+		re.NotNil(capturedCtx)
+		re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+		re.NoError(capturedCtx.Err())
 
-	re.ErrorIs(capturedCtx.Err(), context.Canceled)
+		m.close()
+
+		re.ErrorIs(capturedCtx.Err(), context.Canceled)
+	})
 }
 
 func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
@@ -242,59 +263,61 @@ func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
 	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
 }
 
-func TestGetControllerConfigReturnsSnapshot(t *testing.T) {
-	re := require.New(t)
+func TestManagerControllerConfigSnapshots(t *testing.T) {
+	t.Run("returns_snapshot", func(t *testing.T) {
+		re := require.New(t)
 
-	m := prepareManager()
-	m.controllerConfig = &ControllerConfig{
-		RequestUnit: RequestUnitConfig{
-			ReadBaseCost: 0.5,
-		},
-	}
+		m := prepareManager()
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
 
-	snapshot := m.GetControllerConfig()
-	snapshot.RequestUnit.ReadBaseCost = 1.5
+		snapshot := m.GetControllerConfig()
+		snapshot.RequestUnit.ReadBaseCost = 1.5
 
-	re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
-}
+		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
 
-func TestUpdateControllerConfigItemPublishesNewSnapshot(t *testing.T) {
-	re := require.New(t)
+	t.Run("publishes_new_snapshot_after_successful_update", func(t *testing.T) {
+		re := require.New(t)
 
-	m := prepareManager()
-	m.controllerConfig = &ControllerConfig{
-		RequestUnit: RequestUnitConfig{
-			ReadBaseCost: 0.5,
-		},
-	}
+		m := prepareManager()
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
 
-	previous := m.controllerConfig
-	re.NoError(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5))
-	re.NotSame(previous, m.controllerConfig)
-	re.InDelta(0.5, previous.RequestUnit.ReadBaseCost, 0.00001)
-	re.InDelta(1.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
-}
+		previous := m.controllerConfig
+		re.NoError(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5))
+		re.NotSame(previous, m.controllerConfig)
+		re.InDelta(0.5, previous.RequestUnit.ReadBaseCost, 0.00001)
+		re.InDelta(1.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
 
-func TestUpdateControllerConfigItemDoesNotPublishUnsavedSnapshot(t *testing.T) {
-	re := require.New(t)
+	t.Run("does_not_publish_unsaved_snapshot", func(t *testing.T) {
+		re := require.New(t)
 
-	expectedErr := errors.New("save controller config failed")
-	m := prepareManager()
-	m.storage = failingControllerConfigStorage{
-		Storage: storage.NewStorageWithMemoryBackend(),
-		err:     expectedErr,
-	}
-	m.controllerConfig = &ControllerConfig{
-		RequestUnit: RequestUnitConfig{
-			ReadBaseCost: 0.5,
-		},
-	}
+		expectedErr := errors.New("save controller config failed")
+		m := prepareManager()
+		m.storage = failingControllerConfigStorage{
+			Storage: storage.NewStorageWithMemoryBackend(),
+			err:     expectedErr,
+		}
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
 
-	previous := m.controllerConfig
-	err := m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
-	re.ErrorIs(err, expectedErr)
-	re.Same(previous, m.controllerConfig)
-	re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+		previous := m.controllerConfig
+		err := m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
+		re.ErrorIs(err, expectedErr)
+		re.Same(previous, m.controllerConfig)
+		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
 }
 
 func TestInitManager(t *testing.T) {
