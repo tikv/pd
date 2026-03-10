@@ -194,6 +194,9 @@ tests:
       - eval_time: 5m
         alertname: PD_leader_service_stuck
         exp_alerts: []
+      - eval_time: 5m15s
+        alertname: PD_leader_service_stuck
+        exp_alerts: []
       # At 5:30 pd-1 etcd drops; transient was too short to satisfy for:1m.
       - eval_time: 5m30s
         alertname: PD_leader_service_stuck
