@@ -1205,6 +1205,106 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist"))
 }
 
+// TestNonTrickleFillRate verifies issue #10251: when the server grants tokens in non-trickle
+// mode (capacity sufficient), the response must carry FillRate so the client limiter can
+// locally generate tokens instead of hitting InfDuration waits.
+//
+// Without the fix, the server returns FillRate=0 in non-trickle responses. After the client
+// depletes its granted tokens, durationFromTokens() returns InfDuration, causing all subsequent
+// OnRequestWait calls to fail with ErrClientResourceGroupThrottled or context.DeadlineExceeded.
+func (suite *resourceManagerClientTestSuite) TestNonTrickleFillRate() {
+	re := suite.Require()
+	cli := suite.client
+
+	const groupName = "test_non_trickle_fill_rate"
+	const groupFillRate = uint64(10000)
+	const groupBurstLimit = int64(1000000)
+	group := &rmpb.ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   groupFillRate,
+					BurstLimit: groupBurstLimit,
+				},
+				Tokens: 1000000,
+			},
+		},
+	}
+	resp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Case 1: Non-trickle response when no slot exists (requiredToken=0, initial periodic report).
+	// The server deletes the slot and returns a response directly from the group-level settings.
+	// This response must carry FillRate so the client limiter can refill tokens locally.
+	tokenBucketRequest := &rmpb.TokenBucketsRequest{
+		Requests: []*rmpb.TokenBucketRequest{
+			{
+				ResourceGroupName: groupName,
+				Request: &rmpb.TokenBucketRequest_RuItems{
+					RuItems: &rmpb.TokenBucketRequest_RequestRU{
+						RequestRU: []*rmpb.RequestUnitItem{
+							{
+								Type:  rmpb.RequestUnitType_RU,
+								Value: 0, // no tokens requested — simulates initial periodic report
+							},
+						},
+					},
+				},
+				ConsumptionSinceLastRequest: &rmpb.Consumption{},
+			},
+		},
+		TargetRequestPeriodMs: uint64(time.Second * 5 / time.Millisecond),
+		ClientUniqueId:        1,
+	}
+	token := suite.acquireNonTrickleFillRateTokens(ctx, re, groupName, tokenBucketRequest)
+	re.Equal(groupFillRate, token.GetSettings().GetFillRate(),
+		"non-trickle response (no-slot path) must carry FillRate; "+
+			"without it, the client limiter has fillRate=0 and durationFromTokens returns InfDuration")
+
+	// Case 2: Non-trickle response when slot exists and capacity is sufficient (full-satisfy path).
+	// The server grants the requested tokens directly without trickle.
+	const requestRU = 200.
+	tokenBucketRequest.Requests[0].Request = &rmpb.TokenBucketRequest_RuItems{
+		RuItems: &rmpb.TokenBucketRequest_RequestRU{
+			RequestRU: []*rmpb.RequestUnitItem{
+				{
+					Type:  rmpb.RequestUnitType_RU,
+					Value: requestRU,
+				},
+			},
+		},
+	}
+	tokenBucketRequest.Requests[0].ConsumptionSinceLastRequest = &rmpb.Consumption{RRU: requestRU}
+	token = suite.acquireNonTrickleFillRateTokens(ctx, re, groupName, tokenBucketRequest)
+	re.Equal(requestRU, token.GetTokens(),
+		"full-satisfy path should grant the exact requested tokens")
+	re.Equal(groupFillRate, token.GetSettings().GetFillRate(),
+		"non-trickle response (full-satisfy path) must carry FillRate; "+
+			"without it, the client limiter has fillRate=0 and durationFromTokens returns InfDuration")
+	re.Equal(groupBurstLimit, token.GetSettings().GetBurstLimit())
+}
+
+func (suite *resourceManagerClientTestSuite) acquireNonTrickleFillRateTokens(
+	ctx context.Context, re *require.Assertions, groupName string,
+	tokenBucketRequest *rmpb.TokenBucketsRequest,
+) *rmpb.TokenBucket {
+	resps, err := suite.client.AcquireTokenBuckets(ctx, tokenBucketRequest)
+	re.NoError(err)
+	re.Len(resps, 1)
+	resp := resps[0]
+	re.Equal(groupName, resp.ResourceGroupName)
+	grantedTokens := resp.GetGrantedRUTokens()
+	re.Len(grantedTokens, 1)
+	re.Zero(grantedTokens[0].GetTrickleTimeMs(), "response should be non-trickle (trickleTimeMs=0)")
+	return grantedTokens[0].GetGrantedTokens()
+}
+
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re := suite.Require()
 	cli := suite.client
