@@ -69,15 +69,16 @@ func Tuning(threshold uint64) {
 		if t := globalTuner.Load(); t == nil {
 			// init gc tuner only when threshold > 0, otherwise do nothing
 			if threshold > 0 {
-				t1 := newTuner(threshold)
+				t1 := newTunerWithoutStart(threshold)
 				if success := globalTuner.CompareAndSwap(nil, &t1); success {
+					t1.start()
 					return
 				}
 			}
 		} else {
 			if threshold <= 0 {
-				(*t).stop()
 				if success := globalTuner.CompareAndSwap(t, nil); success {
+					(*t).stop()
 					return
 				}
 			} else {
@@ -124,11 +125,22 @@ type tuner struct {
 
 func newTuner(threshold uint64) *tuner {
 	log.Info("new gctuner", zap.Uint64("threshold", threshold))
+	t := newTunerWithoutStart(threshold)
+	t.start() // start tuning
+	return t
+}
+
+func newTunerWithoutStart(threshold uint64) *tuner {
+	log.Info("new gctuner without start")
 	t := &tuner{}
 	t.gcPercent.Store(defaultGCPercent)
 	t.threshold.Store(threshold)
-	t.finalizer = newFinalizer(t.tuning) // start tuning
 	return t
+}
+
+func (t *tuner) start() {
+	log.Info("gctuner start")
+	t.finalizer = newFinalizer(t.tuning) // start tuning
 }
 
 func (t *tuner) stop() {
