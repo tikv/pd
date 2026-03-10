@@ -46,9 +46,9 @@ import (
 )
 
 const (
-	// componentSignatureKey is used for http request header key to identify component signature.
 	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
 	// This is kept for backward compatibility.
+	// componentSignatureKey is used for http request header key to identify component signature.
 	componentSignatureKey = "component"
 	// anonymousValue identifies anonymous request source
 	anonymousValue = "anonymous"
