@@ -18,6 +18,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
 
 	"go.uber.org/zap"
@@ -65,25 +66,20 @@ func init() {
 // When Tuning, the env GOGC will not be take effect.
 // threshold: disable tuning if threshold == 0
 func Tuning(threshold uint64) {
-	for range 3 {
-		if t := globalTuner.Load(); t == nil {
-			// init gc tuner only when threshold > 0, otherwise do nothing
-			if threshold > 0 {
-				t1 := newTunerWithoutStart(threshold)
-				if success := globalTuner.CompareAndSwap(nil, &t1); success {
-					t1.start()
-					return
-				}
-			}
+	tunerLock.Lock()
+	defer tunerLock.Unlock()
+	if t := globalTuner.Load(); t == nil {
+		// init gc tuner only when threshold > 0, otherwise do nothing
+		if threshold > 0 {
+			t1 := newTuner(threshold)
+			globalTuner.Store(&t1)
+		}
+	} else {
+		if threshold <= 0 {
+			(*t).stop()
+			globalTuner.Store(nil)
 		} else {
-			if threshold <= 0 {
-				if success := globalTuner.CompareAndSwap(t, nil); success {
-					(*t).stop()
-					return
-				}
-			} else {
-				(*t).setThreshold(threshold)
-			}
+			(*t).setThreshold(threshold)
 		}
 	}
 }
@@ -102,6 +98,7 @@ func GetGOGCPercent() (percent uint32) {
 // only allow one gc tuner in one process
 // It is not thread-safe. so it is a private, singleton pattern to avoid misuse.
 var globalTuner atomic.Pointer[*tuner]
+var tunerLock = sync.Mutex{}
 
 /*
 // 			Heap
@@ -125,22 +122,11 @@ type tuner struct {
 
 func newTuner(threshold uint64) *tuner {
 	log.Info("new gctuner", zap.Uint64("threshold", threshold))
-	t := newTunerWithoutStart(threshold)
-	t.start() // start tuning
-	return t
-}
-
-func newTunerWithoutStart(threshold uint64) *tuner {
-	log.Info("new gctuner without start")
 	t := &tuner{}
 	t.gcPercent.Store(defaultGCPercent)
 	t.threshold.Store(threshold)
-	return t
-}
-
-func (t *tuner) start() {
-	log.Info("gctuner start")
 	t.finalizer = newFinalizer(t.tuning) // start tuning
+	return t
 }
 
 func (t *tuner) stop() {
