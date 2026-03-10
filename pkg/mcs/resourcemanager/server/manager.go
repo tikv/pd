@@ -311,6 +311,14 @@ func (m *Manager) loadServiceLimits() error {
 	})
 }
 
+func cloneControllerConfig(cfg *ControllerConfig) *ControllerConfig {
+	if cfg == nil {
+		return nil
+	}
+	cloned := *cfg
+	return &cloned
+}
+
 func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
 	controllerConfig := &ControllerConfig{}
 	if err := json.Unmarshal([]byte(rawValue), controllerConfig); err != nil {
@@ -388,12 +396,13 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
+	controllerConfig := cloneControllerConfig(m.controllerConfig)
 	var config any
 	switch kp[0] {
 	case "request-unit":
-		config = &m.controllerConfig.RequestUnit
+		config = &controllerConfig.RequestUnit
 	default:
-		config = m.controllerConfig
+		config = controllerConfig
 	}
 	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
 	if err != nil {
@@ -405,11 +414,14 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		m.Unlock()
 		return errors.Errorf("config item %s not found", key)
 	}
-	m.Unlock()
 	if updated {
-		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
 			log.Error("save controller config failed", zap.Error(err))
 		}
+		m.controllerConfig = controllerConfig
+	}
+	m.Unlock()
+	if updated {
 		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
 	}
 	return nil
@@ -419,7 +431,7 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 func (m *Manager) GetControllerConfig() *ControllerConfig {
 	m.RLock()
 	defer m.RUnlock()
-	return m.controllerConfig
+	return cloneControllerConfig(m.controllerConfig)
 }
 
 // AddResourceGroup puts a resource group.
@@ -639,7 +651,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			consumptionInfo.keyspaceName = keyspaceName
 			m.ruCollector.Collect(consumptionInfo)
-			m.metrics.recordConsumption(consumptionInfo, m.controllerConfig, time.Now())
+			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
 			// TODO: maybe we need to distinguish background ru.
 			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)

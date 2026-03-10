@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -203,6 +205,65 @@ func TestCloseCancelsMetadataWatcherContext(t *testing.T) {
 	m.close()
 
 	re.ErrorIs(capturedCtx.Err(), context.Canceled)
+}
+
+func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
+	re := require.New(t)
+
+	memStorage := storage.NewStorageWithMemoryBackend()
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = memStorage
+
+	group := &rmpb.ResourceGroup{
+		Name: "payload-group",
+		Mode: rmpb.GroupMode_RUMode,
+		KeyspaceId: &rmpb.KeyspaceIDValue{
+			Value: 42,
+		},
+	}
+	rawGroup, err := proto.Marshal(group)
+	re.NoError(err)
+	re.NoError(memStorage.Save(keypath.KeyspaceResourceGroupSettingPath(42, "key-group"), string(rawGroup)))
+
+	re.NoError(m.loadKeyspaceResourceGroups())
+	krgm := m.getKeyspaceResourceGroupManager(42)
+	re.NotNil(krgm)
+	re.Nil(krgm.getResourceGroup("payload-group", false))
+	re.Nil(krgm.getResourceGroup("key-group", false))
+	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+}
+
+func TestGetControllerConfigReturnsSnapshot(t *testing.T) {
+	re := require.New(t)
+
+	m := prepareManager()
+	m.controllerConfig = &ControllerConfig{
+		RequestUnit: RequestUnitConfig{
+			ReadBaseCost: 0.5,
+		},
+	}
+
+	snapshot := m.GetControllerConfig()
+	snapshot.RequestUnit.ReadBaseCost = 1.5
+
+	re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+}
+
+func TestUpdateControllerConfigItemPublishesNewSnapshot(t *testing.T) {
+	re := require.New(t)
+
+	m := prepareManager()
+	m.controllerConfig = &ControllerConfig{
+		RequestUnit: RequestUnitConfig{
+			ReadBaseCost: 0.5,
+		},
+	}
+
+	previous := m.controllerConfig
+	re.NoError(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5))
+	re.NotSame(previous, m.controllerConfig)
+	re.InDelta(0.5, previous.RequestUnit.ReadBaseCost, 0.00001)
+	re.InDelta(1.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
 }
 
 func TestInitManager(t *testing.T) {

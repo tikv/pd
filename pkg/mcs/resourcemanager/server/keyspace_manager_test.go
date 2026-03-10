@@ -15,7 +15,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -27,8 +29,26 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+type transactionalDeleteGuardStorage struct {
+	storage.Storage
+}
+
+func (transactionalDeleteGuardStorage) DeleteResourceGroupSetting(uint32, string) error {
+	return errors.New("direct setting delete should use a transaction")
+}
+
+func (transactionalDeleteGuardStorage) DeleteResourceGroupStates(uint32, string) error {
+	return errors.New("direct state delete should use a transaction")
+}
+
+func (s transactionalDeleteGuardStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
+	return s.Storage.RunInTxn(ctx, f)
+}
 
 func TestInitDefaultResourceGroup(t *testing.T) {
 	re := require.New(t)
@@ -200,6 +220,30 @@ func TestDeleteResourceGroup(t *testing.T) {
 
 	// Verify default group still exists.
 	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+}
+
+func TestDeleteResourceGroupUsesTransactionalDelete(t *testing.T) {
+	re := require.New(t)
+
+	memStorage := transactionalDeleteGuardStorage{Storage: storage.NewStorageWithMemoryBackend()}
+	krgm := newKeyspaceResourceGroupManager(1, memStorage)
+	group := &rmpb.ResourceGroup{
+		Name:     "test_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 5,
+	}
+
+	re.NoError(krgm.addResourceGroup(group))
+	re.NoError(krgm.deleteResourceGroup(group.GetName()))
+	re.Nil(krgm.getResourceGroup(group.GetName(), false))
+
+	settingsValue, err := memStorage.Load(keypath.KeyspaceResourceGroupSettingPath(1, group.GetName()))
+	re.NoError(err)
+	re.Empty(settingsValue)
+
+	statesValue, err := memStorage.Load(keypath.KeyspaceResourceGroupStatePath(1, group.GetName()))
+	re.NoError(err)
+	re.Empty(statesValue)
 }
 
 func TestDeleteResourceGroupClearsPersistedStatesInMetadataOnlyRole(t *testing.T) {

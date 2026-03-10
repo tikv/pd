@@ -22,6 +22,9 @@ import (
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -35,9 +38,8 @@ const (
 type resourceGroupWatchEntryType uint8
 
 const (
-	resourceGroupWatchEntryUnknown resourceGroupWatchEntryType = iota
 	// keypath.ControllerConfigPath()
-	resourceGroupWatchEntryController
+	resourceGroupWatchEntryController resourceGroupWatchEntryType = iota
 	// keypath.ResourceGroupSettingPrefix() and keypath.KeyspaceResourceGroupSettingPrefix()
 	resourceGroupWatchEntrySettings
 	// keypath.ResourceGroupStatePrefix() and keypath.KeyspaceResourceGroupStatePrefix()
@@ -168,7 +170,7 @@ func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 	}
 	// Ensure reserved default groups exist even if settings were missing in storage.
 	m.initReserved()
-	return m.loadServiceLimits()
+	return nil
 }
 
 func (m *Manager) handleMetadataWatchPut(key, rawValue string) error {
@@ -199,6 +201,9 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 	case resourceGroupWatchEntryServiceLimit:
 		krgm := m.getKeyspaceResourceGroupManager(target.keyspaceID)
 		if krgm == nil {
+			log.Debug("skip deleting service limit without corresponding manager",
+				zap.String("key", key),
+				zap.Uint32("keyspace-id", target.keyspaceID))
 			return nil
 		}
 		krgm.setServiceLimitFromStorage(0)
@@ -214,6 +219,10 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 	}
 	krgm := m.getKeyspaceResourceGroupManager(target.keyspaceID)
 	if krgm == nil {
+		log.Debug("skip deleting resource group without corresponding manager",
+			zap.String("key", key),
+			zap.Uint32("keyspace-id", target.keyspaceID),
+			zap.String("group-name", target.groupName))
 		return nil
 	}
 	krgm.deleteResourceGroupFromCache(target.groupName)

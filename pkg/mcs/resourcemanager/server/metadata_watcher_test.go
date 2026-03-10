@@ -15,18 +15,32 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage"
 )
+
+type countingServiceLimitLoadStorage struct {
+	storage.Storage
+	loadServiceLimitsCount int
+}
+
+func (s *countingServiceLimitLoadStorage) LoadServiceLimits(f func(keyspaceID uint32, serviceLimit float64)) error {
+	s.loadServiceLimitsCount++
+	return s.Storage.LoadServiceLimits(f)
+}
 
 func TestParseResourceGroupWatchPath(t *testing.T) {
 	re := require.New(t)
@@ -214,4 +228,118 @@ func TestHandleMetadataWatchPutAndDelete(t *testing.T) {
 	re.Equal(float64(UnlimitedRate), currentDefault.getFillRate())
 	re.Equal(int64(UnlimitedBurstLimit), currentDefault.getBurstLimit())
 	re.Equal(uint32(middlePriority), currentDefault.Priority)
+}
+
+func TestHandleMetadataWatchPutAppliesExistingServiceLimitToNewGroup(t *testing.T) {
+	re := require.New(t)
+
+	m := &Manager{
+		storage:          storage.NewStorageWithMemoryBackend(),
+		krgms:            make(map[uint32]*keyspaceResourceGroupManager),
+		controllerConfig: &ControllerConfig{},
+	}
+
+	re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/service_limits/10", "123.5"))
+
+	group := &rmpb.ResourceGroup{
+		Name:     "burstable_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 5,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: -1,
+				},
+			},
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 10},
+	}
+	rawGroup, err := proto.Marshal(group)
+	re.NoError(err)
+	re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/10/burstable_group", string(rawGroup)))
+
+	krgm := m.getKeyspaceResourceGroupManager(10)
+	re.NotNil(krgm)
+	current := krgm.getMutableResourceGroup(group.Name)
+	re.NotNil(current)
+	re.Equal(int64(123), current.getOverrideBurstLimit())
+	re.Equal(int64(123), current.getBurstLimit())
+}
+
+func TestHandleMetadataWatchDeleteRestoresDefaultGroupRuntimeFields(t *testing.T) {
+	re := require.New(t)
+
+	m := &Manager{
+		storage:          storage.NewStorageWithMemoryBackend(),
+		krgms:            make(map[uint32]*keyspaceResourceGroupManager),
+		controllerConfig: &ControllerConfig{},
+	}
+
+	defaultGroup := &rmpb.ResourceGroup{
+		Name: DefaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   1000,
+					BurstLimit: -1,
+				},
+			},
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 10},
+	}
+	rawDefaultGroup, err := proto.Marshal(defaultGroup)
+	re.NoError(err)
+	re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/10/default", string(rawDefaultGroup)))
+	re.NoError(m.handleMetadataWatchDelete("resource_group/keyspace/settings/10/default"))
+
+	krgm := m.getKeyspaceResourceGroupManager(10)
+	re.NotNil(krgm)
+	currentDefault := krgm.getMutableResourceGroup(DefaultResourceGroupName)
+	re.NotNil(currentDefault)
+	re.NotNil(currentDefault.RUConsumption)
+	re.NotPanics(func() {
+		currentDefault.UpdateRUConsumption(&rmpb.Consumption{RRU: 1, WRU: 2})
+	})
+	re.Equal(float64(1), currentDefault.RUConsumption.RRU)
+	re.Equal(float64(2), currentDefault.RUConsumption.WRU)
+}
+
+func TestInitializeMetadataWatcherDoesNotReloadServiceLimits(t *testing.T) {
+	re := require.New(t)
+
+	memStorage := &countingServiceLimitLoadStorage{Storage: storage.NewStorageWithMemoryBackend()}
+	m := &Manager{
+		storage:          memStorage,
+		krgms:            make(map[uint32]*keyspaceResourceGroupManager),
+		controllerConfig: &ControllerConfig{},
+		srv:              &testBasicServer{},
+	}
+
+	originalFactory := newMetadataLoopWatcher
+	defer func() { newMetadataLoopWatcher = originalFactory }()
+	newMetadataLoopWatcher = func(
+		_ context.Context,
+		_ *sync.WaitGroup,
+		_ *clientv3.Client,
+		_, _ string,
+		_ func([]*clientv3.Event) error,
+		putFn, _ func(*mvccpb.KeyValue) error,
+		_ func([]*clientv3.Event) error,
+		_ bool,
+	) metadataLoopWatcher {
+		return &fakeMetadataLoopWatcher{
+			waitLoadFn: func() error {
+				return putFn(&mvccpb.KeyValue{
+					Key:   []byte("resource_group/keyspace/service_limits/10"),
+					Value: []byte("123.5"),
+				})
+			},
+		}
+	}
+
+	re.NoError(m.initializeMetadataWatcher(context.Background()))
+	re.Zero(memStorage.loadServiceLimitsCount)
+	re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 }
