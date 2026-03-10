@@ -153,6 +153,20 @@ groups:
       value: '{{ $value }}'
       summary: PD leader lease dropped without failover
 
+  - alert: PD_leader_service_stuck
+    expr: |
+      (service_member_role{job="pd",service="PD"} == 0)
+      and on(instance,job) (etcd_server_is_leader{job="pd"} == 1)
+    for: 1m
+    labels:
+      env: ENV_LABELS_ENV
+      level: critical
+      expr: (service_member_role{job="pd",service="PD"} == 0) and on(instance,job) (etcd_server_is_leader{job="pd"} == 1)
+    annotations:
+      description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, PD service is not the PD leader while being the embedded etcd leader; values:{{ $value }}'
+      value: '{{ $value }}'
+      summary: PD leader service is stuck in non-leader state
+
   - alert: PD_cluster_store_space_used_more_than_80%
     expr: sum(pd_cluster_status{type="storage_size"}) / sum(pd_cluster_status{type="storage_capacity"}) * 100  > 80
     for: 1m

@@ -114,3 +114,50 @@ tests:
       - eval_time: 12m
         alertname: PD_leader_lease_drop_without_failover
         exp_alerts: []
+
+  - interval: 15s
+    name: pd-leader-service-stuck
+    input_series:
+      # PD service layer drops at minute 3 and never recovers.
+      - series: 'service_member_role{job="pd",service="PD",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+
+      # Embedded etcd leader stays stable on pd-1 throughout.
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PD_leader_service_stuck
+        exp_alerts:
+          - exp_labels:
+              env: ENV_LABELS_ENV
+              level: critical
+              job: pd
+              service: PD
+              instance: pd-1
+              expr: (service_member_role{job="pd",service="PD"} == 0) and on(instance,job) (etcd_server_is_leader{job="pd"} == 1)
+            exp_annotations:
+              summary: 'PD leader service is stuck in non-leader state'
+              description: 'cluster: ENV_LABELS_ENV, instance: pd-1, PD service is not the PD leader while being the embedded etcd leader; values:0'
+              value: '0'
+
+  - interval: 15s
+    name: pd-leader-service-stuck-suppressed-by-failover
+    input_series:
+      # Normal failover: pd-1 loses both PD and etcd leadership at minute 5.
+      - series: 'service_member_role{job="pd",service="PD",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-1"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
+
+      # pd-2 takes over both roles.
+      - series: 'service_member_role{job="pd",service="PD",instance="pd-2"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+      - series: 'etcd_server_is_leader{job="pd",instance="pd-2"}'
+        values: '0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PD_leader_service_stuck
+        exp_alerts: []
