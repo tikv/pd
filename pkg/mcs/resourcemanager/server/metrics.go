@@ -68,6 +68,15 @@ var (
 			Help:      "Counter of the write request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
+	// RUv2 metrics (experimental v2 RU calculation, recording only).
+	requestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "request_unit_v2_sum",
+			Help:      "Counter of the experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+
 	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -208,6 +217,7 @@ func init() {
 	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(requestUnitV2Cost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)
@@ -312,6 +322,7 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 type counterMetrics struct {
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter
+	RUV2Metrics                prometheus.Counter
 	SQLLayerRUMetrics          prometheus.Counter
 	ReadByteMetrics            prometheus.Counter
 	WriteByteMetrics           prometheus.Counter
@@ -327,6 +338,7 @@ func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetr
 	return &counterMetrics{
 		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		RUV2Metrics:                requestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		SQLLayerRUMetrics:          sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName),
 		ReadByteMetrics:            readByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WriteByteMetrics:           writeByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
@@ -346,6 +358,10 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 	}
 	if consumption.WRU > 0 {
 		m.WRUMetrics.Add(consumption.WRU)
+	}
+	// RUv2 info (experimental).
+	if consumption.RuV2 > 0 {
+		m.RUV2Metrics.Add(consumption.RuV2)
 	}
 	// Byte info.
 	if consumption.ReadBytes > 0 {
@@ -439,6 +455,7 @@ func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	requestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
 	readByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)

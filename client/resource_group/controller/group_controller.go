@@ -672,6 +672,12 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Unlock()
 }
 
+func (gc *groupCostController) addRUV2Consumption(ruv2 float64) {
+	gc.mu.Lock()
+	gc.mu.consumption.RuV2 += ruv2
+	gc.mu.Unlock()
+}
+
 // GetActiveResourceGroup is used to get active resource group.
 // This is used for test only.
 func (c *ResourceGroupsController) GetActiveResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {

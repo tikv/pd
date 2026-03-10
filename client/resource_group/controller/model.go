@@ -235,6 +235,7 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes += custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes += custom2.WriteCrossAzTrafficBytes
+	custom1.RuV2 += custom2.RuV2
 }
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
@@ -279,6 +280,10 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes - last.WriteCrossAzTrafficBytes
 		last.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes
 	}
+	if now.RuV2 > last.RuV2 {
+		delta.RuV2 = now.RuV2 - last.RuV2
+		last.RuV2 = now.RuV2
+	}
 	return delta
 }
 
@@ -296,6 +301,7 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes -= custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
+	custom1.RuV2 -= custom2.RuV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
