@@ -61,14 +61,14 @@ diff -u \
 
 - Keep the current worktree clean before switching.
 - Fetch the cherry-pick head branch from its actual remote, often `tichi` or `ti-chi-bot`.
-- Create a local `codex/...` branch that tracks the cherry-pick head.
+- Create a local working branch that tracks the cherry-pick head.
 - Confirm the expected head commit before editing.
 
 Example:
 
 ```bash
 git fetch tichi cherry-pick-10131-to-release-8.5
-git switch -c codex/pr-10301-fix-conflict-markers --track tichi/cherry-pick-10131-to-release-8.5
+git switch -c pr-10301-fix-conflict-markers --track tichi/cherry-pick-10131-to-release-8.5
 ```
 
 ## 4. Repair the cherry-pick patch
@@ -98,8 +98,8 @@ go test ./server/cluster -run 'TestCheckCache|TestStoreLimitChangeRefreshLimiter
 make failpoint-disable
 ```
 
-- If you need broader signal, run `make basic-test`.
-- If broader verification fails in unrelated packages, separate that from the cherry-pick fix. Report the failing package and test name rather than attributing it to the cherry-pick automatically.
+- If you need broader signal, run the narrowest additional package or integration test target that covers the touched files.
+- If that extra verification fails in unrelated packages, separate that from the cherry-pick fix. Report the failing package and test name rather than attributing it to the cherry-pick automatically.
 - Before finishing, confirm:
 
 ```bash
@@ -118,7 +118,7 @@ git status --short --branch
 git commit -s -m 'storelimit: resolve cherry-pick markers in #10301'
 ```
 
-- Push back to the cherry-pick head branch if you have permission.
+- Push `HEAD` back to the existing cherry-pick head branch if you have permission.
 - If push fails and the user did not specify a fallback, stop and report the push error instead of inventing a new branch plan.
 
 ## 7. Report the result
