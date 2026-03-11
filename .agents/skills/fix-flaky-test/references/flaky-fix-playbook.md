@@ -29,6 +29,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 - #9979: operator: fix data race avoid panic (https://github.com/tikv/pd/pull/9979)
 - #9899: *: fix data race of cluster (https://github.com/tikv/pd/pull/9899)
 - #9843: test: fix data race for `balance-range-scheduler` (https://github.com/tikv/pd/pull/9843)
+- #8539: mcs: fix potential data race in scheduling server (https://github.com/tikv/pd/pull/8539)
+- #8336: statistics: fix data race in `IsRegionHot` (https://github.com/tikv/pd/pull/8336)
 
 ## Pattern 2: Panic Guarding and Nil Safety
 
@@ -49,8 +51,6 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 **Representative PRs**
 - #9986: tso: improve the high availability of etcd client for etcd save timestamp (https://github.com/tikv/pd/pull/9986)
-- #8539: mcs: fix potential data race in scheduling server (https://github.com/tikv/pd/pull/8539)
-- #8336: statistics: fix data race in `IsRegionHot` (https://github.com/tikv/pd/pull/8336)
 - #6295: dr-autosync: add recover timeout (https://github.com/tikv/pd/pull/6295)
 - #7271: ci: run `make check` with longer timeout (https://github.com/tikv/pd/pull/7271)
 
