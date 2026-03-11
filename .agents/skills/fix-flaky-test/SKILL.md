@@ -3,7 +3,7 @@ name: fix-flaky-test
 description: Use when automatically triaging and fixing flaky test issues in tikv/pd from GitHub issues to draft PR.
 ---
 
-# PD Flaky Fix
+# Fix Flaky Test
 
 ## Scope
 
