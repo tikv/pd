@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 type countingServiceLimitLoadStorage struct {
@@ -257,6 +259,47 @@ func TestMetadataWatcherHandlePut(t *testing.T) {
 		re.NotNil(current)
 		re.Equal(int64(123), current.getOverrideBurstLimit())
 		re.Equal(int64(123), current.getBurstLimit())
+	})
+
+	t.Run("does_not_overwrite_storage_payload_when_default_group_arrives_first", func(t *testing.T) {
+		re := require.New(t)
+
+		memStorage := storage.NewStorageWithMemoryBackend()
+		m := newMetadataWatcherTestManager(memStorage)
+		defaultGroup := newMetadataWatcherResourceGroup(DefaultResourceGroupName, 1, 1000, -1)
+		rawDefaultGroup := mustMarshalResourceGroup(t, defaultGroup)
+		re.NoError(memStorage.Save(keypath.KeyspaceResourceGroupSettingPath(10, DefaultResourceGroupName), rawDefaultGroup))
+
+		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/10/default", rawDefaultGroup))
+
+		stored, err := memStorage.Load(keypath.KeyspaceResourceGroupSettingPath(10, DefaultResourceGroupName))
+		re.NoError(err)
+		re.NotEmpty(stored)
+
+		persisted := &rmpb.ResourceGroup{}
+		re.NoError(proto.Unmarshal([]byte(stored), persisted))
+		re.Equal(defaultGroup.Priority, persisted.Priority)
+		re.Equal(
+			defaultGroup.GetRUSettings().GetRU().GetSettings().GetFillRate(),
+			persisted.GetRUSettings().GetRU().GetSettings().GetFillRate(),
+		)
+	})
+
+	t.Run("service_limit_update_does_not_persist_reserved_default_group", func(t *testing.T) {
+		re := require.New(t)
+
+		memStorage := storage.NewStorageWithMemoryBackend()
+		m := newMetadataWatcherTestManager(memStorage)
+
+		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/service_limits/10", "123.5"))
+
+		storedSettings, err := memStorage.Load(keypath.KeyspaceResourceGroupSettingPath(10, DefaultResourceGroupName))
+		re.NoError(err)
+		re.Empty(storedSettings)
+
+		storedStates, err := memStorage.Load(keypath.KeyspaceResourceGroupStatePath(10, DefaultResourceGroupName))
+		re.NoError(err)
+		re.Empty(storedStates)
 	})
 }
 

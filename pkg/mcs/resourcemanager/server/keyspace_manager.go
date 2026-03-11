@@ -208,6 +208,26 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	}
 }
 
+func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {
+	krgm.RLock()
+	_, ok := krgm.groups[DefaultResourceGroupName]
+	krgm.RUnlock()
+	if ok {
+		return
+	}
+	defaultGroup := newDefaultResourceGroup()
+	inserted := false
+	krgm.Lock()
+	if _, ok := krgm.groups[DefaultResourceGroupName]; !ok {
+		krgm.groups[DefaultResourceGroupName] = defaultGroup
+		inserted = true
+	}
+	krgm.Unlock()
+	if inserted {
+		krgm.syncBurstabilityWithServiceLimit(defaultGroup)
+	}
+}
+
 func newDefaultResourceGroup() *ResourceGroup {
 	return &ResourceGroup{
 		Name: DefaultResourceGroupName,
