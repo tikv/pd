@@ -36,11 +36,17 @@ platform (managed service console or internal control plane):
 - `balance-hot-region-scheduler` config;
 - schedule-level hotspot knobs (for example, `hot-region-schedule-limit` and
   `hot-region-cache-hits-threshold`);
+- TiKV heartbeat and read-path knobs that can change hotspot reporting
+  semantics, especially `raftstore.pd-store-heartbeat-tick-interval`,
+  `readpool.unified.max-thread-count`, and `quota.background-read-bandwidth`;
 - load-base-split related thresholds if exposed by the platform or SQL config
   path, especially `split.split-balance-score` and other split thresholds;
 - halt/disable related flags if exposed by the platform.
 
 Use this snapshot as baseline evidence for diagnosis and rollback decisions.
+When comparing "actual" versus "default", align to the cluster's exact version
+instead of the current development branch. For hotspot issues, a version-aligned
+default check is mandatory before concluding that the config is "normal".
 
 ### 3.2 PD monitoring (panel order)
 
@@ -74,6 +80,50 @@ If `hot read/write` looks quiet but store-level CPU is still obviously skewed, d
 not stop here. Continue with TiKV CPU, hibernate peers, raft messages, and
 store-level traffic checks. This is a known blind spot pattern where PD hotspot
 scheduling does not directly optimize for TiKV CPU.
+
+### 3.2.1 Read Hot Cache Zero branch (mandatory when `Hot cache read entry numbers=0`)
+
+If `Hot cache read entry numbers` is `0`, while store read bytes/keys are high
+or dashboards show hotspots concentrated in a few Regions, do not jump directly
+to scheduler tuning. First validate the read-hotspot ingestion path.
+
+Interpretation of the panel:
+
+- `Hot cache read entry numbers` is the PD read hot-cache length
+  (`pd_hotcache_status{name="total_length", type="read"}`), not store-level
+  throughput and not the final scheduler-visible hot region count.
+- If this panel is `0`, PD usually did not build the read hot cache at all.
+  This is stronger than "entries exist but did not pass
+  `hot-region-cache-hits-threshold`".
+
+Mandatory checks:
+
+- compare actual TiKV `raftstore.pd-store-heartbeat-tick-interval` with PD read
+  hot-cache assumptions;
+- explicitly check whether the heartbeat interval is below the PD minimum
+  denoising interval;
+- distinguish store-level aggregate read traffic from peer-level read hot stats;
+- check whether the observed traffic could be transient read types such as
+  `ANALYZE` or checksum rather than normal `select/index` traffic.
+
+Known code-level pitfall:
+
+- PD read hot-cache ingestion drops store-heartbeat read stats when the reported
+  interval is less than `3s`;
+- therefore a non-default TiKV `raftstore.pd-store-heartbeat-tick-interval=2s`
+  can make PD read hot cache stay at `0` even when store read traffic is high.
+
+Second-order effects that are weaker than the `<3s` hard filter but still
+matter:
+
+- PD read hot-cache logic uses store-heartbeat `10s` report semantics for
+  maturity and cooling behavior;
+- scheduler-visible read hot peers require a stricter effective hot degree than
+  write because the read threshold is scaled by
+  `RegionHeartBeatReportInterval / StoreHeartBeatReportInterval`;
+- TiKV excludes transient read flow such as `ANALYZE` and checksum from the PD
+  read-hotspot path, so these workloads can raise store read traffic without
+  populating PD read hot cache.
 
 ### 3.3 TiKV monitoring (aligned with PD conclusions)
 
@@ -153,6 +203,8 @@ Use logs to validate scheduling and execution paths over the incident window:
   - hotspot scheduler activity;
   - operator create/finish/timeout/cancel signals;
   - scheduling-limit related signals.
+  - for read-hotspot blind spots, check whether PD logs show repeated
+    `discard hot peer stat for unknown region` or `unknown region peer`;
 - TiKV log focus:
   - snapshot/raftstore execution pressure;
   - timeout/backoff related signals around hotspot periods;
@@ -238,6 +290,9 @@ Common causes:
 
 - many small hotspots diluted or filtered in reporting and aggregation;
 - low bytes/keys but high query, making PD hotspot detection less sensitive;
+- non-default TiKV `raftstore.pd-store-heartbeat-tick-interval` changes the
+  semantics of read-hotspot reporting; intervals below `3s` can be filtered by
+  PD read hot-cache ingestion before scheduling is even considered;
 - many regions on one or two TiKV nodes, each accessed at low frequency, causing
   TiKV CPU hotspots without clear hot regions;
 - load-base-split does not trigger because no single region stays above the
@@ -257,6 +312,11 @@ Diagnosis:
 
 - confirm sustained TiKV CPU skew first, then verify that PD hot read/write
   leader and peer distribution does not show the same stores as obvious hotspots;
+- if `Hot cache read entry numbers=0`, treat it as an ingestion-path problem
+  first, not as scheduler inefficiency;
+- compare store-level read throughput with PD read hot-cache entry count and the
+  actual TiKV store-heartbeat interval before concluding that "TiKV reported
+  nothing";
 - check `hibernate peers` for frequent wake-ups on hotspot TiKV stores;
 - check `raft messages -> messages` for wake-up and heartbeat pressure on the
   same stores;
