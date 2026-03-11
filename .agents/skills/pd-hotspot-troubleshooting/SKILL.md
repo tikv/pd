@@ -66,6 +66,11 @@ Finally check hotspot scheduling metrics:
   - whether **Direction of hotspot transfer leader / move peer** shows repeated
     moves without real dispersion.
 
+If `hot read/write` looks quiet but store-level CPU is still obviously skewed, do
+not stop here. Continue with TiKV CPU, hibernate peers, raft messages, and
+store-level traffic checks. This is a known blind spot pattern where PD hotspot
+scheduling does not directly optimize for TiKV CPU.
+
 ### 3.3 TiKV monitoring (aligned with PD conclusions)
 
 CPU path:
@@ -75,12 +80,20 @@ CPU path:
   - `Scheduler worker CPU` (often related to write hotspots);
   - `Unified read pool CPU` (often related to read hotspots);
   - `gRPC poll CPU` (may relate to both read and write hotspots).
+- If CPU is skewed but `hot read/write` is not, explicitly check:
+  - `tikv-details -> server -> hibernate peers`;
+  - `tikv -> raft messages -> messages`;
+  - `tikv-details -> cluster -> MBPS/QPS`;
+  - whether the pressure is spread across many regions with low per-region
+    frequency instead of a few obvious hot regions.
 
 Traffic path:
 
 - Check whether MBps trends align with PD hotspot conclusions.
 - If PD shows scheduling activity but TiKV shows no improvement, prioritize
   snapshot/disk/network execution bottlenecks.
+- If MBps is flat but QPS or thread CPU is skewed, treat low-bytes/high-query
+  access as a separate hotspot pattern and continue to SQL / TiKV evidence.
 
 ## 4) Step 2: Top SQL / Slow SQL
 
@@ -111,9 +124,10 @@ instead of `pd-ctl hot history`:
 ```sql
 -- Current hotspot distribution
 SELECT
-  DB_NAME, TABLE_NAME, INDEX_NAME, TYPE, REGION_ID, MAX_HOT_DEGREE, FLOW_BYTES
+  DB_NAME, TABLE_NAME, INDEX_NAME, TYPE, REGION_ID, MAX_HOT_DEGREE, FLOW_BYTES,
+  QUERY_RATE
 FROM INFORMATION_SCHEMA.TIDB_HOT_REGIONS
-ORDER BY FLOW_BYTES DESC
+ORDER BY QUERY_RATE DESC, FLOW_BYTES DESC
 LIMIT 50;
 
 -- Hotspot history in recent window
@@ -176,17 +190,51 @@ If still ineffective, branch by hotspot type:
 
 ### B. TiKV has QPS or CPU hotspots, but `hot read/write` is not obvious
 
+This branch covers the known TiKV CPU pattern.
+
 Common causes:
 
-- many small hotspots diluted/filtered in reporting and aggregation;
+- many small hotspots diluted or filtered in reporting and aggregation;
 - low bytes/keys but high query, making PD hotspot detection less sensitive;
-- read hotspots dominated by scheduler-layer traffic and other pressure, rather than pure coprocessor traffic;
-- version-specific metric blind spots (historical mvcc/tombstone-related cases).
+- many regions on one or two TiKV nodes, each accessed at low frequency, causing
+  TiKV CPU hotspots without clear hot regions;
+- load-base-split does not trigger because no single region stays above the
+  split threshold long enough;
+- hot-region-scheduler balances by hot region count, not by TiKV CPU;
+- read pressure dominated by raftstore, hibernate-peer wake-up, or scheduler
+  layer traffic rather than pure coprocessor throughput;
+- table-level leader or region imbalance, for example after placement-rule based
+  leader pinning.
+
+Diagnosis:
+
+- confirm sustained TiKV CPU skew first, then verify that PD hot read/write
+  leader and peer distribution does not show the same stores as obvious hotspots;
+- check `hibernate peers` for frequent wake-ups on hotspot TiKV stores;
+- check `raft messages -> messages` for wake-up and heartbeat pressure on the
+  same stores;
+- check store-level MBPS/QPS and PD store read/write rate bytes/keys/query;
+- use Top SQL / Slow SQL / SQL hotspot history to decide whether many tables or
+  ranges are concentrated on the same TiKV;
+- if placement rules or zone-specific leader placement exist, verify table-level
+  leader distribution rather than only cluster-level leader balance.
 
 Actions:
 
-- prioritize structural scatter by locating hotspot tables/indexes via Top SQL / Slow SQL / SQL hotspot views;
-- if tombstone accumulation likely causes CPU skew, evaluate compact in low-traffic windows.
+- do not treat this as pure hot-region-scheduler inefficiency by default;
+- do not expect `hot-region-schedule-limit` or tolerance tuning alone to fix
+  CPU-only skew;
+- prioritize structural scatter by locating hotspot tables or indexes via Top
+  SQL / Slow SQL / SQL hotspot views;
+- if the hotspot table is known, evaluate table or range scatter first:
+
+```bash
+curl -X POST http://<tidb>:10080/tables/<db>/<table>/scatter
+curl http://<tidb>:10080/tables/<db>/<table>/stop-scatter
+```
+
+- if tombstone accumulation likely causes CPU skew, evaluate compact in
+  low-traffic windows.
 
 Emergency fallback only when all are true:
 
@@ -194,9 +242,17 @@ Emergency fallback only when all are true:
 - Top SQL unavailable;
 - small hotspots are uniformly distributed.
 
-- for read hotspots, consider temporarily adding and later removing `evict-leader-scheduler`;
+- for read hotspots, consider temporarily adding and later removing
+  `evict-leader-scheduler`;
 - for write hotspots, evaluate offline/online reshuffle;
 - both require explicit risk notes and rollback plans.
+
+Risk notes for emergency fallback:
+
+- `evict-leader-scheduler` may reduce hotspot CPU pressure but can hurt latency
+  or cause extra leader movement;
+- record the exact store ID, add time, remove time, and watch metrics before and
+  after the intervention.
 
 ### C. Write hotspot after truncate or rapid post-DDL writes
 
