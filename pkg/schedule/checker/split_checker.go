@@ -20,11 +20,33 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 )
+
+// keyspaceCheckerWrapper wraps the cluster to provide keyspace existence checking.
+type keyspaceCheckerWrapper struct {
+	cluster sche.CheckerCluster
+}
+
+// KeyspaceExists checks if a keyspace exists by probing the cluster interface.
+func (w *keyspaceCheckerWrapper) KeyspaceExists(id uint32) bool {
+	// Try to get the keyspace manager from the cluster
+	type keyspaceManagerGetter interface {
+		GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool }
+	}
+	if kg, ok := w.cluster.(keyspaceManagerGetter); ok {
+		if km := kg.GetKeyspaceManager(); km != nil {
+			return km.KeyspaceExists(id)
+		}
+	}
+	// If we can't get the keyspace manager, assume the keyspace exists
+	// to maintain backward compatibility
+	return true
+}
 
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
@@ -58,6 +80,23 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 
 	start, end := region.GetStartKey(), region.GetEndKey()
+	
+	// First check if the region spans multiple keyspaces
+	// This ensures one region corresponds to one keyspace
+	checker := &keyspaceCheckerWrapper{cluster: c.cluster}
+	if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
+		desc := "keyspace-split-region"
+		keys := keyspace.GetKeyspaceSplitKeys(start, end, checker)
+		if len(keys) > 0 {
+			op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
+			if err != nil {
+				log.Debug("create keyspace split region operator failed", errs.ZapError(err))
+				return nil
+			}
+			return op
+		}
+	}
+	
 	// We may consider to merge labeler split keys and rule split keys together
 	// before creating operator. It can help to reduce operator count. However,
 	// handle them separately helps to understand the reason for the split.

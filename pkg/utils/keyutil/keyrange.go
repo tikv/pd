@@ -127,6 +127,14 @@ func (rs *KeyRanges) Append(startKey, endKey []byte) {
 	})
 }
 
+// Clear clears the KeyRanges.
+func (rs *KeyRanges) Clean() {
+	for i := range rs.krs {
+		rs.krs[i] = nil // avoid memory leak
+	}
+	rs.krs = rs.krs[:0]
+}
+
 // SortAndDeduce sorts the KeyRanges and deduces the overlapped KeyRanges.
 func (rs *KeyRanges) SortAndDeduce() {
 	if len(rs.krs) <= 1 {

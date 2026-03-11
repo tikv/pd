@@ -15,6 +15,7 @@
 package scheduling
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"testing"
@@ -26,9 +27,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -53,7 +56,9 @@ func (suite *metaTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
+	})
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -128,4 +133,36 @@ func (suite *metaTestSuite) getRaftCluster() *cluster.RaftCluster {
 	cluster := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(cluster)
 	return cluster
+}
+
+func (suite *metaTestSuite) TestKeyspaceMetaWatch() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
+
+	now := time.Now().Unix()
+	request := &keyspace.CreateKeyspaceRequest{
+		Name: fmt.Sprintf("test_keyspace_%d", 0),
+		Config: map[string]string{
+			"config_entry_1": "100",
+		},
+		CreateTime: now,
+	}
+	resp, err := suite.cluster.GetLeaderServer().GetKeyspaceManager().CreateKeyspace(request)
+	re.NoError(err)
+	re.NotNil(resp)
+	re.Greater(resp.Id, uint32(0))
+	bound := keyspace.MakeRegionBound(resp.Id)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	testutil.Eventually(re, func() bool {
+		kr, exist := tc.GetPrimaryServer().GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
+		if exist {
+			return (bytes.Equal(kr[0], []byte(bound.TxnLeftBound)) && bytes.Equal(kr[1], []byte(bound.TxnRightBound))) || (bytes.Equal(kr[0], []byte(bound.RawLeftBound)) && bytes.Equal(kr[1], []byte(bound.RawRightBound)))
+		}
+		return false
+	})
 }
