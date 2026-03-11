@@ -10,6 +10,8 @@ description: Troubleshooting workflow for PD hotspot investigations in TiDB/TiKV
 - Incident window: start time, duration, and periodicity.
 - Impact scope: read latency, write latency, error types, and business impact.
 - Change context: scale operations, DDL, truncate, analyze, CDC/BR.
+- Session or cluster variable changes, especially read routing such as
+  `tidb_replica_read`.
 - Actions already taken: transfer leader, `evict-leader-scheduler`, offline/online operations, table scatter.
 
 ## 2) Troubleshooting Order and Priority
@@ -34,6 +36,8 @@ platform (managed service console or internal control plane):
 - `balance-hot-region-scheduler` config;
 - schedule-level hotspot knobs (for example, `hot-region-schedule-limit` and
   `hot-region-cache-hits-threshold`);
+- load-base-split related thresholds if exposed by the platform or SQL config
+  path, especially `split.split-balance-score` and other split thresholds;
 - halt/disable related flags if exposed by the platform.
 
 Use this snapshot as baseline evidence for diagnosis and rollback decisions.
@@ -95,6 +99,42 @@ Traffic path:
 - If MBps is flat but QPS or thread CPU is skewed, treat low-bytes/high-query
   access as a separate hotspot pattern and continue to SQL / TiKV evidence.
 
+### 3.4 Load Base Split validation (mandatory for read / CPU hotspot cases)
+
+For read-dominant or CPU-dominant hotspot cases, explicitly validate the
+load-base-split path. Do not assume that "scheduler is healthy" means
+"automatic hotspot dispersion is healthy".
+
+Primary checks:
+
+- open TiKV `Raft Admin` related panels and identify split success vs rejection
+  signals;
+- look for high `no_balance_key` or equivalent "cannot find a sufficiently
+  balanced split key" signals;
+- compare split candidate or trigger activity against actual split success;
+- inspect TiKV logs for split rejection reasons around the incident window.
+
+Interpretation:
+
+- known failure pattern: TiKV correctly identifies that a Region should be split
+  but aborts because it cannot find a split key that satisfies the balance
+  constraint;
+- the critical threshold is often `split.split-balance-score`;
+- known conservative default: `0.25`;
+- balance rule intuition:
+  - the internal score is `abs(left-right)/(left+right)`;
+  - with `0.25`, the heavier side can only be about `1.67x` the lighter side;
+  - this can veto many otherwise useful splits in real workloads.
+
+What to conclude:
+
+- if TiKV CPU, `Unified read pool CPU`, `gRPC poll CPU`, or coprocessor QPS are
+  concentrated on a few stores, while `hot read` remains weak and
+  `no_balance_key` is high, treat this as a load-base-split coverage problem
+  first, not a pure PD scheduler problem;
+- manual or periodic split scripts outperforming automatic split is supporting
+  evidence that the gap is in split coverage, not only in hot-region transfer.
+
 ## 4) Step 2: Top SQL / Slow SQL
 
 If Top SQL is available (Dashboard or SQL entry), this step is mandatory:
@@ -102,6 +142,8 @@ If Top SQL is available (Dashboard or SQL entry), this step is mandatory:
 - Identify hotspot SQL, hotspot tables, and hotspot indexes.
 - Cross-validate with PD/TiKV monitoring evidence.
 - Build a causal chain from request pattern to hotspot distribution.
+- Verify whether read routing changed, especially whether
+  `tidb_replica_read=leader` was introduced before the incident.
 
 ## 5) Step 3: PD / TiKV Logs
 
@@ -200,9 +242,14 @@ Common causes:
   TiKV CPU hotspots without clear hot regions;
 - load-base-split does not trigger because no single region stays above the
   split threshold long enough;
+- load-base-split does identify candidate Regions, but aborts with
+  `no_balance_key` or equivalent because `split.split-balance-score` is too
+  strict;
 - hot-region-scheduler balances by hot region count, not by TiKV CPU;
 - read pressure dominated by raftstore, hibernate-peer wake-up, or scheduler
   layer traffic rather than pure coprocessor throughput;
+- leader-only read routing, for example `tidb_replica_read=leader`, pushes read
+  pressure back onto leader stores and can amplify the blind spot;
 - table-level leader or region imbalance, for example after placement-rule based
   leader pinning.
 
@@ -214,8 +261,14 @@ Diagnosis:
 - check `raft messages -> messages` for wake-up and heartbeat pressure on the
   same stores;
 - check store-level MBPS/QPS and PD store read/write rate bytes/keys/query;
+- check TiKV `Raft Admin` / split metrics for `no_balance_key` or equivalent
+  rejected-split reasons;
+- confirm the current value of `split.split-balance-score` when split rejection
+  is suspected;
 - use Top SQL / Slow SQL / SQL hotspot history to decide whether many tables or
   ranges are concentrated on the same TiKV;
+- if the incident follows a read-routing change, confirm whether
+  `tidb_replica_read=leader` was enabled before the hotspot started;
 - if placement rules or zone-specific leader placement exist, verify table-level
   leader distribution rather than only cluster-level leader balance.
 
@@ -224,6 +277,12 @@ Actions:
 - do not treat this as pure hot-region-scheduler inefficiency by default;
 - do not expect `hot-region-schedule-limit` or tolerance tuning alone to fix
   CPU-only skew;
+- if split rejection is confirmed, relax load-base-split thresholds first;
+- the most important known knob is `split.split-balance-score`;
+- a practical trial from historical cases is `0.25 -> 0.6` in a controlled
+  window;
+- record the old value before changing it, and watch split success, Region
+  count, TiKV CPU skew, and latency after the change;
 - prioritize structural scatter by locating hotspot tables or indexes via Top
   SQL / Slow SQL / SQL hotspot views;
 - if the hotspot table is known, evaluate table or range scatter first:
@@ -233,6 +292,12 @@ curl -X POST http://<tidb>:10080/tables/<db>/<table>/scatter
 curl http://<tidb>:10080/tables/<db>/<table>/stop-scatter
 ```
 
+- if the incident was amplified by `tidb_replica_read=leader`, consider
+  temporary rollback to `leader-and-follower` as a mitigation while continuing
+  the root-cause investigation;
+- if a guarded periodic split script consistently improves the workload, treat it
+  as temporary mitigation only, and compare its trigger logic against
+  load-base-split thresholds to explain the gap;
 - if tombstone accumulation likely causes CPU skew, evaluate compact in
   low-traffic windows.
 
@@ -254,7 +319,38 @@ Risk notes for emergency fallback:
 - record the exact store ID, add time, remove time, and watch metrics before and
   after the intervention.
 
-### C. Write hotspot after truncate or rapid post-DDL writes
+### C. Load Base Split finds the Region but refuses to split
+
+Diagnosis:
+
+- the hotspot is read-heavy or CPU-heavy rather than a classic single super-hot
+  write Region;
+- PD `hot read` may look mild, but TiKV `Unified read pool CPU`, `gRPC poll CPU`,
+  coprocessor QPS, or read MBps are concentrated on a few stores;
+- TiKV `Raft Admin` split-related panels show many `no_balance_key` or
+  equivalent rejection events;
+- logs or metrics indicate the Region was considered for split, but no split key
+  passed the balance rule;
+- `split.split-balance-score` is still at the strict default `0.25`.
+
+Actions:
+
+- treat this as a split-coverage problem, not as a disabled PD scheduler;
+- first-line fix: relax `split.split-balance-score`, for example from `0.25` to
+  `0.6`, then observe one full hotspot cycle;
+- remember the tradeoff: higher values allow more uneven post-split Regions, but
+  often still improve hotspot coverage materially;
+- if `1.0` is discussed, note that it is close to removing the balance
+  restriction and should be treated as a last-resort experiment only;
+- if the workload change also forced leader-only reads, consider restoring
+  `tidb_replica_read=leader-and-follower` as a mitigation;
+- if the customer already has a manual split script that is demonstrably better
+  than auto split, use it as evidence for the gap and as temporary mitigation,
+  but do not mistake it for the root fix;
+- note the known follow-up item: `tikv/tikv#18932` tracks relaxing default
+  thresholds for load-base-split coverage.
+
+### D. Write hotspot after truncate or rapid post-DDL writes
 
 Diagnosis:
 
@@ -267,7 +363,7 @@ Actions:
 - tune `tidb_wait_split_region_timeout` when needed;
 - for large-table range scatter, evaluate conflict risk with balance scheduling.
 
-### D. Hotspot scheduling conflict or oscillation (mixed read/write high load)
+### E. Hotspot scheduling conflict or oscillation (mixed read/write high load)
 
 Diagnosis:
 
@@ -297,6 +393,20 @@ pd-ctl -u http://<pd>:2379 scheduler config balance-hot-region-scheduler set src
 pd-ctl -u http://<pd>:2379 scheduler config balance-hot-region-scheduler set dst-tolerance-ratio 1.1
 pd-ctl -u http://<pd>:2379 config set hot-region-schedule-limit 2
 pd-ctl -u http://<pd>:2379 config set hot-region-cache-hits-threshold 5
+```
+
+For load-base-split coverage problems, also record and, when appropriate, tune:
+
+```sql
+SHOW CONFIG WHERE NAME LIKE '%split-balance-score%';
+```
+
+Known historical trial:
+
+```sql
+-- Example only; execute through the platform-approved config path.
+-- Relax strict split balance filtering in a controlled window.
+-- split.split-balance-score: 0.25 -> 0.6
 ```
 
 Rollback rules:
