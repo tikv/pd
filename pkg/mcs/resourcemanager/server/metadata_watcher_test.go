@@ -201,6 +201,47 @@ func TestMetadataWatcherHandlePut(t *testing.T) {
 		re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 	})
 
+	t.Run("initializes_default_group_for_watcher_created_keyspace", func(t *testing.T) {
+		testCases := []struct {
+			name     string
+			key      string
+			rawValue string
+			check    func(*require.Assertions, *Manager)
+		}{
+			{
+				name:     "settings_update",
+				key:      "resource_group/keyspace/settings/10/test_group",
+				rawValue: mustMarshalResourceGroup(t, newMetadataWatcherResourceGroup("test_group", 5, 100, 200)),
+				check: func(re *require.Assertions, m *Manager) {
+					krgm := m.getKeyspaceResourceGroupManager(10)
+					re.NotNil(krgm)
+					re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+				},
+			},
+			{
+				name:     "service_limit_update",
+				key:      "resource_group/keyspace/service_limits/10",
+				rawValue: "123.5",
+				check: func(re *require.Assertions, m *Manager) {
+					krgm := m.getKeyspaceResourceGroupManager(10)
+					re.NotNil(krgm)
+					re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+					re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				re := require.New(t)
+				m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+
+				re.NoError(m.handleMetadataWatchPut(tc.key, tc.rawValue))
+				tc.check(re, m)
+			})
+		}
+	})
+
 	t.Run("applies_existing_service_limit_to_new_group", func(t *testing.T) {
 		re := require.New(t)
 

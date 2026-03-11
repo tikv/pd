@@ -334,7 +334,7 @@ func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
 }
 
 func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawValue string) error {
-	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
 	if err := krgm.upsertResourceGroupFromRaw(name, rawValue); err != nil {
 		log.Error("failed to apply resource group settings from watcher",
 			zap.Uint32("keyspace-id", keyspaceID),
@@ -355,7 +355,7 @@ func (m *Manager) applyServiceLimitFromRaw(keyspaceID uint32, rawValue string) e
 			zap.Error(err))
 		return err
 	}
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimitFromStorage(serviceLimit)
 	return nil
 }
 
