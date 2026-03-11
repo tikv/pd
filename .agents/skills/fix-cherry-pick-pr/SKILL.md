@@ -61,15 +61,17 @@ diff -u \
 
 - Keep the current worktree clean before switching.
 - Fetch the cherry-pick head branch from its actual remote, often `tichi` or `ti-chi-bot`.
-- Create a local working branch that tracks the cherry-pick head.
+- Create a local tracking branch for the cherry-pick head. If the local branch name is free, prefer reusing the remote branch name directly.
 - Confirm the expected head commit before editing.
 
 Example:
 
 ```bash
 git fetch tichi cherry-pick-10131-to-release-8.5
-git switch -c pr-10301-fix-conflict-markers --track tichi/cherry-pick-10131-to-release-8.5
+git switch --track tichi/cherry-pick-10131-to-release-8.5
 ```
+
+- If the local branch name already exists or is occupied by another worktree, create a differently named local branch that still tracks the cherry-pick head.
 
 ## 4. Repair the cherry-pick patch
 
