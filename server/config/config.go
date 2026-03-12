@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -259,7 +260,6 @@ const (
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
 	defaultEnableSchedulingFallback = true
-	tsoMaxIndexUpperLimit           = 10
 )
 
 // Special keys for Labels
@@ -269,8 +269,9 @@ const (
 )
 
 var (
-	defaultEnableTelemetry = false
-	defaultRuntimeServices = []string{}
+	defaultEnableTelemetry    = false
+	defaultRuntimeServices    = []string{}
+	tsoMaxIndexAvailableValue = []int64{1, 2, 4, 8}
 )
 
 func init() {
@@ -454,8 +455,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		return err
 	}
 
-	if c.TSOMaxIndex > tsoMaxIndexUpperLimit {
-		return errors.New(fmt.Sprintf("tso max index:%d should be less than %d", c.TSOMaxIndex, tsoMaxIndexUpperLimit))
+	if !slices.Contains(tsoMaxIndexAvailableValue, c.TSOMaxIndex) {
+		return errors.New(fmt.Sprintf("tso max index:%d should be one of %v", c.TSOMaxIndex, tsoMaxIndexAvailableValue))
 	}
 
 	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
