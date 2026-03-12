@@ -40,6 +40,9 @@ type ResourceGroupStorage interface {
 	LoadServiceLimit(keyspaceID uint32) (float64, error)
 	SaveServiceLimit(keyspaceID uint32, serviceLimit float64) error
 	LoadServiceLimits(f func(keyspaceID uint32, serviceLimit float64)) error
+	LoadRuVersion(keyspaceID uint32) (int32, error)
+	SaveRuVersion(keyspaceID uint32, ruVersion int32) error
+	LoadRuVersions(f func(keyspaceID uint32, ruVersion int32)) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
@@ -142,5 +145,38 @@ func (se *StorageEndpoint) LoadServiceLimits(f func(keyspaceID uint32, serviceLi
 			return
 		}
 		f(uint32(keyspaceID), serviceLimit)
+	})
+}
+
+// LoadRuVersion loads the RU version for the given keyspace.
+func (se *StorageEndpoint) LoadRuVersion(keyspaceID uint32) (int32, error) {
+	value, err := se.Load(keypath.KeyspaceRuVersionPath(keyspaceID))
+	if err != nil || value == "" {
+		return 0, err
+	}
+	return loadJSON[int32](se, keypath.KeyspaceRuVersionPath(keyspaceID))
+}
+
+// SaveRuVersion stores the RU version for the given keyspace.
+func (se *StorageEndpoint) SaveRuVersion(keyspaceID uint32, ruVersion int32) error {
+	return se.saveJSON(keypath.KeyspaceRuVersionPath(keyspaceID), ruVersion)
+}
+
+// LoadRuVersions loads all RU versions from storage.
+func (se *StorageEndpoint) LoadRuVersions(f func(keyspaceID uint32, ruVersion int32)) error {
+	return se.loadRangeByPrefix(keypath.KeyspaceRuVersionPrefix(), func(key, value string) {
+		keyspaceID, err := strconv.ParseUint(key, 10, 32)
+		if err != nil {
+			log.Error("failed to parse the keyspace ID from RU version path",
+				zap.String("key", key), zap.Error(err))
+			return
+		}
+		var ruVersion int32
+		if err := json.Unmarshal([]byte(value), &ruVersion); err != nil {
+			log.Error("failed to parse RU version value",
+				zap.Uint32("keyspace-id", uint32(keyspaceID)), zap.String("value", value), zap.Error(err))
+			return
+		}
+		f(uint32(keyspaceID), ruVersion)
 	})
 }

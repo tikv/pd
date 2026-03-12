@@ -83,6 +83,16 @@ func KeyspaceServiceLimitPrefix() string {
 	return keyspaceServiceLimitsPathPrefixFormat
 }
 
+// KeyspaceRuVersionPath returns the path to save the keyspace RU version.
+func KeyspaceRuVersionPath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceRuVersionsPathFormat, keyspaceID)
+}
+
+// KeyspaceRuVersionPrefix returns the prefix of the keyspace RU versions.
+func KeyspaceRuVersionPrefix() string {
+	return keyspaceRuVersionsPathPrefixFormat
+}
+
 // ParseKeyspaceResourceGroupPath parses the keyspace ID and resource group name from the keyspace resource group path.
 func ParseKeyspaceResourceGroupPath(path string) (uint32, string, error) {
 	parts := strings.Split(path, "/")

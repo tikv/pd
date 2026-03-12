@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
@@ -347,6 +348,15 @@ func (s *Service) setControllerConfig(c *gin.Context) {
 // KeyspaceServiceLimitRequest is the request body for setting the service limit of the keyspace.
 type KeyspaceServiceLimitRequest struct {
 	ServiceLimit float64 `json:"service_limit"`
+	RuVersion    int32   `json:"ru_version,omitempty"`
+}
+
+// KeyspaceServiceLimitResponse is the response body for getting the service limit of the keyspace.
+type KeyspaceServiceLimitResponse struct {
+	ServiceLimit    float64   `json:"service_limit"`
+	AvailableTokens float64   `json:"available_tokens"`
+	LastUpdate      time.Time `json:"last_update"`
+	RuVersion       int32     `json:"ru_version"`
 }
 
 // SetKeyspaceServiceLimit
@@ -385,6 +395,16 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
+	if req.RuVersion > 0 {
+		if err := s.manager.SetKeyspaceRuVersion(keyspaceID, req.RuVersion); err != nil {
+			if rmserver.IsMetadataWriteDisabledError(err) {
+				c.String(http.StatusForbidden, err.Error())
+				return
+			}
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	c.String(http.StatusOK, "Success!")
 }
 
@@ -410,7 +430,13 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusNotFound, fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))
 		return
 	}
-	c.IndentedJSON(http.StatusOK, limiter)
+	resp := KeyspaceServiceLimitResponse{
+		ServiceLimit:    limiter.ServiceLimit,
+		AvailableTokens: limiter.AvailableTokens,
+		LastUpdate:      limiter.LastUpdate,
+		RuVersion:       s.manager.GetKeyspaceRuVersion(keyspaceID),
+	}
+	c.IndentedJSON(http.StatusOK, resp)
 }
 
 // GetConfig

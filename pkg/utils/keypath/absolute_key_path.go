@@ -122,6 +122,9 @@ const (
 	// service limit path
 	keyspaceServiceLimitsPathPrefixFormat = "resource_group/keyspace/service_limits/"   // "resource_group/keyspace/service_limits/"
 	keyspaceServiceLimitsPathFormat       = "resource_group/keyspace/service_limits/%d" // "resource_group/keyspace/service_limits/{keyspace_id}"
+	// ru version path
+	keyspaceRuVersionsPathPrefixFormat = "resource_group/keyspace/ru_versions/"   // "resource_group/keyspace/ru_versions/"
+	keyspaceRuVersionsPathFormat       = "resource_group/keyspace/ru_versions/%d" // "resource_group/keyspace/ru_versions/{keyspace_id}"
 	// legacy resource group path without introducing keyspace, to keep compatibility,
 	// resource groups loaded from the legacy path will be assigned to the default keyspace ID.
 	resourceGroupSettingsPathFormat = "resource_group/settings/%s" // "resource_group/settings/{group_name}"

@@ -68,6 +68,7 @@ type keyspaceResourceGroupManager struct {
 	groups          map[string]*ResourceGroup
 	groupRUTrackers map[string]*groupRUTracker
 	serviceLimiter  *serviceLimiter
+	ruVersion       int32
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
@@ -310,6 +311,32 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 	krgm.RLock()
 	defer krgm.RUnlock()
 	return krgm.serviceLimiter
+}
+
+func (krgm *keyspaceResourceGroupManager) setRuVersion(ruVersion int32) {
+	krgm.Lock()
+	krgm.ruVersion = ruVersion
+	krgm.Unlock()
+	if krgm.writeRole.AllowsMetadataWrite() && krgm.storage != nil {
+		if err := krgm.storage.SaveRuVersion(krgm.keyspaceID, ruVersion); err != nil {
+			log.Error("failed to persist RU version",
+				zap.Uint32("keyspace-id", krgm.keyspaceID),
+				zap.Int32("ru-version", ruVersion),
+				zap.Error(err))
+		}
+	}
+}
+
+func (krgm *keyspaceResourceGroupManager) setRuVersionFromStorage(ruVersion int32) {
+	krgm.Lock()
+	defer krgm.Unlock()
+	krgm.ruVersion = ruVersion
+}
+
+func (krgm *keyspaceResourceGroupManager) getRuVersion() int32 {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	return krgm.ruVersion
 }
 
 func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
