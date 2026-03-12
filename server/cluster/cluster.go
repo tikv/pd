@@ -1109,10 +1109,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
 		reportInterval := stats.GetInterval()
 		interval = reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-		storeReadQuery := core.GetReadQueryNum(stats.QueryStats)
-		storeWriteQuery := core.GetWriteQueryNum(stats.QueryStats)
-		storeTotalQuery := storeReadQuery + storeWriteQuery
-		storeGRPCCPU := statistics.StoreGRPCCPUUsage(stats.GetCpuUsages())
 
 		regions = make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
 		for _, peerStat := range stats.GetPeerStats() {
@@ -1133,7 +1129,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				continue
 			}
 			readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
-			regionReadCPU := statistics.RegionReadCPUUsage(peerStat, storeGRPCCPU, readQueryNum, storeTotalQuery)
+			regionReadCPU := statistics.RegionReadCPUUsage(peerStat)
 			loads := []float64{
 				utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
 				utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),

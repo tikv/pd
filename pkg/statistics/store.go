@@ -194,7 +194,6 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.Lock()
 	defer r.Unlock()
 	readQueryNum, writeQueryNum := core.GetReadQueryNum(stats.QueryStats), core.GetWriteQueryNum(stats.QueryStats)
-	totalQueryNum := readQueryNum + writeQueryNum
 	r.timeMedians[utils.StoreWriteBytes].Add(float64(stats.BytesWritten), interval)
 	r.timeMedians[utils.StoreWriteKeys].Add(float64(stats.KeysWritten), interval)
 	r.timeMedians[utils.StoreWriteQuery].Add(float64(writeQueryNum), interval)
@@ -203,7 +202,7 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.timeMedians[utils.StoreReadQuery].Add(float64(readQueryNum), interval)
 
 	// Updates the cpu usages and disk rw rates of store.
-	r.movingAvgs[utils.StoreReadCPU].Add(StoreReadCPUUsage(stats.GetCpuUsages(), readQueryNum, totalQueryNum))
+	r.movingAvgs[utils.StoreReadCPU].Add(StoreReadCPUUsage(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreCPUUsage].Add(collect(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreDiskReadRate].Add(collect(stats.GetReadIoRates()))
 	r.movingAvgs[utils.StoreDiskWriteRate].Add(collect(stats.GetWriteIoRates()))
@@ -227,14 +226,13 @@ func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
 	r.Lock()
 	defer r.Unlock()
 	readQueryNum, writeQueryNum := core.GetReadQueryNum(stats.QueryStats), core.GetWriteQueryNum(stats.QueryStats)
-	totalQueryNum := readQueryNum + writeQueryNum
 	r.timeMedians[utils.StoreWriteBytes].Set(float64(stats.BytesWritten) / interval)
 	r.timeMedians[utils.StoreReadBytes].Set(float64(stats.BytesRead) / interval)
 	r.timeMedians[utils.StoreWriteKeys].Set(float64(stats.KeysWritten) / interval)
 	r.timeMedians[utils.StoreReadKeys].Set(float64(stats.KeysRead) / interval)
 	r.timeMedians[utils.StoreReadQuery].Set(float64(readQueryNum) / interval)
 	r.timeMedians[utils.StoreWriteQuery].Set(float64(writeQueryNum) / interval)
-	r.movingAvgs[utils.StoreReadCPU].Set(StoreReadCPUUsage(stats.GetCpuUsages(), readQueryNum, totalQueryNum))
+	r.movingAvgs[utils.StoreReadCPU].Set(StoreReadCPUUsage(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreCPUUsage].Set(collect(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreDiskReadRate].Set(collect(stats.GetReadIoRates()))
 	r.movingAvgs[utils.StoreDiskWriteRate].Set(collect(stats.GetWriteIoRates()))
