@@ -297,7 +297,7 @@ func (s *ConfigService) GetKeyspaceServiceLimit(c *gin.Context) {
 }
 
 func (*ConfigService) respondKeyspaceLookupError(c *gin.Context, err error) {
-	if errs.ErrKeyspaceNotExists.Equal(err) || strings.Contains(err.Error(), "keyspace not found with name:") {
+	if errs.ErrKeyspaceNotExists.Equal(err) || errs.ErrKeyspaceNotExistsByName.Equal(err) {
 		c.String(http.StatusNotFound, err.Error())
 		return
 	}

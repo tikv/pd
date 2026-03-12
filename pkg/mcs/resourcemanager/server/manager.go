@@ -550,7 +550,7 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("keyspace not found with name: %s", name)
+		return nil, errs.ErrKeyspaceNotExistsByName.FastGenByArgs(name)
 	}
 	// Update the cache.
 	m.updateKeyspaceNameLookup(loadedID, name)

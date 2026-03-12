@@ -306,7 +306,7 @@ func (s *testStore) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit floa
 func (s *testStore) LookupKeyspaceID(_ context.Context, name string) (uint32, error) {
 	keyspaceID, ok := s.keyspaceIDs[name]
 	if !ok {
-		return 0, pderrors.ErrKeyspaceNotExists.FastGenByArgs(name)
+		return 0, pderrors.ErrKeyspaceNotExistsByName.FastGenByArgs(name)
 	}
 	return keyspaceID, nil
 }
