@@ -360,8 +360,8 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 		m.WRUMetrics.Add(consumption.WRU)
 	}
 	// RUv2 info (experimental).
-	if consumption.RuV2 > 0 {
-		m.RUV2Metrics.Add(consumption.RuV2)
+	if ruv2 := consumption.TikvRUV2 + consumption.TidbRUV2; ruv2 > 0 {
+		m.RUV2Metrics.Add(ruv2)
 	}
 	// Byte info.
 	if consumption.ReadBytes > 0 {

@@ -221,6 +221,13 @@ func getRUValueFromConsumption(custom *rmpb.Consumption) float64 {
 	return custom.RRU + custom.WRU
 }
 
+func getRUV2ValueFromConsumption(custom *rmpb.Consumption) float64 {
+	if custom == nil {
+		return 0
+	}
+	return custom.TikvRUV2 + custom.TidbRUV2
+}
+
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	if custom1 == nil || custom2 == nil {
 		return
@@ -235,7 +242,8 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes += custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes += custom2.WriteCrossAzTrafficBytes
-	custom1.RuV2 += custom2.RuV2
+	custom1.TikvRUV2 += custom2.TikvRUV2
+	custom1.TidbRUV2 += custom2.TidbRUV2
 }
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
@@ -280,9 +288,13 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes - last.WriteCrossAzTrafficBytes
 		last.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes
 	}
-	if now.RuV2 > last.RuV2 {
-		delta.RuV2 = now.RuV2 - last.RuV2
-		last.RuV2 = now.RuV2
+	if now.TikvRUV2 > last.TikvRUV2 {
+		delta.TikvRUV2 = now.TikvRUV2 - last.TikvRUV2
+		last.TikvRUV2 = now.TikvRUV2
+	}
+	if now.TidbRUV2 > last.TidbRUV2 {
+		delta.TidbRUV2 = now.TidbRUV2 - last.TidbRUV2
+		last.TidbRUV2 = now.TidbRUV2
 	}
 	return delta
 }
@@ -301,7 +313,8 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes -= custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
-	custom1.RuV2 -= custom2.RuV2
+	custom1.TikvRUV2 -= custom2.TikvRUV2
+	custom1.TidbRUV2 -= custom2.TidbRUV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {

@@ -674,7 +674,7 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 
 func (gc *groupCostController) addRUV2Consumption(ruv2 float64) {
 	gc.mu.Lock()
-	gc.mu.consumption.RuV2 += ruv2
+	gc.mu.consumption.TidbRUV2 += ruv2
 	gc.mu.Unlock()
 }
 
