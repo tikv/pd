@@ -143,6 +143,7 @@ Reusable agent skills live under `.agents/skills/`. Each skill has a `SKILL.md` 
 
 | Skill | Purpose | Prerequisites | Docs |
 |---|---|---|---|
+| `apply-google-go-best-practices` | Apply Google Go best practices during Go implementation, refactoring, or review, with a concise checklist for naming, errors, docs, tests, APIs, and global state. | None beyond the repository's existing Go workflow and local contribution rules. | [`.agents/skills/apply-google-go-best-practices/SKILL.md`](.agents/skills/apply-google-go-best-practices/SKILL.md) |
 | `create-pr` | Push the current branch and open a well-formatted PR on tikv/pd. Analyzes commits, generates PR title/body following the repository template, and submits via `gh pr create`. | `gh` CLI authenticated with tikv/pd repo access; local commits on a non-master branch. | [`.agents/skills/create-pr/SKILL.md`](.agents/skills/create-pr/SKILL.md) |
 
 ## Microservices / NextGen

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apply Google Go Practices"
+  short_description: "Review or write Go using Google best practices"
+  default_prompt: "Use $apply-google-go-best-practices to review this Go code against Google's Go best practices."
