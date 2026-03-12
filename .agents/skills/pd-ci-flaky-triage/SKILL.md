@@ -21,7 +21,9 @@ Fixed script behavior:
 4. Unknown cases must be emitted under output JSON `unknown[]` only.
 5. Run `validate_flaky_snippets.py` before any output or GitHub write operation.
 6. If one action fails extraction or validation, stop the whole run immediately.
-7. Any external run history is optional and must not influence snippet selection.
+7. Before any `comment[]` or `reopen_and_comment[]` GitHub write, the agent must re-check that the failed CI target matches the flaky test described by the target issue.
+8. If that consistency check is weak or contradictory, do not write the comment/reopen action as-is; revise the action or stop the run.
+9. Any external run history is optional and must not influence snippet selection.
 
 ## Workflow
 
@@ -66,7 +68,12 @@ python3 .agents/skills/pd-ci-flaky-triage/scripts/validate_flaky_snippets.py \
   --error-report-out /tmp/pd_ci_flaky_validation_errors.json
 ```
 
-7. Only after validation passes:
+7. Before any GitHub write for `comment[]` or `reopen_and_comment[]`, do one more agent review:
+- open the target issue title/body/comments
+- compare the issue's flaky test identity with the failed CI test and the selected snippet
+- if they are not clearly the same failure target, do not comment/reopen that issue
+
+8. Only after validation passes and the consistency review passes:
 - compose final create/comment/reopen bodies
 - if the task requires GitHub writes, execute them
 
@@ -152,6 +159,7 @@ Use the final excerpt shape, not the raw signature, to classify the failure.
 2. Require exact test or package evidence for confident matching.
 3. `UNKNOWN_FAILURE` must not match on generic words such as `flaky`.
 4. A suite summary alone is not enough evidence for final snippet selection.
+5. A matched issue is not enough by itself for `comment[]` or `reopen_and_comment[]`; re-check consistency against the selected failed CI target before writing GitHub.
 
 ## Idempotency
 

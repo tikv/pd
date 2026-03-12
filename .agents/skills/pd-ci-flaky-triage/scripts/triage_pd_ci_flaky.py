@@ -1248,9 +1248,6 @@ def decide_flaky(
     confidence_values = [e.confidence for e in entries if e.confidence > 0]
     confidence = round(sum(confidence_values) / len(confidence_values), 3) if confidence_values else 0.0
 
-    has_existing_issue = open_issue is not None or closed_issue is not None
-    existing_issue = open_issue or closed_issue
-
     has_same_sha_flap = False
     for r in records:
         if r.source != "prow" or not r.commit_sha:
@@ -1261,7 +1258,9 @@ def decide_flaky(
             has_same_sha_flap = True
             break
 
-    if has_existing_issue:
+    # Open flaky issues are active evidence. Closed issues are only routing targets
+    # after the current run independently looks flaky.
+    if open_issue is not None:
         return FlakyDecision(
             key=key,
             test_name=test_name,
@@ -1270,7 +1269,7 @@ def decide_flaky(
             distinct_pr_count=len(pr_set),
             distinct_sha_count=len(sha_set),
             has_existing_issue=True,
-            existing_issue_number=int(existing_issue["number"]),
+            existing_issue_number=int(open_issue["number"]),
             confidence=confidence,
             action_reason="matched_existing_issue",
         )

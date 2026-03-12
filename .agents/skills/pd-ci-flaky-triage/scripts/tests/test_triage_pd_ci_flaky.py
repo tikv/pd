@@ -417,6 +417,129 @@ FAIL\tgithub.com/tikv/pd/client\t8.624s
         self.assertEqual(1, len(reopen_actions))
         self.assertEqual(88, reopen_actions[0].issue_number)
 
+    def test_decide_flaky_does_not_treat_closed_issue_as_sufficient_evidence(self) -> None:
+        record = MODULE.FailureRecord(
+            record_id="closed-evidence-1",
+            source="prow",
+            ci_name="pull-unit-test-next-gen-3",
+            ci_url="https://example.invalid/ci/closed-evidence-1",
+            log_url="https://example.invalid/log/closed-evidence-1",
+            occurred_at="2026-03-04T00:00:00Z",
+            pr_number=102,
+            commit_sha="sha-1",
+            run_id="22",
+            job_id=None,
+            status="FAILURE",
+        )
+        parsed = MODULE.ParsedFailure(
+            record_id=record.record_id,
+            key="test::testfoo",
+            test_name="TestFoo",
+            signatures=["PANIC"],
+            evidence_lines=["panic: boom"],
+            tests=["TestFoo"],
+            primary_test="TestFoo",
+            failure_type="panic",
+            evidence_summary="type=panic; test=TestFoo",
+            confidence=0.91,
+            primary_package=None,
+            failed_packages=[],
+        )
+
+        decision = MODULE.decide_flaky(
+            key=parsed.key,
+            test_name=parsed.test_name,
+            entries=[parsed],
+            records_by_id={record.record_id: record},
+            open_issue=None,
+            closed_issue={
+                "number": 88,
+                "url": "https://github.com/tikv/pd/issues/88",
+                "state": "closed",
+            },
+            outcomes_by_ci_sha={},
+        )
+
+        self.assertFalse(decision.is_flaky)
+        self.assertEqual("likely_pr_regression_or_insufficient_evidence", decision.reason)
+        self.assertIsNone(decision.existing_issue_number)
+
+    def test_build_issue_actions_reopens_closed_issue_after_independent_flaky_decision(self) -> None:
+        record = MODULE.FailureRecord(
+            record_id="closed-reopen-1",
+            source="actions",
+            ci_name="PD Test / unit",
+            ci_url="https://example.invalid/ci/closed-reopen-1",
+            log_url=None,
+            occurred_at="2026-03-04T00:00:00Z",
+            pr_number=102,
+            commit_sha="def",
+            run_id="22",
+            job_id=33,
+            status="FAILURE",
+        )
+        parsed = MODULE.ParsedFailure(
+            record_id=record.record_id,
+            key="test::testfoo",
+            test_name="TestFoo",
+            signatures=["PANIC"],
+            evidence_lines=["panic: boom"],
+            tests=["TestFoo"],
+            primary_test="TestFoo",
+            failure_type="panic",
+            evidence_summary="type=panic; test=TestFoo",
+            confidence=0.91,
+            primary_package=None,
+            failed_packages=[],
+        )
+        decision = MODULE.FlakyDecision(
+            key=parsed.key,
+            test_name="TestFoo",
+            is_flaky=True,
+            reason="reproduced_across_prs",
+            distinct_pr_count=2,
+            distinct_sha_count=2,
+            has_existing_issue=False,
+            existing_issue_number=None,
+            confidence=0.91,
+            action_reason="cross_pr_repro",
+        )
+        args = argparse.Namespace(
+            issue_labels="type/ci",
+            repo="tikv/pd",
+            retry_count=1,
+        )
+        summary = MODULE.RunSummary(
+            scanned_window_start="2026-03-04T00:00:00+00:00",
+            scanned_window_end="2026-03-05T00:00:00+00:00",
+        )
+
+        with mock.patch.object(
+            MODULE,
+            "run_gh_json",
+            return_value={"body": "", "comments": []},
+        ):
+            create_actions, comment_actions, reopen_actions = MODULE.build_issue_actions(
+                args=args,
+                grouped={parsed.key: [parsed]},
+                records_by_id={record.record_id: record},
+                decisions=[decision],
+                issue_matches={
+                    parsed.key: {
+                        "number": 88,
+                        "url": "https://github.com/tikv/pd/issues/88",
+                        "state": "closed",
+                    }
+                },
+                signatures_by_key={parsed.key: ["PANIC"]},
+                summary=summary,
+            )
+
+        self.assertEqual([], create_actions)
+        self.assertEqual([], comment_actions)
+        self.assertEqual(1, len(reopen_actions))
+        self.assertEqual(88, reopen_actions[0].issue_number)
+
 
 if __name__ == "__main__":
     unittest.main()
