@@ -40,6 +40,9 @@ type serviceLimiter struct {
 	AvailableTokens float64 `json:"available_tokens"`
 	// LastUpdate records the last time the limiter was updated.
 	LastUpdate time.Time `json:"last_update"`
+	// RuVersion is the RU calculation version for the keyspace.
+	// 0 means not configured.
+	RuVersion int32 `json:"ru_version"`
 	// KeyspaceID is the keyspace ID of the keyspace that this limiter belongs to.
 	keyspaceID uint32
 	// storage is used to persist the service limit.
@@ -184,6 +187,36 @@ func (krl *serviceLimiter) applyServiceLimit(
 	return limitedTokens, minTrickleTimeMs
 }
 
+func (krl *serviceLimiter) setRuVersion(ruVersion int32) {
+	krl.Lock()
+	defer krl.Unlock()
+	krl.RuVersion = ruVersion
+	// Persist the RU version to storage.
+	if krl.writeRole.AllowsMetadataWrite() && krl.storage != nil {
+		if err := krl.storage.SaveRuVersion(krl.keyspaceID, ruVersion); err != nil {
+			log.Error("failed to persist RU version",
+				zap.Uint32("keyspace-id", krl.keyspaceID),
+				zap.Int32("ru-version", ruVersion),
+				zap.Error(err))
+		}
+	}
+}
+
+func (krl *serviceLimiter) setRuVersionNoPersist(ruVersion int32) {
+	krl.Lock()
+	defer krl.Unlock()
+	krl.RuVersion = ruVersion
+}
+
+func (krl *serviceLimiter) getRuVersion() int32 {
+	if krl == nil {
+		return 0
+	}
+	krl.RLock()
+	defer krl.RUnlock()
+	return krl.RuVersion
+}
+
 // Clone returns a copy of the service limiter.
 func (krl *serviceLimiter) Clone() *serviceLimiter {
 	krl.RLock()
@@ -192,6 +225,7 @@ func (krl *serviceLimiter) Clone() *serviceLimiter {
 		ServiceLimit:    krl.ServiceLimit,
 		AvailableTokens: krl.AvailableTokens,
 		LastUpdate:      krl.LastUpdate,
+		RuVersion:       krl.RuVersion,
 		keyspaceID:      krl.keyspaceID,
 	}
 }

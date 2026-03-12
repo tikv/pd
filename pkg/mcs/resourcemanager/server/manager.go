@@ -165,15 +165,6 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	return nil
 }
 
-// GetKeyspaceRuVersion returns the RU version of the keyspace.
-func (m *Manager) GetKeyspaceRuVersion(keyspaceID uint32) int32 {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return 0
-	}
-	return krgm.getRuVersion()
-}
-
 // SetKeyspaceRuVersion sets the RU version of the keyspace.
 func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error {
 	if !m.writeRole.AllowsMetadataWrite() {

@@ -54,6 +54,38 @@ func TestRuVersionPersistence(t *testing.T) {
 	re.Equal(int32(1), versions[3])
 }
 
+func TestServiceLimiterRuVersion(t *testing.T) {
+	re := require.New(t)
+	s := storage.NewStorageWithMemoryBackend()
+
+	// Default RU version should be 0.
+	limiter := newServiceLimiter(1, 0.0, s)
+	re.Equal(int32(0), limiter.getRuVersion())
+
+	// Set RU version and verify it's persisted.
+	limiter.setRuVersion(2)
+	re.Equal(int32(2), limiter.getRuVersion())
+
+	// Verify persistence.
+	loaded, err := s.LoadRuVersion(1)
+	re.NoError(err)
+	re.Equal(int32(2), loaded)
+
+	// Test setRuVersionNoPersist.
+	limiter2 := newServiceLimiter(1, 0.0, s)
+	limiter2.setRuVersionNoPersist(3)
+	re.Equal(int32(3), limiter2.getRuVersion())
+
+	// Test Clone includes RU version.
+	limiter.setRuVersion(5)
+	cloned := limiter.Clone()
+	re.Equal(int32(5), cloned.RuVersion)
+
+	// Test nil limiter returns 0.
+	var nilLimiter *serviceLimiter
+	re.Equal(int32(0), nilLimiter.getRuVersion())
+}
+
 func TestKeyspaceRuVersion(t *testing.T) {
 	re := require.New(t)
 	s := storage.NewStorageWithMemoryBackend()
@@ -61,11 +93,11 @@ func TestKeyspaceRuVersion(t *testing.T) {
 	krgm := newKeyspaceResourceGroupManager(1, s, ResourceGroupWriteRoleLegacyAll)
 
 	// Default RU version should be 0.
-	re.Equal(int32(0), krgm.getRuVersion())
+	re.Equal(int32(0), krgm.getServiceLimiter().getRuVersion())
 
-	// Set RU version and verify it's persisted.
+	// Set RU version via keyspace manager.
 	krgm.setRuVersion(2)
-	re.Equal(int32(2), krgm.getRuVersion())
+	re.Equal(int32(2), krgm.getServiceLimiter().getRuVersion())
 
 	// Verify persistence.
 	loaded, err := s.LoadRuVersion(1)
@@ -75,7 +107,7 @@ func TestKeyspaceRuVersion(t *testing.T) {
 	// Test setRuVersionFromStorage (no persist).
 	krgm2 := newKeyspaceResourceGroupManager(1, s, ResourceGroupWriteRoleLegacyAll)
 	krgm2.setRuVersionFromStorage(3)
-	re.Equal(int32(3), krgm2.getRuVersion())
+	re.Equal(int32(3), krgm2.getServiceLimiter().getRuVersion())
 }
 
 func TestManagerRuVersion(t *testing.T) {
@@ -89,18 +121,22 @@ func TestManagerRuVersion(t *testing.T) {
 
 	keyspaceID := uint32(1)
 
-	// Get RU version for non-existent keyspace should return 0.
-	re.Equal(int32(0), m.GetKeyspaceRuVersion(keyspaceID))
+	// Get RU version for non-existent keyspace via service limiter clone.
+	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.Nil(limiter)
 
 	// Set RU version.
 	err = m.SetKeyspaceRuVersion(keyspaceID, 2)
 	re.NoError(err)
-	re.Equal(int32(2), m.GetKeyspaceRuVersion(keyspaceID))
+	limiter = m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.NotNil(limiter)
+	re.Equal(int32(2), limiter.RuVersion)
 
 	// Update RU version.
 	err = m.SetKeyspaceRuVersion(keyspaceID, 3)
 	re.NoError(err)
-	re.Equal(int32(3), m.GetKeyspaceRuVersion(keyspaceID))
+	limiter = m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.Equal(int32(3), limiter.RuVersion)
 
 	// Rebuild the manager and verify RU versions are loaded from storage.
 	s := m.storage
@@ -108,7 +144,9 @@ func TestManagerRuVersion(t *testing.T) {
 	m2.storage = s
 	err = m2.Init(ctx)
 	re.NoError(err)
-	re.Equal(int32(3), m2.GetKeyspaceRuVersion(keyspaceID))
+	limiter = m2.GetKeyspaceServiceLimiter(keyspaceID)
+	re.NotNil(limiter)
+	re.Equal(int32(3), limiter.RuVersion)
 }
 
 func TestManagerRuVersionWriteDisabled(t *testing.T) {

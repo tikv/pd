@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
@@ -351,14 +350,6 @@ type KeyspaceServiceLimitRequest struct {
 	RuVersion    int32   `json:"ru_version,omitempty"`
 }
 
-// KeyspaceServiceLimitResponse is the response body for getting the service limit of the keyspace.
-type KeyspaceServiceLimitResponse struct {
-	ServiceLimit    float64   `json:"service_limit"`
-	AvailableTokens float64   `json:"available_tokens"`
-	LastUpdate      time.Time `json:"last_update"`
-	RuVersion       int32     `json:"ru_version"`
-}
-
 // SetKeyspaceServiceLimit
 //
 //	@Tags		ResourceManager
@@ -386,6 +377,10 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, "service_limit must be non-negative")
 		return
 	}
+	if req.RuVersion < 0 {
+		c.String(http.StatusBadRequest, "ru_version must be non-negative")
+		return
+	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	if err := s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit); err != nil {
 		if rmserver.IsMetadataWriteDisabledError(err) {
@@ -395,6 +390,8 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Only update the RU version when explicitly provided (> 0).
+	// 0 means "no update" in the request context.
 	if req.RuVersion > 0 {
 		if err := s.manager.SetKeyspaceRuVersion(keyspaceID, req.RuVersion); err != nil {
 			if rmserver.IsMetadataWriteDisabledError(err) {
@@ -430,13 +427,7 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusNotFound, fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))
 		return
 	}
-	resp := KeyspaceServiceLimitResponse{
-		ServiceLimit:    limiter.ServiceLimit,
-		AvailableTokens: limiter.AvailableTokens,
-		LastUpdate:      limiter.LastUpdate,
-		RuVersion:       s.manager.GetKeyspaceRuVersion(keyspaceID),
-	}
-	c.IndentedJSON(http.StatusOK, resp)
+	c.IndentedJSON(http.StatusOK, limiter)
 }
 
 // GetConfig
