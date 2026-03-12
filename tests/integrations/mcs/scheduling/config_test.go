@@ -159,7 +159,12 @@ func (suite *configTestSuite) TestGCTunerConfigWatch() {
 
 	// Update the GC tuner config and verify the watcher receives the changes.
 	persistOpts := suite.pdLeaderServer.GetPersistOptions()
-	pdServerCfg := persistOpts.GetPDServerConfig().Clone()
+	origCfg := persistOpts.GetPDServerConfig().Clone()
+	suite.T().Cleanup(func() {
+		persistOpts.SetPDServerConfig(origCfg)
+		persistConfig(re, suite.pdLeaderServer)
+	})
+	pdServerCfg := origCfg.Clone()
 
 	// Test 1: Update EnableGOGCTuner to true
 	pdServerCfg.EnableGOGCTuner = true
