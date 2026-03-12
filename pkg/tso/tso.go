@@ -127,16 +127,19 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(ctx context.Context, count int64, _ int) (physical int64, logical int64, lastUpdateTime time.Time) {
+func (t *timestampOracle) generateTSO(ctx context.Context, count int64, suffixBits int) (physical int64, logical int64, lastUpdateTime time.Time) {
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
-		return 0, t.uniqueIndex, typeutil.ZeroTime
+		return 0, 0, typeutil.ZeroTime
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
-	t.tsoMux.logical += count * t.maxIndex
+	t.tsoMux.logical += count
 	logical = t.tsoMux.logical
+	if suffixBits > 0 && t.suffix >= 0 {
+		logical = t.calibrateLogical(logical, suffixBits)
+	}
 	// Return the last update time
 	lastUpdateTime = t.tsoMux.updateTime
 	t.tsoMux.updateTime = time.Now()
@@ -405,7 +408,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 var maxRetryCount = 10
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32, _ int) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
@@ -423,8 +426,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical, _ = t.generateTSO(ctx, int64(count), int(t.maxIndex))
-		resp.SuffixBits = uint32(t.maxIndex)
+		resp.Physical, resp.Logical, _ = t.generateTSO(ctx, int64(count), suffixBits)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
@@ -441,6 +443,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 		if !leadership.Check() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
+		resp.SuffixBits = uint32(suffixBits)
 		return resp, nil
 	}
 	t.metrics.exceededMaxRetryEvent.Inc()

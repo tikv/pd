@@ -70,19 +70,15 @@ func TestMain(m *testing.M) {
 
 func TestUniqueIndex(t *testing.T) {
 	re := require.New(t)
-
-	checkUniqueIndex(re, 1)
 	checkUniqueIndex(re, 0)
-}
-
-func TestUniqueIndexWithFollowerHandle(t *testing.T) {
-	re := require.New(t)
 	checkUniqueIndex(re, 1)
-	checkUniqueIndex(re, 0)
+	checkUniqueIndex(re, 2)
+	checkUniqueIndex(re, 3)
+
 }
 
 func checkUniqueIndex(re *require.Assertions, uniqueIndex int64) {
-	maxIndex := int64(2)
+	maxIndex := int64(4)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

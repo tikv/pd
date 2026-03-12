@@ -187,7 +187,7 @@ func (gta *GlobalTSOAllocator) estimateMaxTS(ctx context.Context, count uint32, 
 func (gta *GlobalTSOAllocator) Initialize(int) error {
 	gta.tsoAllocatorRoleGauge.Set(1)
 	// The suffix of a Global TSO should always be 0.
-	gta.timestampOracle.suffix = 0
+	gta.timestampOracle.suffix = int(gta.timestampOracle.uniqueIndex)
 	return gta.timestampOracle.SyncTimestamp()
 }
 
@@ -240,7 +240,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 	// No dc-locations configured in the cluster, use the normal Global TSO generation way.
 	// (without synchronization with other Local TSO Allocators)
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count, 0)
+		return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count, gta.am.GetSuffixBits())
 	}
 	ctx1 := ctx
 

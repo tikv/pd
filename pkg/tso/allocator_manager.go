@@ -499,7 +499,7 @@ func (am *AllocatorManager) compareAndSetMaxSuffix(suffix int32) {
 func (am *AllocatorManager) GetSuffixBits() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	return CalSuffixBits(am.mu.maxSuffix)
+	return CalSuffixBits(int32(am.maxIndex - 1))
 }
 
 // CalSuffixBits calculates the bits of suffix by the max suffix sign.

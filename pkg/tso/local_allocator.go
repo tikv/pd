@@ -102,7 +102,7 @@ func (lta *LocalTSOAllocator) GetDCLocation() string {
 // Initialize will initialize the created local TSO allocator.
 func (lta *LocalTSOAllocator) Initialize(suffix int) error {
 	lta.tsoAllocatorRoleGauge.Set(1)
-	lta.timestampOracle.suffix = suffix
+	lta.timestampOracle.suffix = int(lta.timestampOracle.uniqueIndex)
 	return lta.timestampOracle.SyncTimestamp()
 }
 
