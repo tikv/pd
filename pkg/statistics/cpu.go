@@ -58,3 +58,16 @@ func RegionReadCPUUsage(peerStat *pdpb.PeerStat) float64 {
 	}
 	return float64(cpuStats.GetUnifiedRead())
 }
+
+// RegionWriteCPUUsage returns the region-level write CPU usage based on scheduler CPU.
+// If cpu_stats is missing, return 0.
+func RegionWriteCPUUsage(peerStat *pdpb.PeerStat) float64 {
+	if peerStat == nil {
+		return 0
+	}
+	cpuStats := peerStat.GetCpuStats()
+	if cpuStats == nil {
+		return 0
+	}
+	return float64(cpuStats.GetScheduler())
+}

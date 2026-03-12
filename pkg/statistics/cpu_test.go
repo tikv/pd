@@ -42,3 +42,14 @@ func TestRegionReadCPUUsage(t *testing.T) {
 	peerStat.CpuStats = cpuStats
 	re.Equal(80.0, RegionReadCPUUsage(peerStat))
 }
+
+func TestRegionWriteCPUUsage(t *testing.T) {
+	re := require.New(t)
+	peerStat := &pdpb.PeerStat{}
+	re.Equal(0.0, RegionWriteCPUUsage(peerStat))
+
+	cpuStats := &pdpb.CPUStats{}
+	cpuStats.Scheduler = 66
+	peerStat.CpuStats = cpuStats
+	re.Equal(66.0, RegionWriteCPUUsage(peerStat))
+}

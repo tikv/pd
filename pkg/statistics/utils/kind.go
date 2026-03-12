@@ -76,6 +76,7 @@ const (
 	RegionWriteBytes
 	RegionWriteKeys
 	RegionWriteQueryNum
+	RegionWriteCPU
 	RegionReadCPU
 
 	RegionStatCount
@@ -95,6 +96,8 @@ func (k RegionStatKind) String() string {
 		return "read_query"
 	case RegionWriteQueryNum:
 		return "write_query"
+	case RegionWriteCPU:
+		return "write_cpu"
 	case RegionReadCPU:
 		return "read_cpu"
 	}
@@ -244,6 +247,9 @@ func (rw RWType) GetLoadRates(deltaLoads []float64, interval uint64) []float64 {
 	loads := make([]float64, DimLen)
 	for dim, k := range rw.RegionStats() {
 		loads[dim] = deltaLoads[k] / float64(interval)
+	}
+	if rw == Write && len(deltaLoads) > int(RegionWriteCPU) {
+		loads[CPUDim] = deltaLoads[RegionWriteCPU] / float64(interval)
 	}
 	return loads
 }

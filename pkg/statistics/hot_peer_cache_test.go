@@ -845,6 +845,43 @@ func TestDifferentReportInterval(t *testing.T) {
 	}
 }
 
+func TestWriteCPUIsTrackedButDoesNotTriggerHotness(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(ctx, cluster, utils.Write)
+
+	hotRegion, err := buildRegion(cluster, utils.Write, 3, utils.RegionHeartBeatReportInterval)
+	re.NoError(err)
+	hotRegion = hotRegion.Clone(core.SetCPUStats(&pdpb.CPUStats{Scheduler: 88}))
+	checkAndUpdate(re, cache, hotRegion, 3)
+
+	stats := cache.GetHotPeerStats(0)
+	for _, peers := range stats {
+		re.Len(peers, 1)
+		re.Equal(88.0, peers[0].GetLoad(utils.CPUDim))
+	}
+
+	coldRegion, err := buildRegion(cluster, utils.Write, 3, utils.RegionHeartBeatReportInterval)
+	re.NoError(err)
+	coldRegion = coldRegion.Clone(
+		core.SetWrittenBytes(1),
+		core.SetWrittenKeys(1),
+		core.SetWrittenQuery(1),
+		core.SetCPUStats(&pdpb.CPUStats{Scheduler: 99}),
+	)
+
+	coldStats := cache.CheckPeerFlow(
+		coldRegion,
+		coldRegion.GetPeers(),
+		coldRegion.GetLoads(),
+		utils.RegionHeartBeatReportInterval,
+	)
+	re.Empty(coldStats)
+}
+
 func BenchmarkCheckRegionFlow(b *testing.B) {
 	re := require.New(b)
 	cluster := core.NewBasicCluster()

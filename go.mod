@@ -6,6 +6,8 @@ go 1.25.6
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+replace github.com/pingcap/kvproto => github.com/lhy1024/kvproto v0.0.0-20260312140619-1ab752c30b5a
+
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v1.5.0

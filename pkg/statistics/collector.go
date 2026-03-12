@@ -70,9 +70,11 @@ func (tikvCollector) getLoads(storeLoads StoreKindLoads, peerLoadSum Loads, rwTy
 			loads[utils.ByteDim] = peerLoadSum[utils.ByteDim]
 			loads[utils.KeyDim] = peerLoadSum[utils.KeyDim]
 			loads[utils.QueryDim] = storeLoads[utils.StoreWriteQuery]
+			loads[utils.CPUDim] = peerLoadSum[utils.CPUDim]
 		case constant.RegionKind:
 			loads[utils.ByteDim] = storeLoads[utils.StoreWriteBytes]
 			loads[utils.KeyDim] = storeLoads[utils.StoreWriteKeys]
+			loads[utils.CPUDim] = peerLoadSum[utils.CPUDim]
 			// The `Write-peer` does not have `QueryDim`
 		}
 	}
@@ -121,6 +123,7 @@ func (c tiflashCollector) getLoads(storeLoads StoreKindLoads, peerLoadSum Loads,
 				loads[utils.ByteDim] = peerLoadSum[utils.ByteDim]
 				loads[utils.KeyDim] = peerLoadSum[utils.KeyDim]
 			}
+			loads[utils.CPUDim] = peerLoadSum[utils.CPUDim]
 			// The `Write-peer` does not have `QueryDim`
 		}
 	}

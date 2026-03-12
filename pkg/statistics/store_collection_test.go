@@ -319,3 +319,48 @@ func TestTiKVNotAffectedByTiFlashCompute(t *testing.T) {
 	tiflashDetails := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, constant.RegionKind, tiflashCollector)
 	re.Empty(tiflashDetails)
 }
+
+func TestWriteCPULoadIsSummarizedForMonitoring(t *testing.T) {
+	re := require.New(t)
+	rw := utils.Write
+	kind := constant.RegionKind
+	collector := newTikvCollector()
+	storeHistoryLoad := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval)
+
+	storeID := uint64(1)
+	storeInfos := map[uint64]*StoreSummaryInfo{
+		storeID: &StoreSummaryInfo{
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{
+					Id:      storeID,
+					Address: "mock://tikv-1:1",
+				},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
+		},
+	}
+	storeLoads := map[uint64]StoreKindLoads{
+		storeID: {
+			utils.StoreWriteBytes: 10 * units.MiB,
+			utils.StoreWriteKeys:  2048,
+			utils.StoreWriteQuery: 128,
+		},
+	}
+	storeHotPeers := map[uint64][]*HotPeerStat{
+		storeID: {
+			&HotPeerStat{
+				StoreID:   storeID,
+				HotDegree: 1,
+				Loads:     []float64{256, 128, 0, 66},
+			},
+		},
+	}
+
+	details := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, storeHotPeers, rw, kind, collector)
+	re.Len(details, 1)
+	re.Equal(66.0, details[0].LoadPred.Current.Loads[utils.CPUDim])
+
+	peersStat := details[0].ToHotPeersStat()
+	re.Equal(66.0, peersStat.StoreCPURate)
+	re.Equal(66.0, peersStat.TotalCPURate)
+}

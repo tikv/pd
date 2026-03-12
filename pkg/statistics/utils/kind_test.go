@@ -46,12 +46,13 @@ func TestGetLoads(t *testing.T) {
 		Commit:                 14,
 	}
 	regionA := core.NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{}}, nil,
+		core.SetReportInterval(0, 60),
 		core.SetReadBytes(1),
 		core.SetReadKeys(2),
 		core.SetWrittenBytes(3),
 		core.SetWrittenKeys(4),
 		core.SetQueryStats(queryStats),
-		core.SetCPUUsage(12))
+		core.SetCPUStats(&pdpb.CPUStats{UnifiedRead: 12, Scheduler: 7}))
 	loads := regionA.GetLoads()
 	re.Len(loads, int(RegionStatCount))
 	re.Equal(float64(regionA.GetBytesRead()), loads[RegionReadBytes])
@@ -62,6 +63,7 @@ func TestGetLoads(t *testing.T) {
 	re.Equal(float64(regionA.GetBytesWritten()), loads[RegionWriteBytes])
 	re.Equal(float64(regionA.GetKeysWritten()), loads[RegionWriteKeys])
 	re.Equal(float64(regionA.GetWriteQueryNum()), loads[RegionWriteQueryNum])
+	re.Equal(float64(7*60), loads[RegionWriteCPU])
 	re.Equal(float64(regionA.GetCPUUsage()), loads[RegionReadCPU])
 	writeQuery := float64(queryStats.Put + queryStats.Delete + queryStats.DeleteRange + queryStats.AcquirePessimisticLock + queryStats.Rollback + queryStats.Prewrite + queryStats.Commit)
 	re.Equal(float64(regionA.GetWriteQueryNum()), writeQuery)
@@ -74,5 +76,6 @@ func TestGetLoads(t *testing.T) {
 	re.Equal(float64(regionA.GetBytesWritten()), loads[RegionWriteBytes])
 	re.Equal(float64(regionA.GetKeysWritten()), loads[RegionWriteKeys])
 	re.Equal(float64(regionA.GetWriteQueryNum()), loads[RegionWriteQueryNum])
+	re.Equal(float64(7*60), loads[RegionWriteCPU])
 	re.Equal(0.0, loads[RegionReadCPU])
 }

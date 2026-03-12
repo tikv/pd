@@ -507,6 +507,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionWriteBytes:    0,
 			utils.RegionWriteKeys:     0,
 			utils.RegionWriteQueryNum: 0,
+			utils.RegionWriteCPU:      0,
 			utils.RegionReadCPU:       regionReadCPU * float64(interval),
 		}
 		checkReadPeerTask := func(cache *statistics.HotPeerCache) {
