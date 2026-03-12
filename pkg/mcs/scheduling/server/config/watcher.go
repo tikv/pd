@@ -71,6 +71,8 @@ type Watcher struct {
 
 	// GC tuner state for tracking changes
 	gcTunerState *gctuner.State
+
+	totalMem uint64
 }
 
 type persistedConfig struct {
@@ -78,7 +80,7 @@ type persistedConfig struct {
 	Schedule       sc.ScheduleConfig    `json:"schedule"`
 	Replication    sc.ReplicationConfig `json:"replication"`
 	Store          sc.StoreConfig       `json:"store"`
-	Server         sc.ServerConfig      `json:"pd-server"`
+	Server         *sc.ServerConfig     `json:"pd-server"`
 }
 
 // NewWatcher creates a new watcher to watch the config meta change from PD.
@@ -106,11 +108,8 @@ func NewWatcher(
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
 		storage:                   storage,
+		totalMem:                  totalMem,
 	}
-
-	// Initialize GC tuner
-	gcCfg := persistConfig.GetGCTunerConfig()
-	cw.gcTunerState = gctuner.InitGCTuner(totalMem, gcCfg)
 
 	err = cw.initializeConfigWatcher()
 	if err != nil {
@@ -157,12 +156,15 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
-		cw.setServerConfig(&cfg.Server)
-
-		// Update GC tuner if config changed
-		gcCfg := cw.GetGCTunerConfig()
-		cw.gcTunerState.UpdateIfNeeded(gcCfg)
-
+		if cfg.Server != nil {
+			cw.setServerConfig(cfg.Server)
+			gcCfg := cw.GetGCTunerConfig()
+			if cw.gcTunerState != nil {
+				cw.gcTunerState.UpdateIfNeeded(gcCfg)
+			} else {
+				cw.gcTunerState = gctuner.InitGCTuner(cw.totalMem, gcCfg)
+			}
+		}
 		return nil
 	}
 	deleteFn := func(*mvccpb.KeyValue) error {

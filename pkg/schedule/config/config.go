@@ -90,18 +90,6 @@ const (
 
 	// RegionSizeToKeysRatio is the ratio between region size and region keys.
 	RegionSizeToKeysRatio = 10000
-
-	// GC tuner defaults (same as PD server)
-	defaultServerMemoryLimit          = 0
-	defaultServerMemoryLimitGCTrigger = 0.7
-	defaultEnableGOGCTuner            = true
-	defaultGCTunerThreshold           = 0.6
-	minServerMemoryLimit              = 0
-	maxServerMemoryLimit              = 0.99
-	minServerMemoryLimitGCTrigger     = 0.5
-	maxServerMemoryLimitGCTrigger     = 0.99
-	minGCTunerThreshold               = 0.0
-	maxGCTunerThreshold               = 0.9
 )
 
 var (
@@ -733,35 +721,15 @@ func (c *ReplicationConfig) Adjust(meta *configutil.ConfigMetaData) error {
 	return c.Validate()
 }
 
-// Adjust adjusts the config.
-func (s *ServerConfig) Adjust(meta *configutil.ConfigMetaData) error {
-	// GC tuner config adjustments
-	if !meta.IsDefined("server-memory-limit") {
-		s.ServerMemoryLimit = defaultServerMemoryLimit
+// Clone makes a deep copy of the config.
+func (s *ServerConfig) Clone() ServerConfig {
+	if s == nil {
+		return ServerConfig{}
 	}
-	if s.ServerMemoryLimit < minServerMemoryLimit {
-		s.ServerMemoryLimit = minServerMemoryLimit
-	} else if s.ServerMemoryLimit > maxServerMemoryLimit {
-		s.ServerMemoryLimit = maxServerMemoryLimit
+	return ServerConfig{
+		ServerMemoryLimitGCTrigger: s.ServerMemoryLimitGCTrigger,
+		ServerMemoryLimit:          s.ServerMemoryLimit,
+		EnableGOGCTuner:            s.EnableGOGCTuner,
+		GCTunerThreshold:           s.GCTunerThreshold,
 	}
-	if !meta.IsDefined("server-memory-limit-gc-trigger") {
-		s.ServerMemoryLimitGCTrigger = defaultServerMemoryLimitGCTrigger
-	}
-	if s.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger {
-		s.ServerMemoryLimitGCTrigger = minServerMemoryLimitGCTrigger
-	} else if s.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
-		s.ServerMemoryLimitGCTrigger = maxServerMemoryLimitGCTrigger
-	}
-	if !meta.IsDefined("enable-gogc-tuner") {
-		s.EnableGOGCTuner = defaultEnableGOGCTuner
-	}
-	if !meta.IsDefined("gc-tuner-threshold") {
-		s.GCTunerThreshold = defaultGCTunerThreshold
-	}
-	if s.GCTunerThreshold < minGCTunerThreshold {
-		s.GCTunerThreshold = minGCTunerThreshold
-	} else if s.GCTunerThreshold > maxGCTunerThreshold {
-		s.GCTunerThreshold = maxGCTunerThreshold
-	}
-	return nil
 }

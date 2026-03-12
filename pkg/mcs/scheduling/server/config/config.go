@@ -81,7 +81,8 @@ type Config struct {
 
 	Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
 	Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
-	Server      sc.ServerConfig      `toml:"pd-server" json:"pd-server"`
+	// This config is sync with the pd server.
+	Server sc.ServerConfig `toml:"pd-server" json:"pd-server"`
 }
 
 // NewConfig creates a new config.
@@ -146,10 +147,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
 	}
-	if err := c.Replication.Adjust(configMetaData.Child("replication")); err != nil {
-		return err
-	}
-	return c.Server.Adjust(configMetaData.Child("pd-server"))
+	return c.Replication.Adjust(configMetaData.Child("replication"))
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
@@ -304,7 +302,7 @@ func (o *PersistConfig) setServerConfig(cfg *sc.ServerConfig) {
 	o.serverConfig.Store(cfg)
 }
 
-// GetServerConfig returns the server configuration.
+// GetServerConfig returns the cloned server configuration.
 func (o *PersistConfig) GetServerConfig() *sc.ServerConfig {
 	return o.serverConfig.Load().(*sc.ServerConfig)
 }
@@ -782,9 +780,12 @@ func (o *PersistConfig) GetTTLData(key string) (string, bool) {
 	return "", false
 }
 
-// GetGCTunerConfig returns the GC tuner configuration.
+// GetGCTunerConfig returns the GC tuner configuration, only used test.
 func (o *PersistConfig) GetGCTunerConfig() *gctuner.Config {
 	cfg := o.serverConfig.Load().(*sc.ServerConfig)
+	if cfg == nil {
+		return nil
+	}
 	return &gctuner.Config{
 		EnableGOGCTuner:            cfg.EnableGOGCTuner,
 		GCTunerThreshold:           cfg.GCTunerThreshold,

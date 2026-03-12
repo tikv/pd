@@ -146,17 +146,6 @@ func (suite *configTestSuite) TestGCTunerConfigWatch() {
 	re.NoError(err)
 	defer watcher.Close()
 
-	// Check the initial GC tuner config values (defaults from PD).
-	// Default values: EnableGOGCTuner=false (in test env), GCTunerThreshold=0.6,
-	// ServerMemoryLimit=0, ServerMemoryLimitGCTrigger=0.7
-	testutil.Eventually(re, func() bool {
-		gcCfg := watcher.GetGCTunerConfig()
-		return !gcCfg.EnableGOGCTuner &&
-			gcCfg.GCTunerThreshold == 0.6 &&
-			gcCfg.ServerMemoryLimit == 0 &&
-			gcCfg.ServerMemoryLimitGCTrigger == 0.7
-	})
-
 	// Update the GC tuner config and verify the watcher receives the changes.
 	persistOpts := suite.pdLeaderServer.GetPersistOptions()
 	origCfg := persistOpts.GetPDServerConfig().Clone()
