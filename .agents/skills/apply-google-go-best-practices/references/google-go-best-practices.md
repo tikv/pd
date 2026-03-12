@@ -3,7 +3,7 @@
 Paraphrased from the official Google guide:
 https://google.github.io/styleguide/go/best-practices
 
-Use this reference as a checklist for review and implementation work. Follow repository-local rules first when they are stricter or when changing a public API would be too disruptive.
+Use this reference as a secondary checklist for review and implementation work. Follow repository-local rules first when they are stricter or when changing a public API would be too disruptive.
 
 ## Naming and package layout
 
@@ -79,6 +79,7 @@ Use this reference as a checklist for review and implementation work. Follow rep
 
 ## Apply in pd
 
+- This is not the default style authority for routine `pd` changes. Use it only when the task explicitly asks for Google Go guidance or when an external comparison baseline is useful.
 - Follow the repository root `AGENTS.md`, deeper `AGENTS.md` files, `.github/copilot-instructions.md`, and `.golangci.yml` before applying generic style guidance.
 - Preserve PD-specific conventions such as `github.com/pingcap/errors`, failpoint-safe test flows, and gci import ordering.
 - Prefer small, behavior-preserving edits. Do not rename exported APIs or move packages broadly unless the task explicitly requires that scope.
