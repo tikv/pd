@@ -8970,7 +8970,7 @@
           "aliasColors": {},
           "dashLength": 10,
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The P99 duration of gRPC stream Send operations by request type.",
+          "description": "The P99 duration of gRPC stream Send operations by request type and target.",
           "editable": true,
           "fieldConfig": {
             "defaults": {},
@@ -9015,10 +9015,10 @@
           "spaceLength": 10,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_server_grpc_stream_send_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[5m])) by (instance, request, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_server_grpc_stream_send_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[5m])) by (instance, request, target, le))",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{instance}}-{{request}}",
+              "legendFormat": "{{instance}}-{{request}}-{{target}}",
               "refId": "A",
               "step": 4
             }
@@ -9079,7 +9079,7 @@
           "aliasColors": {},
           "dashLength": 10,
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The rate of gRPC stream Send operations by request type.",
+          "description": "The rate of gRPC stream Send operations by request type and target.",
           "editable": true,
           "fieldConfig": {
             "defaults": {},
@@ -9123,9 +9123,9 @@
           "spaceLength": 10,
           "targets": [
             {
-              "expr": "sum(rate(pd_server_grpc_stream_send_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, request)",
+              "expr": "sum(rate(pd_server_grpc_stream_send_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, request, target)",
               "intervalFactor": 2,
-              "legendFormat": "{{instance}}-{{request}}",
+              "legendFormat": "{{instance}}-{{request}}-{{target}}",
               "refId": "A",
               "step": 4
             }
