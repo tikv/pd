@@ -766,16 +766,26 @@ func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, c
 	gc.addRUConsumption(consumption)
 }
 
-// ReportRUV2Consumption is used to report the experimental v2 RU consumption.
+// ReportTiKVRUV2Consumption is used to report the experimental TiKV-side v2 RU consumption.
 // RUv2 is only recorded for observation purposes without actual token deduction.
-func (c *ResourceGroupsController) ReportRUV2Consumption(resourceGroupName string, ruv2 float64) {
+func (c *ResourceGroupsController) ReportTiKVRUV2Consumption(resourceGroupName string, ruv2 float64) {
+	c.reportRUV2Consumption(resourceGroupName, ruv2, 0)
+}
+
+// ReportTiDBRUV2Consumption is used to report the experimental TiDB-side v2 RU consumption.
+// RUv2 is only recorded for observation purposes without actual token deduction.
+func (c *ResourceGroupsController) ReportTiDBRUV2Consumption(resourceGroupName string, ruv2 float64) {
+	c.reportRUV2Consumption(resourceGroupName, 0, ruv2)
+}
+
+func (c *ResourceGroupsController) reportRUV2Consumption(resourceGroupName string, tikvRUV2, tidbRUV2 float64) {
 	gc, ok := c.loadGroupController(resourceGroupName)
 	if !ok {
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
 		return
 	}
 
-	gc.addRUV2Consumption(ruv2)
+	gc.addRUV2Consumption(tikvRUV2, tidbRUV2)
 }
 
 // IsDegraded returns whether the controller is in degraded mode.

@@ -221,13 +221,6 @@ func getRUValueFromConsumption(custom *rmpb.Consumption) float64 {
 	return custom.RRU + custom.WRU
 }
 
-func getRUV2ValueFromConsumption(custom *rmpb.Consumption) float64 {
-	if custom == nil {
-		return 0
-	}
-	return custom.TikvRUV2 + custom.TidbRUV2
-}
-
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	if custom1 == nil || custom2 == nil {
 		return
