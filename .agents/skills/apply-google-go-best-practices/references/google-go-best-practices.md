@@ -79,6 +79,6 @@ Use this reference as a checklist for review and implementation work. Follow rep
 
 ## Apply in pd
 
-- Follow `/Users/ryan/Workspace/pd/AGENTS.md`, deeper `AGENTS.md` files, `.github/copilot-instructions.md`, and `.golangci.yml` before applying generic style guidance.
+- Follow the repository root `AGENTS.md`, deeper `AGENTS.md` files, `.github/copilot-instructions.md`, and `.golangci.yml` before applying generic style guidance.
 - Preserve PD-specific conventions such as `github.com/pingcap/errors`, failpoint-safe test flows, and gci import ordering.
 - Prefer small, behavior-preserving edits. Do not rename exported APIs or move packages broadly unless the task explicitly requires that scope.
