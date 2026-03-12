@@ -1,6 +1,6 @@
 ---
 name: apply-google-go-best-practices
-description: Apply Google Go best practices when writing, reviewing, or refactoring Go code. Use when Codex needs to improve or evaluate Go code for naming, shadowing, package boundaries, error handling, documentation, variable declarations, option patterns, tests, string construction, or package-level state. For repository work, combine this skill with the local AGENTS.md, lint, and test rules rather than replacing them.
+description: Apply Google Go best practices when writing, reviewing, or refactoring Go code. Use when an agent needs to improve or evaluate Go code for naming, shadowing, package boundaries, error handling, documentation, variable declarations, option patterns, tests, string construction, or package-level state. For repository work, combine this skill with the local AGENTS.md, lint, and test rules rather than replacing them.
 ---
 
 # Apply Google Go Best Practices
