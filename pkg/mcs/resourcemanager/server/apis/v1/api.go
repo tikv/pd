@@ -182,6 +182,7 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 //	@Param		groupInfo	body	object	true	"json params, rmpb.ResourceGroup"
 //	@Success	200			"Success"
 //	@Failure	400			{string}	error
+//	@Failure	404			{string}	error
 //	@Failure	500			{string}	error
 //	@Router		/config/group [PUT]
 func (s *Service) putResourceGroup(c *gin.Context) {
@@ -263,6 +264,7 @@ type KeyspaceServiceLimitRequest = metadataapi.KeyspaceServiceLimitRequest
 //	@Success	200				{string}	string	"Success!"
 //	@Failure	400				{string}	error
 //	@Failure	403				{string}	error
+//	@Failure	404				{string}	error
 //	@Failure	500				{string}	error
 //	@Router		/config/keyspace/service-limit/{keyspace_name} [post]
 func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
