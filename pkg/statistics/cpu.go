@@ -21,9 +21,6 @@ import (
 )
 
 const (
-	// grpcServerThreadPrefix matches TiKV's gRPC server thread prefix:
-	// https://github.com/tikv/tikv/blob/master/components/tikv_util/src/thread_name_prefix.rs#L34
-	grpcServerThreadPrefix = "grpc-server"
 	// unifiedReadPoolThreadPrefix matches TiKV's unified-read thread prefix:
 	// https://github.com/tikv/tikv/blob/master/components/tikv_util/src/thread_name_prefix.rs#L60
 	unifiedReadPoolThreadPrefix = "unified-read"
@@ -44,22 +41,14 @@ func storeUnifiedReadCPUUsage(cpuUsages []*pdpb.RecordPair) uint64 {
 	return sumCPUUsageByPrefix(cpuUsages, unifiedReadPoolThreadPrefix)
 }
 
-// StoreReadCPUUsage returns the store-level read CPU usage derived from unified-read and gRPC threads.
-// Read CPU is the sum of:  Unified read pool CPU and grpc CPU which is shared by read/write requests, so we apportion gRPC CPU by readQuery/totalQuery.
-func StoreReadCPUUsage(cpuUsages []*pdpb.RecordPair, readQuery, totalQuery uint64) float64 {
-	unifiedReadCPU := float64(storeUnifiedReadCPUUsage(cpuUsages))
-	if totalQuery == 0 || readQuery == 0 {
-		return unifiedReadCPU
-	}
-	grpcCPU := float64(StoreGRPCCPUUsage(cpuUsages))
-	// gRPC server CPU is shared by read/write requests, so we apportion it by readQuery/totalQuery.
-	return unifiedReadCPU + grpcCPU*float64(readQuery)/float64(totalQuery)
+// StoreReadCPUUsage returns the store-level read CPU usage derived from unified-read threads.
+func StoreReadCPUUsage(cpuUsages []*pdpb.RecordPair) float64 {
+	return float64(storeUnifiedReadCPUUsage(cpuUsages))
 }
 
-// RegionReadCPUUsage returns the region-level read CPU usage based on unified-read CPU
-// and the proportional gRPC CPU usage. If cpu_stats is missing, return 0 to avoid
-// mixing gRPC CPU on legacy TiKV.
-func RegionReadCPUUsage(peerStat *pdpb.PeerStat, storeGRPCCPU, readQuery, totalQuery uint64) float64 {
+// RegionReadCPUUsage returns the region-level read CPU usage based on unified-read CPU.
+// If cpu_stats is missing, return 0.
+func RegionReadCPUUsage(peerStat *pdpb.PeerStat) float64 {
 	if peerStat == nil {
 		return 0
 	}
@@ -67,14 +56,5 @@ func RegionReadCPUUsage(peerStat *pdpb.PeerStat, storeGRPCCPU, readQuery, totalQ
 	if cpuStats == nil {
 		return 0
 	}
-	regionCPU := float64(cpuStats.GetUnifiedRead())
-	if totalQuery > 0 && readQuery > 0 {
-		regionCPU += float64(storeGRPCCPU) * float64(readQuery) / float64(totalQuery)
-	}
-	return regionCPU
-}
-
-// StoreGRPCCPUUsage returns the store-level gRPC CPU usage derived from gRPC server threads.
-func StoreGRPCCPUUsage(cpuUsages []*pdpb.RecordPair) uint64 {
-	return sumCPUUsageByPrefix(cpuUsages, grpcServerThreadPrefix)
+	return float64(cpuStats.GetUnifiedRead())
 }
