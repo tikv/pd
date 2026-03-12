@@ -118,43 +118,26 @@ func TestTSOIndex(t *testing.T) {
 			tsoMux: &tsoObject{
 				physical: time.Now(),
 			},
-			maxIndex:    2,
-			uniqueIndex: 0,
-		},
-		{
-			tsoMux: &tsoObject{
-				physical: time.Now(),
-			},
-			maxIndex:    2,
 			uniqueIndex: 1,
 		},
 		{
 			tsoMux: &tsoObject{
 				physical: time.Now(),
 			},
-			maxIndex:    4,
-			uniqueIndex: 1,
-		},
-		{
-			tsoMux: &tsoObject{
-				physical: time.Now(),
-			},
-			maxIndex:    4,
 			uniqueIndex: 2,
 		},
 		{
 			tsoMux: &tsoObject{
 				physical: time.Now(),
 			},
-			maxIndex:    4,
 			uniqueIndex: 3,
 		},
 	} {
 		ts.suffix = int(ts.uniqueIndex)
 		for range 10 {
 			count := rand.Int63n(100)
-			_, logical, _ := ts.generateTSO(ctx, count, CalSuffixBits(int32(ts.maxIndex-1)))
-			require.Equal(t, ts.uniqueIndex, logical%ts.maxIndex)
+			_, logical, _ := ts.generateTSO(ctx, count, CalSuffixBits(4))
+			require.Equal(t, ts.uniqueIndex, logical%4)
 		}
 	}
 }

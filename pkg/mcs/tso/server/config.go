@@ -49,7 +49,7 @@ const (
 )
 
 var (
-	tsoMaxIndexAvailableValue = []int64{1, 2, 4, 8}
+	tsoMaxIndexAvailableValue = []int64{0, 1, 2, 4, 8}
 )
 
 var _ tso.ServiceConfig = (*Config)(nil)

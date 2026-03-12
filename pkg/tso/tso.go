@@ -84,7 +84,6 @@ type timestampOracle struct {
 	metrics *tsoMetrics
 
 	uniqueIndex int64
-	maxIndex    int64
 }
 
 func (t *timestampOracle) getStorageTimeout() time.Duration {
@@ -458,6 +457,5 @@ func (t *timestampOracle) ResetTimestamp() {
 	t.tsoMux.physical = typeutil.ZeroTime
 	t.tsoMux.logical = 0
 	t.tsoMux.updateTime = typeutil.ZeroTime
-	t.tsoMux.logical = t.uniqueIndex
 	t.lastSavedTime.Store(typeutil.ZeroTime)
 }

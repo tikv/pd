@@ -80,7 +80,6 @@ func newLocalTimestampOracle(am *AllocatorManager, leadership *election.Leadersh
 		dcLocation:             dcLocation,
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), dcLocation),
-		maxIndex:               am.maxIndex,
 		uniqueIndex:            am.uniqueIndex,
 	}
 	return oracle

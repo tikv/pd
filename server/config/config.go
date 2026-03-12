@@ -271,7 +271,7 @@ const (
 var (
 	defaultEnableTelemetry    = false
 	defaultRuntimeServices    = []string{}
-	tsoMaxIndexAvailableValue = []int64{1, 2, 4, 8}
+	tsoMaxIndexAvailableValue = []int64{0, 1, 2, 4, 8}
 )
 
 func init() {

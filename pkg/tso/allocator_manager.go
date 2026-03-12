@@ -194,7 +194,7 @@ type AllocatorManager struct {
 	}
 
 	uniqueIndex int64
-	maxIndex    int64
+	suffixbit   int
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -221,8 +221,8 @@ func NewAllocatorManager(
 		leaderLease:            cfg.GetLeaderLease(),
 		maxResetTSGap:          cfg.GetMaxResetTSGap,
 		securityConfig:         cfg.GetTLSConfig(),
-		maxIndex:               maxIdx,
 		uniqueIndex:            uniqueIdx,
+		suffixbit:              CalSuffixBits(int32(maxIdx - 1)),
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -499,7 +499,7 @@ func (am *AllocatorManager) compareAndSetMaxSuffix(suffix int32) {
 func (am *AllocatorManager) GetSuffixBits() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	return CalSuffixBits(int32(am.maxIndex - 1))
+	return am.suffixbit
 }
 
 // CalSuffixBits calculates the bits of suffix by the max suffix sign.
