@@ -352,9 +352,6 @@ curl -X POST http://<tidb>:10080/tables/<db>/<table>/scatter
 curl http://<tidb>:10080/tables/<db>/<table>/stop-scatter
 ```
 
-- if the incident was amplified by `tidb_replica_read=leader`, consider
-  temporary rollback to `leader-and-follower` as a mitigation while continuing
-  the root-cause investigation;
 - if a guarded periodic split script consistently improves the workload, treat it
   as temporary mitigation only, and compare its trigger logic against
   load-base-split thresholds to explain the gap;
@@ -402,8 +399,6 @@ Actions:
   often still improve hotspot coverage materially;
 - if `1.0` is discussed, note that it is close to removing the balance
   restriction and should be treated as a last-resort experiment only;
-- if the workload change also forced leader-only reads, consider restoring
-  `tidb_replica_read=leader-and-follower` as a mitigation;
 - if the customer already has a manual split script that is demonstrably better
   than auto split, use it as evidence for the gap and as temporary mitigation,
   but do not mistake it for the root fix;
