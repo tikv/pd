@@ -511,14 +511,9 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) err
 			)
 			return err
 		}
-		log.Info("[keyspace] keyspace region split completed",
-			zap.Uint32("keyspace-id", id),
-			zap.Duration("takes", time.Since(start)),
-		)
-		return nil
 	}
 
-	log.Info("[keyspace] keyspace region split initiated",
+	log.Info("[keyspace] region split initiated",
 		zap.Uint32("keyspace-id", id),
 		zap.Duration("takes", time.Since(start)),
 	)
@@ -930,8 +925,8 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 // KeyspaceExists checks if a keyspace with the given ID exists in the cache.
 // This is used to determine if keyspace boundaries should be enforced during split/merge.
 func (manager *Manager) KeyspaceExists(id uint32) bool {
-	_, err := manager.GetKeyspaceNameByID(id)
-	return err == nil
+	name, err := manager.GetKeyspaceNameByID(id)
+	return err == nil && len(name) > 0
 }
 
 // ScanAllKeyspace scans all keyspaces and applies the given function.

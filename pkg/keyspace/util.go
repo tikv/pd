@@ -15,10 +15,12 @@
 package keyspace
 
 import (
+	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"encoding/hex"
 	"regexp"
+	"slices"
 
 	"github.com/gogo/protobuf/proto"
 
@@ -51,6 +53,8 @@ var (
 	}
 	// Only keyspaces in the state specified by allowChangeConfig are allowed to change their config.
 	allowChangeConfig = []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED}
+	RawPrefix         = []byte{'r'}
+	TxnPrefix         = []byte{'x'}
 )
 
 // validateID check if keyspace falls within the acceptable range.
@@ -126,12 +130,11 @@ func MakeRegionBound(id uint32) *RegionBound {
 	nextKeyspaceIDBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
 	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
-	tr := codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...))
 	return &RegionBound{
-		RawLeftBound:  codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)),
-		RawRightBound: codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)),
-		TxnLeftBound:  tr,
-		TxnRightBound: codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)),
+		RawLeftBound:  codec.EncodeBytes(append(RawPrefix, keyspaceIDBytes[1:]...)),
+		RawRightBound: codec.EncodeBytes(append(RawPrefix, nextKeyspaceIDBytes[1:]...)),
+		TxnLeftBound:  codec.EncodeBytes(append(TxnPrefix, keyspaceIDBytes[1:]...)),
+		TxnRightBound: codec.EncodeBytes(append(TxnPrefix, nextKeyspaceIDBytes[1:]...)),
 	}
 }
 
@@ -292,8 +295,8 @@ func isProtectedKeyspaceName(name string) bool {
 
 // ExtractKeyspaceID extracts the keyspace ID from a region key.
 // It returns the keyspace ID and a boolean indicating whether the key contains a valid keyspace ID.
-// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'x' for txn.
-// Only txn mode keys are supported.
+// The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'x' for txn and 'r' for raw.
+// if the key is empty, it means the key belongs the max keyspace.
 func ExtractKeyspaceID(key []byte) (uint32, bool) {
 	// Empty key represents the start of the entire key space (no keyspace)
 	if len(key) == 0 {
@@ -311,9 +314,9 @@ func ExtractKeyspaceID(key []byte) (uint32, bool) {
 		return 0, false
 	}
 
-	// Check if it's a txn mode ('x') key - raw mode is not supported
+	// Check the mod prefix.
 	prefix := decoded[0]
-	if prefix != 'x' {
+	if prefix != RawPrefix[0] && prefix != TxnPrefix[0] {
 		return 0, false
 	}
 
@@ -338,12 +341,14 @@ type KeyspaceChecker interface {
 // 2. endKey is NOT exactly at the right bound of startKey's keyspace (i.e., not just at the boundary), AND
 // 3. All keyspaces that the region actually spans exist (checked via checker)
 func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker KeyspaceChecker) bool {
-	// If endKey is empty, it represents infinity boundary
-	if len(endKey) == 0 {
-		return false
+	var startKeyspaceID uint32
+	var startHasKeyspace bool
+	if len(startKey) == 0 {
+		startKeyspaceID, startHasKeyspace = constant.StartKeyspaceID, true
+	} else {
+		startKeyspaceID, startHasKeyspace = ExtractKeyspaceID(startKey)
 	}
 
-	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
 	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
 
 	// If either key doesn't have a keyspace ID, cannot determine
@@ -392,11 +397,14 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker KeyspaceChecker) [][]
 		return nil
 	}
 
-	if len(endKey) == 0 {
-		return nil
+	var startKeyspaceID uint32
+	var startHasKeyspace bool
+	if len(startKey) == 0 {
+		startKeyspaceID, startHasKeyspace = constant.StartKeyspaceID, true
+	} else {
+		startKeyspaceID, startHasKeyspace = ExtractKeyspaceID(startKey)
 	}
 
-	startKeyspaceID, startHasKeyspace := ExtractKeyspaceID(startKey)
 	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
 
 	// If either key doesn't have a keyspace ID, cannot determine split keys
@@ -406,11 +414,6 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker KeyspaceChecker) [][]
 
 	// If same keyspace, no split needed
 	if startKeyspaceID == endKeyspaceID {
-		return nil
-	}
-
-	// Check if the start keyspace exists
-	if !checker.KeyspaceExists(startKeyspaceID) {
 		return nil
 	}
 
@@ -429,18 +432,26 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker KeyspaceChecker) [][]
 		rightBound := bound.TxnRightBound
 
 		// If the right bound is >= endKey, we're done
-		if string(rightBound) >= string(endKey) {
+		if string(rightBound) >= string(endKey) && len(endKey) != 0 {
 			break
 		}
 
 		// Add this boundary as a split key
 		splitKeys = append(splitKeys, rightBound)
 
+		rightBoundRaw := bound.RawRightBound
+		if string(rightBoundRaw) >= string(endKey) && len(endKey) != 0 {
+			break
+		}
+		splitKeys = append(splitKeys, rightBoundRaw)
+
 		// Safety check to prevent infinite loops
 		if currentID >= constant.MaxValidKeyspaceID {
 			break
 		}
 	}
-
+	slices.SortFunc(splitKeys, func(a, b []byte) int {
+		return bytes.Compare(a, b)
+	})
 	return splitKeys
 }

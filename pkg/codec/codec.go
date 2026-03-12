@@ -22,10 +22,9 @@ import (
 )
 
 var (
-	tablePrefix    = []byte{'t'}
-	metaPrefix     = []byte{'m'}
-	recordPrefix   = []byte("_r")
-	keyspacePrefix = []byte{'x'} // 'x' for keyspace
+	tablePrefix  = []byte{'t'}
+	metaPrefix   = []byte{'m'}
+	recordPrefix = []byte("_r")
 )
 
 const (
@@ -73,21 +72,6 @@ func (k Key) MetaOrTable() (bool, int64) {
 		return false, tableID
 	}
 	return false, 0
-}
-
-// DecodeKeyspaceTxnKey decodes the keyspace transaction key.
-func (k Key) DecodeKeyspaceTxnKey() (bool, uint32) {
-	_, key, err := DecodeBytes(k)
-	if err != nil {
-		return false, 0
-	}
-	if !bytes.HasPrefix(key, keyspacePrefix) {
-		return false, 0
-	}
-	key = key[len(keyspacePrefix):]
-	d := append([]byte{0}, key[:3]...)
-	keyspaceID := binary.BigEndian.Uint32(d)
-	return true, keyspaceID
 }
 
 var pads = make([]byte, encGroupSize)
