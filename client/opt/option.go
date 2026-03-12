@@ -261,6 +261,13 @@ func WithAllowRouterServiceHandleStoreRequest() GetStoreOption {
 	return func(op *GetStoreOp) { op.AllowRouterServiceHandle = true }
 }
 
+// WithPDLeaderHandleStoreRequestOnly means the store request must be handled by PD leader.
+func WithPDLeaderHandleStoreRequestOnly() GetStoreOption {
+	return func(op *GetStoreOp) {
+		op.AllowRouterServiceHandle = false
+	}
+}
+
 // RegionsOp represents available options when operate regions
 type RegionsOp struct {
 	Group          string
@@ -315,6 +322,14 @@ func WithAllowRouterServiceHandle() GetRegionOption {
 // WithOutputMustContainAllKeyRange means the output must contain all key ranges.
 func WithOutputMustContainAllKeyRange() GetRegionOption {
 	return func(op *GetRegionOp) { op.OutputMustContainAllKeyRange = true }
+}
+
+// WithAllowPDLeaderOnly means the request must be handled by PD leader.
+func WithAllowPDLeaderOnly() GetRegionOption {
+	return func(op *GetRegionOp) {
+		op.AllowRouterServiceHandle = false
+		op.AllowFollowerHandle = false
+	}
 }
 
 // MetaStorageOp represents available options when using meta storage client.

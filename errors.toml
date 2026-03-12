@@ -581,6 +581,11 @@ error = '''
 unknown operation
 '''
 
+["PD:keyspace:ErrKeyspaceConfigPreconditionFailed"]
+error = '''
+keyspace config precondition failed, %s
+'''
+
 ["PD:keyspace:ErrKeyspaceExists"]
 error = '''
 keyspace already exists

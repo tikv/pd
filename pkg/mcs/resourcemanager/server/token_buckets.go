@@ -407,11 +407,12 @@ func (gtb *GroupTokenBucket) getFillRateAndBurstLimit() (fillRate uint64, burstL
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(resourceGroupName string, tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
-	if tokenBucket == nil || tokenBucket.Settings == nil {
+	if tokenBucket == nil || tokenBucket.GetSettings() == nil {
 		return &GroupTokenBucket{}
 	}
+	settings := proto.Clone(tokenBucket.GetSettings()).(*rmpb.TokenLimitSettings)
 	return &GroupTokenBucket{
-		Settings: tokenBucket.GetSettings(),
+		Settings: settings,
 		GroupTokenBucketState: GroupTokenBucketState{
 			Tokens:             tokenBucket.GetTokens(),
 			resourceGroupName:  resourceGroupName,
@@ -438,13 +439,22 @@ func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	if tb == nil {
 		return
 	}
-	if setting := proto.Clone(tb.GetSettings()).(*rmpb.TokenLimitSettings); setting != nil {
-		gtb.Settings = setting
-		gtb.settingChanged = true
-	}
+	gtb.applySettings(tb)
 
 	// The settings in token is delta of the last update and now.
 	gtb.Tokens += tb.GetTokens()
+}
+
+// applySettings applies the token bucket settings only without patching token delta.
+func (gtb *GroupTokenBucket) applySettings(tb *rmpb.TokenBucket) {
+	if tb == nil {
+		return
+	}
+	if settings := tb.GetSettings(); settings != nil {
+		setting := proto.Clone(settings).(*rmpb.TokenLimitSettings)
+		gtb.Settings = setting
+		gtb.settingChanged = true
+	}
 }
 
 // init initializes the group token bucket.

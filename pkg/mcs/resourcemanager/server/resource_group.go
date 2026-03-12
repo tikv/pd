@@ -204,7 +204,18 @@ func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLi
 func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 	rg.Lock()
 	defer rg.Unlock()
+	return rg.patchSettingsLocked(metaGroup, true)
+}
 
+// ApplySettings applies the resource group settings only.
+// It does not patch token delta.
+func (rg *ResourceGroup) ApplySettings(metaGroup *rmpb.ResourceGroup) error {
+	rg.Lock()
+	defer rg.Unlock()
+	return rg.patchSettingsLocked(metaGroup, false)
+}
+
+func (rg *ResourceGroup) patchSettingsLocked(metaGroup *rmpb.ResourceGroup, patchTokens bool) error {
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
@@ -220,7 +231,11 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		if settings == nil {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
-		rg.RUSettings.RU.patch(settings.GetRU())
+		if patchTokens {
+			rg.RUSettings.RU.patch(settings.GetRU())
+		} else {
+			rg.RUSettings.RU.applySettings(settings.GetRU())
+		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}

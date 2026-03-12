@@ -38,7 +38,6 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -55,6 +54,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -66,7 +66,19 @@ const (
 	// do this check and re-distribute the primaries if necessary.
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
 	groupPatrolInterval                 = time.Minute
+	// keyspaceGroupMetricsSyncInterval is the interval for syncing keyspace list length metrics from kgm.kgs.
+	keyspaceGroupMetricsSyncInterval = 15 * time.Second
 )
+
+// getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
+// It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
+// create an import cycle with keyspace importing pkg/tso for keyspace list length metric).
+func getBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
 
 type state struct {
 	syncutil.RWMutex
@@ -430,10 +442,11 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
 
-	kgm.wg.Add(3)
+	kgm.wg.Add(4)
 	go kgm.primaryPriorityCheckLoop()
 	go kgm.groupSplitPatroller()
 	go kgm.deletedGroupCleaner()
+	go kgm.keyspaceGroupMetricsSyncer()
 
 	return nil
 }
@@ -839,6 +852,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 
 	if oldGroup != nil {
 		oldKeyspaces = oldGroup.Keyspaces
+		// Keep the existing keyspaces sorted to simplify diff calculation
+		sort.Slice(oldKeyspaces, func(i, j int) bool {
+			return oldKeyspaces[i] < oldKeyspaces[j]
+		})
 		oldKeyspaceLookupTable = oldGroup.KeyspaceLookupTable
 	}
 
@@ -902,7 +919,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				j++
 			}
 		}
-		keyspaceID := keyspace.GetBootstrapKeyspaceID()
+		keyspaceID := getBootstrapKeyspaceID()
 		kgm.checkReserveKeyspace(newGroup, newKeyspaces, keyspaceID)
 	}
 	// Check the split state.
@@ -975,6 +992,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			}
 		}
 		kgm.kgs[groupID] = nil
+		DeleteKeyspaceListLengthMetric(groupID)
 	}
 
 	allocator := kgm.allocators[groupID]
@@ -987,7 +1005,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 }
 
 func (kgm *KeyspaceGroupManager) genDefaultKeyspaceGroupMeta() *endpoint.KeyspaceGroup {
-	keyspaces := []uint32{keyspace.GetBootstrapKeyspaceID()}
+	keyspaces := []uint32{getBootstrapKeyspaceID()}
 	return &endpoint.KeyspaceGroup{
 		ID: constant.DefaultKeyspaceGroupID,
 		Members: []endpoint.KeyspaceGroupMember{{
@@ -1424,6 +1442,9 @@ mergeLoop:
 				zap.Error(err))
 			continue
 		}
+		for _, groupID := range mergeList {
+			DeleteKeyspaceListLengthMetric(groupID)
+		}
 		kgm.metrics.mergeDuration.Observe(time.Since(startTime).Seconds())
 		log.Info("finished merging keyspace group",
 			zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1477,6 +1498,36 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 				continue
 			}
 		}
+	}
+}
+
+// keyspaceGroupMetricsSyncer periodically syncs keyspace list length metrics from
+// in-memory keyspace group state, so metrics stay correct without depending on API calls.
+func (kgm *KeyspaceGroupManager) keyspaceGroupMetricsSyncer() {
+	defer logutil.LogPanic()
+	defer kgm.wg.Done()
+	interval := keyspaceGroupMetricsSyncInterval
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	log.Info("keyspace group metrics syncer is started",
+		zap.Duration("sync-interval", interval))
+	for {
+		select {
+		case <-kgm.ctx.Done():
+			log.Info("keyspace group metrics syncer exited")
+			return
+		case <-ticker.C:
+		}
+		if kgm.metrics == nil {
+			continue
+		}
+		kgm.RLock()
+		for groupID, kg := range kgm.kgs {
+			if kg != nil {
+				getOrInitKeyspaceCountGauge(uint32(groupID)).Set(float64(len(kg.Keyspaces)))
+			}
+		}
+		kgm.RUnlock()
 	}
 }
 
