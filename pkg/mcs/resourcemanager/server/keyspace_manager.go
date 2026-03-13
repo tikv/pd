@@ -560,7 +560,7 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 		}
 
 		// Calculate the basic and burst RU demands for all groups in this priority level.
-		di := krgm.calculateDemandInfo(queue)
+		di := krgm.calculateDemandInfo(queue, serviceLimiter.ServiceLimit)
 		totalRUDemand := di.totalRUDemand()
 		if totalRUDemand == 0 {
 			continue
@@ -571,10 +571,10 @@ func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
 			if di.totalBasicRUDemand >= remainingServiceLimit {
 				// If the basic RU demand already exceeds the remaining service limit, then we can only try to meet the basic needs of
 				// the resource groups through proportional allocation of the fill rate setting.
-				remainingServiceLimit = di.allocateBasicRUDemand(queue, remainingServiceLimit)
+				remainingServiceLimit = di.allocateBasicRUDemand(remainingServiceLimit)
 			} else {
 				// If the basic RU demand can be fully met, we can further satisfy the extra burst RU demand.
-				remainingServiceLimit = di.allocateBurstRUDemand(queue, remainingServiceLimit)
+				remainingServiceLimit = di.allocateBurstRUDemand(remainingServiceLimit)
 			}
 		} else {
 			// If the total real-time RU demand is less than the remaining service limit, no need to divide the service limit,
@@ -638,8 +638,9 @@ func (krgm *keyspaceResourceGroupManager) setZeroFillRateForAllGroups(queue []*R
 	}
 }
 
-func (krgm *keyspaceResourceGroupManager) calculateDemandInfo(queue []*ResourceGroup) *demandInfo {
+func (krgm *keyspaceResourceGroupManager) calculateDemandInfo(queue []*ResourceGroup, serviceLimit float64) *demandInfo {
 	di := &demandInfo{
+		groupInfos:       make([]*groupInfo, 0, len(queue)),
 		basicRUDemandMap: make(map[string]float64, len(queue)),
 		burstRUDemandMap: make(map[string]float64, len(queue)),
 	}
@@ -652,11 +653,21 @@ func (krgm *keyspaceResourceGroupManager) calculateDemandInfo(queue []*ResourceG
 		ruPerSec := grt.getRUPerSec()
 		fillRateSetting := group.getFillRate(true)
 		burstLimitSetting := float64(group.getBurstLimit(true))
+		// Handle specifically if the fill rate and burst limit settings of the default resource group are set to unlimited (i.e., default settings).
+		// This ensures that, during the calculation of `proportionalFillRate`, the unlimited fill rate does not consume nearly the entire service limit quota.
+		if group.Name == DefaultResourceGroupName &&
+			fillRateSetting == UnlimitedRate &&
+			burstLimitSetting == UnlimitedBurstLimit {
+			// Override the fill rate setting of the default resource group to the service limit.
+			fillRateSetting = serviceLimit
+		}
+
 		// Calculate the basic RU demand of the resource group.
 		// Basic demand is the minimum of real-time RU consumption and configured fill rate.
 		basicRUDemand := math.Min(ruPerSec, fillRateSetting)
 		di.totalBasicRUDemand += basicRUDemand
 		di.basicRUDemandMap[group.Name] = basicRUDemand
+
 		// Calculate the burst RU demand of the resource group.
 		burstRUDemand := 0.0
 		// If the burst limit setting is within the range of [0, fillRateSetting],
@@ -669,13 +680,35 @@ func (krgm *keyspaceResourceGroupManager) calculateDemandInfo(queue []*ResourceG
 		}
 		di.totalBurstRUDemand += burstRUDemand
 		di.burstRUDemandMap[group.Name] = burstRUDemand
+
 		// Calculate the total fill rate of all the resource groups in this priority level.
 		di.totalFillRate += fillRateSetting
+
+		di.groupInfos = append(di.groupInfos, &groupInfo{
+			ResourceGroup:     group,
+			fillRateSetting:   fillRateSetting,
+			burstLimitSetting: burstLimitSetting,
+			basicRUDemand:     basicRUDemand,
+			// The normalized RU demand is the basic RU demand divided by the fill rate setting.
+			// This can represent its demand level under the fill rate setting.
+			normalizedRUDemand: basicRUDemand / fillRateSetting,
+		})
 	}
 	return di
 }
 
+// groupInfo can be considered as a snapshot of the resource group at the time of each conciliation.
+type groupInfo struct {
+	*ResourceGroup
+	fillRateSetting    float64
+	burstLimitSetting  float64
+	basicRUDemand      float64
+	normalizedRUDemand float64
+}
+
+// demandInfo is used to collect and calculate the necessary information for the conciliation algorithm.
 type demandInfo struct {
+	groupInfos         []*groupInfo
 	totalFillRate      float64
 	totalBasicRUDemand float64
 	totalBurstRUDemand float64
@@ -688,32 +721,14 @@ func (di *demandInfo) totalRUDemand() float64 {
 }
 
 func (di *demandInfo) allocateBasicRUDemand(
-	queue []*ResourceGroup,
 	remainingServiceLimit float64,
 ) float64 {
-	type groupInfo struct {
-		group              *ResourceGroup
-		basicRUDemand      float64
-		normalizedRUDemand float64
-	}
-	groupInfos := make([]*groupInfo, 0, len(queue))
-	for _, group := range queue {
-		basicRUDemand := di.basicRUDemandMap[group.Name]
-		groupInfos = append(groupInfos, &groupInfo{
-			group:         group,
-			basicRUDemand: basicRUDemand,
-			// The normalized RU demand is the basic RU demand divided by the fill rate setting.
-			// This can represent its demand level under the fill rate setting.
-			normalizedRUDemand: basicRUDemand / group.getFillRate(true),
-		})
-	}
 	// Sort the group infos by the normalized RU demand in ascending order, low demand first.
-	sort.Slice(groupInfos, func(i, j int) bool {
-		return groupInfos[i].normalizedRUDemand < groupInfos[j].normalizedRUDemand
+	sort.Slice(di.groupInfos, func(i, j int) bool {
+		return di.groupInfos[i].normalizedRUDemand < di.groupInfos[j].normalizedRUDemand
 	})
-	for _, gi := range groupInfos {
-		fillRateSetting := gi.group.getFillRate(true)
-		proportionalFillRate := remainingServiceLimit * fillRateSetting / di.totalFillRate
+	for _, gi := range di.groupInfos {
+		proportionalFillRate := remainingServiceLimit * gi.fillRateSetting / di.totalFillRate
 		// Allocate the remaining service limit proportionally based on basic demand.
 		overrideFillRate := math.Min(
 			gi.basicRUDemand,
@@ -721,37 +736,34 @@ func (di *demandInfo) allocateBasicRUDemand(
 		)
 		// Do not allow the resource group to consume extra tokens in this case,
 		// so the override burst limit is set to the same as the override fill rate.
-		gi.group.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
+		gi.overrideFillRateAndBurstLimit(overrideFillRate, int64(overrideFillRate))
 		// Deduct the basic RU demand from the remaining service limit.
 		remainingServiceLimit -= overrideFillRate
-		di.totalFillRate -= fillRateSetting
+		di.totalFillRate -= gi.fillRateSetting
 	}
 	return remainingServiceLimit
 }
 
 func (di *demandInfo) allocateBurstRUDemand(
-	queue []*ResourceGroup,
 	remainingServiceLimit float64,
 ) float64 {
 	remainingServiceLimit -= di.totalBasicRUDemand
 	// The remaining service limit is the burst capacity.
 	burstCapacity := remainingServiceLimit
-	for _, group := range queue {
-		burstRUDemand := di.burstRUDemandMap[group.Name]
-		fillRateSetting := group.getFillRate(true)
+	for _, gi := range di.groupInfos {
+		burstRUDemand := di.burstRUDemandMap[gi.Name]
 		// Allocate the remaining service limit proportionally based on burst demand.
-		overrideBurstLimit := fillRateSetting + burstCapacity*burstRUDemand/di.totalBurstRUDemand
+		overrideBurstLimit := gi.fillRateSetting + burstCapacity*burstRUDemand/di.totalBurstRUDemand
 		// Should not exceed the original burst limit setting if it's greater than 0.
-		burstLimitSetting := float64(group.getBurstLimit(true))
-		if burstLimitSetting > 0 {
-			overrideBurstLimit = math.Min(overrideBurstLimit, burstLimitSetting)
+		if gi.burstLimitSetting > 0 {
+			overrideBurstLimit = math.Min(overrideBurstLimit, gi.burstLimitSetting)
 		}
 		// The basic RU demand is already met, so the override fill rate is set to -1
 		// to allow the resource group to consume as many RUs as they originally need
 		// according to its fill rate setting.
-		group.overrideFillRateAndBurstLimit(-1, int64(overrideBurstLimit))
+		gi.overrideFillRateAndBurstLimit(-1, int64(overrideBurstLimit))
 		// Deduct the burst supply from the remaining service limit.
-		remainingServiceLimit -= math.Max(0, overrideBurstLimit-fillRateSetting)
+		remainingServiceLimit -= math.Max(0, overrideBurstLimit-gi.fillRateSetting)
 	}
 	return remainingServiceLimit
 }
