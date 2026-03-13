@@ -51,15 +51,14 @@ const (
 // Manager is the manager of resource group.
 type Manager struct {
 	syncutil.RWMutex
-	controllerConfigUpdateMu syncutil.Mutex
-	cancel                   context.CancelFunc
-	wg                       sync.WaitGroup
-	srv                      bs.Server
-	writeRole                ResourceGroupWriteRole
-	enableMetadataWatcher    bool
-	controllerConfig         *ControllerConfig
-	krgms                    map[uint32]*keyspaceResourceGroupManager
-	storage                  interface {
+	cancel                context.CancelFunc
+	wg                    sync.WaitGroup
+	srv                   bs.Server
+	writeRole             ResourceGroupWriteRole
+	enableMetadataWatcher bool
+	controllerConfig      *ControllerConfig
+	krgms                 map[uint32]*keyspaceResourceGroupManager
+	storage               interface {
 		// Used to store the resource group settings and states.
 		endpoint.ResourceGroupStorage
 		// Used to get the keyspace meta info.
@@ -328,8 +327,6 @@ func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
 			zap.Error(err))
 		return err
 	}
-	m.controllerConfigUpdateMu.Lock()
-	defer m.controllerConfigUpdateMu.Unlock()
 	m.Lock()
 	m.controllerConfig = controllerConfig
 	m.Unlock()
@@ -404,11 +401,8 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	if len(kp) == 0 {
 		return errors.Errorf("invalid key %s", key)
 	}
-	m.controllerConfigUpdateMu.Lock()
-	defer m.controllerConfigUpdateMu.Unlock()
-	m.RLock()
+	m.Lock()
 	controllerConfig := cloneControllerConfig(m.controllerConfig)
-	m.RUnlock()
 	var config any
 	switch kp[0] {
 	case "request-unit":
@@ -418,21 +412,23 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	}
 	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
 	if err != nil {
+		m.Unlock()
 		return err
 	}
 
 	if !found {
+		m.Unlock()
 		return errors.Errorf("config item %s not found", key)
 	}
 	if updated {
 		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+			m.Unlock()
 			log.Error("save controller config failed", zap.Error(err))
 			return err
 		}
-		m.Lock()
 		m.controllerConfig = controllerConfig
-		m.Unlock()
 	}
+	m.Unlock()
 	if updated {
 		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
 	}
