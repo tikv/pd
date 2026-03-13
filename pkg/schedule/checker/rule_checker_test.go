@@ -1829,11 +1829,11 @@ func (suite *ruleCheckerTestSuite) TestRuleCache() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		if testCase.stillCached {
-			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/assertShouldCache", "return(true)"))
+			re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/schedule/checker/assertShouldCache", func() { panic("cached should be used") }))
 			suite.rc.Check(testCase.region)
 			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/assertShouldCache"))
 		} else {
-			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/assertShouldNotCache", "return(true)"))
+			re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/schedule/checker/assertShouldNotCache", func() { panic("cached shouldn't be used") }))
 			suite.rc.Check(testCase.region)
 			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/assertShouldNotCache"))
 		}

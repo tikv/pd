@@ -125,8 +125,10 @@ func TestExitWatch(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Case1: close the client before the watch loop starts
 	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
+		ch := make(chan struct{})
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/election/delayWatcher", func() { <-ch }))
 		client.Close()
+		close(ch)
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})
@@ -146,8 +148,10 @@ func TestExitWatch(t *testing.T) {
 	})
 	// Case4: close the server before the watch loop starts
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/delayWatcher", `pause`))
+		ch := make(chan struct{})
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/election/delayWatcher", func() { <-ch }))
 		server.Close()
+		close(ch)
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/delayWatcher"))
 		return func() {}
 	})

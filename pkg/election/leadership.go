@@ -292,7 +292,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	lastReceivedResponseTime := time.Now()
 
 	for {
-		failpoint.Inject("delayWatcher", nil)
+		failpoint.InjectCall("delayWatcher")
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.

@@ -226,9 +226,7 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwar
 
 // unaryFollowerMiddleware adds the check of followers enable compared to unaryMiddleware.
 func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, fn forwardFn, allowFollower *bool) (rsp any, err error) {
-	failpoint.Inject("customTimeout", func() {
-		time.Sleep(5 * time.Second)
-	})
+	failpoint.InjectCall("customTimeout")
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
@@ -1484,7 +1482,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	defer func() {
 		grpcutil.RequestCounter("GetRegion", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
-	failpoint.Inject("delayProcess", nil)
+	failpoint.InjectCall("delayProcess")
 	rc, header := s.getRaftCluster(*followerHandle)
 	if header != nil {
 		return &pdpb.GetRegionResponse{Header: header}, nil

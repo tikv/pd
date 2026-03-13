@@ -371,7 +371,7 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 			return err == nil
 		})
 		// Transfer leader back.
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", func() { time.Sleep(time.Second) }))
 		err = suite.cluster.GetServer(newLeaderName).ResignLeader()
 		re.NoError(err)
 		// Should NOT panic here.
@@ -457,7 +457,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 
 func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest", func() { time.Sleep(time.Second) }))
 	var (
 		stopSignal atomic.Bool
 		wg         sync.WaitGroup

@@ -45,7 +45,7 @@ func TestGetVersion(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/memberNil", func() { time.Sleep(1500 * time.Millisecond) }))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/memberNil"))
 	}()

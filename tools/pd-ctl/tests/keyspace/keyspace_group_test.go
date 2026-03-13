@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -61,7 +62,7 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServerLoop", func() { time.Sleep(2 * time.Second) }))
 
 	suite.idAllocator = mockid.NewIDAllocator()
 	// we test the case which exceed the default max txn ops limit in etcd, which is 128.

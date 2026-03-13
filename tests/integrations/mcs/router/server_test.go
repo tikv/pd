@@ -137,7 +137,7 @@ func (suite *serverTestSuite) TearDownTest() {
 
 func (suite *serverTestSuite) TestStoreAPI() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/customTimeout", func() { time.Sleep(5 * time.Second) }))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/customTimeout"))
 	}()

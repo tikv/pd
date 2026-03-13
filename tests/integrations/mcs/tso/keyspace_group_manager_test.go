@@ -463,7 +463,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection() {
 	re := suite.Require()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/pauseFinishSplitBeforeTxn", `pause`))
+	ch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/pauseFinishSplitBeforeTxn", func() { <-ch }))
 
 	// Create the keyspace group `oldID` with keyspaces [444, 555, 666].
 	oldID := suite.allocID()
@@ -520,6 +521,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 	})
 	re.Equal(primary1.GetServingUrls(), primary2.GetServingUrls())
 	// Wait for the keyspace groups to finish the split.
+	close(ch)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/pauseFinishSplitBeforeTxn"))
 	waitFinishSplit(re, suite.pdLeaderServer, oldID, newID, []uint32{444}, []uint32{555, 666})
 }
