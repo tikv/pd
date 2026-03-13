@@ -496,6 +496,12 @@ func (c *AffinityChecker) RecordOpSuccess(op *operator.Operator) {
 	c.recentMergeCache.PutWithTTL(relatedID, nil, recentMergeTTL)
 }
 
+// isRegionPlacementRuleSatisfiedWithBestLocation is an affinity-specific
+// scheduling gate. Besides requiring the region to satisfy placement rules, it
+// also requires that affinity scheduling cannot find a strictly better location
+// under the current topology and that the matched rule's isolation level is
+// satisfied. This is intentionally stricter than filter.IsRegionReplicated and
+// should not be used as a general replicated-state check.
 func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region *core.RegionInfo, isRealRegion bool) bool {
 	// Get the RegionFit for the given Region. If the Region is not a real existing Region but a virtual target state,
 	// use FitRegionWithoutCache to bypass the cache.
