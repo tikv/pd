@@ -74,7 +74,6 @@ func TestUniqueIndex(t *testing.T) {
 	checkUniqueIndex(re, 1)
 	checkUniqueIndex(re, 2)
 	checkUniqueIndex(re, 3)
-
 }
 
 func checkUniqueIndex(re *require.Assertions, uniqueIndex int64) {

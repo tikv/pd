@@ -112,7 +112,6 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
 		t.tsoMux.updateTime = time.Now()
-		t.tsoMux.logical = t.uniqueIndex
 	}
 }
 
