@@ -11,9 +11,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    name: Prepare Build Tag
+    runs-on: self-hosted
+    outputs:
+      tag: ${{ steps.prep.outputs.tag }}
+    steps:
+      - name: Setup build tag
+        id: prep
+        run: |
+          TAG="$(date -u +'%Y%m%d')-${{ github.sha }}"
+          echo "Generated tag: ${TAG}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
   build-arm64:
     name: Build ARM64 Image
     runs-on: arm64
+    needs: ["prepare"]
     env:
       GITHUB_TOKEN: ${{ secrets.GIT_ACTION_BOT }}
     steps:
@@ -35,10 +49,11 @@ jobs:
             GIT_AUTH_TOKEN=${{ secrets.GIT_ACTION_BOT }}
           build-args: |
             GITHUB_TOKEN=${{ secrets.GIT_ACTION_BOT }}
-          tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-arm64
+          tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }}-arm64
   build-amd64:
     name: Build AMD64 Image
     runs-on: amd64
+    needs: ["prepare"]
     env:
       GITHUB_TOKEN: ${{ secrets.GIT_ACTION_BOT }}
     steps:
@@ -60,11 +75,11 @@ jobs:
             GIT_AUTH_TOKEN=${{ secrets.GIT_ACTION_BOT }}
           build-args: |
             GITHUB_TOKEN=${{ secrets.GIT_ACTION_BOT }}
-          tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-amd64
+          tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }}-amd64
   multi-arch:
     name: Create Multi-Architecture Image
     runs-on: amd64
-    needs: ["build-arm64", "build-amd64"]
+    needs: ["prepare", "build-arm64", "build-amd64"]
     steps:
       - name: Login to Harbor
         uses: docker/login-action@v3
@@ -74,12 +89,12 @@ jobs:
           password: ${{ secrets.HARBOR_TOKEN }}
       - name: create-manifest
         run: |
-          docker manifest create hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }} \
-          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-amd64 \
-          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-arm64
+          docker manifest create hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }} \
+          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }}-amd64 \
+          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }}-arm64
       - name: push-manifest
         run: |
-          docker manifest push hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}
+          docker manifest push hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }}
       - name: Login to Harbor (keyspace)
         if: ${{ github.ref == 'refs/heads/release-8.5-keyspace' && github.event_name == 'push' }}
         uses: docker/login-action@v3
@@ -92,9 +107,9 @@ jobs:
         run: |
           # Remove the local manifest entry if it exists
           docker manifest rm hub.pingcap.net/keyspace/pd:v8.5.0 || true
-          
+
           docker manifest create hub.pingcap.net/keyspace/pd:v8.5.0 \
-          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-amd64 \
-          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-arm64
-          
+          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }}-amd64 \
+          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ needs.prepare.outputs.tag }}-arm64
+
           docker manifest push hub.pingcap.net/keyspace/pd:v8.5.0
