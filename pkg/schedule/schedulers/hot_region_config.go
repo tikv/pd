@@ -44,6 +44,13 @@ const (
 )
 
 var defaultPrioritiesConfig = prioritiesConfig{
+	read:        []string{utils.CPUPriority, utils.BytePriority},
+	writeLeader: []string{utils.QueryPriority, utils.BytePriority},
+	writePeer:   []string{utils.BytePriority, utils.KeyPriority},
+}
+
+// because tikv <= 8.5.5 and < 9.0.0-beta.1 does not report cpu information, we will use query and byte as the read priorities
+var queryPrioritiesConfig = prioritiesConfig{
 	read:        []string{utils.QueryPriority, utils.BytePriority},
 	writeLeader: []string{utils.QueryPriority, utils.BytePriority},
 	writePeer:   []string{utils.BytePriority, utils.KeyPriority},
@@ -64,11 +71,13 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 			MinHotByteRate:         100,
 			MinHotKeyRate:          10,
 			MinHotQueryRate:        10,
+			MinHotCPURate:          1,
 			MaxZombieRounds:        3,
 			MaxPeerNum:             1000,
 			ByteRateRankStepRatio:  0.05,
 			KeyRateRankStepRatio:   0.05,
 			QueryRateRankStepRatio: 0.05,
+			CPURateRankStepRatio:   0.05,
 			CountRankStepRatio:     0.01,
 			GreatDecRatio:          0.95,
 			MinorDecRatio:          0.99,
@@ -92,19 +101,21 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerParam {
 		MinHotByteRate:         conf.MinHotByteRate,
 		MinHotKeyRate:          conf.MinHotKeyRate,
 		MinHotQueryRate:        conf.MinHotQueryRate,
+		MinHotCPURate:          conf.MinHotCPURate,
 		MaxZombieRounds:        conf.MaxZombieRounds,
 		MaxPeerNum:             conf.MaxPeerNum,
 		ByteRateRankStepRatio:  conf.ByteRateRankStepRatio,
 		KeyRateRankStepRatio:   conf.KeyRateRankStepRatio,
 		QueryRateRankStepRatio: conf.QueryRateRankStepRatio,
+		CPURateRankStepRatio:   conf.CPURateRankStepRatio,
 		CountRankStepRatio:     conf.CountRankStepRatio,
 		GreatDecRatio:          conf.GreatDecRatio,
 		MinorDecRatio:          conf.MinorDecRatio,
 		SrcToleranceRatio:      conf.SrcToleranceRatio,
 		DstToleranceRatio:      conf.DstToleranceRatio,
-		ReadPriorities:         adjustPrioritiesConfig(conf.lastQuerySupported, conf.ReadPriorities, getReadPriorities),
-		WriteLeaderPriorities:  adjustPrioritiesConfig(conf.lastQuerySupported, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
-		WritePeerPriorities:    adjustPrioritiesConfig(conf.lastQuerySupported, conf.WritePeerPriorities, getWritePeerPriorities),
+		ReadPriorities:         adjustPrioritiesConfig(conf.lastQuerySupported, conf.lastCPUSupported, conf.ReadPriorities, getReadPriorities),
+		WriteLeaderPriorities:  adjustPrioritiesConfig(conf.lastQuerySupported, conf.lastCPUSupported, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
+		WritePeerPriorities:    adjustPrioritiesConfig(conf.lastQuerySupported, conf.lastCPUSupported, conf.WritePeerPriorities, getWritePeerPriorities),
 		StrictPickingStore:     conf.StrictPickingStore,
 		EnableForTiFlash:       conf.EnableForTiFlash,
 		RankFormulaVersion:     conf.getRankFormulaVersionLocked(),
@@ -119,6 +130,7 @@ type hotRegionSchedulerParam struct {
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
 	MinHotQueryRate float64 `json:"min-hot-query-rate"`
+	MinHotCPURate   float64 `json:"min-hot-cpu-rate"`
 	MaxZombieRounds int     `json:"max-zombie-rounds"`
 	MaxPeerNum      int     `json:"max-peer-number"`
 
@@ -127,6 +139,7 @@ type hotRegionSchedulerParam struct {
 	ByteRateRankStepRatio  float64 `json:"byte-rate-rank-step-ratio"`
 	KeyRateRankStepRatio   float64 `json:"key-rate-rank-step-ratio"`
 	QueryRateRankStepRatio float64 `json:"query-rate-rank-step-ratio"`
+	CPURateRankStepRatio   float64 `json:"cpu-rate-rank-step-ratio"`
 	CountRankStepRatio     float64 `json:"count-rank-step-ratio"`
 	GreatDecRatio          float64 `json:"great-dec-ratio"`
 	MinorDecRatio          float64 `json:"minor-dec-ratio"` // only for v1
@@ -161,6 +174,7 @@ type hotRegionSchedulerConfig struct {
 	hotRegionSchedulerParam
 
 	lastQuerySupported bool
+	lastCPUSupported   bool
 }
 
 func (conf *hotRegionSchedulerConfig) encodeConfig() ([]byte, error) {
@@ -229,6 +243,12 @@ func (conf *hotRegionSchedulerConfig) getQueryRateRankStepRatio() float64 {
 	return conf.QueryRateRankStepRatio
 }
 
+func (conf *hotRegionSchedulerConfig) getCPURateRankStepRatio() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.CPURateRankStepRatio
+}
+
 func (conf *hotRegionSchedulerConfig) getCountRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -281,6 +301,12 @@ func (conf *hotRegionSchedulerConfig) getMinHotQueryRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotQueryRate
+}
+
+func (conf *hotRegionSchedulerConfig) getMinHotCPURate() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.MinHotCPURate
 }
 
 func (conf *hotRegionSchedulerConfig) getReadPriorities() []string {
@@ -393,7 +419,7 @@ func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, _ *
 func isPriorityValid(priorities []string) (map[string]bool, error) {
 	priorityMap := map[string]bool{}
 	for _, p := range priorities {
-		if p != utils.BytePriority && p != utils.KeyPriority && p != utils.QueryPriority {
+		if p != utils.BytePriority && p != utils.KeyPriority && p != utils.QueryPriority && p != utils.CPUPriority {
 			return nil, errs.ErrSchedulerConfig.FastGenByArgs("invalid scheduling dimensions")
 		}
 		priorityMap[p] = true
@@ -411,11 +437,15 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 	if _, err := isPriorityValid(conf.ReadPriorities); err != nil {
 		return err
 	}
-	if _, err := isPriorityValid(conf.WriteLeaderPriorities); err != nil {
+	if pm, err := isPriorityValid(conf.WriteLeaderPriorities); err != nil {
 		return err
+	} else if pm[utils.CPUPriority] {
+		return errs.ErrSchedulerConfig.FastGenByArgs("cpu is not allowed to be set in priorities for write-leader-priorities")
 	}
 	if pm, err := isPriorityValid(conf.WritePeerPriorities); err != nil {
 		return err
+	} else if pm[utils.CPUPriority] {
+		return errs.ErrSchedulerConfig.FastGenByArgs("cpu is not allowed to be set in priorities for write-peer-priorities")
 	} else if pm[utils.QueryPriority] {
 		return errs.ErrSchedulerConfig.FastGenByArgs("query is not allowed to be set in priorities for write-peer-priorities")
 	}
@@ -506,6 +536,22 @@ func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCl
 	return querySupport
 }
 
+func (conf *hotRegionSchedulerConfig) checkCPUSupport(cluster sche.SchedulerCluster) bool {
+	version := cluster.GetSchedulerConfig().GetClusterVersion()
+	cpuSupport := versioninfo.IsHotScheduleWithCPUSupported(version)
+	conf.Lock()
+	defer conf.Unlock()
+	if cpuSupport != conf.lastCPUSupported {
+		log.Info("cpu supported changed",
+			zap.Bool("last-cpu-support", conf.lastCPUSupported),
+			zap.String("cluster-version", version.String()),
+			zap.Reflect("config", conf),
+			zap.Reflect("valid-config", conf.getValidConf()))
+		conf.lastCPUSupported = cpuSupport
+	}
+	return cpuSupport
+}
+
 type prioritiesConfig struct {
 	read        []string
 	writeLeader []string
@@ -530,20 +576,32 @@ func getWritePeerPriorities(c *prioritiesConfig) []string {
 	return c.writePeer
 }
 
-// adjustPrioritiesConfig will adjust config for cluster with low version tikv
-// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions
-func adjustPrioritiesConfig(querySupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
+// adjustPrioritiesConfig will adjust config for cluster with low version tikv.
+// because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions.
+// because tikv <= 8.5.5 and < 9.0.0-beta.1 does not report cpu information, we will use query and byte as the read priorities.
+func adjustPrioritiesConfig(querySupport, cpuSupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
 	withQuery := slice.AnyOf(origins, func(i int) bool {
 		return origins[i] == utils.QueryPriority
 	})
+	withCPU := slice.AnyOf(origins, func(i int) bool {
+		return origins[i] == utils.CPUPriority
+	})
 	compatibles := getPriorities(&compatiblePrioritiesConfig)
-	if !querySupport && withQuery {
+	if !querySupport && (withQuery || withCPU) {
 		return compatibles
 	}
 
+	cpuFallback := getPriorities(&queryPrioritiesConfig)
+	if !cpuSupport && withCPU {
+		return cpuFallback
+	}
+
 	defaults := getPriorities(&defaultPrioritiesConfig)
+	if !cpuSupport {
+		defaults = cpuFallback
+	}
 	isLegal := slice.AllOf(origins, func(i int) bool {
-		return origins[i] == utils.BytePriority || origins[i] == utils.KeyPriority || origins[i] == utils.QueryPriority
+		return origins[i] == utils.BytePriority || origins[i] == utils.KeyPriority || origins[i] == utils.QueryPriority || origins[i] == utils.CPUPriority
 	})
 	if len(defaults) == len(origins) && isLegal && origins[0] != origins[1] {
 		return origins

@@ -43,4 +43,5 @@ var MinHotThresholds = [RegionStatCount]float64{
 	RegionWriteBytes:    1 * units.KiB,
 	RegionWriteKeys:     32,
 	RegionWriteQueryNum: 32,
+	RegionReadCPU:       1,
 }

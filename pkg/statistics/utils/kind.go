@@ -21,6 +21,8 @@ const (
 	KeyPriority = "key"
 	// QueryPriority indicates hot-region-scheduler prefer query dim
 	QueryPriority = "query"
+	// CPUPriority indicates hot-region-scheduler prefer cpu dim
+	CPUPriority = "cpu"
 )
 
 // Indicator dims.
@@ -28,6 +30,7 @@ const (
 	ByteDim int = iota
 	KeyDim
 	QueryDim
+	CPUDim
 	DimLen
 )
 
@@ -40,6 +43,8 @@ func StringToDim(name string) int {
 		return KeyDim
 	case QueryPriority:
 		return QueryDim
+	case CPUPriority:
+		return CPUDim
 	}
 	return ByteDim
 }
@@ -53,6 +58,8 @@ func DimToString(dim int) string {
 		return KeyPriority
 	case QueryDim:
 		return QueryPriority
+	case CPUDim:
+		return CPUPriority
 	default:
 		return ""
 	}
@@ -69,6 +76,7 @@ const (
 	RegionWriteBytes
 	RegionWriteKeys
 	RegionWriteQueryNum
+	RegionReadCPU
 
 	RegionStatCount
 )
@@ -87,6 +95,8 @@ func (k RegionStatKind) String() string {
 		return "read_query"
 	case RegionWriteQueryNum:
 		return "write_query"
+	case RegionReadCPU:
+		return "read_cpu"
 	}
 	return "unknown RegionStatKind"
 }
@@ -101,6 +111,7 @@ const (
 	StoreWriteBytes
 	StoreWriteKeys
 	StoreReadQuery
+	StoreReadCPU
 	StoreWriteQuery
 	StoreCPUUsage
 	StoreDiskReadRate
@@ -122,6 +133,8 @@ func (k StoreLoadKind) String() string {
 		return "store_write_bytes"
 	case StoreReadQuery:
 		return "store_read_query"
+	case StoreReadCPU:
+		return "store_read_cpu"
 	case StoreWriteQuery:
 		return "store_write_query"
 	case StoreWriteKeys:
@@ -182,7 +195,7 @@ func (rw RWType) String() string {
 
 var (
 	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum}
-	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueryNum}
+	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueryNum, RegionReadCPU}
 )
 
 // RegionStats returns hot items according to kind
