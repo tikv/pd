@@ -70,7 +70,7 @@ type Config struct {
 	// in etcd after lease time, etcd will expire the leader key
 	// and other servers can campaign the leader again.
 	// Etcd only supports seconds TTL, so here is second too.
-	LeaderLease int64 `toml:"lease" json:"lease"`
+	LeaderLease int64 `toml:"lease" json:"lease" online:"false"`
 
 	// Log related config.
 	Log log.Config `toml:"log" json:"log"`
@@ -89,14 +89,14 @@ type Config struct {
 	TSOProxyRecvFromClientTimeout typeutil.Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
 
 	// TSOSaveInterval is the interval to save timestamp.
-	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval" online:"false"`
 
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
 	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
 	// more TSOs provided, and at the same time consuming more CPU time.
 	// This config is only valid in 1ms to 10s. If it's configured too long or too short, it will
 	// be automatically clamped to the range.
-	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval" online:"false"`
 
 	// Deprecated
 	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
@@ -132,7 +132,7 @@ type Config struct {
 	// TickInterval is the interval for etcd Raft tick.
 	TickInterval typeutil.Duration `toml:"tick-interval" json:"tick-interval"`
 	// ElectionInterval is the interval for etcd Raft election.
-	ElectionInterval typeutil.Duration `toml:"election-interval" json:"election-interval"`
+	ElectionInterval typeutil.Duration `toml:"election-interval" json:"election-interval" online:"false"`
 	// Prevote is true to enable Raft Pre-Vote.
 	// If enabled, Raft runs an additional election phase
 	// to check whether it would get enough votes to win
@@ -497,12 +497,12 @@ func (c *Config) String() string {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
-	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string" online:"false"`
 	// MaxResetTSGap is the max gap to reset the TSO.
 	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
-	KeyType string `toml:"key-type" json:"key-type"`
+	KeyType string `toml:"key-type" json:"key-type" online:"false"`
 	// RuntimeServices is the running extension services.
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.

@@ -43,6 +43,30 @@ func FindJSONFullTagByChildTag(t reflect.Type, tag string) string {
 	return ""
 }
 
+// GetAllOnlineConfigTags is used to get all online config tags recursively
+func GetAllOnlineConfigTags(t reflect.Type) map[string]struct{} {
+	ret := make(map[string]struct{})
+	for i := range t.NumField() {
+		field := t.Field(i)
+		online := field.Tag.Get("online")
+		jsonTag := field.Tag.Get("json")
+		if len(online) > 0 && online == "false" {
+			continue
+		}
+		c := strings.Split(jsonTag, ",")
+		if field.Type.Kind() == reflect.Struct {
+			sub := GetAllOnlineConfigTags(field.Type)
+			for k := range sub {
+				ret[jsonTag+"."+k] = struct{}{}
+				ret[k] = struct{}{}
+			}
+		} else {
+			ret[c[0]] = struct{}{}
+		}
+	}
+	return ret
+}
+
 // FindSameFieldByJSON is used to check whether there is same field between `m` and `v`
 func FindSameFieldByJSON(v any, m map[string]any) bool {
 	t := reflect.TypeOf(v).Elem()
