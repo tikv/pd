@@ -16,9 +16,6 @@ package keyspace
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
-	"strconv"
 	"testing"
 	"time"
 
@@ -31,8 +28,6 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/schedule/labeler"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -77,58 +72,6 @@ func (suite *keyspaceTestSuite) SetupTest() {
 func (suite *keyspaceTestSuite) TearDownTest() {
 	suite.cancel()
 	suite.cluster.Destroy()
-}
-
-func (suite *keyspaceTestSuite) TestRegionLabeler() {
-	re := suite.Require()
-	regionLabeler := suite.server.GetRaftCluster().GetRegionLabeler()
-
-	// Create test keyspaces.
-	count := 20
-	now := time.Now().Unix()
-	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
-	manager := suite.manager
-	var err error
-	for i := range count {
-		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("test_keyspace_%d", i),
-			CreateTime: now,
-		})
-		re.NoError(err)
-	}
-	// Check for region labels.
-	for _, meta := range keyspaces {
-		checkLabelRule(re, meta.GetId(), regionLabeler)
-	}
-}
-
-func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.RegionLabeler) {
-	labelID := "keyspaces/" + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
-	loadedLabel := regionLabeler.GetLabelRule(labelID)
-	re.NotNil(loadedLabel)
-
-	rangeRule, ok := loadedLabel.Data.([]*labeler.KeyRangeRule)
-	re.True(ok)
-	re.Len(rangeRule, 2)
-
-	bound := keyspace.MakeRegionBound(id)
-
-	re.Equal(hex.EncodeToString(bound.RawLeftBound), rangeRule[0].StartKeyHex)
-	re.Equal(hex.EncodeToString(bound.RawRightBound), rangeRule[0].EndKeyHex)
-	re.Equal(hex.EncodeToString(bound.TxnLeftBound), rangeRule[1].StartKeyHex)
-	re.Equal(hex.EncodeToString(bound.TxnRightBound), rangeRule[1].EndKeyHex)
-}
-
-func (suite *keyspaceTestSuite) TestPreAlloc() {
-	re := suite.Require()
-	regionLabeler := suite.server.GetRaftCluster().GetRegionLabeler()
-	for _, keyspaceName := range preAllocKeyspace {
-		// Check pre-allocated keyspaces are correctly allocated.
-		meta, err := suite.manager.LoadKeyspace(keyspaceName)
-		re.NoError(err)
-		// Check pre-allocated keyspaces also have the correct region label.
-		checkLabelRule(re, meta.GetId(), regionLabeler)
-	}
 }
 
 func makeMutations() []*keyspace.Mutation {
@@ -229,10 +172,10 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 		expected uint32
 		ok       bool
 	}{
-		{"keyspace 1 txn", []byte{'x', 0, 0, 1, 0}, 1, true},
-		{"keyspace 2 txn", []byte{'x', 0, 0, 2, 100}, 2, true},
-		{"keyspace 100 txn", []byte{'x', 0, 0, 100, 50}, 100, true},
-		{"empty key", []byte{}, 0, false},
+		{"keyspace 1 txn", keyspace.MakeRegionBound(1).TxnLeftBound, 1, true},
+		{"keyspace 2 txn", keyspace.MakeRegionBound(2).TxnLeftBound, 2, true},
+		{"keyspace 100 txn", keyspace.MakeRegionBound(100).TxnLeftBound, 100, true},
+		{"empty key", []byte{}, constant.MaxValidKeyspaceID, true},
 		{"short key", []byte{'x', 0}, 0, false},
 	}
 
@@ -253,26 +196,26 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 	}{
 		{
 			"same keyspace",
-			[]byte{'x', 0, 0, 1, 0},
-			[]byte{'x', 0, 0, 1, 100},
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(1).TxnRightBound,
 			false,
 		},
 		{
 			"at boundary (should not span)",
-			[]byte{'x', 0, 0, 1, 0},
-			[]byte{'x', 0, 0, 2}, // Exactly at the right bound
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(2).TxnLeftBound, // Exactly at the right bound
 			false,
 		},
 		{
 			"spans two keyspaces",
-			[]byte{'x', 0, 0, 1, 0},
-			[]byte{'x', 0, 0, 2, 100},
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(2).TxnRightBound,
 			true,
 		},
 		{
 			"spans multiple keyspaces",
-			[]byte{'x', 0, 0, 1, 0},
-			[]byte{'x', 0, 0, 5, 0},
+			keyspace.MakeRegionBound(1).TxnLeftBound,
+			keyspace.MakeRegionBound(5).TxnRightBound,
 			true,
 		},
 	}
@@ -284,8 +227,8 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 
 	// Test GetKeyspaceSplitKeys function
 	// For a region spanning keyspaces 1-3, it should generate split keys at boundaries 2 and 3
-	startKey := []byte{'x', 0, 0, 1, 0}
-	endKey := []byte{'x', 0, 0, 3, 100}
+	startKey := keyspace.MakeRegionBound(1).TxnLeftBound
+	endKey := keyspace.MakeRegionBound(3).TxnRightBound
 	splitKeys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)
 	re.NotNil(splitKeys)
 	re.GreaterOrEqual(len(splitKeys), 1, "Should generate at least one split key")

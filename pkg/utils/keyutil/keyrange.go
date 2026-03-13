@@ -127,7 +127,7 @@ func (rs *KeyRanges) Append(startKey, endKey []byte) {
 	})
 }
 
-// Clear clears the KeyRanges.
+// Clean clears the KeyRanges.
 func (rs *KeyRanges) Clean() {
 	for i := range rs.krs {
 		rs.krs[i] = nil // avoid memory leak

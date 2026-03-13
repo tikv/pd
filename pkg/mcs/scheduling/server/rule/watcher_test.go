@@ -103,7 +103,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 			ID:       "test_" + strconv.Itoa(i),
 			Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 			RuleType: labeler.KeyRange,
-			Data:     keyspace.MakeKeyspaceRanges(uint32(i)),
+			Data:     keyspace.MakeKeyRanges(uint32(i)),
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)

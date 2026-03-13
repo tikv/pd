@@ -58,6 +58,37 @@ func (w *keyspaceCheckerWrapperForMerge) KeyspaceExists(id uint32) bool {
 	return true
 }
 
+// GetKeyspaceIDInRange returns one existing keyspace ID in (start, end).
+func (w *keyspaceCheckerWrapperForMerge) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	if start >= end {
+		return 0, false
+	}
+	type keyspaceManagerGetter interface {
+		GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool }
+	}
+	if kg, ok := w.cluster.(keyspaceManagerGetter); ok {
+		if km := kg.GetKeyspaceManager(); km != nil {
+			if getter, ok := any(km).(interface {
+				GetKeyspaceIDInRange(uint32, uint32) (uint32, bool)
+			}); ok {
+				return getter.GetKeyspaceIDInRange(start, end)
+			}
+			for id := start + 1; id < end; id++ {
+				if km.KeyspaceExists(id) {
+					return id, true
+				}
+			}
+			return 0, false
+		}
+	}
+	// If we can't get the keyspace manager, assume keyspaces exist to maintain
+	// backward compatibility.
+	if start+1 < end {
+		return start + 1, true
+	}
+	return 0, false
+}
+
 const (
 	maxTargetRegionSize   = 500
 	maxTargetRegionFactor = 4

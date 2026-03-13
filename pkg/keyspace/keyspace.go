@@ -929,13 +929,33 @@ func (manager *Manager) KeyspaceExists(id uint32) bool {
 	return err == nil && len(name) > 0
 }
 
+// GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
+func (manager *Manager) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	if start >= end {
+		return 0, false
+	}
+	found := false
+	var candidate uint32
+	manager.ScanAllKeyspace(func(keyspaceID uint32, _ string) bool {
+		if keyspaceID >= start && keyspaceID <= end {
+			candidate = keyspaceID
+			found = true
+		}
+		return !found
+	})
+	return candidate, found
+}
+
+// ScanIterator is the type of the function used in ScanAllKeyspace,
+// which takes keyspaceID and name as parameters and returns a boolean indicating whether to stop scanning.
+type ScanIterator func(keyspaceID uint32, name string) bool
+
 // ScanAllKeyspace scans all keyspaces and applies the given function.
-func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string)) {
+func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string) bool) {
 	manager.keyspaceNameLookup.Range(func(key, value any) bool {
 		keyspaceID := key.(uint32)
 		name := value.(string)
-		fn(keyspaceID, name)
-		return true
+		return fn(keyspaceID, name)
 	})
 }
 

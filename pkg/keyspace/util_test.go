@@ -171,16 +171,16 @@ func TestExtractKeyspaceID(t *testing.T) {
 			expectedSuccess: true,
 		},
 		{
-			name:            "keyspace 0 raw mode (not supported)",
+			name:            "keyspace 0 raw mode ",
 			key:             MakeRegionBound(0).RawLeftBound,
 			expectedID:      0,
-			expectedSuccess: false,
+			expectedSuccess: true,
 		},
 		{
 			name:            "keyspace 100 raw mode (not supported)",
 			key:             MakeRegionBound(100).RawLeftBound,
-			expectedID:      0,
-			expectedSuccess: false,
+			expectedID:      100,
+			expectedSuccess: true,
 		},
 		{
 			name:            "non-keyspace key (table key)",
@@ -207,23 +207,50 @@ func TestExtractKeyspaceID(t *testing.T) {
 	}
 }
 
-// mockKeyspaceChecker is a mock implementation of KeyspaceChecker for testing.
+// mockKeyspaceChecker is a mock implementation of Checker for testing.
 type mockKeyspaceChecker struct {
 	existingKeyspaces map[uint32]bool
+	allExist          bool
 }
 
 func (m *mockKeyspaceChecker) KeyspaceExists(id uint32) bool {
+	if m.allExist {
+		return true
+	}
 	if m.existingKeyspaces == nil {
 		return true // Default: all keyspaces exist
 	}
 	return m.existingKeyspaces[id]
 }
 
+func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	if start >= end {
+		return 0, false
+	}
+	if m.allExist {
+		if start+1 < end {
+			return start + 1, true
+		}
+		return 0, false
+	}
+	found := false
+	var candidate uint32
+	for id, exists := range m.existingKeyspaces {
+		if exists && id >= start && id <= end {
+			if !found || id < candidate {
+				candidate = id
+				found = true
+			}
+		}
+	}
+	return candidate, found
+}
+
 func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 	re := require.New(t)
 
 	// Mock checker where all keyspaces exist
-	allExistChecker := &mockKeyspaceChecker{}
+	allExistChecker := &mockKeyspaceChecker{allExist: true}
 
 	// Mock checker where only specific keyspaces exist
 	specificChecker := &mockKeyspaceChecker{
@@ -298,11 +325,23 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			expectedResult: false,
 		},
 		{
-			name:           "span deleted keyspace - should not span",
+			name:           "span deleted keyspace but still cross two existing keyspaces - should span",
 			startKey:       MakeRegionBound(100).TxnLeftBound,
 			endKey:         MakeRegionBound(102).TxnRightBound,
 			checker:        specificChecker, // keyspace 102 doesn't exist
-			expectedResult: false,
+			expectedResult: true,
+		},
+		{
+			name:     "empty end key with sparse existing keyspaces should span when crossing two existing",
+			startKey: MakeRegionBound(101).TxnLeftBound,
+			endKey:   []byte{},
+			checker: &mockKeyspaceChecker{
+				existingKeyspaces: map[uint32]bool{
+					101: true,
+					102: true,
+				},
+			},
+			expectedResult: true,
 		},
 		{
 			name:           "span existing keyspaces - should span",
@@ -314,7 +353,7 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name, func(_ *testing.T) {
 			result := RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, tc.checker)
 			re.Equal(tc.expectedResult, result, "test case: %s", tc.name)
 		})
@@ -325,7 +364,13 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 	re := require.New(t)
 
 	// Mock checker where all keyspaces exist
-	allExistChecker := &mockKeyspaceChecker{}
+	allExistChecker := &mockKeyspaceChecker{allExist: true}
+
+	oneExistChecker := &mockKeyspaceChecker{
+		existingKeyspaces: map[uint32]bool{
+			101: true,
+		},
+	}
 
 	// Mock checker where only specific keyspaces exist
 	specificChecker := &mockKeyspaceChecker{
@@ -342,78 +387,79 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 		startKey          []byte
 		endKey            []byte
 		checker           *mockKeyspaceChecker
-		expectedSplitKeys int
+		expectedSplitKeys [][]byte
 	}{
 		{
-			name:              "empty start and end key",
-			startKey:          []byte{},
-			endKey:            []byte{},
-			checker:           specificChecker,
-			expectedSplitKeys: 6,
+			name:     "span two keyspaces txn mode",
+			startKey: MakeRegionBound(100).TxnLeftBound,
+			endKey:   MakeRegionBound(101).TxnRightBound,
+			checker:  allExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).TxnRightBound,
+			},
 		},
 		{
-			name:              "empty start and end key",
-			startKey:          []byte{},
-			endKey:            []byte{},
-			checker:           allExistChecker,
-			expectedSplitKeys: int(constant.MaxValidKeyspaceID-constant.StartKeyspaceID-2) * 2,
-		},
-		{
-			name:              "empty end key",
-			startKey:          MakeRegionBound(1).TxnLeftBound,
-			endKey:            []byte{},
-			checker:           allExistChecker,
-			expectedSplitKeys: int(constant.MaxValidKeyspaceID-constant.StartKeyspaceID-1) * 2,
+			name:     "span two keyspaces raw mode",
+			startKey: MakeRegionBound(100).RawLeftBound,
+			endKey:   MakeRegionBound(101).RawRightBound,
+			checker:  allExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).RawRightBound,
+			},
 		},
 		{
 			name:              "same keyspace txn mode",
 			startKey:          MakeRegionBound(100).TxnLeftBound,
 			endKey:            MakeRegionBound(100).TxnRightBound,
 			checker:           allExistChecker,
-			expectedSplitKeys: 0,
+			expectedSplitKeys: nil,
 		},
 		{
-			name:              "span two keyspaces txn mode",
-			startKey:          MakeRegionBound(100).TxnLeftBound,
-			endKey:            MakeRegionBound(101).TxnRightBound,
+			name:              "same keyspace raw mode",
+			startKey:          MakeRegionBound(100).RawLeftBound,
+			endKey:            MakeRegionBound(100).RawRightBound,
 			checker:           allExistChecker,
-			expectedSplitKeys: 2,
+			expectedSplitKeys: nil,
 		},
-		// {
-		// 	name:              "span 5 keyspaces txn mode",
-		// 	startKey:          MakeRegionBound(100).TxnLeftBound,
-		// 	endKey:            MakeRegionBound(105).TxnRightBound,
-		// 	checker:           allExistChecker,
-		// 	expectedSplitKeys: 5,
-		// },
-		// {
-		// 	name:              "non-keyspace keys",
-		// 	startKey:          codec.EncodeBytes([]byte{'t', 1, 2, 3}),
-		// 	endKey:            codec.EncodeBytes([]byte{'t', 1, 2, 4}),
-		// 	checker:           allExistChecker,
-		// 	expectedSplitKeys: 0,
-		// },
-		// {
-		// 	name:              "span keyspaces with deleted ones - only split at existing boundaries",
-		// 	startKey:          MakeRegionBound(100).TxnLeftBound,
-		// 	endKey:            MakeRegionBound(105).TxnRightBound,
-		// 	checker:           specificChecker, // only 100, 101, 102 exist
-		// 	expectedSplitKeys: 2,               // split at boundary of 100 and 101 only (102 has no next)
-		// },
+		{
+			name:     "adjacent range with one keyspace",
+			startKey: MakeRegionBound(101).TxnLeftBound,
+			endKey:   MakeRegionBound(102).TxnRightBound,
+			checker:  oneExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(101).TxnRightBound,
+			},
+		},
+		{
+			name:     "empty start and end key with one exist",
+			startKey: []byte{},
+			endKey:   []byte{},
+			checker:  oneExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(101).RawLeftBound,
+				MakeRegionBound(101).RawRightBound,
+				MakeRegionBound(101).TxnLeftBound,
+				MakeRegionBound(101).TxnRightBound,
+			},
+		},
+		{
+			name:     "empty start and end key with three exist",
+			startKey: []byte{},
+			endKey:   []byte{},
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).RawLeftBound,
+				MakeRegionBound(100).RawRightBound,
+				MakeRegionBound(100).TxnLeftBound,
+				MakeRegionBound(100).TxnRightBound,
+			},
+		},
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name, func(_ *testing.T) {
 			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.checker)
-			re.Equal(tc.expectedSplitKeys, len(splitKeys), "test case: %s", tc.name)
-
-			// Verify that the split keys are valid and properly ordered
-			if len(splitKeys) > 0 {
-				for i := 0; i < len(splitKeys)-1; i++ {
-					re.True(string(splitKeys[i]) < string(splitKeys[i+1]),
-						"split keys should be in ascending order for test case: %s", tc.name)
-				}
-			}
+			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
 		})
 	}
 }

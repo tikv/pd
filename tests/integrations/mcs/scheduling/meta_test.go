@@ -153,7 +153,7 @@ func (suite *metaTestSuite) TestKeyspaceMetaWatch() {
 	resp, err := suite.cluster.GetLeaderServer().GetKeyspaceManager().CreateKeyspace(request)
 	re.NoError(err)
 	re.NotNil(resp)
-	re.Greater(resp.Id, uint32(0))
+	re.Positive(resp.Id)
 	bound := keyspace.MakeRegionBound(resp.Id)
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
@@ -161,7 +161,7 @@ func (suite *metaTestSuite) TestKeyspaceMetaWatch() {
 	testutil.Eventually(re, func() bool {
 		kr, exist := tc.GetPrimaryServer().GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
 		if exist {
-			return (bytes.Equal(kr[0], []byte(bound.TxnLeftBound)) && bytes.Equal(kr[1], []byte(bound.TxnRightBound))) || (bytes.Equal(kr[0], []byte(bound.RawLeftBound)) && bytes.Equal(kr[1], []byte(bound.RawRightBound)))
+			return (bytes.Equal(kr[0], bound.TxnLeftBound) && bytes.Equal(kr[1], bound.TxnRightBound)) || (bytes.Equal(kr[0], bound.RawLeftBound) && bytes.Equal(kr[1], bound.RawRightBound))
 		}
 		return false
 	})

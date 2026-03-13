@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -53,8 +54,8 @@ var (
 	}
 	// Only keyspaces in the state specified by allowChangeConfig are allowed to change their config.
 	allowChangeConfig = []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED}
-	RawPrefix         = []byte{'r'}
-	TxnPrefix         = []byte{'x'}
+	rawPrefix         = []byte{'r'}
+	txnPrefix         = []byte{'x'}
 )
 
 // validateID check if keyspace falls within the acceptable range.
@@ -131,10 +132,10 @@ func MakeRegionBound(id uint32) *RegionBound {
 	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
 	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
 	return &RegionBound{
-		RawLeftBound:  codec.EncodeBytes(append(RawPrefix, keyspaceIDBytes[1:]...)),
-		RawRightBound: codec.EncodeBytes(append(RawPrefix, nextKeyspaceIDBytes[1:]...)),
-		TxnLeftBound:  codec.EncodeBytes(append(TxnPrefix, keyspaceIDBytes[1:]...)),
-		TxnRightBound: codec.EncodeBytes(append(TxnPrefix, nextKeyspaceIDBytes[1:]...)),
+		RawLeftBound:  codec.EncodeBytes(append(rawPrefix, keyspaceIDBytes[1:]...)),
+		RawRightBound: codec.EncodeBytes(append(rawPrefix, nextKeyspaceIDBytes[1:]...)),
+		TxnLeftBound:  codec.EncodeBytes(append(txnPrefix, keyspaceIDBytes[1:]...)),
+		TxnRightBound: codec.EncodeBytes(append(txnPrefix, nextKeyspaceIDBytes[1:]...)),
 	}
 }
 
@@ -316,7 +317,7 @@ func ExtractKeyspaceID(key []byte) (uint32, bool) {
 
 	// Check the mod prefix.
 	prefix := decoded[0]
-	if prefix != RawPrefix[0] && prefix != TxnPrefix[0] {
+	if prefix != rawPrefix[0] && prefix != txnPrefix[0] {
 		return 0, false
 	}
 
@@ -327,10 +328,12 @@ func ExtractKeyspaceID(key []byte) (uint32, bool) {
 	return keyspaceID, true
 }
 
-// KeyspaceChecker is an interface to check if a keyspace exists.
-type KeyspaceChecker interface {
+// Checker is an interface to check keyspace existence.
+type Checker interface {
 	// KeyspaceExists checks if a keyspace with the given ID exists.
 	KeyspaceExists(id uint32) bool
+	// GetKeyspaceIDInRange returns one existing keyspace ID in (start, end).
+	GetKeyspaceIDInRange(start, end uint32) (uint32, bool)
 }
 
 // RegionSpansMultipleKeyspaces checks if a region spans across multiple keyspaces.
@@ -339,8 +342,8 @@ type KeyspaceChecker interface {
 // A region [startKey, endKey) spans multiple keyspaces if:
 // 1. startKey and endKey have different keyspace IDs, AND
 // 2. endKey is NOT exactly at the right bound of startKey's keyspace (i.e., not just at the boundary), AND
-// 3. All keyspaces that the region actually spans exist (checked via checker)
-func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker KeyspaceChecker) bool {
+// 3. At least two existing keyspaces are crossed (checked via checker)
+func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
 	var startKeyspaceID uint32
 	var startHasKeyspace bool
 	if len(startKey) == 0 {
@@ -363,25 +366,24 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker KeyspaceCheck
 
 	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
 	// check if endKey is at the exact boundary (right bound of startKeyspace)
-	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace
+	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace.
+	// Otherwise, the neighboring keyspace is occupied and the region spans multiple keyspaces.
 	if endKeyspaceID == startKeyspaceID+1 {
 		startBound := MakeRegionBound(startKeyspaceID)
-		// endKey == TxnRightBound means the region is [startKey, rightBound of startKeyspace)
+		// it means the region is [startKey, rightBound of startKeyspace)
 		// which is still within one keyspace
-		if string(endKey) == string(startBound.TxnRightBound) {
+		if string(endKey) == string(startBound.TxnRightBound) || string(endKey) == string(startBound.RawRightBound) {
 			return false
 		}
+		return true
 	}
 
-	// Check if all keyspaces that the region spans (between start and end, exclusive of endKeyspace)
-	// exist. Since endKey is exclusive, we check up to endKeyspaceID-1.
-	// If any keyspace doesn't exist (deleted), don't enforce the boundary
+	// Check existing keyspaces that the region spans in (start, end).
+	// The boundary should be enforced only when the range crosses at least
+	// two existing keyspaces.
 	if checker != nil {
-		for id := startKeyspaceID; id < endKeyspaceID; id++ {
-			if !checker.KeyspaceExists(id) {
-				return false
-			}
-		}
+		_, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
+		return ok
 	}
 
 	// Otherwise, the region spans multiple keyspaces
@@ -391,7 +393,7 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker KeyspaceCheck
 // GetKeyspaceSplitKeys returns the split keys for a region that spans multiple keyspaces.
 // It returns a list of keys where the region should be split to separate keyspaces.
 // Only returns split keys for keyspaces that exist (checked via checker).
-func GetKeyspaceSplitKeys(startKey, endKey []byte, checker KeyspaceChecker) [][]byte {
+func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 	// If checker is nil, cannot verify keyspace existence
 	if checker == nil {
 		return nil
@@ -417,41 +419,41 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker KeyspaceChecker) [][]
 		return nil
 	}
 
-	var splitKeys [][]byte
-
-	// Generate split keys for each keyspace boundary between start and end
-	// Only include boundaries for keyspaces that exist
-	for currentID := startKeyspaceID; currentID < endKeyspaceID; currentID++ {
-		// Check if the next keyspace exists before adding a split key
-		nextID := currentID + 1
-		if !checker.KeyspaceExists(nextID) {
-			continue
-		}
-
-		bound := MakeRegionBound(currentID)
-		rightBound := bound.TxnRightBound
-
-		// If the right bound is >= endKey, we're done
-		if string(rightBound) >= string(endKey) && len(endKey) != 0 {
-			break
-		}
-
-		// Add this boundary as a split key
-		splitKeys = append(splitKeys, rightBound)
-
-		rightBoundRaw := bound.RawRightBound
-		if string(rightBoundRaw) >= string(endKey) && len(endKey) != 0 {
-			break
-		}
-		splitKeys = append(splitKeys, rightBoundRaw)
-
-		// Safety check to prevent infinite loops
-		if currentID >= constant.MaxValidKeyspaceID {
-			break
+	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
+	// check if endKey is at the exact boundary (right bound of startKeyspace)
+	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace.
+	// Otherwise, continue to generate split keys.
+	if endKeyspaceID == startKeyspaceID+1 {
+		startBound := MakeRegionBound(startKeyspaceID)
+		// it means the region is [startKey, rightBound of startKeyspace)
+		// which is still within one keyspace
+		if string(endKey) == string(startBound.TxnRightBound) || string(endKey) == string(startBound.RawRightBound) {
+			return nil
 		}
 	}
-	slices.SortFunc(splitKeys, func(a, b []byte) int {
-		return bytes.Compare(a, b)
-	})
+
+	// Generate split keys for each keyspace boundary between start and end.
+	// Iterate existing keyspaces in (startKeyspaceID, endKeyspaceID).
+	var splitKeys [][]byte
+	nextID, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
+	if !ok {
+		return nil
+	}
+	bound := MakeRegionBound(nextID)
+	if keyutil.Between(startKey, endKey, bound.RawLeftBound) {
+		splitKeys = append(splitKeys, bound.RawLeftBound)
+	}
+	if keyutil.Between(startKey, endKey, bound.RawRightBound) {
+		splitKeys = append(splitKeys, bound.RawRightBound)
+	}
+	if keyutil.Between(startKey, endKey, bound.TxnLeftBound) {
+		splitKeys = append(splitKeys, bound.TxnLeftBound)
+	}
+	if keyutil.Between(startKey, endKey, bound.TxnRightBound) {
+		splitKeys = append(splitKeys, bound.TxnRightBound)
+	}
+
+	slices.SortFunc(splitKeys, bytes.Compare)
+	splitKeys = slices.CompactFunc(splitKeys, bytes.Equal)
 	return splitKeys
 }

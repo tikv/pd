@@ -2647,12 +2647,12 @@ func (c *RaftCluster) runStorageSizeCollector(
 
 func (c *RaftCluster) collectStorageSize(keyspaceManager *keyspace.Manager) []*storageSizeInfo {
 	regionBoundsMap := make(map[string]*keyspace.RegionBound)
-	start := time.Now()
-	keyspaceManager.ScanAllKeyspace(func(keyspaceID uint32, name string) {
+	keyspaceManager.ScanAllKeyspace(func(keyspaceID uint32, name string) bool {
 		regionBoundsMap[name] = keyspace.MakeRegionBound(keyspaceID)
+		return true
 	})
 
-	start = time.Now()
+	start := time.Now()
 	storageSizeInfoList := make([]*storageSizeInfo, 0, len(regionBoundsMap))
 	// Observe the region stats of each keyspace.
 	for keyspaceName, regionBounds := range regionBoundsMap {

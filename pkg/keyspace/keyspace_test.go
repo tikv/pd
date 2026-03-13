@@ -741,6 +741,22 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	re.Error(err)
 }
 
+func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
+	re := suite.Require()
+	manager := suite.manager
+	requests := makeCreateKeyspaceRequests(5)
+	for _, request := range requests {
+		_, err := manager.CreateKeyspace(request)
+		re.NoError(err)
+	}
+
+	_, ok := manager.GetKeyspaceIDInRange(2, 5)
+	re.True(ok)
+
+	_, ok = manager.GetKeyspaceIDInRange(6, 10)
+	re.False(ok)
+}
+
 // TestUpdateMultipleKeyspace checks that updating multiple keyspace's config simultaneously
 // will be successful.
 func (suite *keyspaceTestSuite) TestUpdateMultipleKeyspace() {

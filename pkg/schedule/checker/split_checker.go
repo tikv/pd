@@ -48,6 +48,37 @@ func (w *keyspaceCheckerWrapper) KeyspaceExists(id uint32) bool {
 	return true
 }
 
+// GetKeyspaceIDInRange returns one existing keyspace ID in (start, end).
+func (w *keyspaceCheckerWrapper) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	if start >= end {
+		return 0, false
+	}
+	type keyspaceManagerGetter interface {
+		GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool }
+	}
+	if kg, ok := w.cluster.(keyspaceManagerGetter); ok {
+		if km := kg.GetKeyspaceManager(); km != nil {
+			if getter, ok := any(km).(interface {
+				GetKeyspaceIDInRange(uint32, uint32) (uint32, bool)
+			}); ok {
+				return getter.GetKeyspaceIDInRange(start, end)
+			}
+			for id := start + 1; id < end; id++ {
+				if km.KeyspaceExists(id) {
+					return id, true
+				}
+			}
+			return 0, false
+		}
+	}
+	// If we can't get the keyspace manager, assume keyspaces exist to maintain
+	// backward compatibility.
+	if start+1 < end {
+		return start + 1, true
+	}
+	return 0, false
+}
+
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
 	PauseController
@@ -80,23 +111,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 
 	start, end := region.GetStartKey(), region.GetEndKey()
-	
-	// First check if the region spans multiple keyspaces
-	// This ensures one region corresponds to one keyspace
-	checker := &keyspaceCheckerWrapper{cluster: c.cluster}
-	if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
-		desc := "keyspace-split-region"
-		keys := keyspace.GetKeyspaceSplitKeys(start, end, checker)
-		if len(keys) > 0 {
-			op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
-			if err != nil {
-				log.Debug("create keyspace split region operator failed", errs.ZapError(err))
-				return nil
-			}
-			return op
-		}
-	}
-	
+
 	// We may consider to merge labeler split keys and rule split keys together
 	// before creating operator. It can help to reduce operator count. However,
 	// handle them separately helps to understand the reason for the split.
@@ -106,6 +121,24 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if len(keys) == 0 && c.cluster.GetCheckerConfig().IsPlacementRulesEnabled() {
 		desc = "rule-split-region"
 		keys = c.ruleManager.GetSplitKeys(start, end)
+	}
+
+	if len(keys) == 0 {
+		// First check if the region spans multiple keyspaces
+		// This ensures one region corresponds to one keyspace
+		checker := &keyspaceCheckerWrapper{cluster: c.cluster}
+		if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
+			desc = "keyspace-split-region"
+			keys = keyspace.GetKeyspaceSplitKeys(start, end, checker)
+			if len(keys) > 0 {
+				op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
+				if err != nil {
+					log.Debug("create keyspace split region operator failed", errs.ZapError(err))
+					return nil
+				}
+				return op
+			}
+		}
 	}
 
 	if len(keys) == 0 {

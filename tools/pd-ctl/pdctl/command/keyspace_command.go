@@ -551,19 +551,7 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges for the keyspace
-	ks := keyspace.MakeKeyspaceRanges(keyspaceID32)
-	rules := make([]*pd.Rule, 0, len(ks.Ranges()))
-	for i, kr := range ks.Ranges() {
-		rules = append(rules, &pd.Rule{
-			GroupID:          fmt.Sprintf("keyspace-%d", keyspaceID),
-			ID:               fmt.Sprintf("keyspace-%d-rule-%d", keyspaceID, i),
-			Role:             pd.Voter,
-			Count:            3, // TODO: make replica count configurable
-			StartKeyHex:      hex.EncodeToString(kr.StartKey),
-			EndKeyHex:        hex.EncodeToString(kr.EndKey),
-			LabelConstraints: labelConstraints,
-		})
-	}
+	keyRanges := keyspace.MakeKeyRanges(keyspaceID32)
 
 	// Create placement rule bundle
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
@@ -571,7 +559,28 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		ID:       groupID,
 		Index:    100,
 		Override: true,
-		Rules:    rules,
+		Rules: []*pd.Rule{
+			{
+				GroupID: groupID,
+				ID:      fmt.Sprintf("keyspace-%d-rule", keyspaceID),
+				Role:    pd.Voter,
+				// TODO: make replica count configurable
+				Count:            3,
+				StartKeyHex:      keyRanges[0].(map[string]any)["start_key"].(string),
+				EndKeyHex:        keyRanges[0].(map[string]any)["end_key"].(string),
+				LabelConstraints: labelConstraints,
+			},
+			{
+				GroupID: groupID,
+				ID:      fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID),
+				Role:    pd.Voter,
+				// TODO: make replica count configurable
+				Count:            3,
+				StartKeyHex:      keyRanges[1].(map[string]any)["start_key"].(string),
+				EndKeyHex:        keyRanges[1].(map[string]any)["end_key"].(string),
+				LabelConstraints: labelConstraints,
+			},
+		},
 	}
 
 	// Send to PD server using PDCli
