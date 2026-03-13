@@ -21,6 +21,8 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/memory"
 )
 
 var testHeap []byte
@@ -107,6 +109,9 @@ func testGetGOGC(re *require.Assertions) {
 		gt := globalTuner.Load()
 		re.Nil(gt)
 	}()
+	re.Nil(globalTuner.Load())
+	Tuning(0)
+	re.Nil(globalTuner.Load())
 	re.Equal(defaultGCPercent, GetGOGCPercent())
 	// init tuner
 	threshold := uint64(units.GiB)
@@ -124,4 +129,106 @@ func testGetGOGC(re *require.Assertions) {
 	percent := uint32(30)
 	(*gt).setGCPercent(percent)
 	re.Equal(percent, GetGOGCPercent())
+}
+
+func TestInitGCTuner(t *testing.T) {
+	re := require.New(t)
+	prevEnable := EnableGOGCTuner.Load()
+	prevMemLimit := memory.ServerMemoryLimit.Load()
+	t.Cleanup(func() {
+		EnableGOGCTuner.Store(prevEnable)
+		memory.ServerMemoryLimit.Store(prevMemLimit)
+		Tuning(0)
+	})
+	// Test initialization
+	totalMem := uint64(1000000000) // 1GB
+	cfg := &Config{
+		EnableGOGCTuner:            true,
+		GCTunerThreshold:           0.6,
+		ServerMemoryLimit:          0.8,
+		ServerMemoryLimitGCTrigger: 0.7,
+	}
+	state := InitGCTuner(totalMem, cfg)
+	re.NotNil(state)
+	re.True(state.EnableGCTuner)
+	re.Equal(uint64(800000000), state.MemoryLimitBytes) // 1GB * 0.8
+	re.Equal(uint64(480000000), state.GCThresholdBytes) // 800MB * 0.6
+	re.Equal(0.7, state.MemoryLimitGCTriggerRatio)
+	re.Equal(uint64(560000000), state.MemoryLimitGCTriggerBytes) // 800MB * 0.7
+	re.True(EnableGOGCTuner.Load())
+}
+
+func TestInitGCTunerWithZeroMemoryLimit(t *testing.T) {
+	re := require.New(t)
+
+	totalMem := uint64(1000000000) // 1GB
+	cfg := &Config{
+		EnableGOGCTuner:            true,
+		GCTunerThreshold:           0.6,
+		ServerMemoryLimit:          0, // zero means use total memory
+		ServerMemoryLimitGCTrigger: 0.7,
+	}
+
+	state := InitGCTuner(totalMem, cfg)
+
+	re.NotNil(state)
+	re.Equal(uint64(0), state.MemoryLimitBytes)
+	re.Equal(uint64(600000000), state.GCThresholdBytes) // 1GB * 0.6 (uses totalMem)
+
+	// Cleanup
+	Tuning(0)
+}
+
+func TestUpdateIfNeeded(t *testing.T) {
+	re := require.New(t)
+
+	totalMem := uint64(1000000000) // 1GB
+	cfg := &Config{
+		EnableGOGCTuner:            true,
+		GCTunerThreshold:           0.6,
+		ServerMemoryLimit:          0.8,
+		ServerMemoryLimitGCTrigger: 0.7,
+	}
+
+	state := InitGCTuner(totalMem, cfg)
+	originalThreshold := state.GCThresholdBytes
+
+	// Test no change
+	updated := state.UpdateIfNeeded(cfg)
+	re.False(updated)
+	re.Equal(originalThreshold, state.GCThresholdBytes)
+
+	// Test GC threshold change
+	cfg.GCTunerThreshold = 0.5
+	updated = state.UpdateIfNeeded(cfg)
+	re.True(updated)
+	re.Equal(uint64(400000000), state.GCThresholdBytes) // 800MB * 0.5
+
+	// Test enable toggle
+	cfg.EnableGOGCTuner = false
+	updated = state.UpdateIfNeeded(cfg)
+	re.True(updated)
+	re.False(state.EnableGCTuner)
+	re.False(EnableGOGCTuner.Load())
+
+	// Test memory limit change
+	cfg.ServerMemoryLimit = 0.9
+	cfg.GCTunerThreshold = 0.5
+	updated = state.UpdateIfNeeded(cfg)
+	re.True(updated)
+	re.Equal(uint64(900000000), state.MemoryLimitBytes) // 1GB * 0.9
+
+	// Test ratio-only change (when bytes might be the same due to rounding)
+	// Set up a scenario where ratio changes but computed bytes are the same
+	cfg.ServerMemoryLimitGCTrigger = 0.8
+	updated = state.UpdateIfNeeded(cfg)
+	re.True(updated)
+	re.Equal(0.8, state.MemoryLimitGCTriggerRatio)
+
+	// Test no change when ratio is the same
+	updated = state.UpdateIfNeeded(cfg)
+	re.False(updated)
+
+	// Cleanup
+	Tuning(0)
 }

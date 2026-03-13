@@ -28,9 +28,12 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	pkgerrors "github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/gctuner"
+	"github.com/tikv/pd/pkg/memory"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
@@ -65,6 +68,11 @@ type Watcher struct {
 	// schedulersController is used to trigger the scheduler's config reloading.
 	// Store as `*schedulers.Controller`.
 	schedulersController atomic.Value
+
+	// GC tuner state for tracking changes
+	gcTunerState *gctuner.State
+
+	totalMem uint64
 }
 
 type persistedConfig struct {
@@ -72,6 +80,7 @@ type persistedConfig struct {
 	Schedule       sc.ScheduleConfig    `json:"schedule"`
 	Replication    sc.ReplicationConfig `json:"replication"`
 	Store          sc.StoreConfig       `json:"store"`
+	Server         *sc.ServerConfig     `json:"pd-server"`
 }
 
 // NewWatcher creates a new watcher to watch the config meta change from PD.
@@ -82,6 +91,15 @@ func NewWatcher(
 	storage storage.Storage,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
+
+	// Get total memory for GC tuner
+	totalMem, err := memory.MemTotal()
+	if err != nil {
+		cancel()
+		return nil, pkgerrors.Wrap(err, "fail to get total memory")
+	}
+	log.Info("memory info", zap.Uint64("total-mem", totalMem))
+
 	cw := &Watcher{
 		ctx:                       ctx,
 		cancel:                    cancel,
@@ -90,8 +108,10 @@ func NewWatcher(
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
 		storage:                   storage,
+		totalMem:                  totalMem,
 	}
-	err := cw.initializeConfigWatcher()
+
+	err = cw.initializeConfigWatcher()
 	if err != nil {
 		cw.Close()
 		return nil, err
@@ -136,6 +156,15 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
+		if cfg.Server != nil {
+			cw.setServerConfig(cfg.Server)
+			gcCfg := cw.GetGCTunerConfig()
+			if cw.gcTunerState != nil {
+				cw.gcTunerState.UpdateIfNeeded(gcCfg)
+			} else {
+				cw.gcTunerState = gctuner.InitGCTuner(cw.totalMem, gcCfg)
+			}
+		}
 		return nil
 	}
 	deleteFn := func(*mvccpb.KeyValue) error {
