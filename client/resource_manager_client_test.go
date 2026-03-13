@@ -265,6 +265,27 @@ func newInnerClientForRMRouteTest(t *testing.T, ctx context.Context, pdAddr stri
 	return inner
 }
 
+func TestRuConfigKeyBytes(t *testing.T) {
+	re := require.New(t)
+	// Test that the key bytes are formatted correctly.
+	key := RuConfigKeyBytes(1)
+	re.Equal("resource_group/keyspace/ruconfig/1", string(key))
+	key = RuConfigKeyBytes(0)
+	re.Equal("resource_group/keyspace/ruconfig/0", string(key))
+	key = RuConfigKeyBytes(4294967295)
+	re.Equal("resource_group/keyspace/ruconfig/4294967295", string(key))
+}
+
+func TestGroupSettingsPathPrefixBytes(t *testing.T) {
+	re := require.New(t)
+	// Null keyspace should use the legacy prefix.
+	prefix := GroupSettingsPathPrefixBytes(constants.NullKeyspaceID)
+	re.Equal("resource_group/settings", string(prefix))
+	// Non-null keyspace should use the keyspace-specific prefix.
+	prefix = GroupSettingsPathPrefixBytes(1)
+	re.Contains(string(prefix), "resource_group/keyspace/settings/1")
+}
+
 func TestResourceManagerWritesUsePDAndReadsUseRM(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
