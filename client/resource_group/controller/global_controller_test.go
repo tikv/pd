@@ -549,12 +549,20 @@ func TestRuVersionWatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mockProvider := newMockResourceGroupProvider()
+	mockProvider := &MockResourceGroupProvider{}
+	// Set up standard expectations
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
+	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+
+	ruConfigKey := pd.RuConfigKeyBytes(1)
+	watchRuConfigChan := make(chan []*meta_storagepb.Event, 1)
+	// Expectation for ru_config watch (3 arguments: ctx, key, opts slice)
+	mockProvider.On("Watch", mock.Anything, ruConfigKey, mock.Anything).Return(watchRuConfigChan, nil)
+	// Expectation for other watches (meta, config)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 1)
 	re.NoError(err)
-
-	watchChan := make(chan []*meta_storagepb.Event, 1)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(watchChan, nil)
 
 	controller.Start(ctx)
 
@@ -562,7 +570,7 @@ func TestRuVersionWatch(t *testing.T) {
 	ruVersion3 := int32(3)
 	config := ruConfigJSON{RuVersion: &ruVersion3}
 	val, _ := json.Marshal(config)
-	watchChan <- []*meta_storagepb.Event{
+	watchRuConfigChan <- []*meta_storagepb.Event{
 		{
 			Type: meta_storagepb.Event_PUT,
 			Kv: &meta_storagepb.KeyValue{
@@ -575,7 +583,7 @@ func TestRuVersionWatch(t *testing.T) {
 	})
 
 	// Case 2: DELETE event
-	watchChan <- []*meta_storagepb.Event{
+	watchRuConfigChan <- []*meta_storagepb.Event{
 		{
 			Type: meta_storagepb.Event_DELETE,
 		},
@@ -585,7 +593,7 @@ func TestRuVersionWatch(t *testing.T) {
 	})
 
 	// Case 3: PUT event with invalid JSON
-	watchChan <- []*meta_storagepb.Event{
+	watchRuConfigChan <- []*meta_storagepb.Event{
 		{
 			Type: meta_storagepb.Event_PUT,
 			Kv: &meta_storagepb.KeyValue{

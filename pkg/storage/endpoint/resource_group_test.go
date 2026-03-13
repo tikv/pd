@@ -19,11 +19,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 func TestRuConfig(t *testing.T) {
 	re := require.New(t)
-	storage := NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	innerKV := kv.NewMemoryKV()
+	storage := NewStorageEndpoint(innerKV, nil)
 
 	// Case 1: Load non-existent RU config
 	config, err := storage.LoadRuConfig(1)
@@ -52,4 +54,21 @@ func TestRuConfig(t *testing.T) {
 	re.Len(configs, 2)
 	re.Equal(int32(3), configs[1])
 	re.Equal(int32(5), configs[2])
+
+	// Case 5: Load with invalid JSON
+	innerKV.Save(keypath.KeyspaceRuConfigPath(3), "invalid-json")
+	_, err = storage.LoadRuConfig(3)
+	re.Error(err)
+
+	// Case 6: Iterate with invalid JSON and invalid keys
+	innerKV.Save(keypath.KeyspaceRuConfigPath(4), "invalid-json")
+	// Insert a key that is not a number
+	innerKV.Save(keypath.KeyspaceRuConfigPrefix()+"abc", "{}")
+
+	err = storage.LoadRuConfigs(func(keyspaceID uint32, config *KeyspaceRuConfig) {
+		// This should not be called for keyspace 4 because of unmarshal error
+		// and not for "abc" because of parse uint error
+		re.NotEqual(uint32(4), keyspaceID)
+	})
+	re.NoError(err)
 }
