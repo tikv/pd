@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,6 +79,8 @@ type ResourceGroupKVInterceptor interface {
 	OnResponseWait(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, time.Duration, error)
 	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
 	IsBackgroundRequest(ctx context.Context, resourceGroupName, requestResource string) bool
+	// GetRuVersion returns the current RU calculation version for this keyspace.
+	GetRuVersion() int32
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
@@ -176,6 +179,10 @@ type ResourceGroupsController struct {
 
 	degradedRUSettings *rmpb.GroupRequestUnitSettings
 
+	// ruVersion stores the current RU calculation version for this keyspace.
+	// 0 means not loaded or not configured (treated as v1).
+	ruVersion atomic.Int32
+
 	wg sync.WaitGroup
 }
 
@@ -241,6 +248,42 @@ func (c *ResourceGroupsController) GetConfig() *RUConfig {
 	return c.safeRuConfig.Load()
 }
 
+// GetRuVersion returns the current RU calculation version for this keyspace.
+// Returns 1 (default v1) if not configured or not loaded yet.
+// This is a pure memory read (atomic load), no network call.
+func (c *ResourceGroupsController) GetRuVersion() int32 {
+	v := c.ruVersion.Load()
+	if v <= 0 {
+		return 1
+	}
+	return v
+}
+
+func (c *ResourceGroupsController) loadRuVersion(ctx context.Context) {
+	key := pd.RuVersionKeyBytes(c.keyspaceID)
+	resp, err := c.provider.Get(ctx, key)
+	if err != nil {
+		log.Warn("[resource group controller] load ru_version failed", zap.Error(err))
+		return
+	}
+	kvs := resp.GetKvs()
+	if len(kvs) == 0 {
+		log.Info("[resource group controller] ru_version not found in PD, using default v1",
+			zap.Uint32("keyspace-id", c.keyspaceID))
+		return
+	}
+	ruVersion, err := strconv.ParseInt(string(kvs[0].GetValue()), 10, 32)
+	if err != nil {
+		log.Warn("[resource group controller] failed to parse ru_version",
+			zap.String("value", string(kvs[0].GetValue())), zap.Error(err))
+		return
+	}
+	c.ruVersion.Store(int32(ruVersion))
+	log.Info("[resource group controller] loaded ru_version from PD",
+		zap.Int32("ru-version", int32(ruVersion)),
+		zap.Uint32("keyspace-id", c.keyspaceID))
+}
+
 // Source List
 const (
 	FromPeriodReport = "period_report"
@@ -298,6 +341,16 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
+
+		// Load initial ru_version and set up watch.
+		c.loadRuVersion(ctx)
+		ruVersionKey := pd.RuVersionKeyBytes(c.keyspaceID)
+		var watchRuVersionChannel chan []*meta_storagepb.Event
+		watchRuVersionChannel, err = c.provider.Watch(ctx, ruVersionKey)
+		if err != nil {
+			log.Warn("watch ru_version failed", zap.Error(err))
+		}
+
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
 		defer watchRetryTimer.Stop()
 
@@ -329,6 +382,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
+						watchRetryTimer.Reset(watchRetryInterval)
+					}
+				}
+			if watchRuVersionChannel == nil {
+					watchRuVersionChannel, err = c.provider.Watch(ctx, ruVersionKey)
+					if err != nil {
+						log.Warn("watch ru_version failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
@@ -439,6 +499,34 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 					}
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
+				}
+			case resp, ok := <-watchRuVersionChannel:
+				if !ok {
+					watchRuVersionChannel = nil
+					watchRetryTimer.Reset(watchRetryInterval)
+					continue
+				}
+				for _, item := range resp {
+					if item.Type == meta_storagepb.Event_PUT {
+						v, err := strconv.ParseInt(string(item.Kv.Value), 10, 32)
+						if err != nil {
+							log.Warn("[resource group controller] failed to parse ru_version from watch event",
+								zap.String("value", string(item.Kv.Value)), zap.Error(err))
+							continue
+						}
+						old := c.ruVersion.Swap(int32(v))
+						if old != int32(v) {
+							log.Info("[resource group controller] ru_version updated",
+								zap.Int32("old", old), zap.Int32("new", int32(v)),
+								zap.Uint32("keyspace-id", c.keyspaceID))
+						}
+					} else if item.Type == meta_storagepb.Event_DELETE {
+						old := c.ruVersion.Swap(0)
+						if old != 0 {
+							log.Info("[resource group controller] ru_version deleted, reset to default v1",
+								zap.Int32("old", old), zap.Uint32("keyspace-id", c.keyspaceID))
+						}
+					}
 				}
 			case gc := <-c.tokenBucketUpdateChan:
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx)

@@ -40,6 +40,7 @@ const (
 	groupSettingsPathPrefix                           = "resource_group/settings"
 	keyspaceResourceGroupSettingPathPrefix            = "resource_group/keyspace/settings/%d"
 	controllerConfigPathPrefix                        = "resource_group/controller"
+	keyspaceRuVersionsPathPrefix                      = "resource_group/keyspace/ru_versions/%d"
 )
 
 // GroupSettingsPathPrefixBytes is used to watch or get resource groups.
@@ -52,6 +53,11 @@ func GroupSettingsPathPrefixBytes(keyspaceID uint32) []byte {
 
 // ControllerConfigPathPrefixBytes is used to watch or get controller config.
 var ControllerConfigPathPrefixBytes = []byte(controllerConfigPathPrefix)
+
+// RuVersionKeyBytes returns the etcd key bytes for the given keyspace's ru_version.
+func RuVersionKeyBytes(keyspaceID uint32) []byte {
+	return fmt.Appendf(nil, keyspaceRuVersionsPathPrefix, keyspaceID)
+}
 
 // ResourceManagerClient manages resource group info and token request.
 type ResourceManagerClient interface {
