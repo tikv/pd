@@ -51,13 +51,14 @@ const (
 // Manager is the manager of resource group.
 type Manager struct {
 	syncutil.RWMutex
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	srv              bs.Server
-	writeRole        ResourceGroupWriteRole
-	controllerConfig *ControllerConfig
-	krgms            map[uint32]*keyspaceResourceGroupManager
-	storage          interface {
+	cancel                context.CancelFunc
+	wg                    sync.WaitGroup
+	srv                   bs.Server
+	writeRole             ResourceGroupWriteRole
+	enableMetadataWatcher bool
+	controllerConfig      *ControllerConfig
+	krgms                 map[uint32]*keyspaceResourceGroupManager
+	storage               interface {
 		// Used to store the resource group settings and states.
 		endpoint.ResourceGroupStorage
 		// Used to get the keyspace meta info.
@@ -88,6 +89,13 @@ type writeRoleProvider interface {
 	GetResourceGroupWriteRole() ResourceGroupWriteRole
 }
 
+// metadataWatcherProvider is an optional provider used by the independent RM service
+// to switch manager bootstrap from full storage load to metadata watcher mode.
+// The PD server does not implement this hook and keeps the legacy bootstrap path.
+type metadataWatcherProvider interface {
+	EnableResourceGroupMetadataWatcher() bool
+}
+
 // NewManager returns a new manager base on the given server,
 // which should implement the `FactoryProvider` interface.
 func NewManager[T factoryProvider](srv bs.Server) *Manager {
@@ -96,8 +104,13 @@ func NewManager[T factoryProvider](srv bs.Server) *Manager {
 	if provider, ok := any(fp).(writeRoleProvider); ok {
 		writeRole = provider.GetResourceGroupWriteRole()
 	}
+	enableMetadataWatcher := false
+	if provider, ok := any(fp).(metadataWatcherProvider); ok {
+		enableMetadataWatcher = provider.EnableResourceGroupMetadataWatcher()
+	}
 	m := &Manager{
 		writeRole:             writeRole,
+		enableMetadataWatcher: enableMetadataWatcher,
 		controllerConfig:      fp.GetControllerConfig(),
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
@@ -212,21 +225,31 @@ func (m *Manager) Init(ctx context.Context) error {
 		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
 
+	// This context is derived from the leader/primary context, it will be canceled
+	// from the outside loop when the leader/primary step down.
+	ctx, m.cancel = context.WithCancel(ctx)
+
 	// re-save the config to make sure the config has been persisted.
 	if m.writeRole.AllowsMetadataWrite() {
 		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+			m.cancel()
 			return err
 		}
 	}
 
 	// Load keyspace resource groups from the storage.
-	if err := m.loadKeyspaceResourceGroups(); err != nil {
-		return err
+	if m.enableMetadataWatcher {
+		if err := m.initializeMetadataWatcher(ctx); err != nil {
+			m.cancel()
+			m.wg.Wait()
+			return err
+		}
+	} else {
+		if err := m.loadKeyspaceResourceGroups(); err != nil {
+			m.cancel()
+			return err
+		}
 	}
-
-	// This context is derived from the leader/primary context, it will be canceled
-	// from the outside loop when the leader/primary step down.
-	ctx, m.cancel = context.WithCancel(ctx)
 	m.wg.Add(1)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
@@ -279,9 +302,85 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	// Initialize the reserved keyspace resource group manager and default resource groups.
 	m.initReserved()
 	// Load service limits from the storage after all resource groups are loaded.
+	return m.loadServiceLimits()
+}
+
+func (m *Manager) loadServiceLimits() error {
 	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
 		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	})
+}
+
+func cloneControllerConfig(cfg *ControllerConfig) *ControllerConfig {
+	if cfg == nil {
+		return nil
+	}
+	cloned := *cfg
+	return &cloned
+}
+
+func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
+	controllerConfig := &ControllerConfig{}
+	if err := json.Unmarshal([]byte(rawValue), controllerConfig); err != nil {
+		log.Error("failed to apply controller config from watcher",
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	m.Lock()
+	m.controllerConfig = controllerConfig
+	m.Unlock()
+	return nil
+}
+
+func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawValue string) error {
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+	krgm.ensureReservedDefaultGroupInCache()
+	if err := krgm.upsertResourceGroupFromRaw(name, rawValue); err != nil {
+		log.Error("failed to apply resource group settings from watcher",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", name),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) applyServiceLimitFromRaw(keyspaceID uint32, rawValue string) error {
+	var serviceLimit float64
+	if err := json.Unmarshal([]byte(rawValue), &serviceLimit); err != nil {
+		log.Error("failed to apply service limit from watcher",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+	krgm.ensureReservedDefaultGroupInCache()
+	krgm.setServiceLimitFromStorage(serviceLimit)
+	return nil
+}
+
+func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawValue string) error {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		// LoopWatcher bootstrap loads keys in lexicographic order, so settings are loaded
+		// before states. If a live watch delivers states before the corresponding settings
+		// create the manager, we drop the update and rely on the next persisted states sync.
+		log.Debug("skip applying resource group states without corresponding manager",
+			zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name))
+		return nil
+	}
+	if err := krgm.setRawStatesIntoResourceGroup(name, rawValue); err != nil {
+		log.Error("failed to apply resource group states from watcher",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", name),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) initReserved() {
@@ -303,12 +402,13 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
+	controllerConfig := cloneControllerConfig(m.controllerConfig)
 	var config any
 	switch kp[0] {
 	case "request-unit":
-		config = &m.controllerConfig.RequestUnit
+		config = &controllerConfig.RequestUnit
 	default:
-		config = m.controllerConfig
+		config = controllerConfig
 	}
 	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
 	if err != nil {
@@ -320,11 +420,16 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		m.Unlock()
 		return errors.Errorf("config item %s not found", key)
 	}
+	if updated {
+		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+			m.Unlock()
+			log.Error("save controller config failed", zap.Error(err))
+			return err
+		}
+		m.controllerConfig = controllerConfig
+	}
 	m.Unlock()
 	if updated {
-		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
-			log.Error("save controller config failed", zap.Error(err))
-		}
 		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
 	}
 	return nil
@@ -334,7 +439,7 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 func (m *Manager) GetControllerConfig() *ControllerConfig {
 	m.RLock()
 	defer m.RUnlock()
-	return m.controllerConfig
+	return cloneControllerConfig(m.controllerConfig)
 }
 
 // AddResourceGroup puts a resource group.
@@ -554,7 +659,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			consumptionInfo.keyspaceName = keyspaceName
 			m.ruCollector.Collect(consumptionInfo)
-			m.metrics.recordConsumption(consumptionInfo, m.controllerConfig, time.Now())
+			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
 			// TODO: maybe we need to distinguish background ru.
 			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)

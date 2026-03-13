@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"sort"
@@ -23,11 +24,14 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -93,17 +97,87 @@ func newKeyspaceResourceGroupManager(
 	}
 }
 
-func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, rawValue string) error {
+func (krgm *keyspaceResourceGroupManager) parseResourceGroupFromRaw(name, rawValue string) (*rmpb.ResourceGroup, error) {
 	group := &rmpb.ResourceGroup{}
 	if err := proto.Unmarshal([]byte(rawValue), group); err != nil {
 		log.Error("failed to parse the keyspace resource group meta info",
 			zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
+		return nil, err
+	}
+	if group.Name != name {
+		err := errors.Errorf("resource group key name %s does not match payload name %s", name, group.Name)
+		log.Error("resource group name mismatch in storage payload",
+			zap.Uint32("keyspace-id", krgm.keyspaceID),
+			zap.String("name", name),
+			zap.String("payload-name", group.Name),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return nil, err
+	}
+	return group, nil
+}
+
+func validateResourceGroupProto(grouppb *rmpb.ResourceGroup) error {
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > maxGroupNameLength {
+		return errs.ErrInvalidGroup
+	}
+	if grouppb.GetPriority() > maxPriority {
+		return errs.ErrInvalidGroup
+	}
+	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, rawValue string) error {
+	group, err := krgm.parseResourceGroupFromRaw(name, rawValue)
+	if err != nil {
 		return err
 	}
+	if err := validateResourceGroupProto(group); err != nil {
+		return err
+	}
+	resourceGroup := FromProtoResourceGroup(group)
 	krgm.Lock()
-	krgm.groups[group.Name] = FromProtoResourceGroup(group)
+	krgm.groups[group.Name] = resourceGroup
 	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(resourceGroup)
 	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string, rawValue string) error {
+	group, err := krgm.parseResourceGroupFromRaw(name, rawValue)
+	if err != nil {
+		return err
+	}
+	if err := validateResourceGroupProto(group); err != nil {
+		return err
+	}
+
+	krgm.RLock()
+	existing := krgm.groups[group.Name]
+	krgm.RUnlock()
+	if existing != nil {
+		if err := existing.ApplySettings(group); err != nil {
+			log.Error("failed to apply the keyspace resource group settings from raw value",
+				zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
+			return err
+		}
+		krgm.syncBurstabilityWithServiceLimit(existing)
+		return nil
+	}
+
+	resourceGroup := FromProtoResourceGroup(group)
+	krgm.Lock()
+	krgm.groups[group.Name] = resourceGroup
+	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(resourceGroup)
+	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromCache(name string) {
+	krgm.Lock()
+	delete(krgm.groups, name)
+	delete(krgm.groupRUTrackers, name)
+	krgm.Unlock()
 }
 
 func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name string, rawValue string) error {
@@ -128,35 +202,60 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	if ok {
 		return
 	}
-	defaultGroup := &ResourceGroup{
-		Name: DefaultResourceGroupName,
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &RequestUnitSettings{
-			RU: &GroupTokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   UnlimitedRate,
-					BurstLimit: UnlimitedBurstLimit,
-				},
-			},
-		},
-		Priority: middlePriority,
-	}
+	defaultGroup := newDefaultResourceGroup()
 	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
 		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
 	}
 }
 
-func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
-	if len(grouppb.Name) == 0 || len(grouppb.Name) > maxGroupNameLength {
-		return errs.ErrInvalidGroup
+func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {
+	krgm.RLock()
+	_, ok := krgm.groups[DefaultResourceGroupName]
+	krgm.RUnlock()
+	if ok {
+		return
 	}
-	// Check the Priority.
-	if grouppb.GetPriority() > maxPriority {
-		return errs.ErrInvalidGroup
+	defaultGroup := newDefaultResourceGroup()
+	inserted := false
+	krgm.Lock()
+	if _, ok := krgm.groups[DefaultResourceGroupName]; !ok {
+		krgm.groups[DefaultResourceGroupName] = defaultGroup
+		inserted = true
+	}
+	krgm.Unlock()
+	if inserted {
+		krgm.syncBurstabilityWithServiceLimit(defaultGroup)
+	}
+}
+
+func newDefaultResourceGroup() *ResourceGroup {
+	return &ResourceGroup{
+		Name: DefaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: NewRequestUnitSettings(DefaultResourceGroupName, &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   UnlimitedRate,
+				BurstLimit: UnlimitedBurstLimit,
+			},
+		}),
+		Priority:      middlePriority,
+		RUConsumption: &rmpb.Consumption{},
+	}
+}
+
+func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserved() {
+	defaultGroup := newDefaultResourceGroup()
+	krgm.Lock()
+	krgm.groups[DefaultResourceGroupName] = defaultGroup
+	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(defaultGroup)
+}
+
+func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	if err := validateResourceGroupProto(grouppb); err != nil {
+		return err
 	}
 	group := FromProtoResourceGroup(grouppb)
-	krgm.Lock()
-	defer krgm.Unlock()
 	if krgm.writeRole.AllowsMetadataWrite() {
 		if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
 			return err
@@ -167,7 +266,10 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.Resourc
 			return err
 		}
 	}
+	krgm.Lock()
 	krgm.groups[group.Name] = group
+	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(group)
 	return nil
 }
 
@@ -204,12 +306,29 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 	if !krgm.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
-		return err
+	if txnStorage, ok := krgm.storage.(interface {
+		RunInTxn(context.Context, func(txn kv.Txn) error) error
+	}); ok {
+		if err := txnStorage.RunInTxn(context.Background(), func(txn kv.Txn) error {
+			if err := txn.Remove(keypath.KeyspaceResourceGroupSettingPath(krgm.keyspaceID, name)); err != nil {
+				return err
+			}
+			return txn.Remove(keypath.KeyspaceResourceGroupStatePath(krgm.keyspaceID, name))
+		}); err != nil {
+			return err
+		}
+	} else {
+		if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
+			return err
+		}
+		if err := krgm.storage.DeleteResourceGroupStates(krgm.keyspaceID, name); err != nil {
+			log.Warn("failed to delete resource group states after deleting settings",
+				zap.Uint32("keyspace-id", krgm.keyspaceID),
+				zap.String("name", name),
+				zap.Error(err))
+		}
 	}
-	krgm.Lock()
-	delete(krgm.groups, name)
-	krgm.Unlock()
+	krgm.deleteResourceGroupFromCache(name)
 	return nil
 }
 
@@ -761,6 +880,19 @@ func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
 	for _, group := range krgm.getMutableResourceGroupList() {
 		group.overrideFillRateAndBurstLimit(-1, -1)
 	}
+}
+
+// Newly loaded groups can miss the initial service-limit replay, so apply the
+// same baseline burst invalidation when they enter the cache.
+func (krgm *keyspaceResourceGroupManager) syncBurstabilityWithServiceLimit(group *ResourceGroup) {
+	if group == nil || group.getBurstLimit(true) >= 0 || group.getOverrideBurstLimit() >= 0 {
+		return
+	}
+	serviceLimit, isSet := krgm.getServiceLimit()
+	if !isSet || serviceLimit <= 0 {
+		return
+	}
+	group.overrideBurstLimit(int64(serviceLimit))
 }
 
 // Since the burstable resource groups won't require tokens from the server anymore,

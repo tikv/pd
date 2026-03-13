@@ -307,6 +307,13 @@ func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
 	return ResourceGroupWriteRoleLegacyAll
 }
 
+// EnableResourceGroupMetadataWatcher reports whether the independent RM service
+// should bootstrap manager state from the metadata watcher.
+// The PD server path does not implement this hook and keeps the legacy bootstrap path.
+func (*Server) EnableResourceGroupMetadataWatcher() bool {
+	return true
+}
+
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	return !s.IsClosed() && s.participant.IsServing()
