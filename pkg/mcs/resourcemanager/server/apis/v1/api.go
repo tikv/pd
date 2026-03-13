@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -132,6 +133,8 @@ func (s *Service) RegisterRouter() {
 	// With keyspace name, it will get/set the service limit of the given keyspace.
 	configEndpoint.POST("/keyspace/service-limit/:keyspace_name", s.setKeyspaceServiceLimit)
 	configEndpoint.GET("/keyspace/service-limit/:keyspace_name", s.getKeyspaceServiceLimit)
+	// With keyspace ID, it will get the service limit of the given keyspace.
+	configEndpoint.GET("/keyspace/service-limit/id/:keyspace_id", s.getKeyspaceServiceLimitByID)
 }
 
 // RegisterPrimaryRouter registers the router of the primary handler.
@@ -405,9 +408,36 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	s.respondKeyspaceServiceLimit(c, keyspaceID, keyspaceName)
+}
+
+// GetKeyspaceServiceLimitByID
+//
+//	@Tags		ResourceManager
+//	@Summary	Get the service limit of the keyspace by ID.
+//	@Param		keyspace_id	path		string	true	"Keyspace ID"
+//	@Success	200			{string}	json	format	of	rmserver.serviceLimiter
+//	@Failure	400			{string}	error
+//	@Failure	404			{string}	error
+//	@Router		/config/keyspace/service-limit/id/{keyspace_id} [get]
+func (s *Service) getKeyspaceServiceLimitByID(c *gin.Context) {
+	keyspaceIDStr := c.Param("keyspace_id")
+	keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	s.respondKeyspaceServiceLimit(c, uint32(keyspaceID), "")
+}
+
+func (s *Service) respondKeyspaceServiceLimit(c *gin.Context, keyspaceID uint32, keyspaceName string) {
 	limiter := s.manager.GetKeyspaceServiceLimiter(keyspaceID)
 	if limiter == nil {
-		c.String(http.StatusNotFound, fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))
+		if len(keyspaceName) > 0 {
+			c.String(http.StatusNotFound, fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))
+			return
+		}
+		c.String(http.StatusNotFound, fmt.Sprintf("keyspace manager not found with keyspace id: %d", keyspaceID))
 		return
 	}
 	c.IndentedJSON(http.StatusOK, limiter)
