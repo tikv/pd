@@ -384,6 +384,90 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	re.NoError(cluster.RemoveStore(3, false))
 }
 
+func TestRemoveTiFlashStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	// Put 3 TiKV stores (minimum for max-replicas=3)
+	for i := uint64(1); i <= 3; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Serving,
+		}
+		re.NoError(cluster.PutMetaStore(store))
+	}
+
+	// Add 2 TiFlash write stores and 1 TiFlash compute store
+	tiflashStores := []*metapb.Store{
+		{
+			Id:            100,
+			Address:       "mock://tiflash-1:3930",
+			StatusAddress: "mock://tiflash-1:20292",
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    "/tiflash",
+			NodeState:     metapb.NodeState_Serving,
+			Labels: []*metapb.StoreLabel{
+				{Key: "engine", Value: "tiflash"},
+			},
+		},
+		{
+			Id:            101,
+			Address:       "mock://tiflash-2:3930",
+			StatusAddress: "mock://tiflash-2:20292",
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    "/tiflash",
+			NodeState:     metapb.NodeState_Serving,
+			Labels: []*metapb.StoreLabel{
+				{Key: "engine", Value: "tiflash"},
+			},
+		},
+		{
+			Id:            102,
+			Address:       "mock://tiflash-compute-1:3930",
+			StatusAddress: "mock://tiflash-compute-1:20292",
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    "/tiflash_compute",
+			NodeState:     metapb.NodeState_Serving,
+			Labels: []*metapb.StoreLabel{
+				{Key: "engine", Value: "tiflash_compute"},
+			},
+		},
+	}
+
+	for _, store := range tiflashStores {
+		re.NoError(cluster.PutMetaStore(store))
+	}
+
+	// Should be able to remove TiFlash write store 100 even with only 3 TiKV stores
+	// (which equals max-replicas=3)
+	err = cluster.RemoveStore(100, false)
+	re.NoError(err, "should be able to remove TiFlash write store with 3 TiKV stores")
+
+	store := cluster.GetStore(100)
+	re.True(store.IsRemoving(), "TiFlash write store should be in removing state")
+
+	// Should also be able to remove TiFlash compute store 102
+	err = cluster.RemoveStore(102, false)
+	re.NoError(err, "should be able to remove TiFlash compute store with 3 TiKV stores")
+
+	store = cluster.GetStore(102)
+	re.True(store.IsRemoving(), "TiFlash compute store should be in removing state")
+}
+
 func TestForceBuryStore(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
