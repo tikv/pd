@@ -165,13 +165,22 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	return nil
 }
 
-// SetKeyspaceRuVersion sets the RU version of the keyspace.
-func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error {
+// SetKeyspaceRuConfig sets the RU config of the keyspace.
+func (m *Manager) SetKeyspaceRuConfig(keyspaceID uint32, config *endpoint.KeyspaceRuConfig) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setRuVersion(ruVersion)
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setRuConfig(config)
 	return nil
+}
+
+// GetKeyspaceRuConfig returns the RU config of the keyspace.
+func (m *Manager) GetKeyspaceRuConfig(keyspaceID uint32) *endpoint.KeyspaceRuConfig {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		return nil
+	}
+	return krgm.getRuConfig()
 }
 
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
@@ -293,9 +302,9 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	}); err != nil {
 		return err
 	}
-	// Load RU versions from the storage.
-	return m.storage.LoadRuVersions(func(keyspaceID uint32, ruVersion int32) {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setRuVersionFromStorage(ruVersion)
+	// Load RU configs from the storage.
+	return m.storage.LoadRuConfigs(func(keyspaceID uint32, config *endpoint.KeyspaceRuConfig) {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setRuConfigFromStorage(config)
 	})
 }
 

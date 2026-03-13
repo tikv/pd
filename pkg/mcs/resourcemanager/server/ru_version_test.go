@@ -21,96 +21,83 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
-func TestRuVersionPersistence(t *testing.T) {
+func TestRuConfigPersistence(t *testing.T) {
 	re := require.New(t)
 	s := storage.NewStorageWithMemoryBackend()
 
-	// Test saving and loading RU version.
-	err := s.SaveRuVersion(1, 2)
+	// Test saving and loading RU config.
+	ruVersion := int32(2)
+	err := s.SaveRuConfig(1, &endpoint.KeyspaceRuConfig{RuVersion: &ruVersion})
 	re.NoError(err)
-	loaded, err := s.LoadRuVersion(1)
+	loaded, err := s.LoadRuConfig(1)
 	re.NoError(err)
-	re.Equal(int32(2), loaded)
+	re.NotNil(loaded)
+	re.NotNil(loaded.RuVersion)
+	re.Equal(int32(2), *loaded.RuVersion)
 
-	// Test loading non-existent RU version returns 0.
-	loaded, err = s.LoadRuVersion(999)
+	// Test loading non-existent RU config returns nil.
+	loaded, err = s.LoadRuConfig(999)
 	re.NoError(err)
-	re.Equal(int32(0), loaded)
+	re.Nil(loaded)
 
-	// Test loading all RU versions.
-	err = s.SaveRuVersion(2, 3)
+	// Test loading all RU configs.
+	ruVersion3 := int32(3)
+	ruVersion1 := int32(1)
+	err = s.SaveRuConfig(2, &endpoint.KeyspaceRuConfig{RuVersion: &ruVersion3})
 	re.NoError(err)
-	err = s.SaveRuVersion(3, 1)
+	err = s.SaveRuConfig(3, &endpoint.KeyspaceRuConfig{RuVersion: &ruVersion1})
 	re.NoError(err)
-	versions := make(map[uint32]int32)
-	err = s.LoadRuVersions(func(keyspaceID uint32, ruVersion int32) {
-		versions[keyspaceID] = ruVersion
+	configs := make(map[uint32]*endpoint.KeyspaceRuConfig)
+	err = s.LoadRuConfigs(func(keyspaceID uint32, config *endpoint.KeyspaceRuConfig) {
+		configs[keyspaceID] = config
 	})
 	re.NoError(err)
-	re.Equal(int32(2), versions[1])
-	re.Equal(int32(3), versions[2])
-	re.Equal(int32(1), versions[3])
+	re.NotNil(configs[1].RuVersion)
+	re.Equal(int32(2), *configs[1].RuVersion)
+	re.NotNil(configs[2].RuVersion)
+	re.Equal(int32(3), *configs[2].RuVersion)
+	re.NotNil(configs[3].RuVersion)
+	re.Equal(int32(1), *configs[3].RuVersion)
 }
 
-func TestServiceLimiterRuVersion(t *testing.T) {
-	re := require.New(t)
-	s := storage.NewStorageWithMemoryBackend()
-
-	// Default RU version should be 0.
-	limiter := newServiceLimiter(1, 0.0, s)
-	re.Equal(int32(0), limiter.getRuVersion())
-
-	// Set RU version and verify it's persisted.
-	limiter.setRuVersion(2)
-	re.Equal(int32(2), limiter.getRuVersion())
-
-	// Verify persistence.
-	loaded, err := s.LoadRuVersion(1)
-	re.NoError(err)
-	re.Equal(int32(2), loaded)
-
-	// Test setRuVersionNoPersist.
-	limiter2 := newServiceLimiter(1, 0.0, s)
-	limiter2.setRuVersionNoPersist(3)
-	re.Equal(int32(3), limiter2.getRuVersion())
-
-	// Test Clone includes RU version.
-	limiter.setRuVersion(5)
-	cloned := limiter.Clone()
-	re.Equal(int32(5), cloned.RuVersion)
-
-	// Test nil limiter returns 0.
-	var nilLimiter *serviceLimiter
-	re.Equal(int32(0), nilLimiter.getRuVersion())
-}
-
-func TestKeyspaceRuVersion(t *testing.T) {
+func TestKeyspaceRuConfig(t *testing.T) {
 	re := require.New(t)
 	s := storage.NewStorageWithMemoryBackend()
 
 	krgm := newKeyspaceResourceGroupManager(1, s, ResourceGroupWriteRoleLegacyAll)
 
-	// Default RU version should be 0.
-	re.Equal(int32(0), krgm.getServiceLimiter().getRuVersion())
+	// Default RU config should be nil.
+	re.Nil(krgm.getRuConfig())
 
-	// Set RU version via keyspace manager.
-	krgm.setRuVersion(2)
-	re.Equal(int32(2), krgm.getServiceLimiter().getRuVersion())
+	// Set RU config via keyspace manager.
+	ruVersion := int32(2)
+	krgm.setRuConfig(&endpoint.KeyspaceRuConfig{RuVersion: &ruVersion})
+	config := krgm.getRuConfig()
+	re.NotNil(config)
+	re.NotNil(config.RuVersion)
+	re.Equal(int32(2), *config.RuVersion)
 
 	// Verify persistence.
-	loaded, err := s.LoadRuVersion(1)
+	loaded, err := s.LoadRuConfig(1)
 	re.NoError(err)
-	re.Equal(int32(2), loaded)
+	re.NotNil(loaded)
+	re.NotNil(loaded.RuVersion)
+	re.Equal(int32(2), *loaded.RuVersion)
 
-	// Test setRuVersionFromStorage (no persist).
+	// Test setRuConfigFromStorage (no persist).
 	krgm2 := newKeyspaceResourceGroupManager(1, s, ResourceGroupWriteRoleLegacyAll)
-	krgm2.setRuVersionFromStorage(3)
-	re.Equal(int32(3), krgm2.getServiceLimiter().getRuVersion())
+	ruVersion3 := int32(3)
+	krgm2.setRuConfigFromStorage(&endpoint.KeyspaceRuConfig{RuVersion: &ruVersion3})
+	config = krgm2.getRuConfig()
+	re.NotNil(config)
+	re.NotNil(config.RuVersion)
+	re.Equal(int32(3), *config.RuVersion)
 }
 
-func TestManagerRuVersion(t *testing.T) {
+func TestManagerRuConfig(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
@@ -121,35 +108,41 @@ func TestManagerRuVersion(t *testing.T) {
 
 	keyspaceID := uint32(1)
 
-	// Get RU version for non-existent keyspace via service limiter clone.
-	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
-	re.Nil(limiter)
+	// Get RU config for non-existent keyspace.
+	config := m.GetKeyspaceRuConfig(keyspaceID)
+	re.Nil(config)
 
-	// Set RU version.
-	err = m.SetKeyspaceRuVersion(keyspaceID, 2)
+	// Set RU config.
+	ruVersion := int32(2)
+	err = m.SetKeyspaceRuConfig(keyspaceID, &endpoint.KeyspaceRuConfig{RuVersion: &ruVersion})
 	re.NoError(err)
-	limiter = m.GetKeyspaceServiceLimiter(keyspaceID)
-	re.NotNil(limiter)
-	re.Equal(int32(2), limiter.RuVersion)
+	config = m.GetKeyspaceRuConfig(keyspaceID)
+	re.NotNil(config)
+	re.NotNil(config.RuVersion)
+	re.Equal(int32(2), *config.RuVersion)
 
-	// Update RU version.
-	err = m.SetKeyspaceRuVersion(keyspaceID, 3)
+	// Update RU config.
+	ruVersion3 := int32(3)
+	err = m.SetKeyspaceRuConfig(keyspaceID, &endpoint.KeyspaceRuConfig{RuVersion: &ruVersion3})
 	re.NoError(err)
-	limiter = m.GetKeyspaceServiceLimiter(keyspaceID)
-	re.Equal(int32(3), limiter.RuVersion)
+	config = m.GetKeyspaceRuConfig(keyspaceID)
+	re.NotNil(config)
+	re.NotNil(config.RuVersion)
+	re.Equal(int32(3), *config.RuVersion)
 
-	// Rebuild the manager and verify RU versions are loaded from storage.
+	// Rebuild the manager and verify RU configs are loaded from storage.
 	s := m.storage
 	m2 := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m2.storage = s
 	err = m2.Init(ctx)
 	re.NoError(err)
-	limiter = m2.GetKeyspaceServiceLimiter(keyspaceID)
-	re.NotNil(limiter)
-	re.Equal(int32(3), limiter.RuVersion)
+	config = m2.GetKeyspaceRuConfig(keyspaceID)
+	re.NotNil(config)
+	re.NotNil(config.RuVersion)
+	re.Equal(int32(3), *config.RuVersion)
 }
 
-func TestManagerRuVersionWriteDisabled(t *testing.T) {
+func TestManagerRuConfigWriteDisabled(t *testing.T) {
 	re := require.New(t)
 	s := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockRoleConfigProvider](&mockRoleConfigProvider{
@@ -162,7 +155,8 @@ func TestManagerRuVersionWriteDisabled(t *testing.T) {
 	err := m.Init(ctx)
 	re.NoError(err)
 
-	err = m.SetKeyspaceRuVersion(1, 2)
+	ruVersion := int32(2)
+	err = m.SetKeyspaceRuConfig(1, &endpoint.KeyspaceRuConfig{RuVersion: &ruVersion})
 	re.Error(err)
 	re.True(IsMetadataWriteDisabledError(err))
 }

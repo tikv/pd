@@ -30,6 +30,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -132,6 +133,11 @@ func (s *Service) RegisterRouter() {
 	// With keyspace name, it will get/set the service limit of the given keyspace.
 	configEndpoint.POST("/keyspace/service-limit/:keyspace_name", s.setKeyspaceServiceLimit)
 	configEndpoint.GET("/keyspace/service-limit/:keyspace_name", s.getKeyspaceServiceLimit)
+	// RU config endpoints (decoupled from service-limit).
+	configEndpoint.POST("/keyspace/ruconfig", s.setKeyspaceRuConfig)
+	configEndpoint.GET("/keyspace/ruconfig", s.getKeyspaceRuConfig)
+	configEndpoint.POST("/keyspace/ruconfig/:keyspace_name", s.setKeyspaceRuConfig)
+	configEndpoint.GET("/keyspace/ruconfig/:keyspace_name", s.getKeyspaceRuConfig)
 }
 
 // RegisterPrimaryRouter registers the router of the primary handler.
@@ -347,7 +353,11 @@ func (s *Service) setControllerConfig(c *gin.Context) {
 // KeyspaceServiceLimitRequest is the request body for setting the service limit of the keyspace.
 type KeyspaceServiceLimitRequest struct {
 	ServiceLimit float64 `json:"service_limit"`
-	RuVersion    int32   `json:"ru_version,omitempty"`
+}
+
+// KeyspaceRuConfigRequest is the request body for setting the RU config of the keyspace.
+type KeyspaceRuConfigRequest struct {
+	RuVersion *int32 `json:"ru_version,omitempty"`
 }
 
 // SetKeyspaceServiceLimit
@@ -377,10 +387,6 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, "service_limit must be non-negative")
 		return
 	}
-	if req.RuVersion < 0 {
-		c.String(http.StatusBadRequest, "ru_version must be non-negative")
-		return
-	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	if err := s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit); err != nil {
 		if rmserver.IsMetadataWriteDisabledError(err) {
@@ -389,18 +395,6 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		}
 		c.String(http.StatusInternalServerError, err.Error())
 		return
-	}
-	// Only update the RU version when explicitly provided (> 0).
-	// 0 means "no update" in the request context.
-	if req.RuVersion > 0 {
-		if err := s.manager.SetKeyspaceRuVersion(keyspaceID, req.RuVersion); err != nil {
-			if rmserver.IsMetadataWriteDisabledError(err) {
-				c.String(http.StatusForbidden, err.Error())
-				return
-			}
-			c.String(http.StatusInternalServerError, err.Error())
-			return
-		}
 	}
 	c.String(http.StatusOK, "Success!")
 }
@@ -428,6 +422,73 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, limiter)
+}
+
+// setKeyspaceRuConfig sets the RU config for the given keyspace.
+//
+//	@Tags		ResourceManager
+//	@Summary	Set the RU config of the keyspace.
+//	@Param		keyspace_name	path	string	true	"Keyspace name"
+//	@Param		config			body	object	true	"json params, KeyspaceRuConfigRequest"
+//	@Success	200				{string}	string	"Success!"
+//	@Failure	400				{string}	error
+//	@Failure	403				{string}	error
+//	@Failure	500				{string}	error
+//	@Router		/config/keyspace/ruconfig/{keyspace_name} [post]
+func (s *Service) setKeyspaceRuConfig(c *gin.Context) {
+	keyspaceName := c.Param("keyspace_name")
+	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	var req KeyspaceRuConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.RuVersion != nil && *req.RuVersion < 0 {
+		c.String(http.StatusBadRequest, "ru_version must be non-negative")
+		return
+	}
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	config := &endpoint.KeyspaceRuConfig{
+		RuVersion: req.RuVersion,
+	}
+	if err := s.manager.SetKeyspaceRuConfig(keyspaceID, config); err != nil {
+		if rmserver.IsMetadataWriteDisabledError(err) {
+			c.String(http.StatusForbidden, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.String(http.StatusOK, "Success!")
+}
+
+// getKeyspaceRuConfig returns the RU config for the given keyspace.
+//
+//	@Tags		ResourceManager
+//	@Summary	Get the RU config of the keyspace.
+//	@Param		keyspace_name	path		string	true	"Keyspace name"
+//	@Success	200				{string}	json	format	of	endpoint.KeyspaceRuConfig
+//	@Failure	400				{string}	error
+//	@Failure	404				{string}	error
+//	@Router		/config/keyspace/ruconfig/{keyspace_name} [get]
+func (s *Service) getKeyspaceRuConfig(c *gin.Context) {
+	keyspaceName := c.Param("keyspace_name")
+	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	config := s.manager.GetKeyspaceRuConfig(keyspaceID)
+	if config == nil {
+		c.IndentedJSON(http.StatusOK, &endpoint.KeyspaceRuConfig{})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, config)
 }
 
 // GetConfig

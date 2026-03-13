@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -259,29 +258,36 @@ func (c *ResourceGroupsController) GetRuVersion() int32 {
 	return v
 }
 
+// ruConfigJSON is the JSON structure for the RU config stored in etcd.
+type ruConfigJSON struct {
+	RuVersion *int32 `json:"ru_version,omitempty"`
+}
+
 func (c *ResourceGroupsController) loadRuVersion(ctx context.Context) {
-	key := pd.RuVersionKeyBytes(c.keyspaceID)
+	key := pd.RuConfigKeyBytes(c.keyspaceID)
 	resp, err := c.provider.Get(ctx, key)
 	if err != nil {
-		log.Warn("[resource group controller] load ru_version failed", zap.Error(err))
+		log.Warn("[resource group controller] load ru_config failed", zap.Error(err))
 		return
 	}
 	kvs := resp.GetKvs()
 	if len(kvs) == 0 {
-		log.Info("[resource group controller] ru_version not found in PD, using default v1",
+		log.Info("[resource group controller] ru_config not found in PD, using default v1",
 			zap.Uint32("keyspace-id", c.keyspaceID))
 		return
 	}
-	ruVersion, err := strconv.ParseInt(string(kvs[0].GetValue()), 10, 32)
-	if err != nil {
-		log.Warn("[resource group controller] failed to parse ru_version",
+	var config ruConfigJSON
+	if err := json.Unmarshal(kvs[0].GetValue(), &config); err != nil {
+		log.Warn("[resource group controller] failed to parse ru_config",
 			zap.String("value", string(kvs[0].GetValue())), zap.Error(err))
 		return
 	}
-	c.ruVersion.Store(int32(ruVersion))
-	log.Info("[resource group controller] loaded ru_version from PD",
-		zap.Int32("ru-version", int32(ruVersion)),
-		zap.Uint32("keyspace-id", c.keyspaceID))
+	if config.RuVersion != nil {
+		c.ruVersion.Store(*config.RuVersion)
+		log.Info("[resource group controller] loaded ru_version from PD",
+			zap.Int32("ru-version", *config.RuVersion),
+			zap.Uint32("keyspace-id", c.keyspaceID))
+	}
 }
 
 // Source List
@@ -342,13 +348,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
 
-		// Load initial ru_version and set up watch.
+		// Load initial ru_config and set up watch.
 		c.loadRuVersion(ctx)
-		ruVersionKey := pd.RuVersionKeyBytes(c.keyspaceID)
-		var watchRuVersionChannel chan []*meta_storagepb.Event
-		watchRuVersionChannel, err = c.provider.Watch(ctx, ruVersionKey)
+		ruConfigKey := pd.RuConfigKeyBytes(c.keyspaceID)
+		var watchRuConfigChannel chan []*meta_storagepb.Event
+		watchRuConfigChannel, err = c.provider.Watch(ctx, ruConfigKey)
 		if err != nil {
-			log.Warn("watch ru_version failed", zap.Error(err))
+			log.Warn("watch ru_config failed", zap.Error(err))
 		}
 
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
@@ -385,10 +391,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
-			if watchRuVersionChannel == nil {
-					watchRuVersionChannel, err = c.provider.Watch(ctx, ruVersionKey)
+			if watchRuConfigChannel == nil {
+					watchRuConfigChannel, err = c.provider.Watch(ctx, ruConfigKey)
 					if err != nil {
-						log.Warn("watch ru_version failed", zap.Error(err))
+						log.Warn("watch ru_config failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
@@ -500,30 +506,32 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
-			case resp, ok := <-watchRuVersionChannel:
+			case resp, ok := <-watchRuConfigChannel:
 				if !ok {
-					watchRuVersionChannel = nil
+					watchRuConfigChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
 					continue
 				}
 				for _, item := range resp {
 					if item.Type == meta_storagepb.Event_PUT {
-						v, err := strconv.ParseInt(string(item.Kv.Value), 10, 32)
-						if err != nil {
-							log.Warn("[resource group controller] failed to parse ru_version from watch event",
+						var config ruConfigJSON
+						if err := json.Unmarshal(item.Kv.Value, &config); err != nil {
+							log.Warn("[resource group controller] failed to parse ru_config from watch event",
 								zap.String("value", string(item.Kv.Value)), zap.Error(err))
 							continue
 						}
-						old := c.ruVersion.Swap(int32(v))
-						if old != int32(v) {
-							log.Info("[resource group controller] ru_version updated",
-								zap.Int32("old", old), zap.Int32("new", int32(v)),
-								zap.Uint32("keyspace-id", c.keyspaceID))
+						if config.RuVersion != nil {
+							old := c.ruVersion.Swap(*config.RuVersion)
+							if old != *config.RuVersion {
+								log.Info("[resource group controller] ru_version updated",
+									zap.Int32("old", old), zap.Int32("new", *config.RuVersion),
+									zap.Uint32("keyspace-id", c.keyspaceID))
+							}
 						}
 					} else if item.Type == meta_storagepb.Event_DELETE {
 						old := c.ruVersion.Swap(0)
 						if old != 0 {
-							log.Info("[resource group controller] ru_version deleted, reset to default v1",
+							log.Info("[resource group controller] ru_config deleted, reset to default v1",
 								zap.Int32("old", old), zap.Uint32("keyspace-id", c.keyspaceID))
 						}
 					}
