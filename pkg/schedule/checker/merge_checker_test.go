@@ -567,7 +567,7 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 
 func makeKeyRanges(keys ...string) []any {
 	var res []any
-	for i := 0; i < len(keys); i += 2 {
+	for i := 0; i+1 < len(keys); i += 2 {
 		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res

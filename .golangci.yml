@@ -77,9 +77,17 @@ linters:
         limitations under the License.
     gosec:
       excludes:
-        - G402
-        - G404
-        - G115
+        - G115 # Integer overflow in type conversions — too many false positives in Go's type system
+        - G118 # context cancel not called — can't trace cancel through goroutines/sync.Once/structs/returns
+        - G120 # Form data without body size limit — PD HTTP endpoints are internal admin APIs
+        - G123 # TLS session resumption may bypass VerifyPeerCertificate — CN check is additional to standard TLS
+        - G402 # TLS MinVersion — PD supports configurable TLS for backward compatibility
+        - G404 # Insecure random source — already banned by depguard, uses math/rand/v2
+        - G602 # Slice index out of range — high false positive rate, Go has runtime bounds checking
+        - G702 # Command injection taint — only in dev tools executing self-built test binaries
+        - G704 # SSRF taint — PD is a distributed coordinator that forwards requests by design
+        - G705 # XSS taint — PD is a JSON API service, not an HTML web app
+        - G706 # Log injection taint — only in CLI tools logging their own arguments
     perfsprint:
       string-format: false
     revive:

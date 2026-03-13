@@ -823,7 +823,7 @@ func (mc *Cluster) PutRegionStores(id uint64, stores ...uint64) {
 // PutStoreWithLabels mocks method.
 func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 	labels := make(map[string]string)
-	for i := 0; i < len(labelPairs); i += 2 {
+	for i := 0; i+1 < len(labelPairs); i += 2 {
 		labels[labelPairs[i]] = labelPairs[i+1]
 	}
 	mc.AddLabelsStore(id, 0, labels)
