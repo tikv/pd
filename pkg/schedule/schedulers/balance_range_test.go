@@ -15,12 +15,17 @@
 package schedulers
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/unrolled/render"
 
 	"github.com/pingcap/failpoint"
 
@@ -515,4 +520,32 @@ func TestPersistFail(t *testing.T) {
 	conf.jobs[0].Finish = &finishedTime
 	re.ErrorContains(conf.gcLocked(), errMsg)
 	re.Len(conf.jobs, 1)
+}
+
+func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
+	re := require.New(t)
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            make([]*balanceRangeSchedulerJob, 0),
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	handler := &balanceRangeSchedulerHandler{
+		config: conf,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	body, err := json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    1,
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+	})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPut, "/job", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	re.NotPanics(func() {
+		handler.addJob(resp, req)
+	})
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Empty(conf.jobs)
 }
