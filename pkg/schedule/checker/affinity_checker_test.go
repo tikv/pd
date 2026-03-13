@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	scheconfig "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -2194,6 +2195,34 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re.NoError(tc.GetRuleManager().SetRule(rule))
 	ops = checker.Check(region)
 	re.Nil(ops)
+}
+
+// TestAffinityStrictCheckDivergesFromIsRegionReplicated documents the intended
+// semantic split: affinity scheduling may reject a region that is already
+// placement-rule replicated when a strictly better location still exists.
+func TestAffinityStrictCheckDivergesFromIsRegionReplicated(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetLocationLabels([]string{"zone", "host"})
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetEnablePlacementRules(true)
+	tc.SetMaxReplicas(3)
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h3"})
+
+	checker := newTestAffinityChecker(ctx, tc, opt)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	re.True(filter.IsRegionReplicated(tc, region))
+	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 }
 
 // TestAffinityMergeCheckPeerStoreMismatch tests that merge is rejected when peer stores don't match.
