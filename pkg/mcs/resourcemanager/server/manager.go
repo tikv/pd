@@ -51,13 +51,14 @@ const (
 // Manager is the manager of resource group.
 type Manager struct {
 	syncutil.RWMutex
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	srv              bs.Server
-	writeRole        ResourceGroupWriteRole
-	controllerConfig *ControllerConfig
-	krgms            map[uint32]*keyspaceResourceGroupManager
-	storage          interface {
+	cancel                context.CancelFunc
+	wg                    sync.WaitGroup
+	srv                   bs.Server
+	writeRole             ResourceGroupWriteRole
+	enableMetadataWatcher bool
+	controllerConfig      *ControllerConfig
+	krgms                 map[uint32]*keyspaceResourceGroupManager
+	storage               interface {
 		// Used to store the resource group settings and states.
 		endpoint.ResourceGroupStorage
 		// Used to get the keyspace meta info.
@@ -88,6 +89,11 @@ type writeRoleProvider interface {
 	GetResourceGroupWriteRole() ResourceGroupWriteRole
 }
 
+// metadataWatcherProvider is an optional provider used to toggle RM metadata watcher.
+type metadataWatcherProvider interface {
+	EnableResourceGroupMetadataWatcher() bool
+}
+
 // NewManager returns a new manager base on the given server,
 // which should implement the `FactoryProvider` interface.
 func NewManager[T factoryProvider](srv bs.Server) *Manager {
@@ -96,8 +102,13 @@ func NewManager[T factoryProvider](srv bs.Server) *Manager {
 	if provider, ok := any(fp).(writeRoleProvider); ok {
 		writeRole = provider.GetResourceGroupWriteRole()
 	}
+	enableMetadataWatcher := false
+	if provider, ok := any(fp).(metadataWatcherProvider); ok {
+		enableMetadataWatcher = provider.EnableResourceGroupMetadataWatcher()
+	}
 	m := &Manager{
 		writeRole:             writeRole,
+		enableMetadataWatcher: enableMetadataWatcher,
 		controllerConfig:      fp.GetControllerConfig(),
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
@@ -220,8 +231,14 @@ func (m *Manager) Init(ctx context.Context) error {
 	}
 
 	// Load keyspace resource groups from the storage.
-	if err := m.loadKeyspaceResourceGroups(); err != nil {
-		return err
+	if m.enableMetadataWatcher {
+		if err := m.initializeMetadataWatcher(ctx); err != nil {
+			return err
+		}
+	} else {
+		if err := m.loadKeyspaceResourceGroups(); err != nil {
+			return err
+		}
 	}
 
 	// This context is derived from the leader/primary context, it will be canceled
@@ -279,6 +296,10 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	// Initialize the reserved keyspace resource group manager and default resource groups.
 	m.initReserved()
 	// Load service limits from the storage after all resource groups are loaded.
+	return m.loadServiceLimits()
+}
+
+func (m *Manager) loadServiceLimits() error {
 	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
 		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	})

@@ -306,6 +306,100 @@ func TestAddResourceGroupFromRaw(t *testing.T) {
 	re.Error(err)
 }
 
+func TestUpsertResourceGroupFromRaw(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	group := &rmpb.ResourceGroup{
+		Name:     "test_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 5,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+			},
+		},
+	}
+	re.NoError(krgm.addResourceGroup(group))
+
+	mutableGroup := krgm.getMutableResourceGroup(group.Name)
+	re.NotNil(mutableGroup)
+	mutableGroup.RUSettings.RU.Tokens = 123.45
+	mutableGroup.RUConsumption = &rmpb.Consumption{RRU: 12, WRU: 34}
+
+	updatedGroup := &rmpb.ResourceGroup{
+		Name:     group.Name,
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 9,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   500,
+					BurstLimit: 600,
+				},
+			},
+		},
+	}
+	rawUpdated, err := proto.Marshal(updatedGroup)
+	re.NoError(err)
+	re.NoError(krgm.upsertResourceGroupFromRaw(group.Name, string(rawUpdated)))
+
+	current := krgm.getMutableResourceGroup(group.Name)
+	re.NotNil(current)
+	re.Equal(uint32(9), current.Priority)
+	re.Equal(float64(500), current.getFillRate())
+	re.Equal(int64(600), current.getBurstLimit())
+	re.InDelta(123.45, current.RUSettings.RU.Tokens, 0.001)
+	re.Equal(float64(12), current.RUConsumption.RRU)
+	re.Equal(float64(34), current.RUConsumption.WRU)
+
+	newGroup := &rmpb.ResourceGroup{
+		Name:     "new_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 3,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   111,
+					BurstLimit: 222,
+				},
+			},
+		},
+	}
+	rawNew, err := proto.Marshal(newGroup)
+	re.NoError(err)
+	re.NoError(krgm.upsertResourceGroupFromRaw(newGroup.GetName(), string(rawNew)))
+	re.NotNil(krgm.getMutableResourceGroup(newGroup.GetName()))
+
+	err = krgm.upsertResourceGroupFromRaw(group.GetName(), "invalid_data")
+	re.Error(err)
+}
+
+func TestDeleteResourceGroupFromCache(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	group := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{},
+			},
+		},
+	}
+	re.NoError(krgm.addResourceGroup(group))
+	krgm.groupRUTrackers[group.Name] = newGroupRUTracker()
+
+	krgm.deleteResourceGroupFromCache(group.Name)
+	re.Nil(krgm.getMutableResourceGroup(group.Name))
+	_, ok := krgm.groupRUTrackers[group.Name]
+	re.False(ok)
+}
+
 func TestSetRawStatesIntoResourceGroup(t *testing.T) {
 	re := require.New(t)
 
