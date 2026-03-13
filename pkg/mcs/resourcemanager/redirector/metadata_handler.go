@@ -34,12 +34,12 @@ func newRMMetadataHandler(provider *rmMetadataManagerProvider) (http.Handler, er
 	if err != nil {
 		return nil, err
 	}
-	return newRMMetadataHandlerWithStore(metadataapi.NewManagerStore(manager)), nil
+	return newRMMetadataHandlerWithConfigStore(metadataapi.NewManagerStore(manager)), nil
 }
 
-func newRMMetadataHandlerWithStore(store metadataapi.Store) http.Handler {
+func newRMMetadataHandlerWithConfigStore(configStore metadataapi.ConfigStore) http.Handler {
 	handler := &rmMetadataHandler{
-		configService: metadataapi.NewConfigService(store),
+		configService: metadataapi.NewConfigService(configStore),
 		engine:        gin.New(),
 	}
 	handler.engine.Use(gin.Recovery())

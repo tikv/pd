@@ -183,12 +183,12 @@ func TestConfigServiceMetadataWriteDisabledReturns403(t *testing.T) {
 	re.Equal(http.StatusForbidden, resp.Code)
 }
 
-func newTestHTTPHandler(store Store) http.Handler {
+func newTestHTTPHandler(configStore ConfigStore) http.Handler {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	root := engine.Group("/resource-manager/api/v1/")
 	configEndpoint := root.Group("/config")
-	NewConfigService(store).Register(configEndpoint)
+	NewConfigService(configStore).Register(configEndpoint)
 	return engine
 }
 

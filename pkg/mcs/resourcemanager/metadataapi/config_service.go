@@ -35,8 +35,8 @@ type KeyspaceServiceLimitRequest struct {
 	ServiceLimit float64 `json:"service_limit"`
 }
 
-// Store abstracts metadata operations for config APIs.
-type Store interface {
+// ConfigStore abstracts metadata operations for config APIs.
+type ConfigStore interface {
 	AddResourceGroup(*rmpb.ResourceGroup) error
 	ModifyResourceGroup(*rmpb.ResourceGroup) error
 	GetResourceGroup(uint32, string, bool) (*rmserver.ResourceGroup, error)
@@ -49,12 +49,12 @@ type Store interface {
 	LookupKeyspaceServiceLimit(uint32) (any, bool)
 }
 
-// ManagerStore adapts rmserver.Manager to Store.
+// ManagerStore adapts rmserver.Manager to ConfigStore.
 type ManagerStore struct {
 	manager *rmserver.Manager
 }
 
-// NewManagerStore builds a Store from rmserver.Manager.
+// NewManagerStore builds a ConfigStore from rmserver.Manager.
 func NewManagerStore(manager *rmserver.Manager) *ManagerStore {
 	return &ManagerStore{manager: manager}
 }
@@ -119,12 +119,12 @@ func (s *ManagerStore) LookupKeyspaceServiceLimit(keyspaceID uint32) (any, bool)
 
 // ConfigService serves resource-manager /config metadata APIs.
 type ConfigService struct {
-	store Store
+	configStore ConfigStore
 }
 
 // NewConfigService creates a metadata config service.
-func NewConfigService(store Store) *ConfigService {
-	return &ConfigService{store: store}
+func NewConfigService(configStore ConfigStore) *ConfigService {
+	return &ConfigService{configStore: configStore}
 }
 
 // Register mounts /config routes onto the provided router group.
@@ -149,7 +149,7 @@ func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.store.AddResourceGroup(&group); err != nil {
+	if err := s.configStore.AddResourceGroup(&group); err != nil {
 		s.respondStoreWriteError(c, err)
 		return
 	}
@@ -163,7 +163,7 @@ func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.store.ModifyResourceGroup(&group); err != nil {
+	if err := s.configStore.ModifyResourceGroup(&group); err != nil {
 		s.respondStoreWriteError(c, err)
 		return
 	}
@@ -173,13 +173,13 @@ func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 // GetResourceGroup handles GET /config/group/:name.
 func (s *ConfigService) GetResourceGroup(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	keyspaceID, err := s.store.LookupKeyspaceID(c, c.Query("keyspace_name"))
+	keyspaceID, err := s.configStore.LookupKeyspaceID(c, c.Query("keyspace_name"))
 	if err != nil {
 		s.respondKeyspaceLookupError(c, err)
 		return
 	}
 	groupName := c.Param("name")
-	group, err := s.store.GetResourceGroup(keyspaceID, groupName, withStats)
+	group, err := s.configStore.GetResourceGroup(keyspaceID, groupName, withStats)
 	if err != nil {
 		s.respondStoreReadError(c, err)
 		return
@@ -194,12 +194,12 @@ func (s *ConfigService) GetResourceGroup(c *gin.Context) {
 // GetResourceGroupList handles GET /config/groups.
 func (s *ConfigService) GetResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	keyspaceID, err := s.store.LookupKeyspaceID(c, c.Query("keyspace_name"))
+	keyspaceID, err := s.configStore.LookupKeyspaceID(c, c.Query("keyspace_name"))
 	if err != nil {
 		s.respondKeyspaceLookupError(c, err)
 		return
 	}
-	groups, err := s.store.GetResourceGroupList(keyspaceID, withStats)
+	groups, err := s.configStore.GetResourceGroupList(keyspaceID, withStats)
 	if err != nil {
 		s.respondStoreReadError(c, err)
 		return
@@ -209,12 +209,12 @@ func (s *ConfigService) GetResourceGroupList(c *gin.Context) {
 
 // DeleteResourceGroup handles DELETE /config/group/:name.
 func (s *ConfigService) DeleteResourceGroup(c *gin.Context) {
-	keyspaceID, err := s.store.LookupKeyspaceID(c, c.Query("keyspace_name"))
+	keyspaceID, err := s.configStore.LookupKeyspaceID(c, c.Query("keyspace_name"))
 	if err != nil {
 		s.respondKeyspaceLookupError(c, err)
 		return
 	}
-	if err := s.store.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
+	if err := s.configStore.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
 		s.respondStoreWriteError(c, err)
 		return
 	}
@@ -223,7 +223,7 @@ func (s *ConfigService) DeleteResourceGroup(c *gin.Context) {
 
 // GetControllerConfig handles GET /config/controller.
 func (s *ConfigService) GetControllerConfig(c *gin.Context) {
-	c.IndentedJSON(http.StatusOK, s.store.GetControllerConfig())
+	c.IndentedJSON(http.StatusOK, s.configStore.GetControllerConfig())
 }
 
 // SetControllerConfig handles POST /config/controller.
@@ -243,7 +243,7 @@ func (s *ConfigService) SetControllerConfig(c *gin.Context) {
 		resolvedConf[key] = v
 	}
 	for key, v := range resolvedConf {
-		if err := s.store.UpdateControllerConfigItem(key, v); err != nil {
+		if err := s.configStore.UpdateControllerConfigItem(key, v); err != nil {
 			if rmserver.IsMetadataWriteDisabledError(err) {
 				c.String(http.StatusForbidden, err.Error())
 				return
@@ -258,7 +258,7 @@ func (s *ConfigService) SetControllerConfig(c *gin.Context) {
 // SetKeyspaceServiceLimit handles POST /config/keyspace/service-limit*.
 func (s *ConfigService) SetKeyspaceServiceLimit(c *gin.Context) {
 	keyspaceName := c.Param("keyspace_name")
-	keyspaceID, err := s.store.LookupKeyspaceID(c, keyspaceName)
+	keyspaceID, err := s.configStore.LookupKeyspaceID(c, keyspaceName)
 	if err != nil {
 		s.respondKeyspaceLookupError(c, err)
 		return
@@ -272,7 +272,7 @@ func (s *ConfigService) SetKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, "service_limit must be non-negative")
 		return
 	}
-	if err := s.store.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit); err != nil {
+	if err := s.configStore.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit); err != nil {
 		s.respondStoreWriteError(c, err)
 		return
 	}
@@ -282,12 +282,12 @@ func (s *ConfigService) SetKeyspaceServiceLimit(c *gin.Context) {
 // GetKeyspaceServiceLimit handles GET /config/keyspace/service-limit*.
 func (s *ConfigService) GetKeyspaceServiceLimit(c *gin.Context) {
 	keyspaceName := c.Param("keyspace_name")
-	keyspaceID, err := s.store.LookupKeyspaceID(c, keyspaceName)
+	keyspaceID, err := s.configStore.LookupKeyspaceID(c, keyspaceName)
 	if err != nil {
 		s.respondKeyspaceLookupError(c, err)
 		return
 	}
-	limiter, ok := s.store.LookupKeyspaceServiceLimit(keyspaceID)
+	limiter, ok := s.configStore.LookupKeyspaceServiceLimit(keyspaceID)
 	if !ok {
 		c.String(http.StatusNotFound,
 			fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))
