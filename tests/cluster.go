@@ -58,6 +58,7 @@ import (
 // TestServer states.
 const (
 	Initial int32 = iota
+	Starting
 	Running
 	Stop
 	Destroy
@@ -142,12 +143,32 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
 	s.Lock()
-	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
+		s.Unlock()
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	if err := s.server.Run(); err != nil {
+	// Immediately set state to Starting and unlock
+	s.state = Starting
+	s.Unlock()
+
+	// Run the server which is a slow operation
+	err := s.server.Run()
+
+	s.Lock()
+	defer s.Unlock()
+
+	if err != nil {
+		// If the server is destroyed or stopped while Run(), return nil
+		if s.state == Destroy || s.state == Stop {
+			return nil
+		}
+		s.state = Stop
 		return err
+	}
+	// Close and return nil if the server is destroyed or stopped
+	if s.state == Destroy || s.state == Stop {
+		s.server.Close()
+		return nil
 	}
 	s.state = Running
 	return nil
@@ -157,12 +178,16 @@ func (s *TestServer) Run() error {
 func (s *TestServer) Stop() error {
 	s.Lock()
 	defer s.Unlock()
-	if s.state != Running {
-		return errors.Errorf("server(state%d) cannot stop", s.state)
+	if s.state == Starting {
+		s.state = Stop
+		return nil
 	}
-	s.server.Close()
-	s.state = Stop
-	return nil
+	if s.state == Running {
+		s.server.Close()
+		s.state = Stop
+		return nil
+	}
+	return errors.Errorf("server(state%d) cannot stop", s.state)
 }
 
 // Destroy is used to destroy a TestServer.
@@ -172,11 +197,9 @@ func (s *TestServer) Destroy() error {
 	if s.state == Running {
 		s.server.Close()
 	}
-	if err := os.RemoveAll(s.server.GetConfig().DataDir); err != nil {
-		return err
-	}
+	// Set state to Destroy before RemoveAll and removed redundant if err != nil check, linter fix
 	s.state = Destroy
-	return nil
+	return os.RemoveAll(s.server.GetConfig().DataDir)
 }
 
 // ResetPDLeader resigns the leader of the server.
