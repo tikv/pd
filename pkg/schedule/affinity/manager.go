@@ -98,14 +98,12 @@ func NewManager(ctx context.Context, storage endpoint.AffinityStorage, storeSetI
 		keyRanges:           make(map[string]GroupKeyRanges),
 		labelRuleBuffer:     make(map[string]*labeler.LabelRule),
 	}
-	if err := m.initialize(); err != nil {
-		return nil, err
-	}
+
 	return m, nil
 }
 
-// initialize loads affinity groups from storage and rebuilds the group-label mapping.
-func (m *Manager) initialize() error {
+// Initialize loads affinity groups from storage and rebuilds the group-label mapping.
+func (m *Manager) Initialize() error {
 	// metaMutex must be locked, because loadRegionLabel will acquire RWMutex to protect keyRanges
 	m.metaMutex.Lock()
 	defer m.metaMutex.Unlock()
