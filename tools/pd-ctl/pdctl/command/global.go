@@ -195,7 +195,8 @@ func buildDirectHeader(cmd *cobra.Command, customHeader http.Header) http.Header
 	if header == nil {
 		header = http.Header{}
 	}
-	if flag := cmd.Flags().Lookup("direct"); flag != nil {
+
+	if flag := cmd.Flag("direct"); flag != nil && flag.Changed {
 		header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
 	}
 	return header

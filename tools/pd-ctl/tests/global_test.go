@@ -90,14 +90,16 @@ func TestSendAndGetComponent(t *testing.T) {
 func TestRegionDirectHeader(t *testing.T) {
 	re := require.New(t)
 	var (
-		mu                      sync.Mutex
-		allowFollowerByRawQuery = make(map[string][]string)
+		mu    sync.Mutex
+		count = 0
 	)
 	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/api/v1/regions", func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
-			allowFollowerByRawQuery[r.URL.RawQuery] = append([]string{}, r.Header.Values(apiutil.PDAllowFollowerHandleHeader)...)
+			if vals := r.Header.Values(apiutil.PDAllowFollowerHandleHeader); len(vals) > 0 {
+				count++
+			}
 			mu.Unlock()
 			fmt.Fprint(w, `{}`)
 		})
@@ -120,25 +122,22 @@ func TestRegionDirectHeader(t *testing.T) {
 	pdAddr := cluster.GetLeaderServer().GetAddr()
 
 	cmd := cmd.GetRootCmd()
-
 	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region")
 	re.NoError(err)
-	mu.Lock()
-	re.Equal([]string{"true"}, allowFollowerByRawQuery[""], "PD-Allow-follower-handle should be true for region requests")
-	mu.Unlock()
+	re.Equal(0, count)
 
 	// The direct flag only controls endpoint selection. PD-Allow-follower-handle is always added
 	// for region requests, regardless of the direct flag value.
 	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct")
 	re.NoError(err)
-	mu.Lock()
-	re.Equal([]string{"true"}, allowFollowerByRawQuery[""], "PD-Allow-follower-handle should be true with --direct")
-	mu.Unlock()
+	re.Equal(1, count)
 
 	// Ignore direct flag value.
 	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=false")
 	re.NoError(err)
-	mu.Lock()
-	re.Equal([]string{"true"}, allowFollowerByRawQuery[""], "PD-Allow-follower-handle should still be true with --direct=false")
-	mu.Unlock()
+	re.Equal(2, count)
+
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=true")
+	re.NoError(err)
+	re.Equal(3, count)
 }
