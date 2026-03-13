@@ -1567,6 +1567,18 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 }
 
 func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	// Only TiKV stores participate in Raft voting and affect replica count.
+	// Non-TiKV stores (e.g., TiFlash) use learners and can be removed without
+	// affecting Raft replica validation.
+	if !store.IsTiKV() {
+		return nil
+	}
+
 	upStores := c.getUpStores()
 	expectUpStoresNum := len(upStores) - 1
 	if expectUpStoresNum < c.opt.GetMaxReplicas() {
