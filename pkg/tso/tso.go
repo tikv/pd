@@ -44,9 +44,7 @@ const (
 	// When a TSO's logical time reaches this limit,
 	// the physical time will be forced to increase.
 	maxLogical = int64(1 << 18)
-	// jetLagWarningThreshold is the warning threshold of jetLag in `timestampOracle.UpdateTimestamp`.
-	// In case of small `updatePhysicalInterval`, the `3 * updatePhysicalInterval` would also is small,
-	// and trigger unnecessary warnings about clock offset.
+	// jetLagWarningThreshold is the warning threshold of jetLag in `timestampOracle.updateTimestamp`.
 	// It's an empirical value.
 	jetLagWarningThreshold = 150 * time.Millisecond
 )
@@ -63,7 +61,6 @@ type timestampOracle struct {
 	keyspaceGroupID uint32
 	member          member.Election
 	storage         endpoint.TSOStorage
-	// TODO: remove saveInterval
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
@@ -200,7 +197,7 @@ func (t *timestampOracle) syncTimestamp() error {
 	failpoint.Inject("systemTimeSlow", func() {
 		next = next.Add(-time.Hour)
 	})
-	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
+	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < updateTimestampGuard {
 		log.Warn("system time may be incorrect",
@@ -315,7 +312,7 @@ const (
 // This function will do two things:
 //  1. When the logical time is going to be used up, increase the current physical time.
 //  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
-//     will be less than or equal to `UpdateTimestampGuard`, then the time window needs to be updated and
+//     will be less than or equal to `updateTimestampGuard`, then the time window needs to be updated and
 //     we also need to save the next physical time plus `TSOSaveInterval` into etcd.
 //
 // Here is some constraints that this function must satisfy:
