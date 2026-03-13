@@ -143,6 +143,7 @@ Reusable agent skills live under `.agents/skills/`. Each skill has a `SKILL.md` 
 
 | Skill | Purpose | Prerequisites | Docs |
 |---|---|---|---|
+| `apply-google-go-best-practices` | Compare Go code against Google Go best practices during targeted review or refactoring when an external style baseline is explicitly needed. | None beyond the repository's existing Go workflow and local contribution rules. | [`.agents/skills/apply-google-go-best-practices/SKILL.md`](.agents/skills/apply-google-go-best-practices/SKILL.md) |
 | `fix-cherry-pick-pr` | Repair cherry-pick PRs by comparing source and cherry-pick diffs, resolving committed conflict markers, preserving release-branch-only code, and running failpoint-aware verification. | `gh` CLI authenticated with tikv/pd repo access; git remotes for the source repo and cherry-pick branch; PD test environment able to run failpoint-aware verification. | [`.agents/skills/fix-cherry-pick-pr/SKILL.md`](.agents/skills/fix-cherry-pick-pr/SKILL.md) |
 | `create-pr` | Push the current branch and open a well-formatted PR on tikv/pd. Analyzes commits, generates PR title/body following the repository template, and submits via `gh pr create`. | `gh` CLI authenticated with tikv/pd repo access; local commits on a non-master branch. | [`.agents/skills/create-pr/SKILL.md`](.agents/skills/create-pr/SKILL.md) |
 
