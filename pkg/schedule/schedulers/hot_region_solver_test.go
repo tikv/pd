@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 func TestSplitBucketsBySize(t *testing.T) {
@@ -163,24 +164,28 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.conf.ReadPriorities = []string{utils.QueryPriority, utils.BytePriority}
 	leaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
 			utils.QueryDim: 10,
 			utils.ByteDim:  1,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
 			utils.QueryDim: 1,
 			utils.ByteDim:  10,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
 			utils.QueryDim: 5,
 			utils.ByteDim:  6,
+			utils.CPUDim:   0,
 		},
 	}}
 
@@ -194,6 +199,30 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	leaderSolver.maxPeerNum = 2
 	u = leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1, 2}, u)
+
+	// Verify the CPU-first priority path can pick by CPU dim.
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.6"))
+	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
+	cpuHotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			utils.QueryDim: 1,
+			utils.ByteDim:  1,
+			utils.CPUDim:   30,
+		},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			utils.QueryDim: 100,
+			utils.ByteDim:  1,
+			utils.CPUDim:   5,
+		},
+	}}
+	st.HotPeers = cpuHotPeers
+	cpuLeaderSolver.maxPeerNum = 1
+	u = cpuLeaderSolver.filterHotPeers(st)
+	checkSortResult(re, []uint64{1}, u)
 }
 
 func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {

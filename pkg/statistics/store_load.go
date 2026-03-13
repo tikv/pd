@@ -34,19 +34,22 @@ type StoreLoadDetail struct {
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[utils.ByteDim],
 		li.LoadPred.Current.Loads[utils.KeyDim], li.LoadPred.Current.Loads[utils.QueryDim]
+	storeCPURate := li.LoadPred.Current.Loads[utils.CPUDim]
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
 			StoreByteRate:  storeByteRate,
 			StoreKeyRate:   storeKeyRate,
 			StoreQueryRate: storeQueryRate,
+			StoreCPURate:   storeCPURate,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
+			TotalCPURate:   0.0,
 			Count:          0,
 			Stats:          make([]HotPeerStatShow, 0),
 		}
 	}
-	var byteRate, keyRate, queryRate float64
+	var byteRate, keyRate, queryRate, cpuRate float64
 	peers := make([]HotPeerStatShow, 0, len(li.HotPeers))
 	for _, peer := range li.HotPeers {
 		if peer.HotDegree > 0 {
@@ -54,6 +57,7 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 			byteRate += peer.GetLoad(utils.ByteDim)
 			keyRate += peer.GetLoad(utils.KeyDim)
 			queryRate += peer.GetLoad(utils.QueryDim)
+			cpuRate += peer.GetLoad(utils.CPUDim)
 		}
 	}
 
@@ -61,9 +65,11 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 		TotalBytesRate: byteRate,
 		TotalKeysRate:  keyRate,
 		TotalQueryRate: queryRate,
+		TotalCPURate:   cpuRate,
 		StoreByteRate:  storeByteRate,
 		StoreKeyRate:   storeKeyRate,
 		StoreQueryRate: storeQueryRate,
+		StoreCPURate:   storeCPURate,
 		Count:          len(peers),
 		Stats:          peers,
 	}
@@ -78,6 +84,7 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 	byteRate := p.GetLoad(utils.ByteDim)
 	keyRate := p.GetLoad(utils.KeyDim)
 	queryRate := p.GetLoad(utils.QueryDim)
+	cpuRate := p.GetLoad(utils.CPUDim)
 	return HotPeerStatShow{
 		StoreID:   p.StoreID,
 		Stores:    p.GetStores(),
@@ -87,6 +94,7 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 		ByteRate:  byteRate,
 		KeyRate:   keyRate,
 		QueryRate: queryRate,
+		CPURate:   cpuRate,
 		AntiCount: p.AntiCount,
 	}
 }
@@ -166,6 +174,7 @@ func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadP
 			future.Loads[utils.ByteDim] += infl.Loads[utils.RegionReadBytes]
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionReadKeys]
 			future.Loads[utils.QueryDim] += infl.Loads[utils.RegionReadQueryNum]
+			future.Loads[utils.CPUDim] += infl.Loads[utils.RegionReadCPU]
 		case utils.Write:
 			future.Loads[utils.ByteDim] += infl.Loads[utils.RegionWriteBytes]
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionWriteKeys]
