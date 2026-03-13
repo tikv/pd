@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -84,4 +85,59 @@ func TestSendAndGetComponent(t *testing.T) {
 	output, err = ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
+}
+
+func TestRegionDirectHeader(t *testing.T) {
+	re := require.New(t)
+	var (
+		mu    sync.Mutex
+		count = 0
+	)
+	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/api/v1/regions", func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			if vals := r.Header.Values(apiutil.PDAllowFollowerHandleHeader); len(vals) > 0 {
+				count++
+			}
+			mu.Unlock()
+			fmt.Fprint(w, `{}`)
+		})
+		info := apiutil.APIServiceGroup{IsCore: true}
+		return mux, info, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+
+	cmd := cmd.GetRootCmd()
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region")
+	re.NoError(err)
+	re.Equal(0, count)
+
+	// The direct flag only controls endpoint selection. PD-Allow-follower-handle is always added
+	// for region requests, regardless of the direct flag value.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct")
+	re.NoError(err)
+	re.Equal(1, count)
+
+	// Ignore direct flag value.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=false")
+	re.NoError(err)
+	re.Equal(2, count)
+
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=true")
+	re.NoError(err)
+	re.Equal(3, count)
 }
