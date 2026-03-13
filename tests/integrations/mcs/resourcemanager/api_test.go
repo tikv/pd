@@ -31,6 +31,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -390,7 +391,7 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	// Try to set a non-existing keyspace's service limit.
 	resp, statusCode := tryToSetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace", 1.0)
 	re.Equal(http.StatusNotFound, statusCode)
-	re.Equal("keyspace not found with name: non_existing_keyspace", resp)
+	re.Equal(errs.ErrKeyspaceNotExistsByName.FastGenByArgs("non_existing_keyspace").Error(), resp)
 	// Try to get a non-existing keyspace's service limit.
 	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
 	re.Equal(http.StatusNotFound, statusCode)
