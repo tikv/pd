@@ -543,3 +543,57 @@ func TestRuVersionAtomicBehavior(t *testing.T) {
 	gc.ruVersion.Store(0)
 	re.Equal(int32(1), gc.GetRuVersion())
 }
+
+func TestRuVersionWatch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	watchChan := make(chan []*meta_storagepb.Event, 1)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(watchChan, nil)
+
+	controller.Start(ctx)
+
+	// Case 1: PUT event with valid JSON
+	ruVersion3 := int32(3)
+	config := ruConfigJSON{RuVersion: &ruVersion3}
+	val, _ := json.Marshal(config)
+	watchChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_PUT,
+			Kv: &meta_storagepb.KeyValue{
+				Value: val,
+			},
+		},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRuVersion() == 3
+	})
+
+	// Case 2: DELETE event
+	watchChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_DELETE,
+		},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRuVersion() == 1 // Reset to default
+	})
+
+	// Case 3: PUT event with invalid JSON
+	watchChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_PUT,
+			Kv: &meta_storagepb.KeyValue{
+				Value: []byte("invalid-json"),
+			},
+		},
+	}
+	// Wait a bit to ensure it doesn't change from 1
+	time.Sleep(100 * time.Millisecond)
+	re.Equal(int32(1), controller.GetRuVersion())
+}

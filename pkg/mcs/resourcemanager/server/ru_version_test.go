@@ -451,7 +451,7 @@ func TestLoadRuConfigsEmpty(t *testing.T) {
 
 	// Loading from empty storage should not fail.
 	count := 0
-	err := s.LoadRuConfigs(func(keyspaceID uint32, config *endpoint.KeyspaceRuConfig) {
+	err := s.LoadRuConfigs(func(_ uint32, _ *endpoint.KeyspaceRuConfig) {
 		count++
 	})
 	re.NoError(err)
