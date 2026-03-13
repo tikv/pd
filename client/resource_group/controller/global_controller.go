@@ -25,6 +25,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -487,6 +489,73 @@ func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName st
 	return group
 }
 
+// isAcquireTokenBucketsRPCError returns true if the error is a transport/RPC
+// error (e.g. RM unavailable, timeout, connection failure) where we can keep
+// the RU path running with degraded fallback. Logical errors (e.g. resource
+// group not found, invalid argument) return false so the caller does not use
+// fallback and the error is propagated.
+func isAcquireTokenBucketsRPCError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.ErrorEqual(err, context.Canceled) {
+		return true
+	}
+	s, ok := status.FromError(errors.Cause(err))
+	if !ok {
+		return false
+	}
+	switch s.Code() {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
+		return true
+	case codes.Internal, codes.ResourceExhausted:
+		return true
+	default:
+		return false
+	}
+}
+
+// buildDegradedTokenBucketResponses builds fallback token bucket responses from
+// degraded RU settings when AcquireTokenBuckets RPC fails. It does not consume
+// any server-side RU; it grants tokens locally at the degraded fill rate so
+// the client-side limiter can continue. Called repeatedly (e.g. RM down) only
+// re-applies the same rate each time.
+func buildDegradedTokenBucketResponses(
+	requests []*rmpb.TokenBucketRequest,
+	degradedRUSettings *rmpb.GroupRequestUnitSettings,
+) []*rmpb.TokenBucketResponse {
+	if degradedRUSettings == nil || degradedRUSettings.RU == nil || degradedRUSettings.RU.Settings == nil {
+		return nil
+	}
+	ru := degradedRUSettings.RU
+	settings := ru.Settings
+	fillRate := float64(settings.GetFillRate())
+	// Grant tokens for one target period at fill rate so the limiter can make progress.
+	grantedTokens := fillRate * defaultTargetPeriod.Seconds()
+	if grantedTokens < fillRate {
+		grantedTokens = fillRate
+	}
+	out := make([]*rmpb.TokenBucketResponse, 0, len(requests))
+	for _, req := range requests {
+		out = append(out, &rmpb.TokenBucketResponse{
+			ResourceGroupName: req.ResourceGroupName,
+			GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
+				{
+					GrantedTokens: &rmpb.TokenBucket{
+						Tokens: grantedTokens,
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate:   settings.GetFillRate(),
+							BurstLimit: settings.GetBurstLimit(),
+						},
+					},
+					TrickleTimeMs: 0,
+				},
+			},
+		})
+	}
+	return out
+}
+
 // tryGetResourceGroupController will try to get the resource group controller from local cache first.
 // If the local cache misses, it will then call gRPC to fetch the resource group info from the remote server.
 // If `useTombstone` is true, it will return the resource group controller even if it is marked as tombstone.
@@ -659,12 +728,23 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		resp, err := c.provider.AcquireTokenBuckets(ctx, req)
 		latency := time.Since(now)
 		if err != nil {
-			// Don't log any errors caused by the stopper canceling the context.
-			if !errors.ErrorEqual(err, context.Canceled) {
-				log.Warn("[resource group controller] token bucket rpc error", zap.Error(err))
+			// Only use degraded fallback for RPC/transport errors (e.g. RM down, timeout).
+			// Logical errors (e.g. resource group not found) are not masked so the caller can handle them.
+			if isAcquireTokenBucketsRPCError(err) && c.degradedRUSettings != nil {
+				resp = buildDegradedTokenBucketResponses(req.Requests, c.degradedRUSettings)
+				if resp != nil {
+					if !errors.ErrorEqual(err, context.Canceled) {
+						log.Info("[resource group controller] use degraded token bucket response due to rpc error, ru path continues", zap.Error(err))
+					}
+					metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
+				}
 			}
-			resp = nil
-			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
+			if resp == nil {
+				if !errors.ErrorEqual(err, context.Canceled) {
+					log.Warn("[resource group controller] token bucket request failed", zap.Error(err))
+				}
+				metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
+			}
 		} else {
 			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
 		}
