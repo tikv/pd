@@ -371,6 +371,41 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
 	re.Equal(http.StatusBadRequest, statusCode)
 	re.Equal(0.0, limit)
+
+	// Test ru_version via service-limit API.
+	// Set a negative ru_version, should fail.
+	resp, statusCode = tryToSetKeyspaceServiceLimitWithRuVersion(re, leaderAddr, "test_keyspace", 1.0, -1)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be non-negative", resp)
+	// Set ru_version = 0 should not update ru_version (skip logic).
+	resp, statusCode = tryToSetKeyspaceServiceLimitWithRuVersion(re, leaderAddr, "test_keyspace", 1.0, 0)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	limiterResp, statusCode := tryToGetKeyspaceServiceLimitFull(re, leaderAddr, "test_keyspace")
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal(1.0, limiterResp.ServiceLimit)
+	re.Equal(int32(0), limiterResp.RuVersion)
+	// Set ru_version > 0 should update ru_version.
+	resp, statusCode = tryToSetKeyspaceServiceLimitWithRuVersion(re, leaderAddr, "test_keyspace", 2.0, 3)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	limiterResp, statusCode = tryToGetKeyspaceServiceLimitFull(re, leaderAddr, "test_keyspace")
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal(2.0, limiterResp.ServiceLimit)
+	re.Equal(int32(3), limiterResp.RuVersion)
+	// Update ru_version to a different value.
+	resp, statusCode = tryToSetKeyspaceServiceLimitWithRuVersion(re, leaderAddr, "test_keyspace", 2.0, 5)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	limiterResp, statusCode = tryToGetKeyspaceServiceLimitFull(re, leaderAddr, "test_keyspace")
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal(2.0, limiterResp.ServiceLimit)
+	re.Equal(int32(5), limiterResp.RuVersion)
+}
+
+type serviceLimitResponse struct {
+	ServiceLimit float64 `json:"service_limit"`
+	RuVersion    int32   `json:"ru_version"`
 }
 
 func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
@@ -378,11 +413,19 @@ func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
-	var limiter struct {
-		ServiceLimit float64 `json:"service_limit"`
-	}
+	var limiter serviceLimitResponse
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
 	return limiter.ServiceLimit, statusCode
+}
+
+func tryToGetKeyspaceServiceLimitFull(re *require.Assertions, leaderAddr, keyspaceName string) (serviceLimitResponse, int) {
+	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil, nil)
+	if statusCode != http.StatusOK {
+		return serviceLimitResponse{}, statusCode
+	}
+	var limiter serviceLimitResponse
+	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
+	return limiter, statusCode
 }
 
 func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string, limit float64) (string, int) {
@@ -394,6 +437,21 @@ func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 		nil,
 		apis.KeyspaceServiceLimitRequest{
 			ServiceLimit: limit,
+		},
+	)
+	return string(bodyBytes), statusCode
+}
+
+func tryToSetKeyspaceServiceLimitWithRuVersion(re *require.Assertions, leaderAddr, keyspaceName string, limit float64, ruVersion int32) (string, int) {
+	bodyBytes, statusCode := sendRequest(
+		re,
+		leaderAddr,
+		http.MethodPost,
+		"/config/keyspace/service-limit/"+keyspaceName,
+		nil,
+		apis.KeyspaceServiceLimitRequest{
+			ServiceLimit: limit,
+			RuVersion:    ruVersion,
 		},
 	)
 	return string(bodyBytes), statusCode

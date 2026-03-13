@@ -96,3 +96,11 @@ func TestParseKeyspaceResourceGroupPath(t *testing.T) {
 		})
 	}
 }
+
+func TestKeyspaceRuVersionPath(t *testing.T) {
+	re := require.New(t)
+	re.Equal("resource_group/keyspace/ru_versions/1", KeyspaceRuVersionPath(1))
+	re.Equal("resource_group/keyspace/ru_versions/0", KeyspaceRuVersionPath(0))
+	re.Equal("resource_group/keyspace/ru_versions/4294967295", KeyspaceRuVersionPath(4294967295))
+	re.Equal("resource_group/keyspace/ru_versions/", KeyspaceRuVersionPrefix())
+}
