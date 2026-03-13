@@ -80,7 +80,6 @@ func newLocalTimestampOracle(am *AllocatorManager, leadership *election.Leadersh
 		dcLocation:             dcLocation,
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), dcLocation),
-		maxIndex:               am.maxIndex,
 		uniqueIndex:            am.uniqueIndex,
 	}
 	return oracle
@@ -100,9 +99,9 @@ func (lta *LocalTSOAllocator) GetDCLocation() string {
 }
 
 // Initialize will initialize the created local TSO allocator.
-func (lta *LocalTSOAllocator) Initialize(suffix int) error {
+func (lta *LocalTSOAllocator) Initialize(int) error {
 	lta.tsoAllocatorRoleGauge.Set(1)
-	lta.timestampOracle.suffix = suffix
+	lta.timestampOracle.suffix = int(lta.timestampOracle.uniqueIndex)
 	return lta.timestampOracle.SyncTimestamp()
 }
 

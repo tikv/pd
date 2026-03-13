@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,7 +46,10 @@ const (
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
-	tsoMaxIndexUpperLimit            = 10
+)
+
+var (
+	tsoMaxIndexAvailableValue = []int64{0, 1, 2, 4, 8}
 )
 
 var _ tso.ServiceConfig = (*Config)(nil)
@@ -232,8 +236,8 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
 	}
-	if c.TSOMaxIndex > tsoMaxIndexUpperLimit {
-		return fmt.Errorf("tso max index:%d should be less than %d", c.TSOMaxIndex, tsoMaxIndexUpperLimit)
+	if !slices.Contains(tsoMaxIndexAvailableValue, c.TSOMaxIndex) {
+		return fmt.Errorf("tso max index:%d is not in the available values:%v", c.TSOMaxIndex, tsoMaxIndexAvailableValue)
 	}
 
 	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
