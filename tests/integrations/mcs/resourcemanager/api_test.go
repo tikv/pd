@@ -30,8 +30,8 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
 	"github.com/tikv/pd/pkg/utils/testutil"
