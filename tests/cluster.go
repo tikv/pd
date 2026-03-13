@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -653,18 +654,31 @@ func RunServer(server *TestServer) <-chan error {
 	return resC
 }
 
+// waitServerRunResults waits for startup results from all servers and returns once any error is observed.
+func waitServerRunResults(results []<-chan error) error {
+	cases := make([]reflect.SelectCase, len(results))
+	for i, ch := range results {
+		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
+	}
+
+	for range results {
+		chosen, recv, _ := reflect.Select(cases)
+		if err, _ := recv.Interface().(error); err != nil {
+			return errors.WithStack(err)
+		}
+		// Disable the consumed channel because each RunServer only sends once.
+		cases[chosen].Chan = reflect.ValueOf((<-chan error)(nil))
+	}
+	return nil
+}
+
 // RunServers starts to run multiple TestServer.
 func RunServers(servers []*TestServer) error {
 	res := make([]<-chan error, len(servers))
 	for i, s := range servers {
 		res[i] = RunServer(s)
 	}
-	for _, c := range res {
-		if err := <-c; err != nil {
-			return errors.WithStack(err)
-		}
-	}
-	return nil
+	return waitServerRunResults(res)
 }
 
 // RunInitialServers starts to run servers in InitialServers.
