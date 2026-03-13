@@ -126,6 +126,18 @@ func (s failingControllerConfigStorage) SaveControllerConfig(any) error {
 	return s.err
 }
 
+type blockingControllerConfigStorage struct {
+	storage.Storage
+	saveStarted chan struct{}
+	allowSave   chan struct{}
+}
+
+func (s *blockingControllerConfigStorage) SaveControllerConfig(any) error {
+	close(s.saveStarted)
+	<-s.allowSave
+	return nil
+}
+
 type testMetadataLoopWatcherFactory func(
 	ctx context.Context,
 	wg *sync.WaitGroup,
@@ -317,6 +329,50 @@ func TestManagerControllerConfigSnapshots(t *testing.T) {
 		re.ErrorIs(err, expectedErr)
 		re.Same(previous, m.controllerConfig)
 		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
+
+	t.Run("does_not_block_reads_while_saving_controller_config", func(t *testing.T) {
+		re := require.New(t)
+
+		blockingStorage := &blockingControllerConfigStorage{
+			Storage:     storage.NewStorageWithMemoryBackend(),
+			saveStarted: make(chan struct{}),
+			allowSave:   make(chan struct{}),
+		}
+		m := prepareManager()
+		m.storage = blockingStorage
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
+
+		updateDone := make(chan error, 1)
+		go func() {
+			updateDone <- m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
+		}()
+
+		select {
+		case <-blockingStorage.saveStarted:
+		case <-time.After(time.Second):
+			t.Fatal("SaveControllerConfig did not start")
+		}
+
+		readDone := make(chan *ControllerConfig, 1)
+		go func() {
+			readDone <- m.GetControllerConfig()
+		}()
+
+		select {
+		case cfg := <-readDone:
+			re.InDelta(0.5, cfg.RequestUnit.ReadBaseCost, 0.00001)
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("GetControllerConfig blocked while SaveControllerConfig was in progress")
+		}
+
+		close(blockingStorage.allowSave)
+		re.NoError(<-updateDone)
+		re.InDelta(1.5, m.GetControllerConfig().RequestUnit.ReadBaseCost, 0.00001)
 	})
 }
 

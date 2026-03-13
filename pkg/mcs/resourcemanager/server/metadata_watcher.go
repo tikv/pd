@@ -31,9 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-const (
-	resourceGroupWatchPrefix = "resource_group/"
-)
+var resourceGroupWatchPrefix = keypath.ResourceGroupPrefix()
 
 type resourceGroupWatchEntryType uint8
 
@@ -197,8 +195,7 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 	if !ok {
 		return nil
 	}
-	switch target.entryType {
-	case resourceGroupWatchEntryServiceLimit:
+	if target.entryType == resourceGroupWatchEntryServiceLimit {
 		krgm := m.getKeyspaceResourceGroupManager(target.keyspaceID)
 		if krgm == nil {
 			log.Debug("skip deleting service limit without corresponding manager",
@@ -208,8 +205,12 @@ func (m *Manager) handleMetadataWatchDelete(key string) error {
 		}
 		krgm.setServiceLimitFromStorage(0)
 		return nil
-	case resourceGroupWatchEntrySettings:
-	default:
+	}
+	if target.entryType == resourceGroupWatchEntryStates {
+		// States cleanup is handled when the settings key is deleted.
+		return nil
+	}
+	if target.entryType != resourceGroupWatchEntrySettings {
 		return nil
 	}
 	// Keep the reserved group alive.
