@@ -15,7 +15,6 @@
 package keyspace
 
 import (
-	"encoding/hex"
 	"math"
 	"testing"
 
@@ -25,7 +24,6 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -140,157 +138,328 @@ func TestProtectedKeyspaceValidation(t *testing.T) {
 	}
 }
 
-func TestMakeLabelRule(t *testing.T) {
+func TestExtractKeyspaceID(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
-		id                uint32
-		expectedLabelRule *labeler.LabelRule
+		name            string
+		key             []byte
+		expectedID      uint32
+		expectedSuccess bool
 	}{
 		{
-			id: 0,
-			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(0),
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   regionLabelKey,
-						Value: "0",
-					},
-				},
-				RuleType: labeler.KeyRange,
-				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 0})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 1})),
-					},
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 0})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 1})),
-					},
-				},
-			},
+			name:            "empty key",
+			key:             []byte{},
+			expectedID:      constant.MaxValidKeyspaceID,
+			expectedSuccess: true,
 		},
 		{
-			id: 4242,
-			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(4242),
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   regionLabelKey,
-						Value: "4242",
-					},
-				},
-				RuleType: labeler.KeyRange,
-				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
-					},
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x92})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x93})),
-					},
-				},
-			},
+			name:            "keyspace 0 txn mode",
+			key:             MakeRegionBound(0).TxnLeftBound,
+			expectedID:      0,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 100 txn mode",
+			key:             MakeRegionBound(100).TxnLeftBound,
+			expectedID:      100,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 4242 txn mode",
+			key:             MakeRegionBound(4242).TxnLeftBound,
+			expectedID:      4242,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 0 raw mode ",
+			key:             MakeRegionBound(0).RawLeftBound,
+			expectedID:      0,
+			expectedSuccess: true,
+		},
+		{
+			name:            "keyspace 100 raw mode (not supported)",
+			key:             MakeRegionBound(100).RawLeftBound,
+			expectedID:      100,
+			expectedSuccess: true,
+		},
+		{
+			name:            "non-keyspace key (table key)",
+			key:             codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			expectedID:      0,
+			expectedSuccess: false,
+		},
+		{
+			name:            "short key",
+			key:             codec.EncodeBytes([]byte{'x'}),
+			expectedID:      0,
+			expectedSuccess: false,
 		},
 	}
-	for _, testCase := range testCases {
-		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id))
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(_ *testing.T) {
+			id, ok := ExtractKeyspaceID(tc.key)
+			re.Equal(tc.expectedSuccess, ok, "test case: %s", tc.name)
+			if tc.expectedSuccess {
+				re.Equal(tc.expectedID, id, "test case: %s", tc.name)
+			}
+		})
 	}
 }
 
-func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
+// mockKeyspaceChecker is a mock implementation of Checker for testing.
+type mockKeyspaceChecker struct {
+	existingKeyspaces map[uint32]bool
+	allExist          bool
+}
+
+func (m *mockKeyspaceChecker) KeyspaceExists(id uint32) bool {
+	if m.allExist {
+		return true
+	}
+	if m.existingKeyspaces == nil {
+		return true // Default: all keyspaces exist
+	}
+	return m.existingKeyspaces[id]
+}
+
+func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	if start >= end {
+		return 0, false
+	}
+	if m.allExist {
+		if start+1 < end {
+			return start + 1, true
+		}
+		return 0, false
+	}
+	found := false
+	var candidate uint32
+	for id, exists := range m.existingKeyspaces {
+		if exists && id >= start && id <= end {
+			if !found || id < candidate {
+				candidate = id
+				found = true
+			}
+		}
+	}
+	return candidate, found
+}
+
+func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 	re := require.New(t)
-	testCases := []struct {
-		labelRule  *labeler.LabelRule
-		expectedID uint32
-		expectedOK bool
-	}{
-		// Valid keyspace label rule.
-		{
-			labelRule:  MakeLabelRule(1),
-			expectedID: 1,
-			expectedOK: true,
-		},
-		// Invalid keyspace label ID - unmatched prefix.
-		{
-			labelRule: &labeler.LabelRule{
-				ID:    "not-keyspaces/1",
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   regionLabelKey,
-						Value: "1",
-					},
-				},
-			},
-			expectedID: 0,
-			expectedOK: false,
-		},
-		// Invalid keyspace label ID - invalid keyspace ID.
-		{
-			labelRule: &labeler.LabelRule{
-				ID:    "keyspaces/id1",
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   regionLabelKey,
-						Value: "1",
-					},
-				},
-			},
-			expectedID: 0,
-			expectedOK: false,
-		},
-		{
-			labelRule: &labeler.LabelRule{
-				ID:    "keyspaces/1id",
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   regionLabelKey,
-						Value: "1",
-					},
-				},
-			},
-			expectedID: 0,
-			expectedOK: false,
-		},
-		// Invalid keyspace label ID - invalid keyspace ID label rule.
-		{
-			labelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(1),
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   "not-id",
-						Value: "1",
-					},
-				},
-			},
-			expectedID: 0,
-			expectedOK: false,
-		},
-		// Invalid keyspace label ID - unmatched keyspace ID with label rule.
-		{
-			labelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(1),
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   "id",
-						Value: "2",
-					},
-				},
-			},
-			expectedID: 0,
-			expectedOK: false,
+
+	// Mock checker where all keyspaces exist
+	allExistChecker := &mockKeyspaceChecker{allExist: true}
+
+	// Mock checker where only specific keyspaces exist
+	specificChecker := &mockKeyspaceChecker{
+		existingKeyspaces: map[uint32]bool{
+			100: true,
+			101: true,
+			105: true,
 		},
 	}
-	for _, testCase := range testCases {
-		id, ok := ParseKeyspaceIDFromLabelRule(testCase.labelRule)
-		re.Equal(testCase.expectedID, id)
-		re.Equal(testCase.expectedOK, ok)
+
+	testCases := []struct {
+		name           string
+		startKey       []byte
+		endKey         []byte
+		checker        *mockKeyspaceChecker
+		expectedResult bool
+	}{
+		{
+			name:           "empty start and end key",
+			startKey:       []byte{},
+			endKey:         []byte{},
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "empty end key",
+			startKey:       MakeRegionBound(1).TxnLeftBound,
+			endKey:         []byte{},
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "same keyspace txn mode",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(100).TxnRightBound,
+			checker:        allExistChecker,
+			expectedResult: false,
+		},
+		{
+			name:           "adjacent keyspace boundary txn mode",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(101).TxnLeftBound, // same as rightBound(100)
+			checker:        allExistChecker,
+			expectedResult: false, // [left100, right100) is within keyspace 100
+		},
+		{
+			name:           "span two keyspaces txn mode",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(101).TxnRightBound,
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "span multiple keyspaces txn mode",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(105).TxnRightBound,
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "empty start key",
+			startKey:       []byte{},
+			endKey:         MakeRegionBound(100).TxnLeftBound,
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "non-keyspace keys",
+			startKey:       codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 4}),
+			checker:        allExistChecker,
+			expectedResult: false,
+		},
+		{
+			name:           "span deleted keyspace but still cross two existing keyspaces - should span",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(102).TxnRightBound,
+			checker:        specificChecker, // keyspace 102 doesn't exist
+			expectedResult: true,
+		},
+		{
+			name:     "empty end key with sparse existing keyspaces should span when crossing two existing",
+			startKey: MakeRegionBound(101).TxnLeftBound,
+			endKey:   []byte{},
+			checker: &mockKeyspaceChecker{
+				existingKeyspaces: map[uint32]bool{
+					101: true,
+					102: true,
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name:           "span existing keyspaces - should span",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         MakeRegionBound(101).TxnRightBound,
+			checker:        specificChecker, // both 100 and 101 exist
+			expectedResult: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(_ *testing.T) {
+			result := RegionSpansMultipleKeyspaces(tc.startKey, tc.endKey, tc.checker)
+			re.Equal(tc.expectedResult, result, "test case: %s", tc.name)
+		})
+	}
+}
+
+func TestGetKeyspaceSplitKeys(t *testing.T) {
+	re := require.New(t)
+
+	// Mock checker where all keyspaces exist
+	allExistChecker := &mockKeyspaceChecker{allExist: true}
+
+	oneExistChecker := &mockKeyspaceChecker{
+		existingKeyspaces: map[uint32]bool{
+			101: true,
+		},
+	}
+
+	// Mock checker where only specific keyspaces exist
+	specificChecker := &mockKeyspaceChecker{
+		existingKeyspaces: map[uint32]bool{
+			100: true,
+			101: true,
+			102: true,
+			// 103, 104, 105 don't exist
+		},
+	}
+
+	testCases := []struct {
+		name              string
+		startKey          []byte
+		endKey            []byte
+		checker           *mockKeyspaceChecker
+		expectedSplitKeys [][]byte
+	}{
+		{
+			name:     "span two keyspaces txn mode",
+			startKey: MakeRegionBound(100).TxnLeftBound,
+			endKey:   MakeRegionBound(101).TxnRightBound,
+			checker:  allExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).TxnRightBound,
+			},
+		},
+		{
+			name:     "span two keyspaces raw mode",
+			startKey: MakeRegionBound(100).RawLeftBound,
+			endKey:   MakeRegionBound(101).RawRightBound,
+			checker:  allExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).RawRightBound,
+			},
+		},
+		{
+			name:              "same keyspace txn mode",
+			startKey:          MakeRegionBound(100).TxnLeftBound,
+			endKey:            MakeRegionBound(100).TxnRightBound,
+			checker:           allExistChecker,
+			expectedSplitKeys: nil,
+		},
+		{
+			name:              "same keyspace raw mode",
+			startKey:          MakeRegionBound(100).RawLeftBound,
+			endKey:            MakeRegionBound(100).RawRightBound,
+			checker:           allExistChecker,
+			expectedSplitKeys: nil,
+		},
+		{
+			name:     "adjacent range with one keyspace",
+			startKey: MakeRegionBound(101).TxnLeftBound,
+			endKey:   MakeRegionBound(102).TxnRightBound,
+			checker:  oneExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(101).TxnRightBound,
+			},
+		},
+		{
+			name:     "empty start and end key with one exist",
+			startKey: []byte{},
+			endKey:   []byte{},
+			checker:  oneExistChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(101).RawLeftBound,
+				MakeRegionBound(101).RawRightBound,
+				MakeRegionBound(101).TxnLeftBound,
+				MakeRegionBound(101).TxnRightBound,
+			},
+		},
+		{
+			name:     "empty start and end key with three exist",
+			startKey: []byte{},
+			endKey:   []byte{},
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).RawLeftBound,
+				MakeRegionBound(100).RawRightBound,
+				MakeRegionBound(100).TxnLeftBound,
+				MakeRegionBound(100).TxnRightBound,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(_ *testing.T) {
+			splitKeys := GetKeyspaceSplitKeys(tc.startKey, tc.endKey, tc.checker)
+			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
+		})
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -35,6 +36,58 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
+
+// keyspaceCheckerWrapperForMerge wraps the cluster to provide keyspace existence checking for merge.
+type keyspaceCheckerWrapperForMerge struct {
+	cluster sche.SharedCluster
+}
+
+// KeyspaceExists checks if a keyspace exists by probing the cluster interface.
+func (w *keyspaceCheckerWrapperForMerge) KeyspaceExists(id uint32) bool {
+	// Try to get the keyspace manager from the cluster
+	type keyspaceManagerGetter interface {
+		GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool }
+	}
+	if kg, ok := w.cluster.(keyspaceManagerGetter); ok {
+		if km := kg.GetKeyspaceManager(); km != nil {
+			return km.KeyspaceExists(id)
+		}
+	}
+	// If we can't get the keyspace manager, assume the keyspace exists
+	// to maintain backward compatibility
+	return true
+}
+
+// GetKeyspaceIDInRange returns one existing keyspace ID in (start, end).
+func (w *keyspaceCheckerWrapperForMerge) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	if start >= end {
+		return 0, false
+	}
+	type keyspaceManagerGetter interface {
+		GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool }
+	}
+	if kg, ok := w.cluster.(keyspaceManagerGetter); ok {
+		if km := kg.GetKeyspaceManager(); km != nil {
+			if getter, ok := any(km).(interface {
+				GetKeyspaceIDInRange(uint32, uint32) (uint32, bool)
+			}); ok {
+				return getter.GetKeyspaceIDInRange(start, end)
+			}
+			for id := start + 1; id < end; id++ {
+				if km.KeyspaceExists(id) {
+					return id, true
+				}
+			}
+			return 0, false
+		}
+	}
+	// If we can't get the keyspace manager, assume keyspaces exist to maintain
+	// backward compatibility.
+	if start+1 < end {
+		return start + 1, true
+	}
+	return 0, false
+}
 
 const (
 	maxTargetRegionSize   = 500
@@ -237,6 +290,13 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 	} else if bytes.Equal(adjacent.GetEndKey(), region.GetStartKey()) && len(adjacent.GetEndKey()) != 0 {
 		start, end = adjacent.GetStartKey(), region.GetEndKey()
 	} else {
+		return false
+	}
+
+	// Check if merging these regions would span multiple keyspaces
+	// This ensures one region corresponds to one keyspace
+	checker := &keyspaceCheckerWrapperForMerge{cluster: cluster}
+	if keyspace.RegionSpansMultipleKeyspaces(start, end, checker) {
 		return false
 	}
 

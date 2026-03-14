@@ -26,6 +26,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -53,6 +54,10 @@ type Watcher struct {
 	//   - Key: /pd/{cluster_id}/region_label/{rule_id}
 	//  - Value: labeler.LabelRule
 	regionLabelPathPrefix string
+	// keyspaceMetaPathPrefix:
+	//   - Key: /pd/{cluster_id}/keyspaces/meta/{keyspace_id}
+	//   - Value: keyspace.KeyspaceMeta
+	keyspaceMetaPathPrefix string
 
 	etcdClient  *clientv3.Client
 	ruleStorage endpoint.RuleStorage
@@ -64,8 +69,9 @@ type Watcher struct {
 	// regionLabeler is used to manage the region label rules.
 	regionLabeler *labeler.RegionLabeler
 
-	ruleWatcher  *etcdutil.LoopWatcher
-	labelWatcher *etcdutil.LoopWatcher
+	ruleWatcher         *etcdutil.LoopWatcher
+	labelWatcher        *etcdutil.LoopWatcher
+	keyspaceMetaWatcher *etcdutil.LoopWatcher
 
 	// patch is used to cache the placement rule changes.
 	patch *placement.RuleConfigPatch
@@ -82,16 +88,17 @@ func NewWatcher(
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &Watcher{
-		ctx:                   ctx,
-		cancel:                cancel,
-		rulesPathPrefix:       keypath.RulesPathPrefix(),
-		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
-		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
-		etcdClient:            etcdClient,
-		ruleStorage:           ruleStorage,
-		checkerController:     checkerController,
-		ruleManager:           ruleManager,
-		regionLabeler:         regionLabeler,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		rulesPathPrefix:        keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix:    keypath.RuleGroupPathPrefix(),
+		regionLabelPathPrefix:  keypath.RegionLabelPathPrefix(),
+		keyspaceMetaPathPrefix: keypath.KeyspaceMetaPrefix(),
+		etcdClient:             etcdClient,
+		ruleStorage:            ruleStorage,
+		checkerController:      checkerController,
+		ruleManager:            ruleManager,
+		regionLabeler:          regionLabeler,
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
@@ -99,6 +106,11 @@ func NewWatcher(
 		return nil, err
 	}
 	err = rw.initializeRegionLabelWatcher()
+	if err != nil {
+		rw.Close()
+		return nil, err
+	}
+	err = rw.initializeKeyspaceMetaWatcher()
 	if err != nil {
 		rw.Close()
 		return nil, err
@@ -275,6 +287,58 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()
+}
+
+func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
+	suspectKeyRanges := &keyutil.KeyRanges{}
+	preEventsFn := func([]*clientv3.Event) error {
+		suspectKeyRanges.Clean()
+		return nil
+	}
+	putFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("update keyspace meta", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		meta, err := keyspace.NewKeyspaceMeta(string(kv.Value))
+		if err != nil {
+			return err
+		}
+		bound := keyspace.MakeRegionBound(meta.Id)
+		suspectKeyRanges.Append(bound.RawLeftBound, bound.RawRightBound)
+		suspectKeyRanges.Append(bound.TxnLeftBound, bound.TxnRightBound)
+		return nil
+	}
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("delete keyspace meta", zap.String("key", string(kv.Key)))
+		meta, err := keyspace.NewKeyspaceMeta(string(kv.Value))
+		if err != nil {
+			return err
+		}
+		bound := keyspace.MakeRegionBound(meta.Id)
+		suspectKeyRanges.Append(bound.RawLeftBound, bound.RawRightBound)
+		suspectKeyRanges.Append(bound.TxnLeftBound, bound.TxnRightBound)
+		return nil
+	}
+	postEventsFn := func([]*clientv3.Event) error {
+		if rw.checkerController == nil {
+			return errors.New("checkerController is nil, cannot add suspect key ranges")
+		}
+		for _, kr := range suspectKeyRanges.Ranges() {
+			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
+		}
+		return nil
+	}
+	rw.keyspaceMetaWatcher = etcdutil.NewLoopWatcher(
+		rw.ctx, &rw.wg,
+		rw.etcdClient,
+		"scheduling-keyspace-meta-watcher",
+		// To keep the consistency with the previous code, we should trim the suffix `/`.
+		strings.TrimSuffix(rw.keyspaceMetaPathPrefix, "/"),
+		preEventsFn,
+		putFn, deleteFn,
+		postEventsFn,
+		true, /* withPrefix */
+	)
+	rw.keyspaceMetaWatcher.StartWatchLoop()
+	return rw.keyspaceMetaWatcher.WaitLoad()
 }
 
 // Close closes the watcher.
