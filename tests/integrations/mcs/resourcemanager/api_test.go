@@ -371,6 +371,46 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
 	re.Equal(http.StatusBadRequest, statusCode)
 	re.Equal(0.0, limit)
+
+	// Test RU config via dedicated ruconfig API.
+	// Get RU config before setting (should return empty config).
+	ruConfigResp, statusCode := tryToGetKeyspaceRuConfig(re, leaderAddr, "test_keyspace")
+	re.Equal(http.StatusOK, statusCode)
+	re.Nil(ruConfigResp.RuVersion)
+	// Set a negative ru_version, should fail.
+	ruVersion := int32(-1)
+	resp, statusCode = tryToSetKeyspaceRuConfig(re, leaderAddr, "test_keyspace", &ruVersion)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be non-negative", resp)
+	// Set ru_version > 0 should update ru_version.
+	ruVersion = int32(3)
+	resp, statusCode = tryToSetKeyspaceRuConfig(re, leaderAddr, "test_keyspace", &ruVersion)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	ruConfigResp, statusCode = tryToGetKeyspaceRuConfig(re, leaderAddr, "test_keyspace")
+	re.Equal(http.StatusOK, statusCode)
+	re.NotNil(ruConfigResp.RuVersion)
+	re.Equal(int32(3), *ruConfigResp.RuVersion)
+	// Update ru_version to a different value.
+	ruVersion = int32(5)
+	resp, statusCode = tryToSetKeyspaceRuConfig(re, leaderAddr, "test_keyspace", &ruVersion)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	ruConfigResp, statusCode = tryToGetKeyspaceRuConfig(re, leaderAddr, "test_keyspace")
+	re.Equal(http.StatusOK, statusCode)
+	re.NotNil(ruConfigResp.RuVersion)
+	re.Equal(int32(5), *ruConfigResp.RuVersion)
+	// Try to get a non-existing keyspace's RU config.
+	resp, statusCode = tryToGetKeyspaceRuConfigRaw(re, leaderAddr, "non_existing_keyspace")
+	re.Equal(http.StatusBadRequest, statusCode)
+}
+
+type serviceLimitResponse struct {
+	ServiceLimit float64 `json:"service_limit"`
+}
+
+type ruConfigResponse struct {
+	RuVersion *int32 `json:"ru_version,omitempty"`
 }
 
 func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
@@ -378,9 +418,7 @@ func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
-	var limiter struct {
-		ServiceLimit float64 `json:"service_limit"`
-	}
+	var limiter serviceLimitResponse
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
 	return limiter.ServiceLimit, statusCode
 }
@@ -394,6 +432,35 @@ func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 		nil,
 		apis.KeyspaceServiceLimitRequest{
 			ServiceLimit: limit,
+		},
+	)
+	return string(bodyBytes), statusCode
+}
+
+func tryToGetKeyspaceRuConfig(re *require.Assertions, leaderAddr, keyspaceName string) (ruConfigResponse, int) {
+	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodGet, "/config/keyspace/ruconfig/"+keyspaceName, nil, nil)
+	if statusCode != http.StatusOK {
+		return ruConfigResponse{}, statusCode
+	}
+	var config ruConfigResponse
+	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&config))
+	return config, statusCode
+}
+
+func tryToGetKeyspaceRuConfigRaw(re *require.Assertions, leaderAddr, keyspaceName string) (string, int) {
+	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodGet, "/config/keyspace/ruconfig/"+keyspaceName, nil, nil)
+	return string(bodyBytes), statusCode
+}
+
+func tryToSetKeyspaceRuConfig(re *require.Assertions, leaderAddr, keyspaceName string, ruVersion *int32) (string, int) {
+	bodyBytes, statusCode := sendRequest(
+		re,
+		leaderAddr,
+		http.MethodPost,
+		"/config/keyspace/ruconfig/"+keyspaceName,
+		nil,
+		apis.KeyspaceRuConfigRequest{
+			RuVersion: ruVersion,
 		},
 	)
 	return string(bodyBytes), statusCode

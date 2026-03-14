@@ -96,3 +96,11 @@ func TestParseKeyspaceResourceGroupPath(t *testing.T) {
 		})
 	}
 }
+
+func TestKeyspaceRuConfigPath(t *testing.T) {
+	re := require.New(t)
+	re.Equal("resource_group/keyspace/ruconfig/1", KeyspaceRuConfigPath(1))
+	re.Equal("resource_group/keyspace/ruconfig/0", KeyspaceRuConfigPath(0))
+	re.Equal("resource_group/keyspace/ruconfig/4294967295", KeyspaceRuConfigPath(4294967295))
+	re.Equal("resource_group/keyspace/ruconfig/", KeyspaceRuConfigPrefix())
+}

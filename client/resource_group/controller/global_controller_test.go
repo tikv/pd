@@ -20,6 +20,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -431,4 +432,186 @@ func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	}
 	checkKeyspace(constants.NullKeyspaceID)
 	checkKeyspace(1)
+}
+
+func TestRuConfigJSONSerialization(t *testing.T) {
+	re := require.New(t)
+
+	// Test marshal with RuVersion set.
+	ruVersion := int32(3)
+	config := ruConfigJSON{RuVersion: &ruVersion}
+	data, err := json.Marshal(config)
+	re.NoError(err)
+	re.Contains(string(data), `"ru_version":3`)
+
+	// Test marshal with nil RuVersion (omitted).
+	config2 := ruConfigJSON{}
+	data, err = json.Marshal(config2)
+	re.NoError(err)
+	re.Equal(`{}`, string(data))
+
+	// Test unmarshal with ru_version.
+	var loaded ruConfigJSON
+	err = json.Unmarshal([]byte(`{"ru_version":7}`), &loaded)
+	re.NoError(err)
+	re.NotNil(loaded.RuVersion)
+	re.Equal(int32(7), *loaded.RuVersion)
+
+	// Test unmarshal with empty JSON.
+	var loaded2 ruConfigJSON
+	err = json.Unmarshal([]byte(`{}`), &loaded2)
+	re.NoError(err)
+	re.Nil(loaded2.RuVersion)
+
+	// Test unmarshal with ru_version = 0 (pointer should not be nil).
+	var loaded3 ruConfigJSON
+	err = json.Unmarshal([]byte(`{"ru_version":0}`), &loaded3)
+	re.NoError(err)
+	re.NotNil(loaded3.RuVersion)
+	re.Equal(int32(0), *loaded3.RuVersion)
+}
+
+func TestGetRuVersionDefault(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// Default should return 1 (v1).
+	re.Equal(int32(1), gc.GetRuVersion())
+}
+
+func TestGetRuVersionAfterSet(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// Simulate ru_version update via atomic store.
+	gc.ruVersion.Store(3)
+	re.Equal(int32(3), gc.GetRuVersion())
+
+	// Zero should return 1 (default).
+	gc.ruVersion.Store(0)
+	re.Equal(int32(1), gc.GetRuVersion())
+
+	// Negative should also return 1 (default).
+	gc.ruVersion.Store(-1)
+	re.Equal(int32(1), gc.GetRuVersion())
+}
+
+func TestLoadRuVersionFromEmpty(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// loadRuVersion with empty response should not change the version.
+	gc.loadRuVersion(context.Background())
+	re.Equal(int32(1), gc.GetRuVersion())
+}
+
+func TestRuVersionAtomicBehavior(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// loadRuVersion with empty provider does not change value.
+	gc.loadRuVersion(context.Background())
+	re.Equal(int32(1), gc.GetRuVersion())
+
+	// Directly simulate what loadRuVersion does when it parses a valid JSON.
+	var config ruConfigJSON
+	re.NoError(json.Unmarshal([]byte(`{"ru_version":5}`), &config))
+	re.NotNil(config.RuVersion)
+	gc.ruVersion.Store(*config.RuVersion)
+	re.Equal(int32(5), gc.GetRuVersion())
+
+	// Simulate parsing JSON with nil ru_version — should not update.
+	var config2 ruConfigJSON
+	re.NoError(json.Unmarshal([]byte(`{}`), &config2))
+	re.Nil(config2.RuVersion)
+	// No update since RuVersion is nil.
+	re.Equal(int32(5), gc.GetRuVersion())
+
+	// Simulate invalid JSON — should not crash.
+	var config3 ruConfigJSON
+	re.Error(json.Unmarshal([]byte(`not-valid-json`), &config3))
+
+	// Simulate zero value.
+	var config4 ruConfigJSON
+	re.NoError(json.Unmarshal([]byte(`{"ru_version":0}`), &config4))
+	re.NotNil(config4.RuVersion)
+	gc.ruVersion.Store(*config4.RuVersion)
+	// Zero → GetRuVersion returns 1 (default).
+	re.Equal(int32(1), gc.GetRuVersion())
+
+	// Simulate DELETE event — reset to 0.
+	gc.ruVersion.Store(5)
+	re.Equal(int32(5), gc.GetRuVersion())
+	gc.ruVersion.Store(0)
+	re.Equal(int32(1), gc.GetRuVersion())
+}
+
+func TestRuVersionWatch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	// Set up standard expectations
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
+	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+
+	ruConfigKey := pd.RuConfigKeyBytes(1)
+	watchRuConfigChan := make(chan []*meta_storagepb.Event, 1)
+	// Expectation for ru_config watch (3 arguments: ctx, key, opts slice)
+	mockProvider.On("Watch", mock.Anything, ruConfigKey, mock.Anything).Return(watchRuConfigChan, nil)
+	// Expectation for other watches (meta, config)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	controller.Start(ctx)
+
+	// Case 1: PUT event with valid JSON
+	ruVersion3 := int32(3)
+	config := ruConfigJSON{RuVersion: &ruVersion3}
+	val, _ := json.Marshal(config)
+	watchRuConfigChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_PUT,
+			Kv: &meta_storagepb.KeyValue{
+				Value: val,
+			},
+		},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRuVersion() == 3
+	})
+
+	// Case 2: DELETE event
+	watchRuConfigChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_DELETE,
+		},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRuVersion() == 1 // Reset to default
+	})
+
+	// Case 3: PUT event with invalid JSON
+	watchRuConfigChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_PUT,
+			Kv: &meta_storagepb.KeyValue{
+				Value: []byte("invalid-json"),
+			},
+		},
+	}
+	// Wait a bit to ensure it doesn't change from 1
+	time.Sleep(100 * time.Millisecond)
+	re.Equal(int32(1), controller.GetRuVersion())
 }

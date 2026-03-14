@@ -40,6 +40,9 @@ type ResourceGroupStorage interface {
 	LoadServiceLimit(keyspaceID uint32) (float64, error)
 	SaveServiceLimit(keyspaceID uint32, serviceLimit float64) error
 	LoadServiceLimits(f func(keyspaceID uint32, serviceLimit float64)) error
+	LoadRuConfig(keyspaceID uint32) (*KeyspaceRuConfig, error)
+	SaveRuConfig(keyspaceID uint32, config *KeyspaceRuConfig) error
+	LoadRuConfigs(f func(keyspaceID uint32, config *KeyspaceRuConfig)) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
@@ -142,5 +145,47 @@ func (se *StorageEndpoint) LoadServiceLimits(f func(keyspaceID uint32, serviceLi
 			return
 		}
 		f(uint32(keyspaceID), serviceLimit)
+	})
+}
+
+// KeyspaceRuConfig is the RU configuration for a keyspace.
+type KeyspaceRuConfig struct {
+	RuVersion *int32 `json:"ru_version,omitempty"`
+}
+
+// LoadRuConfig loads the RU config for the given keyspace.
+func (se *StorageEndpoint) LoadRuConfig(keyspaceID uint32) (*KeyspaceRuConfig, error) {
+	value, err := se.Load(keypath.KeyspaceRuConfigPath(keyspaceID))
+	if err != nil || value == "" {
+		return nil, err
+	}
+	var config KeyspaceRuConfig
+	if err := json.Unmarshal([]byte(value), &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+// SaveRuConfig stores the RU config for the given keyspace.
+func (se *StorageEndpoint) SaveRuConfig(keyspaceID uint32, config *KeyspaceRuConfig) error {
+	return se.saveJSON(keypath.KeyspaceRuConfigPath(keyspaceID), config)
+}
+
+// LoadRuConfigs loads all RU configs from storage.
+func (se *StorageEndpoint) LoadRuConfigs(f func(keyspaceID uint32, config *KeyspaceRuConfig)) error {
+	return se.loadRangeByPrefix(keypath.KeyspaceRuConfigPrefix(), func(key, value string) {
+		keyspaceID, err := strconv.ParseUint(key, 10, 32)
+		if err != nil {
+			log.Error("failed to parse the keyspace ID from RU config path",
+				zap.String("key", key), zap.Error(err))
+			return
+		}
+		var config KeyspaceRuConfig
+		if err := json.Unmarshal([]byte(value), &config); err != nil {
+			log.Error("failed to parse RU config value",
+				zap.Uint32("keyspace-id", uint32(keyspaceID)), zap.String("value", value), zap.Error(err))
+			return
+		}
+		f(uint32(keyspaceID), &config)
 	})
 }

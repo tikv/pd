@@ -68,6 +68,7 @@ type keyspaceResourceGroupManager struct {
 	groups          map[string]*ResourceGroup
 	groupRUTrackers map[string]*groupRUTracker
 	serviceLimiter  *serviceLimiter
+	ruConfig        *endpoint.KeyspaceRuConfig
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
@@ -310,6 +311,38 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 	krgm.RLock()
 	defer krgm.RUnlock()
 	return krgm.serviceLimiter
+}
+
+func (krgm *keyspaceResourceGroupManager) setRuConfig(config *endpoint.KeyspaceRuConfig) {
+	krgm.Lock()
+	krgm.ruConfig = config
+	krgm.Unlock()
+	// Persist the RU config to storage.
+	if krgm.writeRole.AllowsMetadataWrite() && krgm.storage != nil {
+		if err := krgm.storage.SaveRuConfig(krgm.keyspaceID, config); err != nil {
+			log.Error("failed to persist RU config",
+				zap.Uint32("keyspace-id", krgm.keyspaceID),
+				zap.Any("ru-config", config),
+				zap.Error(err))
+		}
+	}
+}
+
+func (krgm *keyspaceResourceGroupManager) setRuConfigFromStorage(config *endpoint.KeyspaceRuConfig) {
+	krgm.Lock()
+	krgm.ruConfig = config
+	krgm.Unlock()
+}
+
+func (krgm *keyspaceResourceGroupManager) getRuConfig() *endpoint.KeyspaceRuConfig {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	if krgm.ruConfig == nil {
+		return nil
+	}
+	// Return a copy.
+	copy := *krgm.ruConfig
+	return &copy
 }
 
 func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
