@@ -56,14 +56,17 @@ func TestRuConfig(t *testing.T) {
 	re.Equal(int32(5), configs[2])
 
 	// Case 5: Load with invalid JSON
-	innerKV.Save(keypath.KeyspaceRuConfigPath(3), "invalid-json")
+	err = innerKV.Save(keypath.KeyspaceRuConfigPath(3), "invalid-json")
+	re.NoError(err)
 	_, err = storage.LoadRuConfig(3)
 	re.Error(err)
 
 	// Case 6: Iterate with invalid JSON and invalid keys
-	innerKV.Save(keypath.KeyspaceRuConfigPath(4), "invalid-json")
+	err = innerKV.Save(keypath.KeyspaceRuConfigPath(4), "invalid-json")
+	re.NoError(err)
 	// Insert a key that is not a number
-	innerKV.Save(keypath.KeyspaceRuConfigPrefix()+"abc", "{}")
+	err = innerKV.Save(keypath.KeyspaceRuConfigPrefix()+"abc", "{}")
+	re.NoError(err)
 
 	err = storage.LoadRuConfigs(func(keyspaceID uint32, config *KeyspaceRuConfig) {
 		// This should not be called for keyspace 4 because of unmarshal error
