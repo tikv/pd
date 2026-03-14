@@ -68,7 +68,7 @@ func TestRuConfig(t *testing.T) {
 	err = innerKV.Save(keypath.KeyspaceRuConfigPrefix()+"abc", "{}")
 	re.NoError(err)
 
-	err = storage.LoadRuConfigs(func(keyspaceID uint32, config *KeyspaceRuConfig) {
+	err = storage.LoadRuConfigs(func(keyspaceID uint32, _ *KeyspaceRuConfig) {
 		// This should not be called for keyspace 4 because of unmarshal error
 		// and not for "abc" because of parse uint error
 		re.NotEqual(uint32(4), keyspaceID)
