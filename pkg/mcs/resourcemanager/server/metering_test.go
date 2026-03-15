@@ -66,7 +66,7 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	re.Equal(metering.NewBytesValue(2048), record[meteringDataWriteBytesField])
 	re.Equal(metering.NewBytesValue(6144), record[meteringDataCrossAZTrafficBytesField])
 	// RUv2 = (10+20) * 2 = 60 (two consumption items with same TikvRUV2+TidbRUV2)
-	re.Equal(metering.NewRUValue(60.0), record[meteringDataRUV2Field])
+	re.Equal(metering.NewRUValue(60.0), record[meteringDataOLTPRUV2Field])
 }
 
 func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
@@ -120,7 +120,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 			re.Equal(metering.NewRUValue(0.0), record[meteringDataOLAPRUField])
 			re.Equal(metering.NewBytesValue(1024), record[meteringDataWriteBytesField])
 			re.Equal(metering.NewBytesValue(300), record[meteringDataCrossAZTrafficBytesField])
-			re.Equal(metering.NewRUValue(8.0), record[meteringDataRUV2Field])
+			re.Equal(metering.NewRUValue(8.0), record[meteringDataOLTPRUV2Field])
 		case testKeyspaceName2:
 			re.Equal(testKeyspaceName2, keyspaceName)
 			re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
@@ -128,7 +128,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 			re.Equal(metering.NewRUValue(100.0), record[meteringDataOLAPRUField])
 			re.Equal(metering.NewBytesValue(1024), record[meteringDataWriteBytesField])
 			re.Equal(metering.NewBytesValue(700), record[meteringDataCrossAZTrafficBytesField])
-			re.Equal(metering.NewRUValue(11.0), record[meteringDataRUV2Field])
+			re.Equal(metering.NewRUValue(11.0), record[meteringDataOLTPRUV2Field])
 		default:
 			re.Fail("unexpected keyspace", keyspaceName)
 		}

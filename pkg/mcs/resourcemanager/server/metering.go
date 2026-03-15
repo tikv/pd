@@ -31,7 +31,7 @@ const (
 	meteringDataOLAPRUField              = "olap_ru"
 	meteringDataWriteBytesField          = "write_bytes"
 	meteringDataCrossAZTrafficBytesField = "cross_az_traffic_bytes"
-	meteringDataRUV2Field                = "ru_v2"
+	meteringDataOLTPRUV2Field            = "oltp_ru_v2"
 )
 
 type ruMetering struct {
@@ -39,7 +39,7 @@ type ruMetering struct {
 	olapRU              float64
 	writeBytes          uint64
 	crossAZTrafficBytes uint64
-	ruV2                float64
+	oltpRUV2            float64
 }
 
 func (rm *ruMetering) add(consumption *consumptionItem) {
@@ -51,7 +51,7 @@ func (rm *ruMetering) add(consumption *consumptionItem) {
 	}
 	rm.writeBytes += uint64(consumption.WriteBytes)
 	rm.crossAZTrafficBytes += consumption.ReadCrossAzTrafficBytes + consumption.WriteCrossAzTrafficBytes
-	rm.ruV2 += consumption.TikvRUV2 + consumption.TidbRUV2
+	rm.oltpRUV2 += consumption.TikvRUV2 + consumption.TidbRUV2
 }
 
 func (rm *ruMetering) oltpMeteringValue() common.MeteringValue {
@@ -70,8 +70,8 @@ func (rm *ruMetering) crossAZTrafficBytesMeteringValue() common.MeteringValue {
 	return metering.NewBytesValue(rm.crossAZTrafficBytes)
 }
 
-func (rm *ruMetering) ruV2MeteringValue() common.MeteringValue {
-	return metering.NewRUValue(rm.ruV2)
+func (rm *ruMetering) oltpRUV2MeteringValue() common.MeteringValue {
+	return metering.NewRUValue(rm.oltpRUV2)
 }
 
 var _ metering.Collector = (*ruCollector)(nil)
@@ -130,7 +130,7 @@ func (c *ruCollector) Aggregate() []map[string]any {
 			meteringDataOLAPRUField:              ruMetering.olapMeteringValue(),
 			meteringDataWriteBytesField:          ruMetering.writeBytesMeteringValue(),
 			meteringDataCrossAZTrafficBytesField: ruMetering.crossAZTrafficBytesMeteringValue(),
-			meteringDataRUV2Field:                ruMetering.ruV2MeteringValue(),
+			meteringDataOLTPRUV2Field:            ruMetering.oltpRUV2MeteringValue(),
 		})
 	}
 	return records
