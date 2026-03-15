@@ -469,6 +469,8 @@ github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 h1:HR/ylkkLmGdSSDaD8
 github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3/go.mod h1:DWQW5jICDR7UJh4HtxXSM20Churx4CQL0fwL/SoOSA4=
 github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc h1:WQYup3tMJq1tyDU8aWTpSZcMPJIKHV+LNlCu6S7OH1I=
 github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc/go.mod h1:Qj77xzm/Bscv47607+/BkP0ovAHnf4j7HWSLKQaKwBw=
+github.com/pingcap/metering_sdk v0.0.0-20260203082503-b9f282339654 h1:ot11W01XErRpIRBc9Q35WoSYwec3nqtMfKOU/kOzgOI=
+github.com/pingcap/metering_sdk v0.0.0-20260203082503-b9f282339654/go.mod h1:qMqVMFM+BtxbUQD8tzHKjvXF+fGHTs/YM/L8xleGgvw=
 github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 h1:QV6jqlfOkh8hqvEAgwBZa+4bSgO0EeKC7s5c6Luam2I=
 github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21/go.mod h1:QYnjfA95ZaMefyl1NO8oPtKeb8pYUdnDVhQgf+qdpjM=
 github.com/pingcap/tidb-dashboard v0.0.0-20250928152019-e111aaee93f4 h1:cl2GYJ9efBk2uxSrNGr3+U62U5DAKZyPNx5cl0gP/J8=
