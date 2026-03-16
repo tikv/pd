@@ -911,6 +911,11 @@ error = '''
 the keyspace does not exist with id %d
 '''
 
+["PD:resourcemanager:ErrKeyspaceNotExistsByName"]
+error = '''
+keyspace not found with name: %s
+'''
+
 ["PD:scatter:ErrEmptyRegion"]
 error = '''
 empty region
