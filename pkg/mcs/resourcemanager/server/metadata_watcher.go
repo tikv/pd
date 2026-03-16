@@ -115,7 +115,15 @@ func parseLegacyResourceGroupWatchPath(groupName string, entryType resourceGroup
 
 func parseKeyspaceWatchPath(path string, entryType resourceGroupWatchEntryType) (resourceGroupWatchTarget, bool) {
 	keyspaceID, groupName, err := keypath.ParseKeyspaceResourceGroupPath(path)
-	if err != nil || groupName == "" {
+	if err != nil {
+		log.Debug("failed to parse keyspace resource group watch path",
+			zap.String("path", path),
+			zap.Error(err))
+		return resourceGroupWatchTarget{}, false
+	}
+	if groupName == "" {
+		log.Debug("skip keyspace resource group watch path without group name",
+			zap.String("path", path))
 		return resourceGroupWatchTarget{}, false
 	}
 	return resourceGroupWatchTarget{
@@ -127,10 +135,15 @@ func parseKeyspaceWatchPath(path string, entryType resourceGroupWatchEntryType) 
 
 func parseKeyspaceIDWatchPath(path string, entryType resourceGroupWatchEntryType) (resourceGroupWatchTarget, bool) {
 	if path == "" || strings.Contains(path, "/") {
+		log.Debug("skip invalid keyspace service limit watch path",
+			zap.String("path", path))
 		return resourceGroupWatchTarget{}, false
 	}
 	keyspaceID, err := strconv.ParseUint(path, 10, 32)
 	if err != nil {
+		log.Debug("failed to parse keyspace service limit watch path",
+			zap.String("path", path),
+			zap.Error(err))
 		return resourceGroupWatchTarget{}, false
 	}
 	return resourceGroupWatchTarget{
