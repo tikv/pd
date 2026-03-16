@@ -194,7 +194,7 @@ func isWitnessEnabled(cluster sche.CheckerCluster) bool {
 }
 
 func getRuleFitStores(cluster sche.SharedCluster, rf *placement.RuleFit) []*core.StoreInfo {
-	var stores []*core.StoreInfo
+	stores := make([]*core.StoreInfo, 0, len(rf.Peers))
 	for _, p := range rf.Peers {
 		if s := cluster.GetStore(p.GetStoreId()); s != nil {
 			stores = append(stores, s)

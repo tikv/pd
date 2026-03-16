@@ -2013,9 +2013,9 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	re.Nil(ops, "Affinity scheduling should be blocked when group is not allowed")
 }
 
-// TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch verifies that when the affinity group peers
-// don't satisfy placement rules, the group will be expired and scheduling is disabled.
-func TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch(t *testing.T) {
+// TestAffinityCheckerNormalizeGroupWhenPlacementRuleMismatch verifies that when the affinity group peers
+// don't satisfy placement rules, the checker keeps the group schedulable by normalizing it to the valid Region peers.
+func TestAffinityCheckerNormalizeGroupWhenPlacementRuleMismatch(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2036,8 +2036,8 @@ func TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch(t *testing.T) {
 	affinityManager := tc.GetAffinityManager()
 	checker := newTestAffinityChecker(ctx, tc, opt)
 
-	// Affinity group expects 4 voters while placement rules (and the region) only allow 3,
-	// so isGroupReplicated should be false and the group should be expired/refreshed.
+	// Affinity group expects 4 voters while placement rules (and the region) only allow 3.
+	// The checker should normalize the group to the valid Region peers and keep it schedulable.
 	group := &affinity.Group{
 		ID:            "test_group",
 		LeaderStoreID: 1,
@@ -2129,7 +2129,7 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := mockconfig.NewTestOptions()
+	opt := newAffinityTestOptions()
 	opt.SetLocationLabels([]string{"region", "zone", "host"})
 	tc := mockcluster.NewCluster(ctx, opt)
 
