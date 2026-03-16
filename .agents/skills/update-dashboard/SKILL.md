@@ -84,7 +84,30 @@ The PD repo has three `go.mod` files that reference tidb-dashboard. Update all t
    grep 'tidb-dashboard' go.mod tests/integrations/go.mod tools/go.mod
    ```
 
-## Phase 5: Commit
+## Phase 5: Find or Create Tracking Issue
+
+Before committing, ensure there is a GitHub issue for this dashboard bump.
+
+1. Search for an existing open issue:
+   ```bash
+   gh issue list --repo tikv/pd --search "update tidb-dashboard <short-hash>" --state open --limit 5
+   ```
+   Also try broader searches if the exact hash doesn't match:
+   ```bash
+   gh issue list --repo tikv/pd --search "bump tidb-dashboard" --state open --limit 5
+   ```
+
+2. If a matching issue exists, note its number for the PR.
+
+3. If no matching issue exists, create one:
+   ```bash
+   gh issue create --repo tikv/pd \
+     --title "chore(dashboard): update TiDB Dashboard to <version-timestamp>-<short-hash>" \
+     --body "Routine dependency bump: update \`github.com/pingcap/tidb-dashboard\` to \`<full-version>\`."
+   ```
+   Note the created issue number.
+
+## Phase 6: Commit and Create PR
 
 1. Create a feature branch:
    ```bash
@@ -102,7 +125,7 @@ The PD repo has three `go.mod` files that reference tidb-dashboard. Update all t
    ```
 
 4. Use the `create-pr` skill to push and open a PR. The PR should:
-   - Link to the tracking issue: `ref #10206`
+   - Link to the tracking issue found or created in Phase 5: `Close #<issue-number>`
    - Reference the upstream dashboard commit or PR if known
    - Use the `chore(dashboard):` prefix in the title
    - Note any Go toolchain version bump if applicable
