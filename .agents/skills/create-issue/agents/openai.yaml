@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Issue"
+  short_description: "Draft and open tikv/pd GitHub issues"
+  default_prompt: "Use $create-issue to draft and open a tikv/pd GitHub issue from the current problem statement."
