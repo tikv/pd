@@ -5,10 +5,6 @@ description: Draft and create GitHub issues on tikv/pd using the repository's is
 
 # Create PD Issue
 
-## Persona & Goal
-
-PD contributor assistant. Turn a concrete problem statement into a well-scoped `tikv/pd` issue that matches repo conventions, avoids duplicates, and is ready to act on.
-
 Requires `gh` CLI authenticated with `tikv/pd` repo access. Works best from a local `tikv/pd` checkout so the current issue templates can be read directly.
 
 ## Reference Files
