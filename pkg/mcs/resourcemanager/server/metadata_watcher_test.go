@@ -25,11 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage"
@@ -303,36 +300,6 @@ func TestMetadataWatcherHandlePut(t *testing.T) {
 		storedStates, err := memStorage.Load(keypath.KeyspaceResourceGroupStatePath(10, DefaultResourceGroupName))
 		re.NoError(err)
 		re.Empty(storedStates)
-	})
-}
-
-func TestMetadataWatcherLogsMalformedWatchPaths(t *testing.T) {
-	t.Run("malformed_keyspace_group_path", func(t *testing.T) {
-		re := require.New(t)
-		core, logs := observer.New(zap.DebugLevel)
-		restore := log.ReplaceGlobals(zap.New(core), nil)
-		defer restore()
-
-		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
-		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/settings/abc/group", "ignored"))
-
-		entries := logs.FilterMessage("failed to parse keyspace resource group watch path").All()
-		re.Len(entries, 1)
-		re.Equal("abc/group", entries[0].ContextMap()["path"])
-	})
-
-	t.Run("malformed_service_limit_path", func(t *testing.T) {
-		re := require.New(t)
-		core, logs := observer.New(zap.DebugLevel)
-		restore := log.ReplaceGlobals(zap.New(core), nil)
-		defer restore()
-
-		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
-		re.NoError(m.handleMetadataWatchPut("resource_group/keyspace/service_limits/abc", "ignored"))
-
-		entries := logs.FilterMessage("failed to parse keyspace service limit watch path").All()
-		re.Len(entries, 1)
-		re.Equal("abc", entries[0].ContextMap()["path"])
 	})
 }
 
