@@ -57,6 +57,7 @@ Collect the facts needed to file a real issue instead of a placeholder.
 > Load only the matching file under `.github/ISSUE_TEMPLATE/` now.
 
 1. Read the chosen template and keep its headings intact.
+   Extract the template's `name:` field from frontmatter and use that exact value later with `gh issue create --template`.
 
 2. Draft a title that matches the issue type and real scope:
    - bug: concise symptom or component-level failure
@@ -74,16 +75,12 @@ Collect the facts needed to file a real issue instead of a placeholder.
 
 After user approval:
 
-1. Use the matching GitHub issue template name so GitHub can apply the template's own defaults:
-   - `bug-report` -> `Bug Report`
-   - `flaky-test` -> `Flaky Test`
-   - `development-task` -> `Development Task`
-   - `enhancement-task` -> `Enhancement Task`
-   - `feature-request` -> `Feature Request`
+1. Use the selected template's frontmatter `name:` field as the `gh --template` argument so GitHub can apply the template's own defaults.
+   If the template metadata is missing or ambiguous, stop and ask the user before creation.
 
 2. Create the issue with `gh`. Preserve formatting with a temporary file or heredoc:
    ```bash
-   gh issue create --repo tikv/pd --template "<template-name>" --title "<title>" --body-file <body-file>
+   gh issue create --repo tikv/pd --template "<template-name>" --title "<title>" --body-file "<body-file>"
    ```
    Keep the selected template and the drafted body aligned. Do not mix a bug body with a development-task template, or vice versa.
 
@@ -99,6 +96,7 @@ After user approval:
 
 - Do not skip duplicate search just because the issue seems routine.
 - Do not use one template's headings with another template's `--template` name.
+- Do not hard-code template names or labels when the selected issue template already defines them in frontmatter.
 - Do not add manual `--label` flags for standard PD issue types unless the user explicitly asked for extra labels.
 - Do not file flaky-test issues without the failing job name and a concrete CI link.
 
