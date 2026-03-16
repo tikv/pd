@@ -192,9 +192,6 @@ type AllocatorManager struct {
 		syncutil.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
-
-	uniqueIndex int64
-	maxIndex    int64
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -207,7 +204,6 @@ func NewAllocatorManager(
 	cfg Config,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
-	maxIdx, uniqueIdx := cfg.GetTSOIndex()
 	am := &AllocatorManager{
 		ctx:                    ctx,
 		cancel:                 cancel,
@@ -221,8 +217,6 @@ func NewAllocatorManager(
 		leaderLease:            cfg.GetLeaderLease(),
 		maxResetTSGap:          cfg.GetMaxResetTSGap,
 		securityConfig:         cfg.GetTLSConfig(),
-		maxIndex:               maxIdx,
-		uniqueIndex:            uniqueIdx,
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
