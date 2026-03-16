@@ -77,6 +77,7 @@ type Config struct {
 
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+
 	// TSOUniqueIndex is the current TSO unique index.
 	TSOUniqueIndex int64 `toml:"tso-unique-index" json:"tso-unique-index"`
 	// TSOMaxIndex is the current TSO max index, which should be same with how many cluster needs to replicate data.
