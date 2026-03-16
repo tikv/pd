@@ -1,6 +1,6 @@
 ---
 name: create-issue
-description: Draft and create GitHub issues on tikv/pd using the repository's issue templates. Searches for duplicates, picks the right template and label, drafts the title/body from the current problem statement, shows the draft to the user for approval, and submits via `gh issue create`. Use when you need a new PD bug report, flaky-test issue, development task, enhancement task, or feature request.
+description: Draft and create GitHub issues on tikv/pd using the repository's issue templates. Searches for duplicates, picks the right template, drafts the title/body from the current problem statement, shows the draft to the user for approval, and submits via `gh issue create`. Use when you need a new PD bug report, flaky-test issue, development task, enhancement task, or feature request.
 ---
 
 # Create PD Issue
@@ -15,11 +15,11 @@ Requires `gh` CLI authenticated with `tikv/pd` repo access. Works best from a lo
 
 | File | Contents | Load When |
 |---|---|---|
-| `.github/ISSUE_TEMPLATE/bug-report.md` | Bug report structure and default label | When reporting a bug, regression, or correctness problem |
-| `.github/ISSUE_TEMPLATE/flaky-test.md` | Flaky test structure and default label | When filing CI instability or test flakiness |
-| `.github/ISSUE_TEMPLATE/development-task.md` | Development task structure and default label | When filing a concrete engineering task or follow-up |
-| `.github/ISSUE_TEMPLATE/enhancement-task.md` | Enhancement task structure and default label | When filing an improvement with a known technical direction |
-| `.github/ISSUE_TEMPLATE/feature-request.md` | Feature request structure and default label | When filing a product or API capability request |
+| `.github/ISSUE_TEMPLATE/bug-report.md` | Bug report structure and template metadata | When reporting a bug, regression, or correctness problem |
+| `.github/ISSUE_TEMPLATE/flaky-test.md` | Flaky test structure and template metadata | When filing CI instability or test flakiness |
+| `.github/ISSUE_TEMPLATE/development-task.md` | Development task structure and template metadata | When filing a concrete engineering task or follow-up |
+| `.github/ISSUE_TEMPLATE/enhancement-task.md` | Enhancement task structure and template metadata | When filing an improvement with a known technical direction |
+| `.github/ISSUE_TEMPLATE/feature-request.md` | Feature request structure and template metadata | When filing a product or API capability request |
 
 ## Workflow
 
@@ -30,8 +30,10 @@ Collect the facts needed to file a real issue instead of a placeholder.
 1. Confirm the repo and GitHub auth are usable:
    ```bash
    git rev-parse --show-toplevel
+   git remote -v
    gh auth status
    ```
+   If the checkout is not `tikv/pd`, stop and switch to the correct repo before reading templates or creating the issue.
 
 2. Identify the source material for the issue: user prompt, review findings, local diff, CI logs, panic stack, or a linked PR. If critical facts are missing, ask targeted follow-up questions before drafting.
 
@@ -66,36 +68,45 @@ Collect the facts needed to file a real issue instead of a placeholder.
 
 4. If the issue comes from code review or a PR follow-up, link the triggering PR, commit, or discussion in the body.
 
-5. Show the drafted title, label, and full body to the user before creating the issue. Ask for any missing corrections at this stage.
+5. Show the drafted title and full body to the user before creating the issue. Ask for any missing corrections at this stage.
 
 ### Phase 3: Create the Issue
 
 After user approval:
 
-1. Apply the label implied by the template:
-   - `bug-report` -> `type/bug`
-   - `flaky-test` -> `type/ci`
-   - `development-task` -> `type/development`
-   - `enhancement-task` -> `type/enhancement`
-   - `feature-request` -> `type/feature-request`
+1. Use the matching GitHub issue template name so GitHub can apply the template's own defaults:
+   - `bug-report` -> `Bug Report`
+   - `flaky-test` -> `Flaky Test`
+   - `development-task` -> `Development Task`
+   - `enhancement-task` -> `Enhancement Task`
+   - `feature-request` -> `Feature Request`
 
 2. Create the issue with `gh`. Preserve formatting with a temporary file or heredoc:
    ```bash
-   gh issue create --repo tikv/pd --title "<title>" --body-file <body-file> --label "<label>"
+   gh issue create --repo tikv/pd --template "<template-name>" --title "<title>" --body-file <body-file>
    ```
+   Keep the selected template and the drafted body aligned. Do not mix a bug body with a development-task template, or vice versa.
 
 3. Report the created issue number and URL back to the user.
 
 ### Phase 4: Post-Creation Handling
 
-- If `gh issue create` reports an existing issue or permission problem, stop and surface the error directly.
-- If the issue requires extra labels beyond the template default, add them only when the user asked for them or the repo convention is explicit.
+- If `gh issue create` reports an existing issue, permission problem, or template-name error, stop and surface the error directly.
+- If the user explicitly asks for extra labels, milestones, or projects, add them deliberately. Otherwise, rely on the selected template's defaults instead of passing manual `--label` flags.
 - For flaky-test issues, do not submit until the failing job name and at least one CI link are available.
+
+## Common Pitfalls
+
+- Do not skip duplicate search just because the issue seems routine.
+- Do not use one template's headings with another template's `--template` name.
+- Do not add manual `--label` flags for standard PD issue types unless the user explicitly asked for extra labels.
+- Do not file flaky-test issues without the failing job name and a concrete CI link.
 
 ## Agent Constraints
 
 - Always search for duplicates first.
 - Always show the draft before submitting. User approval is required.
 - Use `gh` CLI for GitHub operations.
+- Keep the drafted body consistent with the selected template.
 - Keep the issue scoped to one problem or task.
 - Do not modify code. This skill only drafts and creates issues.
