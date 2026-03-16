@@ -157,17 +157,17 @@ func (c *Config) GetMaxResetTSGap() time.Duration {
 	return c.MaxResetTSGap.Duration
 }
 
-// GetTLSConfig returns the TLS config.
-func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
-	return &c.Security.TLSConfig
-}
-
-// GetTSOIndex returns the current cluster tso index configuration.
+// GetTSOIndex returns the TSO unique index and max index.
 func (c *Config) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
-	if c.TSOMaxIndex <= 0 {
+	if c.TSOMaxIndex == 0 {
 		return 1, 0
 	}
 	return c.TSOMaxIndex, c.TSOUniqueIndex
+}
+
+// GetTLSConfig returns the TLS config.
+func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
+	return &c.Security.TLSConfig
 }
 
 // Parse parses flag definitions from the argument list.

@@ -104,7 +104,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// Do not update the zero physical time if the `force` flag is false.
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) && !force {
+	if t.tsoMux.physical == typeutil.ZeroTime && !force {
 		return
 	}
 	// make sure the ts won't fall back
@@ -118,7 +118,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
+	if t.tsoMux.physical == typeutil.ZeroTime {
 		return typeutil.ZeroTime, 0
 	}
 	return t.tsoMux.physical, t.tsoMux.logical
@@ -414,7 +414,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 	}
 	for i := range maxRetryCount {
 		currentPhysical, _ := t.getTSO()
-		if currentPhysical.Equal(typeutil.ZeroTime) {
+		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			if leadership.Check() {
 				time.Sleep(200 * time.Millisecond)

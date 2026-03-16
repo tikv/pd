@@ -669,6 +669,14 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
+// GetTSOIndex returns the TSO unique index and max index.
+func (c *Config) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
+	if c.TSOMaxIndex == 0 {
+		return 1, 0
+	}
+	return c.TSOMaxIndex, c.TSOUniqueIndex
+}
+
 // GetLeaderLease returns the leader lease.
 func (c *Config) GetLeaderLease() int64 {
 	return c.LeaderLease

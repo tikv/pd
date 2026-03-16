@@ -86,7 +86,6 @@ func (c *TestServiceConfig) GetTLSConfig() *grpcutil.TLSConfig {
 	return c.TLSConfig
 }
 
-// GetTSOIndex returns the current cluster tso index configuration.
 func (*TestServiceConfig) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
 	return 1, 0
 }
