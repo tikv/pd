@@ -464,7 +464,7 @@ func TestRuVersionFromControllerConfig(t *testing.T) {
 	config := DefaultConfig()
 	config.RUVersionPolicy = &RUVersionPolicy{
 		Default:   1,
-		Overrides: map[string]int32{"42": 3},
+		Overrides: map[uint32]RUVersion{42: 3},
 	}
 	gc.updateRuVersionFromConfig(config)
 	re.Equal(int32(3), gc.GetRuVersion())
@@ -481,7 +481,7 @@ func TestRuVersionOverrideFromControllerConfig(t *testing.T) {
 	config := DefaultConfig()
 	config.RUVersionPolicy = &RUVersionPolicy{
 		Default:   5,
-		Overrides: map[string]int32{"42": 3, "100": 7},
+		Overrides: map[uint32]RUVersion{42: 3, 100: 7},
 	}
 	gc.updateRuVersionFromConfig(config)
 	re.Equal(int32(3), gc.GetRuVersion())
@@ -497,7 +497,7 @@ func TestRuVersionDefaultFallback(t *testing.T) {
 	config := DefaultConfig()
 	config.RUVersionPolicy = &RUVersionPolicy{
 		Default:   5,
-		Overrides: map[string]int32{"100": 7},
+		Overrides: map[uint32]RUVersion{100: 7},
 	}
 	gc.updateRuVersionFromConfig(config)
 	// No override for keyspace 42, use default.
@@ -529,7 +529,7 @@ func TestRuVersionFromInitialControllerConfig(t *testing.T) {
 		BaseConfig: BaseConfig{
 			RUVersionPolicy: &RUVersionPolicy{
 				Default:   1,
-				Overrides: map[string]int32{"42": 3},
+				Overrides: map[uint32]RUVersion{42: 3},
 			},
 		},
 	}
@@ -576,7 +576,7 @@ func TestRuVersionWatchViaControllerConfig(t *testing.T) {
 		BaseConfig: BaseConfig{
 			RUVersionPolicy: &RUVersionPolicy{
 				Default:   1,
-				Overrides: map[string]int32{"42": 3},
+				Overrides: map[uint32]RUVersion{42: 3},
 			},
 		},
 	}

@@ -436,7 +436,7 @@ func tryToSetKeyspaceRuVersion(re *require.Assertions, leaderAddr, keyspaceName 
 		re,
 		leaderAddr,
 		http.MethodPost,
-		"/config/controller/ru_version/"+keyspaceName,
+		"/config/controller/ru-version/"+keyspaceName,
 		nil,
 		apis.SetKeyspaceRuVersionRequest{
 			RuVersion: ruVersion,
