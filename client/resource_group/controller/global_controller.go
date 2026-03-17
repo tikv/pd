@@ -275,7 +275,7 @@ func (c *ResourceGroupsController) updateRuVersionFromConfig(config *Config) {
 		} else if config.RUVersionPolicy.Default > 0 {
 			old := c.ruVersion.Swap(config.RUVersionPolicy.Default)
 			if old != config.RUVersionPolicy.Default {
-				log.Info("ru_version updated to default from controller config",
+				log.Info("ru version updated to default from controller config",
 					zap.Int32("old", old), zap.Int32("new", config.RUVersionPolicy.Default),
 					zap.Uint32("keyspace-id", c.keyspaceID))
 			}
