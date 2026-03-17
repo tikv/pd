@@ -20,6 +20,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -421,4 +422,185 @@ func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	}
 	checkKeyspace(constants.NullKeyspaceID)
 	checkKeyspace(1)
+}
+
+func TestGetRuVersionDefault(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// Default should return 1 (v1) when no policy is set.
+	re.Equal(int32(1), gc.GetRuVersion())
+}
+
+func TestGetRuVersionAfterSet(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// Simulate ru_version update via atomic store.
+	gc.ruVersion.Store(3)
+	re.Equal(int32(3), gc.GetRuVersion())
+
+	// Zero should return 1 (default).
+	gc.ruVersion.Store(0)
+	re.Equal(int32(1), gc.GetRuVersion())
+
+	// Negative should also return 1 (default).
+	gc.ruVersion.Store(-1)
+	re.Equal(int32(1), gc.GetRuVersion())
+}
+
+func TestRuVersionFromControllerConfig(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	// keyspaceID = 42
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	// Simulate a controller config with RUVersionPolicy containing an override for keyspace 42.
+	config := DefaultConfig()
+	config.RUVersionPolicy = &RUVersionPolicy{
+		Default:   1,
+		Overrides: map[string]int32{"42": 3},
+	}
+	gc.updateRuVersionFromConfig(config)
+	re.Equal(int32(3), gc.GetRuVersion())
+}
+
+func TestRuVersionOverrideFromControllerConfig(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	// keyspaceID = 42
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	// Override takes precedence over default.
+	config := DefaultConfig()
+	config.RUVersionPolicy = &RUVersionPolicy{
+		Default:   5,
+		Overrides: map[string]int32{"42": 3, "100": 7},
+	}
+	gc.updateRuVersionFromConfig(config)
+	re.Equal(int32(3), gc.GetRuVersion())
+}
+
+func TestRuVersionDefaultFallback(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	// keyspaceID = 42, no override for 42
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	config := DefaultConfig()
+	config.RUVersionPolicy = &RUVersionPolicy{
+		Default:   5,
+		Overrides: map[string]int32{"100": 7},
+	}
+	gc.updateRuVersionFromConfig(config)
+	// No override for keyspace 42, use default.
+	re.Equal(int32(5), gc.GetRuVersion())
+}
+
+func TestRuVersionNilPolicy(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	// Set a non-default version first.
+	gc.ruVersion.Store(5)
+	re.Equal(int32(5), gc.GetRuVersion())
+
+	// Nil policy resets to 0 (GetRuVersion returns 1 as default).
+	config := DefaultConfig()
+	config.RUVersionPolicy = nil
+	gc.updateRuVersionFromConfig(config)
+	re.Equal(int32(1), gc.GetRuVersion())
+}
+
+func TestRuVersionFromInitialControllerConfig(t *testing.T) {
+	re := require.New(t)
+
+	// Simulate a provider that returns a controller config with RUVersionPolicy.
+	configWithPolicy := &Config{
+		BaseConfig: BaseConfig{
+			RUVersionPolicy: &RUVersionPolicy{
+				Default:   1,
+				Overrides: map[string]int32{"42": 3},
+			},
+		},
+	}
+	configBytes, err := json.Marshal(configWithPolicy)
+	re.NoError(err)
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 1},
+		Kvs: []*meta_storagepb.KeyValue{
+			{Value: configBytes},
+		},
+	}, nil)
+	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+	// The initial load should set ruVersion from the policy.
+	re.Equal(int32(3), gc.GetRuVersion())
+}
+
+func TestRuVersionWatchViaControllerConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 1},
+	}, nil)
+	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+
+	watchConfigChan := make(chan []*meta_storagepb.Event, 1)
+	mockProvider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, mock.Anything).Return(watchConfigChan, nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 42)
+	re.NoError(err)
+	controller.Start(ctx)
+
+	// Case 1: Config with RUVersionPolicy containing override for keyspace 42
+	configWithPolicy := &Config{
+		BaseConfig: BaseConfig{
+			RUVersionPolicy: &RUVersionPolicy{
+				Default:   1,
+				Overrides: map[string]int32{"42": 3},
+			},
+		},
+	}
+	val, _ := json.Marshal(configWithPolicy)
+	watchConfigChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_PUT,
+			Kv:   &meta_storagepb.KeyValue{Value: val},
+		},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRuVersion() == 3
+	})
+
+	// Case 2: Config without RUVersionPolicy (nil) resets to default
+	configNoPolicy := &Config{}
+	val, _ = json.Marshal(configNoPolicy)
+	watchConfigChan <- []*meta_storagepb.Event{
+		{
+			Type: meta_storagepb.Event_PUT,
+			Kv:   &meta_storagepb.KeyValue{Value: val},
+		},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRuVersion() == 1 // Reset to default
+	})
 }

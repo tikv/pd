@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -165,6 +166,36 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	return nil
 }
 
+// SetKeyspaceRuVersion sets the RU version for a specific keyspace in the controller config.
+func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error {
+	if !m.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
+	m.Lock()
+	defer m.Unlock()
+	if m.controllerConfig.RUVersionPolicy == nil {
+		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: 1}
+	}
+	if m.controllerConfig.RUVersionPolicy.Overrides == nil {
+		m.controllerConfig.RUVersionPolicy.Overrides = make(map[string]int32)
+	}
+	keyspaceIDStr := strconv.FormatUint(uint64(keyspaceID), 10)
+	defaultVersion := m.controllerConfig.RUVersionPolicy.Default
+	if ruVersion == defaultVersion {
+		delete(m.controllerConfig.RUVersionPolicy.Overrides, keyspaceIDStr)
+	} else {
+		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceIDStr] = ruVersion
+	}
+	return m.storage.SaveControllerConfig(m.controllerConfig)
+}
+
+// GetRUVersionPolicy returns the current RU version policy from the controller config.
+func (m *Manager) GetRUVersionPolicy() *RUVersionPolicy {
+	m.RLock()
+	defer m.RUnlock()
+	return m.controllerConfig.RUVersionPolicy
+}
+
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
 	krgm, ok := m.krgms[keyspaceID]
@@ -279,9 +310,12 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	// Initialize the reserved keyspace resource group manager and default resource groups.
 	m.initReserved()
 	// Load service limits from the storage after all resource groups are loaded.
-	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+	if err := m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
 		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) initReserved() {
@@ -307,6 +341,8 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	switch kp[0] {
 	case "request-unit":
 		config = &m.controllerConfig.RequestUnit
+	case "ru-version-policy":
+		config = &m.controllerConfig.RUVersionPolicy
 	default:
 		config = m.controllerConfig
 	}

@@ -93,6 +93,12 @@ type Config struct {
 	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
+// RUVersionPolicy configures which RU calculation version to use per keyspace.
+type RUVersionPolicy struct {
+	Default   int32            `json:"default"`
+	Overrides map[string]int32 `json:"overrides,omitempty"`
+}
+
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
 type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
@@ -110,6 +116,8 @@ type ControllerConfig struct {
 
 	// EnableControllerTraceLog is to control whether resource control client enable trace.
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
+
+	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.

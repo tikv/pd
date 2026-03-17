@@ -102,6 +102,15 @@ type BaseConfig struct {
 
 	// EnableControllerTraceLog is to control whether resource control client enable trace.
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
+
+	// RUVersionPolicy configures which RU calculation version to use per keyspace.
+	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
+}
+
+// RUVersionPolicy configures RU calculation version per keyspace.
+type RUVersionPolicy struct {
+	Default   int32            `json:"default"`
+	Overrides map[string]int32 `json:"overrides,omitempty"`
 }
 
 // Config is the configuration of the resource manager controller.

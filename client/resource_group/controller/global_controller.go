@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,6 +79,8 @@ type ResourceGroupKVInterceptor interface {
 	OnResponseWait(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, time.Duration, error)
 	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
 	IsBackgroundRequest(ctx context.Context, resourceGroupName, requestResource string) bool
+	// GetRuVersion returns the current RU calculation version for this keyspace.
+	GetRuVersion() int32
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
@@ -176,6 +179,10 @@ type ResourceGroupsController struct {
 
 	degradedRUSettings *rmpb.GroupRequestUnitSettings
 
+	// ruVersion stores the current RU calculation version for this keyspace.
+	// 0 means not loaded or not configured (treated as v1).
+	ruVersion atomic.Int32
+
 	wg sync.WaitGroup
 }
 
@@ -214,6 +221,8 @@ func NewResourceGroupController(
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	controller.safeRuConfig.Store(controller.ruConfig)
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
+	// Extract initial ruVersion from the controller config's RUVersionPolicy.
+	controller.updateRuVersionFromConfig(config)
 	return controller, nil
 }
 
@@ -239,6 +248,44 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 // GetConfig returns the config of controller.
 func (c *ResourceGroupsController) GetConfig() *RUConfig {
 	return c.safeRuConfig.Load()
+}
+
+// GetRuVersion returns the current RU calculation version for this keyspace.
+// Returns 1 (default v1) if not configured or not loaded yet.
+// This is a pure memory read (atomic load), no network call.
+func (c *ResourceGroupsController) GetRuVersion() int32 {
+	v := c.ruVersion.Load()
+	if v <= 0 {
+		return 1
+	}
+	return v
+}
+
+// updateRuVersionFromConfig extracts the RU version for this keyspace from the controller config.
+func (c *ResourceGroupsController) updateRuVersionFromConfig(config *Config) {
+	if config.RUVersionPolicy != nil {
+		keyspaceIDStr := strconv.FormatUint(uint64(c.keyspaceID), 10)
+		if v, ok := config.RUVersionPolicy.Overrides[keyspaceIDStr]; ok {
+			old := c.ruVersion.Swap(v)
+			if old != v {
+				log.Info("ru_version updated from controller config",
+					zap.Int32("old", old), zap.Int32("new", v),
+					zap.Uint32("keyspace-id", c.keyspaceID))
+			}
+		} else if config.RUVersionPolicy.Default > 0 {
+			old := c.ruVersion.Swap(config.RUVersionPolicy.Default)
+			if old != config.RUVersionPolicy.Default {
+				log.Info("ru_version updated to default from controller config",
+					zap.Int32("old", old), zap.Int32("new", config.RUVersionPolicy.Default),
+					zap.Uint32("keyspace-id", c.keyspaceID))
+			}
+		} else {
+			c.ruVersion.Store(0)
+		}
+	} else {
+		// No policy = reset to 0 (GetRuVersion() returns 1 as default)
+		c.ruVersion.Store(0)
+	}
 }
 
 // Source List
@@ -298,6 +345,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
+
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
 		defer watchRetryTimer.Stop()
 
@@ -438,6 +486,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if enableControllerTraceLog.Load() != config.EnableControllerTraceLog {
 						enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 					}
+					// Update ru version from the controller config RUVersionPolicy.
+					c.updateRuVersionFromConfig(config)
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
 			case gc := <-c.tokenBucketUpdateChan:
