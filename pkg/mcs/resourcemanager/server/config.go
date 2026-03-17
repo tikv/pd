@@ -99,6 +99,21 @@ type RUVersionPolicy struct {
 	Overrides map[string]int32 `json:"overrides,omitempty"`
 }
 
+// Clone returns a deep copy of the RU version policy.
+func (p *RUVersionPolicy) Clone() *RUVersionPolicy {
+	if p == nil {
+		return nil
+	}
+	clone := &RUVersionPolicy{Default: p.Default}
+	if p.Overrides != nil {
+		clone.Overrides = make(map[string]int32, len(p.Overrides))
+		for keyspaceID, version := range p.Overrides {
+			clone.Overrides[keyspaceID] = version
+		}
+	}
+	return clone
+}
+
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
 type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.

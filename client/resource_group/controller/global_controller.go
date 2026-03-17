@@ -283,7 +283,9 @@ func (c *ResourceGroupsController) updateRuVersionFromConfig(config *Config) {
 			c.ruVersion.Store(0)
 		}
 	} else {
-		// No policy = reset to 0 (GetRuVersion() returns 1 as default)
+		// No policy in the config means no RU version override is active.
+		// Reset the stored value to 0; GetRuVersion() will return 1 (the default)
+		// so callers always see a valid version even when no policy exists.
 		c.ruVersion.Store(0)
 	}
 }

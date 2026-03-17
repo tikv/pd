@@ -174,6 +174,9 @@ func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error
 	m.Lock()
 	defer m.Unlock()
 	if m.controllerConfig.RUVersionPolicy == nil {
+		// Default RU version is 1, meaning no RU model change.
+		// There is currently no API to modify this global default; it is
+		// intentionally fixed so that only per-keyspace overrides drive version bumps.
 		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: 1}
 	}
 	if m.controllerConfig.RUVersionPolicy.Overrides == nil {
@@ -189,11 +192,12 @@ func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error
 	return m.storage.SaveControllerConfig(m.controllerConfig)
 }
 
-// GetRUVersionPolicy returns the current RU version policy from the controller config.
+// GetRUVersionPolicy returns a deep copy of the current RU version policy from the controller config.
+// The returned value is safe to use after the lock is released.
 func (m *Manager) GetRUVersionPolicy() *RUVersionPolicy {
 	m.RLock()
 	defer m.RUnlock()
-	return m.controllerConfig.RUVersionPolicy
+	return m.controllerConfig.RUVersionPolicy.Clone()
 }
 
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
