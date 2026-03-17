@@ -156,6 +156,8 @@ func TestInitGCTuner(t *testing.T) {
 	re.Equal(0.7, state.MemoryLimitGCTriggerRatio)
 	re.Equal(uint64(560000000), state.MemoryLimitGCTriggerBytes) // 800MB * 0.7
 	re.True(EnableGOGCTuner.Load())
+	state.Stop()
+	re.Nil(globalTuner.Load())
 }
 
 func TestInitGCTunerWithZeroMemoryLimit(t *testing.T) {
@@ -176,7 +178,7 @@ func TestInitGCTunerWithZeroMemoryLimit(t *testing.T) {
 	re.Equal(uint64(600000000), state.GCThresholdBytes) // 1GB * 0.6 (uses totalMem)
 
 	// Cleanup
-	Tuning(0)
+	state.Stop()
 }
 
 func TestUpdateIfNeeded(t *testing.T) {
@@ -191,6 +193,9 @@ func TestUpdateIfNeeded(t *testing.T) {
 	}
 
 	state := InitGCTuner(totalMem, cfg)
+	defer func() {
+		state.Stop()
+	}()
 	originalThreshold := state.GCThresholdBytes
 
 	// Test no change
@@ -228,7 +233,4 @@ func TestUpdateIfNeeded(t *testing.T) {
 	// Test no change when ratio is the same
 	updated = state.UpdateIfNeeded(cfg)
 	re.False(updated)
-
-	// Cleanup
-	Tuning(0)
 }

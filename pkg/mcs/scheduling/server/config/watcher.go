@@ -270,5 +270,8 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 // Close closes the watcher.
 func (cw *Watcher) Close() {
 	cw.cancel()
+	if cw.gcTunerState != nil {
+		cw.gcTunerState.Stop()
+	}
 	cw.wg.Wait()
 }

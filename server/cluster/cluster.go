@@ -579,6 +579,7 @@ func (c *RaftCluster) startGCTuner() {
 		select {
 		case <-c.ctx.Done():
 			log.Info("gc tuner is stopped")
+			state.Stop() // disable GC tuner when the cluster is stopping
 			return
 		case <-tick.C:
 			state.UpdateIfNeeded(c.getGCTunerConfig())
