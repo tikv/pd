@@ -342,8 +342,6 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	switch kp[0] {
 	case "request-unit":
 		config = &m.controllerConfig.RequestUnit
-	case "ru-version-policy":
-		config = &m.controllerConfig.RUVersionPolicy
 	default:
 		config = m.controllerConfig
 	}
