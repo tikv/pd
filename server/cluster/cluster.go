@@ -461,23 +461,25 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isKeyspaceGroupEnabled {
-		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
-			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
-			if err != nil || len(servers) == 0 {
-				if err := c.startTSOJobsIfNeeded(); err != nil {
-					log.Error("failed to start TSO jobs", errs.ZapError(err))
-					return
-				}
-				if c.IsServiceIndependent(constant.TSOServiceName) {
-					log.Info("TSO is provided by PD")
-					c.UnsetServiceIndependent(constant.TSOServiceName)
-				}
-			} else {
-				c.stopTSOJobsIfNeeded()
-				if !c.IsServiceIndependent(constant.TSOServiceName) {
-					log.Info("TSO is provided by TSO server")
-					c.SetServiceIndependent(constant.TSOServiceName)
-				}
+		if !c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+			log.Debug("TSO dynamic switching is disabled, skipping TSO service check")
+			return
+		}
+		servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+		if err != nil || len(servers) == 0 {
+			if err := c.startTSOJobsIfNeeded(); err != nil {
+				log.Error("failed to start TSO jobs", errs.ZapError(err))
+				return
+			}
+			if c.IsServiceIndependent(constant.TSOServiceName) {
+				log.Info("TSO is provided by PD")
+				c.UnsetServiceIndependent(constant.TSOServiceName)
+			}
+		} else {
+			c.stopTSOJobsIfNeeded()
+			if !c.IsServiceIndependent(constant.TSOServiceName) {
+				log.Info("TSO is provided by TSO server")
+				c.SetServiceIndependent(constant.TSOServiceName)
 			}
 		}
 		return
@@ -546,7 +548,7 @@ func (c *RaftCluster) stopTSOJobsIfNeeded() {
 	if !c.tsoAllocator.IsInitialize() {
 		return
 	}
-	log.Info("closing the TSO allocator")
+	log.Info("closing the embedded TSO allocator")
 	c.tsoAllocator.Reset(false)
 	failpoint.Inject("updateAfterResetTSO", func() {
 		if err := c.tsoAllocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {

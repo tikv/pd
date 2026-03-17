@@ -398,7 +398,12 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 			return false, err
 		}
 		t.lastSavedTime.Store(save)
-		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
+		saveDuration := time.Since(start)
+		t.metrics.updateSaveDuration.Observe(saveDuration.Seconds())
+		log.Debug("saved timestamp to etcd",
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+			zap.Time("saved-time", save),
+			zap.Duration("took", saveDuration))
 	}
 	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
 	// Otherwise, the caller met logical overflow, so it will allocate physical time to alloc more timestamp in concurrent.
