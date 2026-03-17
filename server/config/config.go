@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -87,6 +88,11 @@ type Config struct {
 
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+
+	// TSOUniqueIndex is the current TSO unique index.
+	TSOUniqueIndex int64 `toml:"tso-unique-index" json:"tso-unique-index"`
+	// TSOMaxIndex is the current TSO max index, which should be same with how many cluster needs to replicate data.
+	TSOMaxIndex int64 `toml:"tso-max-index" json:"tso-max-index"`
 
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
 	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
@@ -262,8 +268,9 @@ const (
 )
 
 var (
-	defaultEnableTelemetry = false
-	defaultRuntimeServices = []string{}
+	defaultEnableTelemetry    = false
+	defaultRuntimeServices    = []string{}
+	tsoMaxIndexAvailableValue = []int64{0, 1, 2, 4, 8}
 )
 
 func init() {
@@ -445,6 +452,14 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
+	}
+
+	if !slices.Contains(tsoMaxIndexAvailableValue, c.TSOMaxIndex) {
+		return errors.New(fmt.Sprintf("tso max index:%d should be one of %v", c.TSOMaxIndex, tsoMaxIndexAvailableValue))
+	}
+
+	if c.TSOMaxIndex != 0 && c.TSOMaxIndex <= c.TSOUniqueIndex {
+		return fmt.Errorf("tso max index:%d is less than unique index:%d", c.TSOMaxIndex, c.TSOUniqueIndex)
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
@@ -652,6 +667,14 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 		m[k] = sl2
 	}
 	return m
+}
+
+// GetTSOIndex returns the TSO unique index and max index.
+func (c *Config) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
+	if c.TSOMaxIndex == 0 {
+		return 1, 0
+	}
+	return c.TSOMaxIndex, c.TSOUniqueIndex
 }
 
 // GetLeaderLease returns the leader lease.

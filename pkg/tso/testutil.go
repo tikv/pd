@@ -85,3 +85,7 @@ func (c *TestServiceConfig) GetMaxResetTSGap() time.Duration {
 func (c *TestServiceConfig) GetTLSConfig() *grpcutil.TLSConfig {
 	return c.TLSConfig
 }
+
+func (*TestServiceConfig) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
+	return 1, 0
+}

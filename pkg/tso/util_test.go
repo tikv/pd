@@ -15,6 +15,8 @@
 package tso
 
 import (
+	"context"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -105,4 +107,58 @@ func TestTimeStamp(t *testing.T) {
 	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
 	oracle.saveInterval = config.DefaultTSOSaveInterval - 2*time.Second
 	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
+}
+
+func TestTSOIndex(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for _, ts := range []*timestampOracle{
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			uniqueIndex: 1,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			uniqueIndex: 2,
+		},
+		{
+			tsoMux: &tsoObject{
+				physical: time.Now(),
+			},
+			uniqueIndex: 3,
+		},
+	} {
+		ts.suffix = int(ts.uniqueIndex)
+		for range 10 {
+			count := rand.Int63n(100)
+			_, logical, _ := ts.generateTSO(ctx, count, CalSuffixBits(4))
+			require.Equal(t, ts.uniqueIndex, logical%4)
+		}
+	}
+}
+
+func TestCalSuffixBits(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		maxSuffix int32
+		expect    int
+	}{
+		{maxSuffix: 0, expect: 0},
+		{maxSuffix: 1, expect: 1},
+		{maxSuffix: 2, expect: 2},
+		{maxSuffix: 3, expect: 2},
+		{maxSuffix: 4, expect: 3},
+		{maxSuffix: 7, expect: 3},
+		{maxSuffix: 8, expect: 4},
+	}
+
+	for _, tc := range testCases {
+		re.Equal(tc.expect, CalSuffixBits(tc.maxSuffix))
+	}
 }

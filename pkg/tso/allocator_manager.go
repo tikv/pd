@@ -192,6 +192,9 @@ type AllocatorManager struct {
 		syncutil.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
+
+	uniqueIndex int64
+	suffixbit   int
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -204,6 +207,7 @@ func NewAllocatorManager(
 	cfg Config,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
+	maxIdx, uniqueIdx := cfg.GetTSOIndex()
 	am := &AllocatorManager{
 		ctx:                    ctx,
 		cancel:                 cancel,
@@ -217,6 +221,8 @@ func NewAllocatorManager(
 		leaderLease:            cfg.GetLeaderLease(),
 		maxResetTSGap:          cfg.GetMaxResetTSGap,
 		securityConfig:         cfg.GetTLSConfig(),
+		uniqueIndex:            uniqueIdx,
+		suffixbit:              CalSuffixBits(int32(maxIdx - 1)),
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -493,7 +499,7 @@ func (am *AllocatorManager) compareAndSetMaxSuffix(suffix int32) {
 func (am *AllocatorManager) GetSuffixBits() int {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	return CalSuffixBits(am.mu.maxSuffix)
+	return am.suffixbit
 }
 
 // CalSuffixBits calculates the bits of suffix by the max suffix sign.

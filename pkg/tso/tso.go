@@ -82,6 +82,8 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+
+	uniqueIndex int64
 }
 
 func (t *timestampOracle) getStorageTimeout() time.Duration {
@@ -127,7 +129,7 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64, suffixBi
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if t.tsoMux.physical == typeutil.ZeroTime {
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
 		return 0, 0, typeutil.ZeroTime
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)

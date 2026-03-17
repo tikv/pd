@@ -1401,6 +1401,10 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
+func (s *Server) GetTSOIndex() (maxIndex int64, uniqueIndex int64) {
+	return s.cfg.GetTSOIndex()
+}
+
 // GetControllerConfig gets the resource manager controller config.
 func (s *Server) GetControllerConfig() *rm_server.ControllerConfig {
 	return &s.cfg.Controller
