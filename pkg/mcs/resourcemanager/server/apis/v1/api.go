@@ -443,8 +443,8 @@ func (s *Service) setKeyspaceRuVersion(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.RuVersion < 0 {
-		c.String(http.StatusBadRequest, "ru_version must be non-negative")
+	if req.RuVersion <= 0 {
+		c.String(http.StatusBadRequest, "ru_version must be positive")
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)

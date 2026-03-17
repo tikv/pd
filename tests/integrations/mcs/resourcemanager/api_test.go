@@ -379,7 +379,10 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	// Set a negative ru_version, should fail.
 	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "test_keyspace", -1)
 	re.Equal(http.StatusBadRequest, statusCode)
-	re.Equal("ru_version must be non-negative", resp)
+	re.Equal("ru_version must be positive", resp)
+	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "test_keyspace", 0)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be positive", resp)
 	// Set ru_version > 0 should update the controller config's RUVersionPolicy.
 	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "test_keyspace", 3)
 	re.Equal(http.StatusOK, statusCode)
