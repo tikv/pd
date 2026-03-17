@@ -172,13 +172,13 @@ func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error
 	}
 	m.Lock()
 	if m.controllerConfig.RUVersionPolicy == nil {
-		// Default RU version is 1, meaning no RU model change.
+		// DefaultRUVersion (v1) means no RU model change.
 		// There is currently no API to modify this global default; it is
 		// intentionally fixed so that only per-keyspace overrides drive version bumps.
-		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: 1}
+		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: DefaultRUVersion}
 	}
 	if m.controllerConfig.RUVersionPolicy.Overrides == nil {
-		m.controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]int32)
+		m.controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]RUVersion)
 	}
 	defaultVersion := m.controllerConfig.RUVersionPolicy.Default
 	if ruVersion == defaultVersion {
@@ -340,6 +340,13 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	switch kp[0] {
 	case "request-unit":
 		config = &m.controllerConfig.RequestUnit
+	case "ru-version-policy":
+		// Validate before applying: parse the value as RUVersionPolicy and check it.
+		if err := validateRUVersionPolicyValue(value); err != nil {
+			m.Unlock()
+			return err
+		}
+		config = m.controllerConfig
 	default:
 		config = m.controllerConfig
 	}

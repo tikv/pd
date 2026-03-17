@@ -15,6 +15,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -93,10 +94,52 @@ type Config struct {
 	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
+// RUVersion represents an RU calculation version.
+type RUVersion = int32
+
+const (
+	// RUVersionV1 is the default RU calculation version.
+	RUVersionV1 RUVersion = 1
+	// RUVersionV2 is the new RU calculation version with detailed metrics.
+	RUVersionV2 RUVersion = 2
+)
+
+// DefaultRUVersion is the default RU calculation version used when no policy is configured.
+const DefaultRUVersion = RUVersionV1
+
 // RUVersionPolicy configures which RU calculation version to use per keyspace.
 type RUVersionPolicy struct {
-	Default   int32            `json:"default"`
-	Overrides map[uint32]int32 `json:"overrides,omitempty"`
+	Default   RUVersion            `json:"default"`
+	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
+}
+
+// validateRUVersionPolicyValue validates the value before applying it as RUVersionPolicy.
+func validateRUVersionPolicyValue(value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("invalid ru-version-policy value: %w", err)
+	}
+	var policy RUVersionPolicy
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return fmt.Errorf("invalid ru-version-policy format: %w", err)
+	}
+	return policy.validate()
+}
+
+// validate checks that all RU version values in the policy are positive.
+func (p *RUVersionPolicy) validate() error {
+	if p == nil {
+		return nil
+	}
+	if p.Default <= 0 {
+		return fmt.Errorf("ru-version-policy default must be positive, got %d", p.Default)
+	}
+	for ks, v := range p.Overrides {
+		if v <= 0 {
+			return fmt.Errorf("ru-version-policy override for keyspace %d must be positive, got %d", ks, v)
+		}
+	}
+	return nil
 }
 
 // Clone returns a deep copy of the RU version policy.
@@ -106,7 +149,7 @@ func (p *RUVersionPolicy) Clone() *RUVersionPolicy {
 	}
 	clone := &RUVersionPolicy{Default: p.Default}
 	if p.Overrides != nil {
-		clone.Overrides = make(map[uint32]int32, len(p.Overrides))
+		clone.Overrides = make(map[uint32]RUVersion, len(p.Overrides))
 		for keyspaceID, version := range p.Overrides {
 			clone.Overrides[keyspaceID] = version
 		}

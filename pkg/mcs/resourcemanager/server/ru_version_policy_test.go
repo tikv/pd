@@ -164,6 +164,55 @@ func TestManagerSetKeyspaceRuVersionMultipleKeyspaces(t *testing.T) {
 	re.Equal(int32(4), policy.Overrides[3])
 }
 
+func TestUpdateControllerConfigRUVersionPolicy(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+
+	// Valid policy: update via generic config endpoint should succeed.
+	err = m.UpdateControllerConfigItem("ru-version-policy", map[string]any{
+		"default":   float64(1),
+		"overrides": map[string]any{"42": float64(2)},
+	})
+	re.NoError(err)
+	policy := m.GetRUVersionPolicy()
+	re.NotNil(policy)
+	re.Equal(int32(1), policy.Default)
+	re.Equal(int32(2), policy.Overrides[42])
+
+	// Invalid: negative default should be rejected.
+	err = m.UpdateControllerConfigItem("ru-version-policy", map[string]any{
+		"default": float64(-1),
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "default must be positive")
+
+	// Invalid: negative override should be rejected.
+	err = m.UpdateControllerConfigItem("ru-version-policy", map[string]any{
+		"default":   float64(1),
+		"overrides": map[string]any{"10": float64(-5)},
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "must be positive")
+
+	// Invalid: zero default should be rejected.
+	err = m.UpdateControllerConfigItem("ru-version-policy", map[string]any{
+		"default": float64(0),
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "default must be positive")
+
+	// After rejections, original valid policy should remain unchanged.
+	policy = m.GetRUVersionPolicy()
+	re.NotNil(policy)
+	re.Equal(int32(1), policy.Default)
+	re.Equal(int32(2), policy.Overrides[42])
+}
+
 func TestManagerSetKeyspaceRuVersionResetToDefault(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()

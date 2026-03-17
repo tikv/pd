@@ -78,8 +78,8 @@ type ResourceGroupKVInterceptor interface {
 	OnResponseWait(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, time.Duration, error)
 	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
 	IsBackgroundRequest(ctx context.Context, resourceGroupName, requestResource string) bool
-	// GetRuVersion returns the current RU calculation version for this keyspace.
-	GetRuVersion() int32
+	// GetRUVersion returns the current RU calculation version for this keyspace.
+	GetRUVersion() int32
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
@@ -249,10 +249,10 @@ func (c *ResourceGroupsController) GetConfig() *RUConfig {
 	return c.safeRuConfig.Load()
 }
 
-// GetRuVersion returns the current RU calculation version for this keyspace.
-// Returns 1 (default v1) if not configured or not loaded yet.
+// GetRUVersion returns the current RU calculation version for this keyspace.
+// Returns DefaultRUVersion (v1) if not configured or not loaded yet.
 // This is a pure memory read (atomic load), no network call.
-func (c *ResourceGroupsController) GetRuVersion() int32 {
+func (c *ResourceGroupsController) GetRUVersion() int32 {
 	v := c.ruVersion.Load()
 	if v <= 0 {
 		return DefaultRUVersion
@@ -282,7 +282,7 @@ func (c *ResourceGroupsController) updateRuVersionFromConfig(config *Config) {
 		}
 	} else {
 		// No policy in the config means no RU version override is active.
-		// Reset the stored value to 0; GetRuVersion() will return 1 (the default)
+		// Reset the stored value to 0; GetRUVersion() will return DefaultRUVersion
 		// so callers always see a valid version even when no policy exists.
 		c.ruVersion.Store(0)
 	}

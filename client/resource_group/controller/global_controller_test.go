@@ -424,17 +424,17 @@ func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	checkKeyspace(1)
 }
 
-func TestGetRuVersionDefault(t *testing.T) {
+func TestGetRUVersionDefault(t *testing.T) {
 	re := require.New(t)
 	mockProvider := newMockResourceGroupProvider()
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
 	re.NoError(err)
 
 	// Default should return 1 (v1) when no policy is set.
-	re.Equal(int32(1), gc.GetRuVersion())
+	re.Equal(int32(1), gc.GetRUVersion())
 }
 
-func TestGetRuVersionAfterSet(t *testing.T) {
+func TestGetRUVersionAfterSet(t *testing.T) {
 	re := require.New(t)
 	mockProvider := newMockResourceGroupProvider()
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
@@ -442,15 +442,15 @@ func TestGetRuVersionAfterSet(t *testing.T) {
 
 	// Simulate ru_version update via atomic store.
 	gc.ruVersion.Store(3)
-	re.Equal(int32(3), gc.GetRuVersion())
+	re.Equal(int32(3), gc.GetRUVersion())
 
 	// Zero should return 1 (default).
 	gc.ruVersion.Store(0)
-	re.Equal(int32(1), gc.GetRuVersion())
+	re.Equal(int32(1), gc.GetRUVersion())
 
 	// Negative should also return 1 (default).
 	gc.ruVersion.Store(-1)
-	re.Equal(int32(1), gc.GetRuVersion())
+	re.Equal(int32(1), gc.GetRUVersion())
 }
 
 func TestRuVersionFromControllerConfig(t *testing.T) {
@@ -467,7 +467,7 @@ func TestRuVersionFromControllerConfig(t *testing.T) {
 		Overrides: map[uint32]RUVersion{42: 3},
 	}
 	gc.updateRuVersionFromConfig(config)
-	re.Equal(int32(3), gc.GetRuVersion())
+	re.Equal(int32(3), gc.GetRUVersion())
 }
 
 func TestRuVersionOverrideFromControllerConfig(t *testing.T) {
@@ -484,7 +484,7 @@ func TestRuVersionOverrideFromControllerConfig(t *testing.T) {
 		Overrides: map[uint32]RUVersion{42: 3, 100: 7},
 	}
 	gc.updateRuVersionFromConfig(config)
-	re.Equal(int32(3), gc.GetRuVersion())
+	re.Equal(int32(3), gc.GetRUVersion())
 }
 
 func TestRuVersionDefaultFallback(t *testing.T) {
@@ -501,7 +501,7 @@ func TestRuVersionDefaultFallback(t *testing.T) {
 	}
 	gc.updateRuVersionFromConfig(config)
 	// No override for keyspace 42, use default.
-	re.Equal(int32(5), gc.GetRuVersion())
+	re.Equal(int32(5), gc.GetRUVersion())
 }
 
 func TestRuVersionNilPolicy(t *testing.T) {
@@ -512,13 +512,13 @@ func TestRuVersionNilPolicy(t *testing.T) {
 
 	// Set a non-default version first.
 	gc.ruVersion.Store(5)
-	re.Equal(int32(5), gc.GetRuVersion())
+	re.Equal(int32(5), gc.GetRUVersion())
 
-	// Nil policy resets to 0 (GetRuVersion returns 1 as default).
+	// Nil policy resets to 0 (GetRUVersion returns 1 as default).
 	config := DefaultConfig()
 	config.RUVersionPolicy = nil
 	gc.updateRuVersionFromConfig(config)
-	re.Equal(int32(1), gc.GetRuVersion())
+	re.Equal(int32(1), gc.GetRUVersion())
 }
 
 func TestRuVersionFromInitialControllerConfig(t *testing.T) {
@@ -549,7 +549,7 @@ func TestRuVersionFromInitialControllerConfig(t *testing.T) {
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
 	// The initial load should set ruVersion from the policy.
-	re.Equal(int32(3), gc.GetRuVersion())
+	re.Equal(int32(3), gc.GetRUVersion())
 }
 
 func TestRuVersionWatchViaControllerConfig(t *testing.T) {
@@ -588,7 +588,7 @@ func TestRuVersionWatchViaControllerConfig(t *testing.T) {
 		},
 	}
 	testutil.Eventually(re, func() bool {
-		return controller.GetRuVersion() == 3
+		return controller.GetRUVersion() == 3
 	})
 
 	// Case 2: Config without RUVersionPolicy (nil) resets to default
@@ -601,6 +601,6 @@ func TestRuVersionWatchViaControllerConfig(t *testing.T) {
 		},
 	}
 	testutil.Eventually(re, func() bool {
-		return controller.GetRuVersion() == 1 // Reset to default
+		return controller.GetRUVersion() == 1 // Reset to default
 	})
 }
