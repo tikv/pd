@@ -51,33 +51,18 @@
 - Clean test artifacts: `make clean-test` (clears `/tmp/pd_tests*`, go test cache, UT bins, playground log).
 
 ## Failpoints Discipline
+- PD uses `github.com/pingcap/failpoint` to inject test-only branches, returns, and pauses into specific code paths.
 - Keep failpoints enabled only for tests; disable immediately after (`make failpoint-disable` or `make clean-test`) to avoid polluting the codebase.
 - Prefer make targets that auto-enable/disable failpoints (recommended: `make gotest ...`, `make test`, `make basic-test`).
 - If you must run `go test` manually, use this rule:
   - Target uses failpoints (for example imports `github.com/pingcap/failpoint`): `make failpoint-enable` -> `go test ...` -> `make failpoint-disable`.
   - Target does not use failpoints: run `go test ...` directly.
-- Mental model:
+- Runtime model:
   - `failpoint.Enable` / `failpoint.Disable` only change runtime evaluation state.
-  - A failpoint does nothing unless execution reaches the injected site again.
+  - A failpoint takes effect only when execution reaches the injected site again.
   - Enabling a failpoint does not replay startup or initialization logic that has already finished.
-- Classify the target path before changing a failpoint test:
-  - Init/startup failpoints require re-entering the setup path after enabling them.
-  - Steady-state request/tick failpoints can usually be enabled before the next request, retry, or periodic update.
-  - Pause/blocking failpoints need an explicit unblock plan so tests do not hang indefinitely.
-- Test design rules:
-  - Inspect the injected code path before deciding whether `Enable` alone is sufficient.
-  - If the failpoint is on an init path, explicitly reinitialize the narrowest component that owns that path.
-  - Prefer the narrowest re-entry primitive that preserves semantics; do not rebuild the whole cluster if allocator/service reinit is enough.
-  - Disable setup-only failpoints after setup/reinit unless the assertion phase also needs them.
-  - If an existing test restarts or reinitializes something before assertions, do not remove that step blindly; first prove the new flow still reaches the same injected site.
-- Review smells:
-  - Enabling a failpoint and asserting behavior immediately without re-entering the injected path.
-  - Removing restart/reinit logic solely because failpoints are runtime-dynamic.
-  - Broadening failpoint lifetime so the test no longer isolates the intended phase.
-- Concrete TSO example:
-  - `pkg/tso/tso.go:syncTimestamp()` failpoint `fallBackSync` lives on the allocator initialization path, so tests must reinitialize that path after enabling it.
-  - `pkg/tso/tso.go:updateTimestamp()` failpoint `fallBackUpdate` lives on the later update path, so it can be exercised by subsequent update cycles.
-  - For this class of test, prefer allocator `Reset(false)` -> `Initialize()` when it preserves semantics, rather than rebuilding the full PD cluster.
+- If failpoint semantics are unclear, inspect the injected code path and nearby tests before changing test flow or assertions.
+- Useful lookup pattern: `rg -n "failpoint.Inject|failpoint.InjectCall|failpoint.Enable" pkg tests server`.
 - Never edit code or run non-test commands while failpoints are enabled. If unsure about state, run `make failpoint-disable` before continuing.
 - Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
 - If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
