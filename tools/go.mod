@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tools
 
-go 1.25.6
+go 1.25.7
 
 replace (
 	github.com/tikv/pd => ../
@@ -159,7 +159,7 @@ require (
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/metering_sdk v0.0.0-20250918015914-468cd6feb1dc // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20260305120502-70e5bb19e006 // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20260316045729-aa6178a60657 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
