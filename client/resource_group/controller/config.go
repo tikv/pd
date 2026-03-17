@@ -107,10 +107,23 @@ type BaseConfig struct {
 	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
 }
 
+// RUVersion represents an RU calculation version.
+type RUVersion = int32
+
+const (
+	// RUVersionV1 is the default RU calculation version.
+	RUVersionV1 RUVersion = 1
+	// RUVersionV2 is the new RU calculation version with detailed metrics.
+	RUVersionV2 RUVersion = 2
+)
+
+// DefaultRUVersion is the default RU calculation version used when no policy is configured.
+const DefaultRUVersion = RUVersionV1
+
 // RUVersionPolicy configures RU calculation version per keyspace.
 type RUVersionPolicy struct {
-	Default   int32            `json:"default"`
-	Overrides map[string]int32 `json:"overrides,omitempty"`
+	Default   RUVersion            `json:"default"`
+	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
 }
 
 // Config is the configuration of the resource manager controller.

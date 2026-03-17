@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -172,7 +171,6 @@ func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error
 		return errMetadataWriteDisabled
 	}
 	m.Lock()
-	defer m.Unlock()
 	if m.controllerConfig.RUVersionPolicy == nil {
 		// Default RU version is 1, meaning no RU model change.
 		// There is currently no API to modify this global default; it is
@@ -180,15 +178,15 @@ func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error
 		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: 1}
 	}
 	if m.controllerConfig.RUVersionPolicy.Overrides == nil {
-		m.controllerConfig.RUVersionPolicy.Overrides = make(map[string]int32)
+		m.controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]int32)
 	}
-	keyspaceIDStr := strconv.FormatUint(uint64(keyspaceID), 10)
 	defaultVersion := m.controllerConfig.RUVersionPolicy.Default
 	if ruVersion == defaultVersion {
-		delete(m.controllerConfig.RUVersionPolicy.Overrides, keyspaceIDStr)
+		delete(m.controllerConfig.RUVersionPolicy.Overrides, keyspaceID)
 	} else {
-		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceIDStr] = ruVersion
+		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
 	}
+	m.Unlock()
 	return m.storage.SaveControllerConfig(m.controllerConfig)
 }
 

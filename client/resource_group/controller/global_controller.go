@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -256,7 +255,7 @@ func (c *ResourceGroupsController) GetConfig() *RUConfig {
 func (c *ResourceGroupsController) GetRuVersion() int32 {
 	v := c.ruVersion.Load()
 	if v <= 0 {
-		return 1
+		return DefaultRUVersion
 	}
 	return v
 }
@@ -264,8 +263,7 @@ func (c *ResourceGroupsController) GetRuVersion() int32 {
 // updateRuVersionFromConfig extracts the RU version for this keyspace from the controller config.
 func (c *ResourceGroupsController) updateRuVersionFromConfig(config *Config) {
 	if config.RUVersionPolicy != nil {
-		keyspaceIDStr := strconv.FormatUint(uint64(c.keyspaceID), 10)
-		if v, ok := config.RUVersionPolicy.Overrides[keyspaceIDStr]; ok {
+		if v, ok := config.RUVersionPolicy.Overrides[c.keyspaceID]; ok {
 			old := c.ruVersion.Swap(v)
 			if old != v {
 				log.Info("ru version updated from controller config",
@@ -347,7 +345,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
-
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
 		defer watchRetryTimer.Stop()
 

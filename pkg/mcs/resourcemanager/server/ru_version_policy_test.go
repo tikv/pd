@@ -1,4 +1,4 @@
-// Copyright 2026 TiKV Project Authors.
+// Copyright 2025 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ func TestRUVersionPolicyJSONSerialization(t *testing.T) {
 	// Test with overrides.
 	policy := &RUVersionPolicy{
 		Default:   1,
-		Overrides: map[string]int32{"42": 2, "100": 3},
+		Overrides: map[uint32]int32{42: 2, 100: 3},
 	}
 	data, err := json.Marshal(policy)
 	re.NoError(err)
@@ -41,8 +41,8 @@ func TestRUVersionPolicyJSONSerialization(t *testing.T) {
 	err = json.Unmarshal(data, &loaded)
 	re.NoError(err)
 	re.Equal(int32(1), loaded.Default)
-	re.Equal(int32(2), loaded.Overrides["42"])
-	re.Equal(int32(3), loaded.Overrides["100"])
+	re.Equal(int32(2), loaded.Overrides[42])
+	re.Equal(int32(3), loaded.Overrides[100])
 
 	// Test without overrides (omitempty).
 	policy2 := &RUVersionPolicy{Default: 1}
@@ -64,7 +64,7 @@ func TestRUVersionPolicyInControllerConfig(t *testing.T) {
 	config := &ControllerConfig{
 		RUVersionPolicy: &RUVersionPolicy{
 			Default:   1,
-			Overrides: map[string]int32{"42": 2},
+			Overrides: map[uint32]int32{42: 2},
 		},
 	}
 	data, err := json.Marshal(config)
@@ -76,7 +76,7 @@ func TestRUVersionPolicyInControllerConfig(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(loaded.RUVersionPolicy)
 	re.Equal(int32(1), loaded.RUVersionPolicy.Default)
-	re.Equal(int32(2), loaded.RUVersionPolicy.Overrides["42"])
+	re.Equal(int32(2), loaded.RUVersionPolicy.Overrides[42])
 
 	// Test ControllerConfig without policy (nil).
 	config2 := &ControllerConfig{}
@@ -109,7 +109,7 @@ func TestManagerSetKeyspaceRuVersion(t *testing.T) {
 	policy := m.GetRUVersionPolicy()
 	re.NotNil(policy)
 	re.Equal(int32(1), policy.Default)
-	re.Equal(int32(2), policy.Overrides["1"])
+	re.Equal(int32(2), policy.Overrides[1])
 
 	// Verify persistence by reloading.
 	s := m.storage
@@ -119,7 +119,7 @@ func TestManagerSetKeyspaceRuVersion(t *testing.T) {
 	re.NoError(err)
 	policy = m2.GetRUVersionPolicy()
 	re.NotNil(policy)
-	re.Equal(int32(2), policy.Overrides["1"])
+	re.Equal(int32(2), policy.Overrides[1])
 }
 
 func TestManagerSetKeyspaceRuVersionWriteDisabled(t *testing.T) {
@@ -159,9 +159,9 @@ func TestManagerSetKeyspaceRuVersionMultipleKeyspaces(t *testing.T) {
 
 	policy := m.GetRUVersionPolicy()
 	re.NotNil(policy)
-	re.Equal(int32(2), policy.Overrides["1"])
-	re.Equal(int32(3), policy.Overrides["2"])
-	re.Equal(int32(4), policy.Overrides["3"])
+	re.Equal(int32(2), policy.Overrides[1])
+	re.Equal(int32(3), policy.Overrides[2])
+	re.Equal(int32(4), policy.Overrides[3])
 }
 
 func TestManagerSetKeyspaceRuVersionResetToDefault(t *testing.T) {
@@ -177,13 +177,13 @@ func TestManagerSetKeyspaceRuVersionResetToDefault(t *testing.T) {
 	err = m.SetKeyspaceRuVersion(1, 2)
 	re.NoError(err)
 	policy := m.GetRUVersionPolicy()
-	re.Equal(int32(2), policy.Overrides["1"])
+	re.Equal(int32(2), policy.Overrides[1])
 
 	// Setting ruVersion=1 removes the override.
 	err = m.SetKeyspaceRuVersion(1, 1)
 	re.NoError(err)
 	policy = m.GetRUVersionPolicy()
 	re.NotNil(policy)
-	_, exists := policy.Overrides["1"]
+	_, exists := policy.Overrides[1]
 	re.False(exists)
 }

@@ -96,7 +96,7 @@ type Config struct {
 // RUVersionPolicy configures which RU calculation version to use per keyspace.
 type RUVersionPolicy struct {
 	Default   int32            `json:"default"`
-	Overrides map[string]int32 `json:"overrides,omitempty"`
+	Overrides map[uint32]int32 `json:"overrides,omitempty"`
 }
 
 // Clone returns a deep copy of the RU version policy.
@@ -106,7 +106,7 @@ func (p *RUVersionPolicy) Clone() *RUVersionPolicy {
 	}
 	clone := &RUVersionPolicy{Default: p.Default}
 	if p.Overrides != nil {
-		clone.Overrides = make(map[string]int32, len(p.Overrides))
+		clone.Overrides = make(map[uint32]int32, len(p.Overrides))
 		for keyspaceID, version := range p.Overrides {
 			clone.Overrides[keyspaceID] = version
 		}

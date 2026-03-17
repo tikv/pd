@@ -133,7 +133,7 @@ func (s *Service) RegisterRouter() {
 	configEndpoint.POST("/keyspace/service-limit/:keyspace_name", s.setKeyspaceServiceLimit)
 	configEndpoint.GET("/keyspace/service-limit/:keyspace_name", s.getKeyspaceServiceLimit)
 	// RU version endpoint — sets per-keyspace RU version in controller config.
-	configEndpoint.POST("/controller/ru_version/:keyspace_name", s.setKeyspaceRuVersion)
+	configEndpoint.POST("/controller/ru-version/:keyspace_name", s.setKeyspaceRuVersion)
 }
 
 // RegisterPrimaryRouter registers the router of the primary handler.
@@ -430,7 +430,7 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 //	@Failure	400				{string}	error
 //	@Failure	403				{string}	error
 //	@Failure	500				{string}	error
-//	@Router		/config/controller/ru_version/{keyspace_name} [post]
+//	@Router		/config/controller/ru-version/{keyspace_name} [post]
 func (s *Service) setKeyspaceRuVersion(c *gin.Context) {
 	keyspaceName := c.Param("keyspace_name")
 	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
