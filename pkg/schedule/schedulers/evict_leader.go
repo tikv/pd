@@ -173,11 +173,10 @@ func (conf *evictLeaderSchedulerConfig) resumeLeaderTransfer(cluster sche.Schedu
 func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id uint64) (bool, error) {
 	conf.RLock()
 	defer conf.RUnlock()
-	if _, exist := conf.StoreIDWithRanges[id]; exist {
-		return true, nil
-	}
-	if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
-		return false, err
+	if _, exist := conf.StoreIDWithRanges[id]; !exist {
+		if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
+			return exist, err
+		}
 	}
 	return true, nil
 }
@@ -428,28 +427,8 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		batch = (int)(batchFloat)
 	}
 
-	var ranges []string
-	rangesVal, hasRanges := input["ranges"]
-	if hasRanges {
-		switch val := rangesVal.(type) {
-		case []string:
-			ranges = val
-		case []any:
-			ranges = make([]string, 0, len(val))
-			for _, item := range val {
-				s, ok := item.(string)
-				if !ok {
-					handler.config.resumeLeaderTransferIfExist(id)
-					handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("ranges"))
-					return
-				}
-				ranges = append(ranges, s)
-			}
-		default:
-			handler.config.resumeLeaderTransferIfExist(id)
-			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("ranges"))
-			return
-		}
+	ranges, ok := (input["ranges"]).([]string)
+	if ok {
 		if !inputHasStoreID {
 			handler.config.resumeLeaderTransferIfExist(id)
 			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("id"))
