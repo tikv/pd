@@ -597,11 +597,12 @@ type mockKeyspaceManagerForMerge struct {
 	existing map[uint32]bool
 }
 
-func (m *mockKeyspaceManagerForMerge) KeyspaceExists(id uint32) bool {
+func (m *mockKeyspaceManagerForMerge) KeyspaceExist(id uint32) bool {
 	if m.existing == nil {
-		return true
+		return false
 	}
-	return m.existing[id]
+	exist, ok := m.existing[id]
+	return ok && exist
 }
 
 func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
@@ -609,15 +610,12 @@ func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32) (u
 		return 0, false
 	}
 	if m.existing == nil {
-		if start+1 < end {
-			return start + 1, true
-		}
-		return 0, false
+		return start, false
 	}
 	found := false
 	var candidate uint32
 	for id, exists := range m.existing {
-		if exists && id > start && id < end {
+		if exists && id >= start && id <= end {
 			if !found || id < candidate {
 				candidate = id
 				found = true
@@ -632,8 +630,63 @@ type mockClusterWithKeyspaceManager struct {
 	manager *mockKeyspaceManagerForMerge
 }
 
-func (c *mockClusterWithKeyspaceManager) GetKeyspaceManager() interface{ KeyspaceExists(uint32) bool } {
-	return c.manager
+func (c *mockClusterWithKeyspaceManager) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	return c.manager.GetKeyspaceIDInRange(start, end)
+}
+
+func (c *mockClusterWithKeyspaceManager) KeyspaceExist(id uint32) bool {
+	return c.manager.KeyspaceExist(id)
+}
+
+func TestNotMergeAfterSplit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := mockconfig.NewTestOptions()
+	cluster := &mockClusterWithKeyspaceManager{
+		Cluster: mockcluster.NewCluster(ctx, cfg),
+		manager: &mockKeyspaceManagerForMerge{},
+	}
+	cluster.manager.existing = map[uint32]bool{
+		100: true,
+		101: true,
+		102: true,
+	}
+	cluster.SetMaxMergeRegionSize(20)
+	cluster.SetMaxMergeRegionKeys(200000)
+	stores := map[uint64][]string{
+		1: {}, 2: {}, 3: {},
+	}
+	for storeID, labels := range stores {
+		cluster.PutStoreWithLabels(storeID, labels...)
+	}
+
+	testNoMerge(re, cluster, []byte(""), []byte(""))
+	bound100 := keyspace.MakeRegionBound(100)
+	bound102 := keyspace.MakeRegionBound(102)
+	testNoMerge(re, cluster, bound100.RawLeftBound, bound102.RawRightBound)
+	testNoMerge(re, cluster, bound100.TxnLeftBound, bound102.TxnRightBound)
+
+	testNoMerge(re, cluster, []byte{'t', 1, 2, 3}, bound102.TxnRightBound)
+	testNoMerge(re, cluster, bound100.RawLeftBound, []byte{'t', 1, 2, 3})
+}
+
+func testNoMerge(re *require.Assertions, cluster *mockClusterWithKeyspaceManager, startKey []byte, endKey []byte) {
+	keys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, cluster)
+	re.NotEmpty(keys)
+	keys = append(keys, endKey)
+	preRegion := newRegionInfo(uint64(99), string(startKey), string(keys[0]), 1, 1, []uint64{1, 1}, []uint64{1, 1})
+	cluster.PutRegion(preRegion)
+	for i := range len(keys) - 1 {
+		region := newRegionInfo(uint64(100+i), string(keys[i]), string(keys[i+1]), 1, 1, []uint64{3, 1}, []uint64{3, 1})
+		cluster.PutRegion(region)
+		re.False(AllowMerge(cluster, preRegion, region), i)
+		preRegion = region
+	}
+
+	// clean all regions
+	emptyRegion := newRegionInfo(uint64(99), "", "", 1, 1, []uint64{1, 1}, []uint64{1, 1})
+	cluster.PutRegion(emptyRegion)
 }
 
 func TestKeyspaceMerge(t *testing.T) {
@@ -643,7 +696,11 @@ func TestKeyspaceMerge(t *testing.T) {
 	cfg := mockconfig.NewTestOptions()
 	cluster := &mockClusterWithKeyspaceManager{
 		Cluster: mockcluster.NewCluster(ctx, cfg),
-		manager: &mockKeyspaceManagerForMerge{},
+		manager: &mockKeyspaceManagerForMerge{
+			existing: map[uint32]bool{
+				100: true,
+			},
+		},
 	}
 	cluster.SetMaxMergeRegionSize(20)
 	cluster.SetMaxMergeRegionKeys(200000)
@@ -694,8 +751,8 @@ func TestKeyspaceMerge(t *testing.T) {
 	cluster.manager.existing = map[uint32]bool{
 		100: true,
 	}
-	re.True(AllowMerge(cluster, region100, region101), "merge should be allowed when a spanned keyspace is missing")
-	re.True(AllowMerge(cluster, region101, region100), "merge should be allowed when a spanned keyspace is missing")
+	re.False(AllowMerge(cluster, region100, region101), "merge should be allowed when a spanned keyspace is missing")
+	re.False(AllowMerge(cluster, region101, region100), "merge should be allowed when a spanned keyspace is missing")
 	re.True(AllowMerge(cluster, region101, region200), "merging should be allowed when all spanned keyspaces exist")
 	re.True(AllowMerge(cluster, region200, region101), "merging should be allowed when all spanned keyspaces exist")
 

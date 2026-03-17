@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"strconv"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -92,8 +91,7 @@ type Manager struct {
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 	// cached keyspace meta info for each keyspace ID.
-	keyspaceNameLookup  sync.Map // store as ID(uint32) -> name(string)
-	keyspaceStateLookup sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
+	KeyspaceCache *Cache
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -142,6 +140,7 @@ func NewKeyspaceManager(
 		config:            config,
 		kgm:               kgm,
 		nextPatrolStartID: constant.StartKeyspaceID,
+		KeyspaceCache:     NewCache(),
 	}
 }
 
@@ -478,7 +477,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 			return err
 		}
 		// Update the keyspace name cache.
-		manager.keyspaceNameLookup.Store(keyspace.Id, keyspace.Name)
+		manager.KeyspaceCache.Save(keyspace.Id, keyspace.Name, keyspace.State)
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
 		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.Id)
@@ -871,7 +870,7 @@ func (manager *Manager) transformKeyspaceState(meta *keyspacepb.KeyspaceMeta, ne
 	meta.State = newState
 	meta.StateChangedAt = now
 	// Update the keyspace state to the cache.
-	manager.keyspaceStateLookup.Store(meta.GetId(), newState)
+	manager.KeyspaceCache.Save(meta.GetId(), meta.GetName(), newState)
 	return nil
 }
 
@@ -902,10 +901,10 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	if id == constant.NullKeyspaceID {
 		return "", nil
 	}
-	// Try to get the keyspace name from the cache first.
-	name, ok := manager.keyspaceNameLookup.Load(id)
+	// Try to get the keyspace name from the cache.
+	item, ok := manager.KeyspaceCache.getKeyspaceByID(id)
 	if ok {
-		return name.(string), nil
+		return item.name, nil
 	}
 	var loadedName string
 	// If the keyspace name is not in the cache, try to get it from the storage.
@@ -917,46 +916,42 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	if len(loadedName) == 0 {
 		return "", errors.Errorf("got an empty keyspace name by id %d", id)
 	}
-	// Load or store the keyspace name to the cache.
-	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
-	return actual.(string), nil
-}
-
-// KeyspaceExists checks if a keyspace with the given ID exists in the cache.
-// This is used to determine if keyspace boundaries should be enforced during split/merge.
-func (manager *Manager) KeyspaceExists(id uint32) bool {
-	name, err := manager.GetKeyspaceNameByID(id)
-	return err == nil && len(name) > 0
+	manager.KeyspaceCache.Save(id, loadedName, meta.GetState())
+	return loadedName, nil
 }
 
 // GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
 func (manager *Manager) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
-	if start >= end {
-		return 0, false
-	}
-	found := false
-	var candidate uint32
-	manager.ScanAllKeyspace(func(keyspaceID uint32, _ string) bool {
-		if keyspaceID >= start && keyspaceID <= end {
-			candidate = keyspaceID
-			found = true
-		}
-		return !found
-	})
-	return candidate, found
+	return manager.KeyspaceCache.GetKeyspaceIDInRange(start, end)
 }
 
-// ScanIterator is the type of the function used in ScanAllKeyspace,
-// which takes keyspaceID and name as parameters and returns a boolean indicating whether to stop scanning.
-type ScanIterator func(keyspaceID uint32, name string) bool
+// KeyspaceExist checks if a keyspace exists by ID.
+func (manager *Manager) KeyspaceExist(id uint32) bool {
+	if id == constant.NullKeyspaceID {
+		return true
+	}
+	// don't direct check the cache because the keyspace may exist in storage
+	// but not in cache, we should check the storage to make sure the existence of the keyspace.
+	_, err := manager.GetKeyspaceNameByID(id)
+	return err == nil
+}
 
-// ScanAllKeyspace scans all keyspaces and applies the given function.
+// UpdateKeyspaceMetaToCache updates keyspace cache from keyspace metadata.
+func (manager *Manager) UpdateKeyspaceMetaToCache(meta *keyspacepb.KeyspaceMeta) {
+	if meta == nil {
+		return
+	}
+	manager.KeyspaceCache.Save(meta.GetId(), meta.GetName(), meta.GetState())
+}
+
+// DeleteKeyspaceMetaFromCache removes a keyspace from cache by ID.
+func (manager *Manager) DeleteKeyspaceMetaFromCache(id uint32) {
+	manager.KeyspaceCache.DeleteKeyspace(id)
+}
+
+// ScanAllKeyspace scans all keyspaces in the cache and applies the given function to each keyspace.
 func (manager *Manager) ScanAllKeyspace(fn func(keyspaceID uint32, name string) bool) {
-	manager.keyspaceNameLookup.Range(func(key, value any) bool {
-		keyspaceID := key.(uint32)
-		name := value.(string)
-		return fn(keyspaceID, name)
-	})
+	manager.KeyspaceCache.scanAllKeyspaces(fn)
 }
 
 // GetKeyspaceStateByID gets the keyspace state by ID, which will try to get it from the cache first.
@@ -965,9 +960,9 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	if id == constant.NullKeyspaceID {
 		return keyspacepb.KeyspaceState_DISABLED, nil
 	}
-	state, ok := manager.keyspaceStateLookup.Load(id)
+	item, ok := manager.KeyspaceCache.getKeyspaceByID(id)
 	if ok {
-		return state.(keyspacepb.KeyspaceState), nil
+		return item.state, nil
 	}
 	var loadedState keyspacepb.KeyspaceState
 	// If the keyspace state is not in the cache, try to get it from the storage.
@@ -978,8 +973,8 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	}
 	loadedState = meta.GetState()
 	// Load or store the keyspace state to the cache.
-	actual, _ := manager.keyspaceStateLookup.LoadOrStore(id, loadedState)
-	return actual.(keyspacepb.KeyspaceState), nil
+	manager.KeyspaceCache.Save(meta.GetId(), meta.GetName(), loadedState)
+	return loadedState, nil
 }
 
 // GetEnabledKeyspaceNameByID gets the enabled keyspace name by ID. If the state is not enabled, it will return an error.

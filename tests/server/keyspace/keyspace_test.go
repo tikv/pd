@@ -170,19 +170,19 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 		name     string
 		key      []byte
 		expected uint32
-		ok       bool
+		kt       keyspace.KeyType
 	}{
-		{"keyspace 1 txn", keyspace.MakeRegionBound(1).TxnLeftBound, 1, true},
-		{"keyspace 2 txn", keyspace.MakeRegionBound(2).TxnLeftBound, 2, true},
-		{"keyspace 100 txn", keyspace.MakeRegionBound(100).TxnLeftBound, 100, true},
-		{"empty key", []byte{}, constant.MaxValidKeyspaceID, true},
-		{"short key", []byte{'x', 0}, 0, false},
+		{"keyspace 1 txn", keyspace.MakeRegionBound(1).TxnLeftBound, 1, keyspace.KeyTypeTxn},
+		{"keyspace 2 txn", keyspace.MakeRegionBound(2).TxnLeftBound, 2, keyspace.KeyTypeTxn},
+		{"keyspace 100 txn", keyspace.MakeRegionBound(100).TxnLeftBound, 100, keyspace.KeyTypeTxn},
+		{"empty key", []byte{}, constant.MaxValidKeyspaceID, keyspace.KeyTypeTxn},
+		{"short key", []byte{'t', 0}, 0, keyspace.KeyTypeUnknown},
 	}
 
 	for _, tc := range testCases {
-		id, ok := keyspace.ExtractKeyspaceID(tc.key)
-		re.Equal(tc.ok, ok, "test case: %s", tc.name)
-		if ok {
+		id, kt := keyspace.ExtractKeyspaceID(tc.key)
+		re.Equal(tc.kt, kt, "test case: %s", tc.name)
+		if kt != keyspace.KeyTypeUnknown {
 			re.Equal(tc.expected, id, "test case: %s", tc.name)
 		}
 	}

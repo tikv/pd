@@ -158,8 +158,9 @@ func (suite *metaTestSuite) TestKeyspaceMetaWatch() {
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
+	se := tc.WaitForPrimaryServing(re)
 	testutil.Eventually(re, func() bool {
-		kr, exist := tc.GetPrimaryServer().GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
+		kr, exist := se.GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
 		if exist {
 			return (bytes.Equal(kr[0], bound.TxnLeftBound) && bytes.Equal(kr[1], bound.TxnRightBound)) || (bytes.Equal(kr[0], bound.RawLeftBound) && bytes.Equal(kr[1], bound.RawRightBound))
 		}

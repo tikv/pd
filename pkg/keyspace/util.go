@@ -15,14 +15,13 @@
 package keyspace
 
 import (
-	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"encoding/hex"
 	"regexp"
-	"slices"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/google/btree"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -294,46 +294,72 @@ func isProtectedKeyspaceName(name string) bool {
 	return name == constant.DefaultKeyspaceName
 }
 
+// KeyType represents the type of the key, which can be raw key or txn key.
+type KeyType int
+
+const (
+	// KeyTypeRaw represents the raw keyspace, which is used for KV operations without transaction.
+	KeyTypeRaw KeyType = iota
+	// KeyTypeTxn represents the txn keyspace, which is used for KV operations with transaction.
+	KeyTypeTxn
+	// KeyTypeUnknown represents unknown key type, which is used for invalid keys that cannot be parsed.
+	KeyTypeUnknown
+)
+
 // ExtractKeyspaceID extracts the keyspace ID from a region key.
 // It returns the keyspace ID and a boolean indicating whether the key contains a valid keyspace ID.
 // The key format is: [mode_prefix][keyspace_id_3bytes][...], where mode_prefix is 'x' for txn and 'r' for raw.
-// if the key is empty, it means the key belongs the max keyspace.
-func ExtractKeyspaceID(key []byte) (uint32, bool) {
+// if the key is empty, it means the key belongs the max txn keyspace.
+func ExtractKeyspaceID(key []byte) (uint32, KeyType) {
 	// Empty key represents the start of the entire key space (no keyspace)
 	if len(key) == 0 {
-		return constant.MaxValidKeyspaceID, true
+		return constant.MaxValidKeyspaceID, KeyTypeTxn
 	}
 
 	// Decode the key
 	_, decoded, err := codec.DecodeBytes(key)
 	if err != nil {
-		return 0, false
+		return 0, KeyTypeUnknown
 	}
 
 	// Check if the key has a mode prefix and keyspace ID (at least 4 bytes: prefix + 3 bytes ID)
 	if len(decoded) < 4 {
-		return 0, false
+		return 0, KeyTypeUnknown
 	}
 
 	// Check the mod prefix.
 	prefix := decoded[0]
-	if prefix != rawPrefix[0] && prefix != txnPrefix[0] {
-		return 0, false
+	var kt KeyType
+	switch prefix {
+	case rawPrefix[0]:
+		kt = KeyTypeRaw
+	case txnPrefix[0]:
+		kt = KeyTypeTxn
+	default:
+		return 0, KeyTypeUnknown
 	}
 
 	// Extract keyspace ID (3 bytes after the prefix)
 	// Convert 3 bytes to uint32 by shifting and combining
 	keyspaceID := uint32(decoded[1])<<16 | uint32(decoded[2])<<8 | uint32(decoded[3])
 
-	return keyspaceID, true
+	return keyspaceID, kt
 }
 
 // Checker is an interface to check keyspace existence.
 type Checker interface {
-	// KeyspaceExists checks if a keyspace with the given ID exists.
-	KeyspaceExists(id uint32) bool
-	// GetKeyspaceIDInRange returns one existing keyspace ID in (start, end).
+	// GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
 	GetKeyspaceIDInRange(start, end uint32) (uint32, bool)
+	// ExistKeyspaceID returns whether the keyspace ID exists.
+	KeyspaceExist(keyspaceID uint32) bool
+}
+
+// AlwaysExistChecker assumes all numeric keyspaces exist.
+type AlwaysExistChecker struct{}
+
+// GetKeyspaceIDInRange returns the first keyspace ID in (start, end).
+func (AlwaysExistChecker) GetKeyspaceIDInRange(start, _ uint32) (uint32, bool) {
+	return start, true
 }
 
 // RegionSpansMultipleKeyspaces checks if a region spans across multiple keyspaces.
@@ -345,29 +371,31 @@ type Checker interface {
 // 3. At least two existing keyspaces are crossed (checked via checker)
 func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool {
 	var startKeyspaceID uint32
-	var startHasKeyspace bool
+	var startKT KeyType
 	if len(startKey) == 0 {
-		startKeyspaceID, startHasKeyspace = constant.StartKeyspaceID, true
+		startKeyspaceID, startKT = constant.StartKeyspaceID, KeyTypeRaw
 	} else {
-		startKeyspaceID, startHasKeyspace = ExtractKeyspaceID(startKey)
+		startKeyspaceID, startKT = ExtractKeyspaceID(startKey)
 	}
 
-	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
+	endKeyspaceID, endKT := ExtractKeyspaceID(endKey)
 
-	// If either key doesn't have a keyspace ID, cannot determine
-	if !startHasKeyspace || !endHasKeyspace {
+	if startKT == KeyTypeUnknown && endKT == KeyTypeUnknown {
 		return false
 	}
 
-	// If keyspace IDs are the same, definitely within one keyspace
-	if startKeyspaceID == endKeyspaceID {
+	// If keyspace IDs are the same, and the key type is the same, it does not span multiple keyspaces.
+	// startKey is the 100 keyspace's left raw bound['r', 0, 100].
+	// endKey is the 100 keyspace's left txn bound['t',0,100].
+	// Although they belong to the same keyspace, but they have different key type, we consider they belong to different keyspaces,
+	// thus it spans multiple keyspaces.
+	if startKeyspaceID == endKeyspaceID && startKT == endKT {
 		return false
 	}
 
 	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
 	// check if endKey is at the exact boundary (right bound of startKeyspace)
 	// If yes, the region is [startKey, rightBound of startKeyspace) which is within one keyspace.
-	// Otherwise, the neighboring keyspace is occupied and the region spans multiple keyspaces.
 	if endKeyspaceID == startKeyspaceID+1 {
 		startBound := MakeRegionBound(startKeyspaceID)
 		// it means the region is [startKey, rightBound of startKeyspace)
@@ -375,15 +403,14 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 		if string(endKey) == string(startBound.TxnRightBound) || string(endKey) == string(startBound.RawRightBound) {
 			return false
 		}
-		return true
 	}
 
-	// Check existing keyspaces that the region spans in (start, end).
-	// The boundary should be enforced only when the range crosses at least
-	// two existing keyspaces.
+	// If endKeyspaceID is more than startKeyspaceID + 1,
+	// check if there is at least one existing keyspace in between.
 	if checker != nil {
-		_, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
-		return ok
+		startExist := checker.KeyspaceExist(startKeyspaceID)
+		endExist := checker.KeyspaceExist(endKeyspaceID)
+		return startExist || endExist
 	}
 
 	// Otherwise, the region spans multiple keyspaces
@@ -400,17 +427,17 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 	}
 
 	var startKeyspaceID uint32
-	var startHasKeyspace bool
+	var startKT KeyType
 	if len(startKey) == 0 {
-		startKeyspaceID, startHasKeyspace = constant.StartKeyspaceID, true
+		startKeyspaceID, startKT = constant.StartKeyspaceID, KeyTypeRaw
 	} else {
-		startKeyspaceID, startHasKeyspace = ExtractKeyspaceID(startKey)
+		startKeyspaceID, startKT = ExtractKeyspaceID(startKey)
 	}
 
-	endKeyspaceID, endHasKeyspace := ExtractKeyspaceID(endKey)
+	endKeyspaceID, endKT := ExtractKeyspaceID(endKey)
 
-	// If either key doesn't have a keyspace ID, cannot determine split keys
-	if !startHasKeyspace || !endHasKeyspace {
+	// If either key has unknown key type, cannot determine keyspace boundaries
+	if startKT == KeyTypeUnknown && endKT == KeyTypeUnknown {
 		return nil
 	}
 
@@ -435,6 +462,9 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 	// Generate split keys for each keyspace boundary between start and end.
 	// Iterate existing keyspaces in (startKeyspaceID, endKeyspaceID).
 	var splitKeys [][]byte
+	if endKT == KeyTypeUnknown {
+		endKeyspaceID = constant.MaxValidKeyspaceID
+	}
 	nextID, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
 	if !ok {
 		return nil
@@ -452,8 +482,87 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 	if keyutil.Between(startKey, endKey, bound.TxnRightBound) {
 		splitKeys = append(splitKeys, bound.TxnRightBound)
 	}
-
-	slices.SortFunc(splitKeys, bytes.Compare)
-	splitKeys = slices.CompactFunc(splitKeys, bytes.Equal)
 	return splitKeys
+}
+
+// Cache is a cache for keyspace information, which is used to quickly determine keyspace existence and get keyspace name by ID.
+type Cache struct {
+	syncutil.RWMutex
+	tree *btree.BTreeG[keyspaceItem]
+}
+
+// NewCache creates a new Cache.
+func NewCache() *Cache {
+	return &Cache{
+		tree: btree.NewG(2, func(i, j keyspaceItem) bool {
+			return i.Less(j)
+		}),
+	}
+}
+
+type keyspaceItem struct {
+	keyspaceID uint32
+	name       string
+	state      keyspacepb.KeyspaceState
+}
+
+// Less compares two keyspaceItem.
+func (s *keyspaceItem) Less(than keyspaceItem) bool {
+	return s.keyspaceID < than.keyspaceID
+}
+
+func (s *Cache) getKeyspaceByID(keyspaceID uint32) (keyspaceItem, bool) {
+	s.RLock()
+	defer s.RUnlock()
+	item, found := s.tree.Get(keyspaceItem{keyspaceID: keyspaceID})
+	return item, found
+}
+
+// Save saves the keyspace information to the cache. It will replace the old information if the keyspace ID already exists.
+func (s *Cache) Save(keyspaceID uint32, name string, state keyspacepb.KeyspaceState) {
+	s.Lock()
+	defer s.Unlock()
+	item := keyspaceItem{keyspaceID: keyspaceID, name: name, state: state}
+	s.tree.ReplaceOrInsert(item)
+}
+
+// DeleteKeyspace deletes a keyspace by ID.
+func (s *Cache) DeleteKeyspace(keyspaceID uint32) {
+	s.Lock()
+	defer s.Unlock()
+	s.tree.Delete(keyspaceItem{keyspaceID: keyspaceID})
+}
+
+func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string) bool) {
+	s.RLock()
+	defer s.RUnlock()
+	s.tree.Ascend(func(i keyspaceItem) bool {
+		return f(i.keyspaceID, i.name)
+	})
+}
+
+// KeyspaceExist checks if a keyspace exists by ID.
+func (s *Cache) KeyspaceExist(id uint32) bool {
+	s.RLock()
+	defer s.RUnlock()
+	_, found := s.tree.Get(keyspaceItem{keyspaceID: id})
+	return found
+}
+
+// GetKeyspaceIDInRange returns the first keyspace ID in the range [start, end].
+func (s *Cache) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	s.RLock()
+	defer s.RUnlock()
+	var foundID uint32
+	s.tree.AscendGreaterOrEqual(keyspaceItem{keyspaceID: start}, func(i keyspaceItem) bool {
+		if i.keyspaceID <= end {
+			foundID = i.keyspaceID
+			return false
+		}
+		return true
+	})
+	if foundID != 0 {
+		return foundID, true
+	}
+	return 0, false
 }

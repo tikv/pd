@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -144,63 +145,63 @@ func TestExtractKeyspaceID(t *testing.T) {
 		name            string
 		key             []byte
 		expectedID      uint32
-		expectedSuccess bool
+		expectedKeyType KeyType
 	}{
 		{
 			name:            "empty key",
 			key:             []byte{},
 			expectedID:      constant.MaxValidKeyspaceID,
-			expectedSuccess: true,
+			expectedKeyType: KeyTypeTxn,
 		},
 		{
 			name:            "keyspace 0 txn mode",
 			key:             MakeRegionBound(0).TxnLeftBound,
 			expectedID:      0,
-			expectedSuccess: true,
+			expectedKeyType: KeyTypeTxn,
 		},
 		{
 			name:            "keyspace 100 txn mode",
 			key:             MakeRegionBound(100).TxnLeftBound,
 			expectedID:      100,
-			expectedSuccess: true,
+			expectedKeyType: KeyTypeTxn,
 		},
 		{
 			name:            "keyspace 4242 txn mode",
 			key:             MakeRegionBound(4242).TxnLeftBound,
 			expectedID:      4242,
-			expectedSuccess: true,
+			expectedKeyType: KeyTypeTxn,
 		},
 		{
 			name:            "keyspace 0 raw mode ",
 			key:             MakeRegionBound(0).RawLeftBound,
 			expectedID:      0,
-			expectedSuccess: true,
+			expectedKeyType: KeyTypeRaw,
 		},
 		{
 			name:            "keyspace 100 raw mode (not supported)",
 			key:             MakeRegionBound(100).RawLeftBound,
 			expectedID:      100,
-			expectedSuccess: true,
+			expectedKeyType: KeyTypeRaw,
 		},
 		{
 			name:            "non-keyspace key (table key)",
 			key:             codec.EncodeBytes([]byte{'t', 1, 2, 3}),
 			expectedID:      0,
-			expectedSuccess: false,
+			expectedKeyType: KeyTypeUnknown,
 		},
 		{
 			name:            "short key",
 			key:             codec.EncodeBytes([]byte{'x'}),
 			expectedID:      0,
-			expectedSuccess: false,
+			expectedKeyType: KeyTypeUnknown,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
-			id, ok := ExtractKeyspaceID(tc.key)
-			re.Equal(tc.expectedSuccess, ok, "test case: %s", tc.name)
-			if tc.expectedSuccess {
+			id, kt := ExtractKeyspaceID(tc.key)
+			re.Equal(tc.expectedKeyType, kt, "test case: %s", tc.name)
+			if tc.expectedKeyType != KeyTypeUnknown {
 				re.Equal(tc.expectedID, id, "test case: %s", tc.name)
 			}
 		})
@@ -213,7 +214,7 @@ type mockKeyspaceChecker struct {
 	allExist          bool
 }
 
-func (m *mockKeyspaceChecker) KeyspaceExists(id uint32) bool {
+func (m *mockKeyspaceChecker) KeyspaceExist(id uint32) bool {
 	if m.allExist {
 		return true
 	}
@@ -390,6 +391,33 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 		expectedSplitKeys [][]byte
 	}{
 		{
+			name:              "non-keyspace keys should not split",
+			startKey:          []byte{'t', 1, 2, 4},
+			endKey:            MakeRegionBound(99).TxnLeftBound,
+			checker:           specificChecker,
+			expectedSplitKeys: nil,
+		},
+		{
+			name:     "non-keyspace keys should not split",
+			startKey: []byte{'t', 1, 2, 4},
+			endKey:   MakeRegionBound(102).TxnLeftBound,
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).TxnLeftBound,
+				MakeRegionBound(100).TxnRightBound,
+			},
+		},
+		{
+			name:     "split keys with sparse existing keyspaces",
+			startKey: MakeRegionBound(99).RawLeftBound,
+			endKey:   []byte{'t', 1, 2, 4},
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(100).RawLeftBound,
+				MakeRegionBound(100).RawRightBound,
+			},
+		},
+		{
 			name:     "span two keyspaces txn mode",
 			startKey: MakeRegionBound(100).TxnLeftBound,
 			endKey:   MakeRegionBound(101).TxnRightBound,
@@ -454,6 +482,13 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 				MakeRegionBound(100).TxnRightBound,
 			},
 		},
+		{
+			name:              "not keys with no keyspace key",
+			startKey:          []byte{'t', 1, 2, 3},
+			endKey:            []byte{'t', 1, 2, 4},
+			checker:           specificChecker,
+			expectedSplitKeys: nil,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -462,4 +497,50 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			re.Equal(tc.expectedSplitKeys, splitKeys, "test case: %s", tc.name)
 		})
 	}
+}
+
+func TestKeyspaceCache(t *testing.T) {
+	re := require.New(t)
+	cache := NewCache()
+
+	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
+	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
+	cache.Save(101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED)
+
+	item, ok := cache.getKeyspaceByID(101)
+	re.True(ok)
+	re.Equal(uint32(101), item.keyspaceID)
+	re.Equal("ks-101", item.name)
+	re.Equal(keyspacepb.KeyspaceState_ARCHIVED, item.state)
+
+	all := func() []uint32 {
+		var ret []uint32
+		cache.scanAllKeyspaces(func(keyspaceID uint32, _ string) bool {
+			ret = append(ret, keyspaceID)
+			return true
+		})
+		return ret
+	}
+	re.Equal([]uint32{100, 101, 102}, all())
+
+	id, ok := cache.GetKeyspaceIDInRange(100, 103)
+	re.True(ok)
+	re.Equal(uint32(100), id)
+
+	id, ok = cache.GetKeyspaceIDInRange(101, 102)
+	re.True(ok)
+	re.Equal(uint32(101), id)
+
+	id, ok = cache.GetKeyspaceIDInRange(103, 104)
+	re.False(ok)
+	re.Zero(id)
+
+	cache.DeleteKeyspace(101)
+	_, ok = cache.getKeyspaceByID(101)
+	re.False(ok)
+	re.Equal([]uint32{100, 102}, all())
+
+	id, ok = cache.GetKeyspaceIDInRange(100, 103)
+	re.True(ok)
+	re.Equal(uint32(100), id)
 }

@@ -108,6 +108,6 @@ func TestKeyspaceSplit(t *testing.T) {
 	re.NotNil(op, "region spanning multiple keyspaces should be split")
 	re.Equal(1, op.Len())
 	splitKeys = op.Step(0).(operator.SplitRegion).SplitKeys
-	// Should have 52 split keys
-	re.Len(splitKeys, 2)
+	re.Len(splitKeys, 1)
+	re.Equal(hex.EncodeToString(bound100.TxnRightBound), hex.EncodeToString(splitKeys[0]))
 }

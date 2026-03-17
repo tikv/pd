@@ -121,6 +121,16 @@ func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return mc.PersistOptions
 }
 
+// GetKeyspaceIDInRange returns the keyspace ID in the specified range.
+func (*Cluster) GetKeyspaceIDInRange(startKeyspaceID uint32, _ uint32) (uint32, bool) {
+	return startKeyspaceID, true
+}
+
+// KeyspaceExist checks if a keyspace exists by ID.
+func (*Cluster) KeyspaceExist(uint32) bool {
+	return true
+}
+
 // GetStorage returns the storage.
 func (mc *Cluster) GetStorage() storage.Storage {
 	return mc.Storage

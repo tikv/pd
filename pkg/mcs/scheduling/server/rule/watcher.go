@@ -17,6 +17,8 @@ package rule
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -68,6 +70,8 @@ type Watcher struct {
 	ruleManager *placement.RuleManager
 	// regionLabeler is used to manage the region label rules.
 	regionLabeler *labeler.RegionLabeler
+	// keyspaceCache is used to cache keyspace metadata from watch events.
+	keyspaceCache *keyspace.Cache
 
 	ruleWatcher         *etcdutil.LoopWatcher
 	labelWatcher        *etcdutil.LoopWatcher
@@ -85,6 +89,7 @@ func NewWatcher(
 	checkerController *checker.Controller,
 	ruleManager *placement.RuleManager,
 	regionLabeler *labeler.RegionLabeler,
+	keyspaceCache *keyspace.Cache,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &Watcher{
@@ -99,6 +104,7 @@ func NewWatcher(
 		checkerController:      checkerController,
 		ruleManager:            ruleManager,
 		regionLabeler:          regionLabeler,
+		keyspaceCache:          keyspaceCache,
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
@@ -297,22 +303,32 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("update keyspace meta", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		meta, err := keyspace.NewKeyspaceMeta(string(kv.Value))
+		keyspaceID, err := rw.extractKeyspaceIDFromMetaKey(string(kv.Key))
 		if err != nil {
 			return err
 		}
-		bound := keyspace.MakeRegionBound(meta.Id)
+		if rw.keyspaceCache != nil {
+			meta, err := keyspace.NewKeyspaceMeta(string(kv.Value))
+			if err != nil {
+				return err
+			}
+			rw.keyspaceCache.Save(meta.Id, meta.Name, meta.State)
+		}
+		bound := keyspace.MakeRegionBound(keyspaceID)
 		suspectKeyRanges.Append(bound.RawLeftBound, bound.RawRightBound)
 		suspectKeyRanges.Append(bound.TxnLeftBound, bound.TxnRightBound)
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("delete keyspace meta", zap.String("key", string(kv.Key)))
-		meta, err := keyspace.NewKeyspaceMeta(string(kv.Value))
+		keyspaceID, err := rw.extractKeyspaceIDFromMetaKey(string(kv.Key))
 		if err != nil {
 			return err
 		}
-		bound := keyspace.MakeRegionBound(meta.Id)
+		if rw.keyspaceCache != nil {
+			rw.keyspaceCache.DeleteKeyspace(keyspaceID)
+		}
+		bound := keyspace.MakeRegionBound(keyspaceID)
 		suspectKeyRanges.Append(bound.RawLeftBound, bound.RawRightBound)
 		suspectKeyRanges.Append(bound.TxnLeftBound, bound.TxnRightBound)
 		return nil
@@ -339,6 +355,15 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 	)
 	rw.keyspaceMetaWatcher.StartWatchLoop()
 	return rw.keyspaceMetaWatcher.WaitLoad()
+}
+
+func (rw *Watcher) extractKeyspaceIDFromMetaKey(key string) (uint32, error) {
+	idStr := strings.TrimPrefix(key, rw.keyspaceMetaPathPrefix)
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parse keyspace id from key %q: %w", key, err)
+	}
+	return uint32(id), nil
 }
 
 // Close closes the watcher.

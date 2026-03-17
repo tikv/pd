@@ -994,6 +994,16 @@ func (c *RaftCluster) GetKeyspaceManager() *keyspace.Manager {
 	return c.keyspaceManager
 }
 
+// GetKeyspaceIDInRange returns the keyspace info by the keyspace ID.
+func (c *RaftCluster) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	return c.keyspaceManager.GetKeyspaceIDInRange(start, end)
+}
+
+// KeyspaceExist returns whether the keyspace exists by the keyspace ID.
+func (c *RaftCluster) KeyspaceExist(id uint32) bool {
+	return c.keyspaceManager.KeyspaceExist(id)
+}
+
 // GetRegionLabeler returns the region labeler.
 func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.regionLabeler

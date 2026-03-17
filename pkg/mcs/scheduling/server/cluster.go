@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/response"
@@ -77,6 +78,7 @@ type Cluster struct {
 	labelStats        *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
 	storage           storage.Storage
+	keyspaceCache     *keyspace.Cache
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -142,6 +144,7 @@ func NewCluster(
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
+		keyspaceCache:     keyspace.NewCache(),
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -194,6 +197,16 @@ func (c *Cluster) GetBasicCluster() *core.BasicCluster {
 // GetSharedConfig returns the shared config.
 func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return c.persistConfig
+}
+
+// GetKeyspaceIDInRange returns the keyspace ID in the specified range.
+func (c *Cluster) GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID uint32) (uint32, bool) {
+	return c.keyspaceCache.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
+}
+
+// KeyspaceExist checks if a keyspace exists by ID.
+func (c *Cluster) KeyspaceExist(id uint32) bool {
+	return c.keyspaceCache.KeyspaceExist(id)
 }
 
 // GetRuleManager returns the rule manager.
