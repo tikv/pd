@@ -169,8 +169,18 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	require.Equal(t, c2.mu.consumption, &totalConsumption)
 	c2.mu.Unlock()
 
+	controller.ReportTiKVRUV2Consumption("test-group", 3.0)
+	controller.ReportTiDBRUV2Consumption("test-group", 4.0)
+	c2.mu.Lock()
+	totalConsumption.TikvRUV2 += 3.0
+	totalConsumption.TidbRUV2 += 4.0
+	require.Equal(t, c2.mu.consumption, &totalConsumption)
+	c2.mu.Unlock()
+
 	// test report with unknown group
 	controller.ReportConsumption("unknown-name", delta)
+	controller.ReportTiKVRUV2Consumption("unknown-name", 1.0)
+	controller.ReportTiDBRUV2Consumption("unknown-name", 1.0)
 
 	var expectResp []*rmpb.TokenBucketResponse
 	recTestGroupAcquireTokenRequest := make(chan bool)

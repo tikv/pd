@@ -86,6 +86,9 @@ var (
 	ErrNotStarted                 = status.Error(codes.Unavailable, "server not started")
 	ErrEtcdNotStarted             = status.Error(codes.Unavailable, "server is started, but etcd not started")
 	ErrFollowerHandlingNotAllowed = status.Error(codes.Unavailable, "not leader and follower handling not allowed")
+
+	// Unimplemented indicates operation is not implemented or not supported.
+	ErrRecvNotSupported = status.Error(codes.Unimplemented, "recv is not supported by this stream")
 )
 
 // common error in multiple packages
@@ -247,6 +250,8 @@ var (
 	ErrIllegalOperation = errors.Normalize("unknown operation", errors.RFCCodeText("PD:keyspace:ErrIllegalOperation"))
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
 	ErrUnsupportedOperationInKeyspace = errors.Normalize("it's a unsupported operation", errors.RFCCodeText("PD:keyspace:ErrUnsupportedOperationInKeyspace"))
+	// ErrKeyspaceConfigPreconditionFailed is used to indicate the precondition for updating keyspace config is not met.
+	ErrKeyspaceConfigPreconditionFailed = errors.Normalize("keyspace config precondition failed, %s", errors.RFCCodeText("PD:keyspace:ErrKeyspaceConfigPreconditionFailed"))
 	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
 	ErrKeyspaceGroupPrimaryNotFound = errors.Normalize("primary of keyspace group does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"))
 	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
@@ -528,10 +533,13 @@ var (
 
 // Resource Manager errors
 var (
-	ErrKeyspaceNotExists      = errors.Normalize("the keyspace does not exist with id %d", errors.RFCCodeText("PD:resourcemanager:ErrKeyspaceNotExists"))
-	ErrResourceGroupNotExists = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
-	ErrDeleteReservedGroup    = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
-	ErrInvalidGroup           = errors.Normalize("invalid group settings, please check the group name, priority and the number of resources", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
+	// ErrKeyspaceNotExists is used to indicate target keyspace does not exist when looked up by ID.
+	ErrKeyspaceNotExists = errors.Normalize("the keyspace does not exist with id %d", errors.RFCCodeText("PD:resourcemanager:ErrKeyspaceNotExists"))
+	// ErrKeyspaceNotExistsByName is used to indicate target keyspace does not exist when looked up by name.
+	ErrKeyspaceNotExistsByName = errors.Normalize("keyspace not found with name: %s", errors.RFCCodeText("PD:resourcemanager:ErrKeyspaceNotExistsByName"))
+	ErrResourceGroupNotExists  = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
+	ErrDeleteReservedGroup     = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
+	ErrInvalidGroup            = errors.Normalize("invalid group settings, please check the group name, priority and the number of resources", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
 )
 
 // Microservice errors

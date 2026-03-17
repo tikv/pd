@@ -410,10 +410,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		var lastTS uint64
 		for range tsoRequestRound {
-			var physical, logical int64
-			var ts uint64
-			physical, logical, err = cli.GetTS(context.Background())
-			ts = tsoutil.ComposeTS(physical, logical)
+			physical, logical, err := cli.GetTS(context.Background())
+			ts := tsoutil.ComposeTS(physical, logical)
 			if err != nil {
 				maxUnavailableTime = time.Now()
 				continue
@@ -430,7 +428,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
-		err = leader.Stop()
+		err := leader.Stop()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
@@ -448,7 +446,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
-		err = leader.Stop()
+		err := leader.Stop()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
@@ -2707,8 +2705,9 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.Len(res.GlobalGCBarriers, 2)
 	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
 	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
-	re.Greater(res.GlobalGCBarriers[1].TTL, time.Second)
-	re.LessOrEqual(2*time.Second, res.GlobalGCBarriers[1].TTL)
+	// Returned TTL is rounded to seconds, so it can be exactly 1s here.
+	re.GreaterOrEqual(res.GlobalGCBarriers[1].TTL, time.Second)
+	re.LessOrEqual(res.GlobalGCBarriers[1].TTL, 2*time.Second)
 
 	cli1 := s.client.GetGCStatesClient(1)
 	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
@@ -2730,8 +2729,9 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.True(ok)
 	re.Equal("b4", state.GCBarriers[0].BarrierID)
 	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
-	re.Greater(state.GCBarriers[0].TTL, 2*time.Second)
-	re.LessOrEqual(3*time.Second, state.GCBarriers[0].TTL)
+	// Returned TTL is rounded to seconds, so it can be exactly 2s here.
+	re.GreaterOrEqual(state.GCBarriers[0].TTL, 2*time.Second)
+	re.LessOrEqual(state.GCBarriers[0].TTL, 3*time.Second)
 }
 
 func TestDecodeHttpKeyRange(t *testing.T) {

@@ -114,6 +114,54 @@ func (suite *resourceManagerRedirectorTestSuite) TestRedirectsConfigRequests() {
 	re.Equal(rmGroup.RUSettings.RU.Settings.BurstLimit, pdGroup.RUSettings.RU.Settings.BurstLimit)
 }
 
+func (suite *resourceManagerRedirectorTestSuite) TestRedirectsKeyspaceServiceLimitRequests() {
+	re := suite.Require()
+	pdSetURL := fmt.Sprintf("%s%sconfig/keyspace/service-limit/%s", suite.pdLeader.GetAddr(), apis.APIPathPrefix, suite.keyspaceName)
+	pdGetURL := fmt.Sprintf("%s%sconfig/keyspace/service-limit/%s", suite.pdLeader.GetAddr(), apis.APIPathPrefix, suite.keyspaceName)
+	reqBody, err := json.Marshal(apis.KeyspaceServiceLimitRequest{ServiceLimit: 2.5})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(
+		tests.TestDialClient,
+		pdSetURL,
+		reqBody,
+		testutil.StatusOK(re),
+		testutil.StringContain(re, "Success!"),
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+	))
+	var limiter struct {
+		ServiceLimit float64 `json:"service_limit"`
+	}
+	re.NoError(testutil.CheckGetJSON(
+		tests.TestDialClient,
+		pdGetURL,
+		nil,
+		testutil.StatusOK(re),
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+		testutil.ExtractJSON(re, &limiter),
+	))
+	re.Equal(2.5, limiter.ServiceLimit)
+
+	nonExisting := "redirector_non_existing_keyspace"
+	pdMissingSetURL := fmt.Sprintf("%s%sconfig/keyspace/service-limit/%s", suite.pdLeader.GetAddr(), apis.APIPathPrefix, nonExisting)
+	re.NoError(testutil.CheckPostJSON(
+		tests.TestDialClient,
+		pdMissingSetURL,
+		reqBody,
+		testutil.Status(re, http.StatusNotFound),
+		testutil.StringContain(re, "keyspace not found"),
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+	))
+	pdMissingGetURL := fmt.Sprintf("%s%sconfig/keyspace/service-limit/%s", suite.pdLeader.GetAddr(), apis.APIPathPrefix, nonExisting)
+	re.NoError(testutil.CheckGetJSON(
+		tests.TestDialClient,
+		pdMissingGetURL,
+		nil,
+		testutil.Status(re, http.StatusNotFound),
+		testutil.StringContain(re, "keyspace not found"),
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
+	))
+}
+
 func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupRequests() {
 	re := suite.Require()
 	groupName := "redirector_grpc_group"

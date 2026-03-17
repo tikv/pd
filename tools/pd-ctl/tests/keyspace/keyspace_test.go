@@ -227,6 +227,68 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	re.Contains(string(output), "Fail")
 }
 
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditions() {
+	re := suite.Require()
+	param := api.CreateKeyspaceParams{
+		Name:   "test_keyspace_cas",
+		Config: map[string]string{},
+	}
+	meta := suite.mustCreateKeyspace(param)
+	re.Equal(param.Name, meta.GetName())
+
+	currentKey := "current_file_id"
+	nextKey := "next_file_id"
+	guardKey := "guard"
+
+	// Set next if absent.
+	args := []string{"-u", suite.pdAddr, "keyspace", "update-config", param.Name, "--update", nextKey + "=1000", "--expect-absent", nextKey}
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal("1000", meta.Config[nextKey])
+
+	// Second set with the same precondition should fail.
+	args = []string{"-u", suite.pdAddr, "keyspace", "update-config", param.Name, "--update", nextKey + "=2000", "--expect-absent", nextKey}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Fail")
+
+	// Comma-separated expects (equal + absent) should parse and apply.
+	args = []string{"-u", suite.pdAddr, "keyspace", "update-config", param.Name, "--update", guardKey + "=1", "--expect", nextKey + "=1000", "--expect-absent", currentKey + "," + "non_exist"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal("1", meta.Config[guardKey])
+
+	// Update current_file_id guarded by next_file_id == expected.
+	args = []string{"-u", suite.pdAddr, "keyspace", "update-config", param.Name, "--update", currentKey + "=1000", "--expect", nextKey + "=1000"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal("1000", meta.Config[currentKey])
+	re.Equal("1000", meta.Config[nextKey])
+
+	// Delete next with wrong expected should fail.
+	args = []string{"-u", suite.pdAddr, "keyspace", "update-config", param.Name, "--remove", nextKey, "--expect", nextKey + "=999"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Fail")
+
+	// Delete next with correct expected should succeed.
+	args = []string{"-u", suite.pdAddr, "keyspace", "update-config", param.Name, "--remove", nextKey, "--expect", nextKey + "=1000"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal("1000", meta.Config[currentKey])
+	re.NotContains(meta.GetConfig(), nextKey)
+
+	// Invalid expect format should error.
+	args = []string{"-u", suite.pdAddr, "keyspace", "update-config", param.Name, "--update", "x=1", "--expect", "bad-format"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Fail")
+}
+
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
 	param := api.CreateKeyspaceParams{

@@ -257,7 +257,11 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
-		region.cpuUsage = h.GetCpuUsage()
+		if cpuStats := h.GetCpuStats(); cpuStats != nil {
+			region.cpuUsage = cpuStats.GetUnifiedRead()
+		} else {
+			region.cpuUsage = h.CpuUsage
+		}
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -301,8 +305,9 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 		}
 	}
 	// skip bucket meta update if tikv has report bucket meta.
-	if r.bucketMeta == nil && bucketEnable && origin != nil && r.buckets == nil {
-		r.buckets = origin.buckets
+	if bucket := r.GetBuckets(); bucketEnable && bucket == nil && origin != nil {
+		inherited := atomic.LoadPointer(&origin.buckets)
+		atomic.StorePointer(&r.buckets, inherited)
 	}
 }
 
@@ -921,9 +926,16 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 				return
 			}
-			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
+			// If bucket version increased, will update both kv and cache.
+			// If bucket version is 0 but previously is not, which means tikv has disabled bucket, will also update both kv and cache to be compatible.
+			newBucketVersion := region.GetBuckets().GetVersion()
+			oldBucketVersion := origin.GetBuckets().GetVersion()
+			if newBucketVersion > oldBucketVersion || (newBucketVersion == 0 && oldBucketVersion > 0) {
 				if log.GetLevel() <= zap.DebugLevel {
-					debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
+					debug("bucket key changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.Uint64("old-bucket-version", oldBucketVersion),
+						zap.Uint64("new-bucket-version", newBucketVersion))
 				}
 				saveKV, saveCache = true, true
 				return

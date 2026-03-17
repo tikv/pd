@@ -581,6 +581,11 @@ error = '''
 unknown operation
 '''
 
+["PD:keyspace:ErrKeyspaceConfigPreconditionFailed"]
+error = '''
+keyspace config precondition failed, %s
+'''
+
 ["PD:keyspace:ErrKeyspaceExists"]
 error = '''
 keyspace already exists
@@ -904,6 +909,11 @@ invalid group settings, please check the group name, priority and the number of 
 ["PD:resourcemanager:ErrKeyspaceNotExists"]
 error = '''
 the keyspace does not exist with id %d
+'''
+
+["PD:resourcemanager:ErrKeyspaceNotExistsByName"]
+error = '''
+keyspace not found with name: %s
 '''
 
 ["PD:scatter:ErrEmptyRegion"]

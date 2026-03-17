@@ -84,6 +84,10 @@ type factoryProvider interface {
 	GetMeteringWriter() *metering.Writer
 }
 
+type metadataFactoryProvider interface {
+	GetControllerConfig() *ControllerConfig
+}
+
 // writeRoleProvider is an optional provider used to configure the manager write role.
 type writeRoleProvider interface {
 	GetResourceGroupWriteRole() ResourceGroupWriteRole
@@ -96,6 +100,19 @@ type metadataWatcherProvider interface {
 	EnableResourceGroupMetadataWatcher() bool
 }
 
+func newManagerBase(controllerConfig *ControllerConfig, writeRole ResourceGroupWriteRole) *Manager {
+	return &Manager{
+		writeRole:             writeRole,
+		controllerConfig:      controllerConfig,
+		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
+		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
+		keyspaceNameLookup:    make(map[uint32]string),
+		keyspaceIDLookup:      make(map[string]uint32),
+		metrics:               newMetrics(),
+		ruCollector:           newRUCollector(),
+	}
+}
+
 // NewManager returns a new manager base on the given server,
 // which should implement the `FactoryProvider` interface.
 func NewManager[T factoryProvider](srv bs.Server) *Manager {
@@ -104,20 +121,9 @@ func NewManager[T factoryProvider](srv bs.Server) *Manager {
 	if provider, ok := any(fp).(writeRoleProvider); ok {
 		writeRole = provider.GetResourceGroupWriteRole()
 	}
-	enableMetadataWatcher := false
+	m := newManagerBase(fp.GetControllerConfig(), writeRole)
 	if provider, ok := any(fp).(metadataWatcherProvider); ok {
-		enableMetadataWatcher = provider.EnableResourceGroupMetadataWatcher()
-	}
-	m := &Manager{
-		writeRole:             writeRole,
-		enableMetadataWatcher: enableMetadataWatcher,
-		controllerConfig:      fp.GetControllerConfig(),
-		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
-		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
-		keyspaceNameLookup:    make(map[uint32]string),
-		keyspaceIDLookup:      make(map[string]uint32),
-		metrics:               newMetrics(),
-		ruCollector:           newRUCollector(),
+		m.enableMetadataWatcher = provider.EnableResourceGroupMetadataWatcher()
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -134,6 +140,25 @@ func NewManager[T factoryProvider](srv bs.Server) *Manager {
 	// The second initialization after becoming serving.
 	srv.AddServiceReadyCallback(m.Init)
 	return m
+}
+
+// NewMetadataOnlyManager creates a metadata-only manager without registering lifecycle callbacks.
+func NewMetadataOnlyManager[T metadataFactoryProvider](srv bs.Server) (*Manager, error) {
+	fp := srv.(T)
+	writeRole := ResourceGroupWriteRoleLegacyAll
+	if provider, ok := any(fp).(writeRoleProvider); ok {
+		writeRole = provider.GetResourceGroupWriteRole()
+	}
+	m := newManagerBase(fp.GetControllerConfig(), writeRole)
+	m.storage = endpoint.NewStorageEndpoint(
+		kv.NewEtcdKVBase(srv.GetClient()),
+		nil,
+	)
+	m.srv = srv
+	if err := m.initMetadata(); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // This is used for testing only now.
@@ -216,39 +241,25 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
-	v, err := m.storage.LoadControllerConfig()
-	if err != nil {
-		log.Error("resource controller config load failed", zap.Error(err), zap.String("v", v))
-		return err
-	}
-	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
-		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
-	}
-
-	// This context is derived from the leader/primary context, it will be canceled
-	// from the outside loop when the leader/primary step down.
-	ctx, m.cancel = context.WithCancel(ctx)
-
-	// re-save the config to make sure the config has been persisted.
-	if m.writeRole.AllowsMetadataWrite() {
-		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
-			m.cancel()
+	if m.enableMetadataWatcher {
+		if err := m.initControllerConfig(); err != nil {
 			return err
 		}
-	}
-
-	// Load keyspace resource groups from the storage.
-	if m.enableMetadataWatcher {
+		// This context is derived from the leader/primary context, it will be canceled
+		// from the outside loop when the leader/primary step down.
+		ctx, m.cancel = context.WithCancel(ctx)
 		if err := m.initializeMetadataWatcher(ctx); err != nil {
 			m.cancel()
 			m.wg.Wait()
 			return err
 		}
 	} else {
-		if err := m.loadKeyspaceResourceGroups(); err != nil {
-			m.cancel()
+		if err := m.initMetadata(); err != nil {
 			return err
 		}
+		// This context is derived from the leader/primary context, it will be canceled
+		// from the outside loop when the leader/primary step down.
+		ctx, m.cancel = context.WithCancel(ctx)
 	}
 	m.wg.Add(1)
 	// Start the background metrics flusher.
@@ -265,6 +276,34 @@ func (m *Manager) Init(ctx context.Context) error {
 	// during redirection.
 	log.Info("resource group manager finishes initialization")
 	return nil
+}
+
+func (m *Manager) initControllerConfig() error {
+	v, err := m.storage.LoadControllerConfig()
+	if err != nil {
+		log.Error("resource controller config load failed", zap.Error(err), zap.String("v", v))
+		return err
+	}
+	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
+		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
+	}
+
+	// re-save the config to make sure the config has been persisted.
+	if m.writeRole.AllowsMetadataWrite() {
+		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) initMetadata() error {
+	if err := m.initControllerConfig(); err != nil {
+		return err
+	}
+
+	// Load keyspace resource groups from the storage.
+	return m.loadKeyspaceResourceGroups()
 }
 
 func (m *Manager) loadKeyspaceResourceGroups() error {
@@ -625,7 +664,7 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("keyspace not found with name: %s", name)
+		return nil, errs.ErrKeyspaceNotExistsByName.FastGenByArgs(name)
 	}
 	// Update the cache.
 	m.updateKeyspaceNameLookup(loadedID, name)

@@ -875,6 +875,9 @@ type OpInfluenceOption func(region *core.RegionInfo) bool
 // WithRangeOption returns an OpInfluenceOption that filters the region by the key ranges.
 func WithRangeOption(ranges []keyutil.KeyRange) OpInfluenceOption {
 	return func(region *core.RegionInfo) bool {
+		if region == nil {
+			return false
+		}
 		for _, r := range ranges {
 			// the start key of the region must greater than the given range start key.
 			// the end key of the region must less than the given range end key.
@@ -897,17 +900,23 @@ func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster, ops ...OpInflue
 	influence := &OpInfluence{
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
+	if cluster == nil {
+		return influence
+	}
 	oc.operators.Range(
 		func(_, value any) bool {
 			op := value.(*Operator)
 			if !op.CheckTimeout() && !op.CheckSuccess() {
 				region := cluster.GetRegion(op.RegionID())
-				for _, opt := range ops {
-					if !opt(region) {
-						return true
-					}
-				}
 				if region != nil {
+					for _, opt := range ops {
+						if opt == nil {
+							continue
+						}
+						if !opt(region) {
+							return true
+						}
+					}
 					op.UnfinishedInfluence(influence, region)
 				}
 			}

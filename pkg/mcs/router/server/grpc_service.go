@@ -129,6 +129,7 @@ func (s *Service) GetRegionByID(_ctx context.Context, request *pdpb.GetRegionByI
 
 // QueryRegion implements the QueryRegion RPC method.
 func (s *Service) QueryRegion(stream routerpb.Router_QueryRegionServer) error {
+	stream = newQueryRegionMetricsStream(stream)
 	for {
 		request, err := stream.Recv()
 		if err == io.EOF {
