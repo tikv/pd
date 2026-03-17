@@ -268,7 +268,7 @@ func (c *ResourceGroupsController) updateRuVersionFromConfig(config *Config) {
 		if v, ok := config.RUVersionPolicy.Overrides[keyspaceIDStr]; ok {
 			old := c.ruVersion.Swap(v)
 			if old != v {
-				log.Info("ru_version updated from controller config",
+				log.Info("ru version updated from controller config",
 					zap.Int32("old", old), zap.Int32("new", v),
 					zap.Uint32("keyspace-id", c.keyspaceID))
 			}
