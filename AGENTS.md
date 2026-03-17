@@ -63,6 +63,8 @@
   - Enabling a failpoint does not replay startup or initialization logic that has already finished.
 - If failpoint semantics are unclear, inspect the injected code path and nearby tests before changing test flow or assertions.
 - Useful lookup pattern: `rg -n "failpoint.Inject|failpoint.InjectCall|failpoint.Enable" pkg tests server`.
+- If that is still not enough, read the upstream `README.md` in `github.com/pingcap/failpoint` before changing the test design.
+- When tests need controllable fault injection, compare `failpoint` and `mock` first; prefer the simpler and more maintainable option instead of defaulting to `mock`.
 - Never edit code or run non-test commands while failpoints are enabled. If unsure about state, run `make failpoint-disable` before continuing.
 - Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
 - If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
