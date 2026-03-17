@@ -37,7 +37,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20251212013835-ed676560b3b4
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20260310032717-0e2f5f3a00bc
+	github.com/pingcap/tidb-dashboard v0.0.0-20260316034444-321d01b0e300
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.55.0
 	github.com/sasha-s/go-deadlock v0.3.6
@@ -59,7 +59,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
-	golang.org/x/time v0.5.0
+	golang.org/x/time v0.12.0
 	golang.org/x/tools v0.38.0
 	google.golang.org/grpc v1.62.1
 	gotest.tools/gotestsum v1.7.0
@@ -158,8 +158,8 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	github.com/quic-go/qpack v0.5.1 // indirect
-	github.com/quic-go/quic-go v0.55.0 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
+	github.com/quic-go/quic-go v0.57.0 // indirect
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/samber/lo v1.37.0 // indirect
