@@ -396,7 +396,7 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	re.NotNil(config.RUVersionPolicy)
 	re.NotEmpty(config.RUVersionPolicy.Overrides)
 	// Try to set a non-existing keyspace's RU version.
-	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "non_existing_keyspace", 3)
+	_, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "non_existing_keyspace", 3)
 	re.Equal(http.StatusBadRequest, statusCode)
 }
 
