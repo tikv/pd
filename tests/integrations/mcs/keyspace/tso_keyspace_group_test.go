@@ -738,18 +738,32 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{newNode.GetAddr(): newNode})
 
 	// Step 7: Verify GetTS succeeds after node restart.
-	// The restarted node may transiently serve stale keyspace-group metadata
-	// before watch sync catches up, so tolerate one transient GetTS error and
-	// assert eventual recovery instead of requiring immediate success.
-	result := <-resultCh
-	if result.err != nil {
-		testutil.Eventually(re, func() bool {
-			retryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			_, _, err := client.GetTS(retryCtx)
-			return err == nil
-		}, testutil.WithWaitFor(60*time.Second), testutil.WithTickInterval(500*time.Millisecond))
-	}
+	// The in-flight GetTS may stay attached to stale discovery/metadata during
+	// recovery. Allow either the blocked request or a fresh retry to observe the
+	// recovered TSO service and return a newer timestamp.
+	var recoveredTS uint64
+	testutil.Eventually(re, func() bool {
+		select {
+		case result := <-resultCh:
+			if result.err == nil {
+				recoveredTS = tsoutil.ComposeTS(result.physicalTS, result.logicalTS)
+				return recoveredTS > setup.initialTS
+			}
+		default:
+		}
+
+		retryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		physicalTS, logicalTS, err := client.GetTS(retryCtx)
+		if err != nil {
+			return false
+		}
+		recoveredTS = tsoutil.ComposeTS(physicalTS, logicalTS)
+		return recoveredTS > setup.initialTS
+	}, testutil.WithWaitFor(60*time.Second), testutil.WithTickInterval(500*time.Millisecond))
+	getTSCancel()
+	re.Greater(recoveredTS, setup.initialTS)
 
 	// KEY VERIFICATION: If code incorrectly tried to fallback to legacy path,
 	// assertNotReachLegacyPath failpoint would have panicked already
