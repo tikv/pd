@@ -123,8 +123,9 @@ func (s *heartbeatServer) recv() (*schedulingpb.RegionHeartbeatRequest, error) {
 
 // RegionHeartbeat implements gRPC SchedulingServer.
 func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeatServer) error {
+	wrappedStream := newRegionHeartbeatMetricsStream(stream)
 	var (
-		server   = &heartbeatServer{stream: stream}
+		server   = &heartbeatServer{stream: wrappedStream}
 		cancel   context.CancelFunc
 		lastBind time.Time
 	)

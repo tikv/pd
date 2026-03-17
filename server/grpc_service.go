@@ -519,6 +519,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
+	stream = newTsoMetricsStream(stream)
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
 		limiter := s.GetGRPCRateLimiter()
@@ -1132,6 +1133,7 @@ func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 
 // ReportBuckets implements gRPC PDServer
 func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
+	stream = newReportBucketsMetricsStream(stream)
 	var (
 		server            = &bucketHeartbeatServer{stream: stream}
 		forwardStream     pdpb.PD_ReportBucketsClient
@@ -1242,6 +1244,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
+	stream = newRegionHeartbeatMetricsStream(stream)
 	var (
 		server                      = &heartbeatServer{stream: stream}
 		flowRoundDivisor            = core.GetFlowRoundDivisorByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
@@ -2230,6 +2233,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
+	stream = newSyncRegionsMetricsStream(stream)
 	if s.IsClosed() || s.cluster == nil {
 		return ErrNotStarted
 	}
@@ -2970,6 +2974,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+	server = newWatchGlobalConfigMetricsStream(server)
 	if s.client == nil {
 		return ErrEtcdNotStarted
 	}

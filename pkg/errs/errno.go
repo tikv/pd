@@ -14,7 +14,11 @@
 
 package errs
 
-import "github.com/pingcap/errors"
+import (
+	"github.com/pingcap/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 const (
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
@@ -29,6 +33,12 @@ const (
 	// Note: keep the same as the ones defined on the client side, because the client side checks if an error message
 	// contains this string to judge whether the leader is changed.
 	NotServedErr = "is not served"
+)
+
+// gRPC stream errors
+var (
+	// Unimplemented indicates operation is not implemented or not supported.
+	ErrRecvNotSupported = status.Error(codes.Unimplemented, "recv is not supported by this stream")
 )
 
 // common error in multiple packages
