@@ -294,4 +294,5 @@ func (s *State) UpdateIfNeeded(cfg *Config) bool {
 // Stop disables the GC tuner.
 func (*State) Stop() {
 	Tuning(0) // disable GC tuner
+	EnableGOGCTuner.Store(false)
 }

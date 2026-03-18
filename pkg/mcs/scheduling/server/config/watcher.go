@@ -144,7 +144,10 @@ func (cw *Watcher) getSchedulersController() *schedulers.Controller {
 
 func (cw *Watcher) initializeConfigWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
-		cfg := &persistedConfig{}
+		defaultServerConfig := sc.DefaultServerConfig()
+		cfg := &persistedConfig{
+			Server: &defaultServerConfig,
+		}
 		if err := json.Unmarshal(kv.Value, cfg); err != nil {
 			log.Warn("failed to unmarshal scheduling config entry",
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
@@ -156,14 +159,12 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
-		if cfg.Server != nil {
-			cw.setServerConfig(cfg.Server)
-			gcCfg := cw.GetGCTunerConfig()
-			if cw.gcTunerState != nil {
-				cw.gcTunerState.UpdateIfNeeded(gcCfg)
-			} else {
-				cw.gcTunerState = gctuner.InitGCTuner(cw.totalMem, gcCfg)
-			}
+		cw.setServerConfig(cfg.Server)
+		gcCfg := cw.GetGCTunerConfig()
+		if cw.gcTunerState != nil {
+			cw.gcTunerState.UpdateIfNeeded(gcCfg)
+		} else {
+			cw.gcTunerState = gctuner.InitGCTuner(cw.totalMem, gcCfg)
 		}
 		return nil
 	}

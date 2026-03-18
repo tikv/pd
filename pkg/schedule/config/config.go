@@ -119,6 +119,11 @@ const (
 	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	EnableLocationReplacement      = "schedule.enable-location-replacement"
 
+	defaultServerMemoryLimit          = 0
+	defaultServerMemoryLimitGCTrigger = 0.7
+	defaultEnableGOGCTuner            = true
+	defaultGCTunerThreshold           = 0.6
+
 	// EnableTiKVSplitRegion is the option to enable tikv split region.
 	// it's related to schedule, but it's not an explicit config
 	EnableTiKVSplitRegion = "schedule.enable-tikv-split-region"
@@ -677,6 +682,16 @@ type ServerConfig struct {
 	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+}
+
+// DefaultServerConfig returns the default server configuration.
+func DefaultServerConfig() ServerConfig {
+	return ServerConfig{
+		ServerMemoryLimit:          defaultServerMemoryLimit,
+		ServerMemoryLimitGCTrigger: defaultServerMemoryLimitGCTrigger,
+		EnableGOGCTuner:            defaultEnableGOGCTuner,
+		GCTunerThreshold:           defaultGCTunerThreshold,
+	}
 }
 
 // Clone makes a deep copy of the config.

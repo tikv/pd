@@ -155,6 +155,17 @@ func (suite *configTestSuite) TestGCTunerConfigWatch() {
 	})
 	pdServerCfg := origCfg.Clone()
 
+	// test0: config don't contain server-config field, the watcher should use the default value.
+	type FakeConfig struct {
+		FakeField string `json:"fake-field"`
+	}
+	cfg := &FakeConfig{}
+	suite.pdLeaderServer.GetServer().GetStorage().SaveConfig(cfg)
+	testutil.Eventually(re, func() bool {
+		cfg := watcher.GetGCTunerConfig()
+		return cfg != nil && cfg.EnableGOGCTuner == true
+	})
+
 	// Test 1: Update EnableGOGCTuner to true
 	pdServerCfg.EnableGOGCTuner = true
 	persistOpts.SetPDServerConfig(pdServerCfg)
