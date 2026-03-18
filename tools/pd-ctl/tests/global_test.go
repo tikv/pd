@@ -126,18 +126,17 @@ func TestRegionDirectHeader(t *testing.T) {
 	re.NoError(err)
 	re.Equal(0, count)
 
-	// The direct flag only controls endpoint selection. PD-Allow-follower-handle is always added
-	// for region requests, regardless of the direct flag value.
+	// PD-Allow-follower-handle is only added when --direct=true.
 	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct")
 	re.NoError(err)
 	re.Equal(1, count)
 
-	// Ignore direct flag value.
+	// --direct=false should not add PD-Allow-follower-handle.
 	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=false")
 	re.NoError(err)
-	re.Equal(2, count)
+	re.Equal(1, count)
 
 	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=true")
 	re.NoError(err)
-	re.Equal(3, count)
+	re.Equal(2, count)
 }
