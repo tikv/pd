@@ -165,8 +165,8 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	return nil
 }
 
-// SetKeyspaceRuVersion sets the RU version for a specific keyspace in the controller config.
-func (m *Manager) SetKeyspaceRuVersion(keyspaceID uint32, ruVersion int32) error {
+// SetKeyspaceRUVersion sets the RU version for a specific keyspace in the controller config.
+func (m *Manager) SetKeyspaceRUVersion(keyspaceID uint32, ruVersion int32) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}

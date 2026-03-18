@@ -90,7 +90,7 @@ func TestRUVersionPolicyInControllerConfig(t *testing.T) {
 	re.Nil(loaded2.RUVersionPolicy)
 }
 
-func TestManagerSetKeyspaceRuVersion(t *testing.T) {
+func TestManagerSetKeyspaceRUVersion(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
@@ -103,7 +103,7 @@ func TestManagerSetKeyspaceRuVersion(t *testing.T) {
 	re.Nil(m.GetRUVersionPolicy())
 
 	// Set RU version for keyspace 1.
-	err = m.SetKeyspaceRuVersion(1, 2)
+	err = m.SetKeyspaceRUVersion(1, 2)
 	re.NoError(err)
 
 	policy := m.GetRUVersionPolicy()
@@ -122,7 +122,7 @@ func TestManagerSetKeyspaceRuVersion(t *testing.T) {
 	re.Equal(int32(2), policy.Overrides[1])
 }
 
-func TestManagerSetKeyspaceRuVersionWriteDisabled(t *testing.T) {
+func TestManagerSetKeyspaceRUVersionWriteDisabled(t *testing.T) {
 	re := require.New(t)
 	s := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockRoleConfigProvider](&mockRoleConfigProvider{
@@ -135,12 +135,12 @@ func TestManagerSetKeyspaceRuVersionWriteDisabled(t *testing.T) {
 	err := m.Init(ctx)
 	re.NoError(err)
 
-	err = m.SetKeyspaceRuVersion(1, 2)
+	err = m.SetKeyspaceRUVersion(1, 2)
 	re.Error(err)
 	re.True(IsMetadataWriteDisabledError(err))
 }
 
-func TestManagerSetKeyspaceRuVersionMultipleKeyspaces(t *testing.T) {
+func TestManagerSetKeyspaceRUVersionMultipleKeyspaces(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
@@ -150,11 +150,11 @@ func TestManagerSetKeyspaceRuVersionMultipleKeyspaces(t *testing.T) {
 	re.NoError(err)
 
 	// Set different versions for different keyspaces.
-	err = m.SetKeyspaceRuVersion(1, 2)
+	err = m.SetKeyspaceRUVersion(1, 2)
 	re.NoError(err)
-	err = m.SetKeyspaceRuVersion(2, 3)
+	err = m.SetKeyspaceRUVersion(2, 3)
 	re.NoError(err)
-	err = m.SetKeyspaceRuVersion(3, 4)
+	err = m.SetKeyspaceRUVersion(3, 4)
 	re.NoError(err)
 
 	policy := m.GetRUVersionPolicy()
@@ -213,7 +213,7 @@ func TestUpdateControllerConfigRUVersionPolicy(t *testing.T) {
 	re.Equal(int32(2), policy.Overrides[42])
 }
 
-func TestManagerSetKeyspaceRuVersionResetToDefault(t *testing.T) {
+func TestManagerSetKeyspaceRUVersionResetToDefault(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
 
@@ -223,13 +223,13 @@ func TestManagerSetKeyspaceRuVersionResetToDefault(t *testing.T) {
 	re.NoError(err)
 
 	// Set and then unset.
-	err = m.SetKeyspaceRuVersion(1, 2)
+	err = m.SetKeyspaceRUVersion(1, 2)
 	re.NoError(err)
 	policy := m.GetRUVersionPolicy()
 	re.Equal(int32(2), policy.Overrides[1])
 
 	// Setting ruVersion=1 removes the override.
-	err = m.SetKeyspaceRuVersion(1, 1)
+	err = m.SetKeyspaceRUVersion(1, 1)
 	re.NoError(err)
 	policy = m.GetRUVersionPolicy()
 	re.NotNil(policy)

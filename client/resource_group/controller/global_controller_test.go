@@ -453,7 +453,7 @@ func TestGetRUVersionAfterSet(t *testing.T) {
 	re.Equal(int32(1), gc.GetRUVersion())
 }
 
-func TestRuVersionFromControllerConfig(t *testing.T) {
+func TestRUVersionFromControllerConfig(t *testing.T) {
 	re := require.New(t)
 	mockProvider := newMockResourceGroupProvider()
 	// keyspaceID = 42
@@ -466,11 +466,11 @@ func TestRuVersionFromControllerConfig(t *testing.T) {
 		Default:   1,
 		Overrides: map[uint32]RUVersion{42: 3},
 	}
-	gc.updateRuVersionFromConfig(config)
+	gc.updateRUVersionFromConfig(config)
 	re.Equal(int32(3), gc.GetRUVersion())
 }
 
-func TestRuVersionOverrideFromControllerConfig(t *testing.T) {
+func TestRUVersionOverrideFromControllerConfig(t *testing.T) {
 	re := require.New(t)
 	mockProvider := newMockResourceGroupProvider()
 	// keyspaceID = 42
@@ -483,11 +483,11 @@ func TestRuVersionOverrideFromControllerConfig(t *testing.T) {
 		Default:   5,
 		Overrides: map[uint32]RUVersion{42: 3, 100: 7},
 	}
-	gc.updateRuVersionFromConfig(config)
+	gc.updateRUVersionFromConfig(config)
 	re.Equal(int32(3), gc.GetRUVersion())
 }
 
-func TestRuVersionDefaultFallback(t *testing.T) {
+func TestRUVersionDefaultFallback(t *testing.T) {
 	re := require.New(t)
 	mockProvider := newMockResourceGroupProvider()
 	// keyspaceID = 42, no override for 42
@@ -499,12 +499,12 @@ func TestRuVersionDefaultFallback(t *testing.T) {
 		Default:   5,
 		Overrides: map[uint32]RUVersion{100: 7},
 	}
-	gc.updateRuVersionFromConfig(config)
+	gc.updateRUVersionFromConfig(config)
 	// No override for keyspace 42, use default.
 	re.Equal(int32(5), gc.GetRUVersion())
 }
 
-func TestRuVersionNilPolicy(t *testing.T) {
+func TestRUVersionNilPolicy(t *testing.T) {
 	re := require.New(t)
 	mockProvider := newMockResourceGroupProvider()
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
@@ -517,11 +517,11 @@ func TestRuVersionNilPolicy(t *testing.T) {
 	// Nil policy resets to 0 (GetRUVersion returns 1 as default).
 	config := DefaultConfig()
 	config.RUVersionPolicy = nil
-	gc.updateRuVersionFromConfig(config)
+	gc.updateRUVersionFromConfig(config)
 	re.Equal(int32(1), gc.GetRUVersion())
 }
 
-func TestRuVersionFromInitialControllerConfig(t *testing.T) {
+func TestRUVersionFromInitialControllerConfig(t *testing.T) {
 	re := require.New(t)
 
 	// Simulate a provider that returns a controller config with RUVersionPolicy.
@@ -552,7 +552,7 @@ func TestRuVersionFromInitialControllerConfig(t *testing.T) {
 	re.Equal(int32(3), gc.GetRUVersion())
 }
 
-func TestRuVersionWatchViaControllerConfig(t *testing.T) {
+func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

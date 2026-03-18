@@ -377,14 +377,14 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	config := suite.mustGetControllerConfig(re)
 	re.Nil(config.RUVersionPolicy)
 	// Set a negative ru_version, should fail.
-	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "test_keyspace", -1)
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", -1)
 	re.Equal(http.StatusBadRequest, statusCode)
 	re.Equal("ru_version must be positive", resp)
-	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "test_keyspace", 0)
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 0)
 	re.Equal(http.StatusBadRequest, statusCode)
 	re.Equal("ru_version must be positive", resp)
 	// Set ru_version > 0 should update the controller config's RUVersionPolicy.
-	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "test_keyspace", 3)
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 3)
 	re.Equal(http.StatusOK, statusCode)
 	re.Equal("Success!", resp)
 	config = suite.mustGetControllerConfig(re)
@@ -392,14 +392,14 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	// The keyspace ID is resolved from the name; check the overrides map has the entry.
 	re.NotEmpty(config.RUVersionPolicy.Overrides)
 	// Update ru_version to a different value.
-	resp, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "test_keyspace", 5)
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 5)
 	re.Equal(http.StatusOK, statusCode)
 	re.Equal("Success!", resp)
 	config = suite.mustGetControllerConfig(re)
 	re.NotNil(config.RUVersionPolicy)
 	re.NotEmpty(config.RUVersionPolicy.Overrides)
 	// Try to set a non-existing keyspace's RU version.
-	_, statusCode = tryToSetKeyspaceRuVersion(re, leaderAddr, "non_existing_keyspace", 3)
+	_, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "non_existing_keyspace", 3)
 	re.Equal(http.StatusBadRequest, statusCode)
 }
 
@@ -431,15 +431,15 @@ func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 	return string(bodyBytes), statusCode
 }
 
-func tryToSetKeyspaceRuVersion(re *require.Assertions, leaderAddr, keyspaceName string, ruVersion int32) (string, int) {
+func tryToSetKeyspaceRUVersion(re *require.Assertions, leaderAddr, keyspaceName string, ruVersion int32) (string, int) {
 	bodyBytes, statusCode := sendRequest(
 		re,
 		leaderAddr,
 		http.MethodPost,
 		"/config/controller/ru-version/"+keyspaceName,
 		nil,
-		apis.SetKeyspaceRuVersionRequest{
-			RuVersion: ruVersion,
+		apis.SetKeyspaceRUVersionRequest{
+			RUVersion: ruVersion,
 		},
 	)
 	return string(bodyBytes), statusCode

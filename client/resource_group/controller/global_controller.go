@@ -221,7 +221,7 @@ func NewResourceGroupController(
 	controller.safeRuConfig.Store(controller.ruConfig)
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	// Extract initial ruVersion from the controller config's RUVersionPolicy.
-	controller.updateRuVersionFromConfig(config)
+	controller.updateRUVersionFromConfig(config)
 	return controller, nil
 }
 
@@ -260,8 +260,8 @@ func (c *ResourceGroupsController) GetRUVersion() int32 {
 	return v
 }
 
-// updateRuVersionFromConfig extracts the RU version for this keyspace from the controller config.
-func (c *ResourceGroupsController) updateRuVersionFromConfig(config *Config) {
+// updateRUVersionFromConfig extracts the RU version for this keyspace from the controller config.
+func (c *ResourceGroupsController) updateRUVersionFromConfig(config *Config) {
 	if config.RUVersionPolicy != nil {
 		if v, ok := config.RUVersionPolicy.Overrides[c.keyspaceID]; ok {
 			old := c.ruVersion.Swap(v)
@@ -486,7 +486,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 					}
 					// Update ru version from the controller config RUVersionPolicy.
-					c.updateRuVersionFromConfig(config)
+					c.updateRUVersionFromConfig(config)
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
 			case gc := <-c.tokenBucketUpdateChan:
