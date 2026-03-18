@@ -4295,7 +4295,6 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	cluster.running = true
 
 	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
-	cluster.schedulingController.coordinator = cluster.coordinator
 	cluster.schedulingController.running = true
 
 	blockedOnClusterLock := make(chan struct{})
@@ -4303,8 +4302,8 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	go func() {
 		defer cluster.schedulingController.wg.Done()
 		<-cluster.schedulingController.ctx.Done()
-		close(blockedOnClusterLock)
 		cluster.RLock()
+		close(blockedOnClusterLock)
 		cluster.RUnlock()
 	}()
 
