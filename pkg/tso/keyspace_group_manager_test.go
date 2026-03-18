@@ -19,10 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1034,6 +1037,96 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSplitUpdateRetry() {
 		assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
 		return reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs)
 	})
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestFinishSplitKeyspaceGroupDoesNotBlockReads() {
+	re := suite.Require()
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(111)
+	)
+
+	var requestCount atomic.Int32
+	requestStarted := make(chan struct{}, 1)
+	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		re.Equal(http.MethodDelete, r.Method)
+		re.Equal(fmt.Sprintf("%s/%d/split", keyspaceGroupsAPIPrefix, groupID), r.URL.Path)
+		requestCount.Add(1)
+		select {
+		case requestStarted <- struct{}{}:
+		default:
+		}
+		<-releaseRequest
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	defer releaseOnce.Do(func() {
+		close(releaseRequest)
+	})
+
+	cfg := suite.createConfig()
+	cfg.BackendEndpoints = srv.URL
+	kgm := &KeyspaceGroupManager{
+		state:      state{keyspaceLookupTable: make(map[uint32]uint32)},
+		httpClient: srv.Client(),
+		cfg:        cfg,
+		metrics:    newKeyspaceGroupMetrics(),
+	}
+	kgm.kgs[groupID] = &endpoint.KeyspaceGroup{
+		ID:                  groupID,
+		Keyspaces:           []uint32{keyspaceID},
+		KeyspaceLookupTable: map[uint32]struct{}{keyspaceID: {}},
+		SplitState:          &endpoint.SplitState{SplitSource: constant.DefaultKeyspaceGroupID},
+	}
+	kgm.allocators[groupID] = &Allocator{}
+	kgm.keyspaceLookupTable[keyspaceID] = groupID
+
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- kgm.finishSplitKeyspaceGroup(groupID)
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		suite.T().Fatal("split completion request did not start")
+	}
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, _, currentGroupID, _, err := kgm.FindGroupByKeyspaceID(keyspaceID)
+		if err == nil && currentGroupID != groupID {
+			err = fmt.Errorf("unexpected keyspace group id %d", currentGroupID)
+		}
+		readDone <- err
+	}()
+
+	go func() {
+		errCh <- kgm.finishSplitKeyspaceGroup(groupID)
+	}()
+
+	select {
+	case err := <-readDone:
+		re.NoError(err)
+	case <-time.After(time.Second):
+		suite.T().Fatal("FindGroupByKeyspaceID blocked during split completion")
+	}
+
+	re.Equal(int32(1), requestCount.Load())
+
+	releaseOnce.Do(func() {
+		close(releaseRequest)
+	})
+
+	re.NoError(<-errCh)
+	re.NoError(<-errCh)
+
+	re.NotNil(kgm.kgs[groupID])
+	re.Nil(kgm.kgs[groupID].SplitState)
 }
 
 // TestPrimaryPriorityChange tests the case that the primary priority of a keyspace group changes
