@@ -79,7 +79,7 @@ type ResourceGroupKVInterceptor interface {
 	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
 	IsBackgroundRequest(ctx context.Context, resourceGroupName, requestResource string) bool
 	// GetRUVersion returns the current RU calculation version for this keyspace.
-	GetRUVersion() int32
+	GetRUVersion() RUVersion
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
@@ -252,7 +252,7 @@ func (c *ResourceGroupsController) GetConfig() *RUConfig {
 // GetRUVersion returns the current RU calculation version for this keyspace.
 // Returns DefaultRUVersion (v1) if not configured or not loaded yet.
 // This is a pure memory read (atomic load), no network call.
-func (c *ResourceGroupsController) GetRUVersion() int32 {
+func (c *ResourceGroupsController) GetRUVersion() RUVersion {
 	v := c.ruVersion.Load()
 	if v <= 0 {
 		return DefaultRUVersion
