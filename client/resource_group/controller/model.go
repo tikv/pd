@@ -311,7 +311,10 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
-	return custom1.RRU == custom2.RRU && custom1.WRU == custom2.WRU
+	return custom1.RRU == custom2.RRU &&
+		custom1.WRU == custom2.WRU &&
+		custom1.TikvRUV2 == custom2.TikvRUV2 &&
+		custom1.TidbRUV2 == custom2.TidbRUV2
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.
