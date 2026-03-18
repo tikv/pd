@@ -108,8 +108,6 @@ func (krgm *keyspaceResourceGroupManager) parseResourceGroupFromRaw(name, rawVal
 		err := errors.Errorf("resource group key name %s does not match payload name %s", name, group.Name)
 		log.Error("resource group name mismatch in storage payload",
 			zap.Uint32("keyspace-id", krgm.keyspaceID),
-			zap.String("name", name),
-			zap.String("payload-name", group.Name),
 			zap.String("raw-value", rawValue),
 			zap.Error(err))
 		return nil, err
@@ -119,10 +117,10 @@ func (krgm *keyspaceResourceGroupManager) parseResourceGroupFromRaw(name, rawVal
 
 func validateResourceGroupProto(grouppb *rmpb.ResourceGroup) error {
 	if len(grouppb.Name) == 0 || len(grouppb.Name) > maxGroupNameLength {
-		return errs.ErrInvalidGroup
+		return errs.ErrInvalidGroup.FastGenByArgs("the group name")
 	}
 	if grouppb.GetPriority() > maxPriority {
-		return errs.ErrInvalidGroup
+		return errs.ErrInvalidGroup.FastGenByArgs("the group priority")
 	}
 	return nil
 }
@@ -275,7 +273,7 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.Resourc
 
 func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if group == nil || group.Name == "" {
-		return errs.ErrInvalidGroup
+		return errs.ErrInvalidGroup.FastGenByArgs("the group name")
 	}
 	krgm.RLock()
 	curGroup, ok := krgm.groups[group.Name]
