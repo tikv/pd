@@ -17,9 +17,17 @@ package tests
 import (
 	"testing"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestClassifyStartServersError(t *testing.T) {
 	t.Parallel()
