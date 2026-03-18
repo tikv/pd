@@ -129,3 +129,20 @@ func TestUpdateDeltaConsumption(t *testing.T) {
 	re.Equal(now.TikvRUV2, last.TikvRUV2)
 	re.Equal(now.TidbRUV2, last.TidbRUV2)
 }
+
+func TestEqualRU(t *testing.T) {
+	re := require.New(t)
+
+	re.True(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 5, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 6},
+	))
+}
