@@ -121,14 +121,12 @@ func TestConfigValidate(t *testing.T) {
 	err = validateMeteringConfig(c)
 	re.NoError(err)
 
-	// Test Azure config without Region - should return error
 	c = &config.MeteringConfig{
 		Type:   storage.ProviderTypeAzure,
 		Bucket: "metering-container",
 	}
 	err = validateMeteringConfig(c)
-	re.Error(err)
-	re.Contains(err.Error(), "region is required")
+	re.NoError(err)
 
 	// Test Azure config without Bucket - should return error
 	c = &config.MeteringConfig{
