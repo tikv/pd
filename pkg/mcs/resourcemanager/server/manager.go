@@ -644,6 +644,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			var (
 				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType)
 				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
+				totalRUV2Metrics         = requestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
+				tikvRUV2Metrics          = tikvRequestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
+				tidbRUV2Metrics          = tidbRequestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
 				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name)
 				readByteMetrics          = readByteCost.WithLabelValues(name, name, ruLabelType)
 				writeByteMetrics         = writeByteCost.WithLabelValues(name, name, ruLabelType)
@@ -672,6 +675,15 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			}
 			if consumption.WRU > 0 {
 				wruMetrics.Add(consumption.WRU)
+			}
+			if consumption.TikvRUV2 > 0 {
+				tikvRUV2Metrics.Add(consumption.TikvRUV2)
+			}
+			if consumption.TidbRUV2 > 0 {
+				tidbRUV2Metrics.Add(consumption.TidbRUV2)
+			}
+			if ruv2 := consumption.TikvRUV2 + consumption.TidbRUV2; ruv2 > 0 {
+				totalRUV2Metrics.Add(ruv2)
 			}
 			// Byte info.
 			if consumption.ReadBytes > 0 {
@@ -712,6 +724,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			for _, r := range m.getInactiveResourceGroups() {
 				readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				requestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
+				tikvRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
+				tidbRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
 				sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
@@ -780,6 +795,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				Grouping("pod", podName).
 				Collector(readRequestUnitCost).
 				Collector(writeRequestUnitCost).
+				Collector(requestUnitV2Cost).
+				Collector(tikvRequestUnitV2Cost).
+				Collector(tidbRequestUnitV2Cost).
 				Collector(sqlLayerRequestUnitCost).
 				PushContext(pushCtx)
 			cancel()

@@ -129,8 +129,8 @@ func TestGetRawResourceTokenBucketSetting(t *testing.T) {
 func TestAdd(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, TikvRUV2: 1, TidbRUV2: 2}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, TikvRUV2: 3, TidbRUV2: 4}
 	expected := &rmpb.Consumption{
 		RRU:               4,
 		WRU:               6,
@@ -140,6 +140,8 @@ func TestAdd(t *testing.T) {
 		SqlLayerCpuTimeMs: 0,
 		KvReadRpcCount:    0,
 		KvWriteRpcCount:   0,
+		TikvRUV2:          4,
+		TidbRUV2:          6,
 	}
 
 	add(custom1, custom2)
@@ -165,8 +167,8 @@ func TestAdd(t *testing.T) {
 func TestSub(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, TikvRUV2: 7, TidbRUV2: 9}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, TikvRUV2: 3, TidbRUV2: 4}
 	expected := &rmpb.Consumption{
 		RRU:               1,
 		WRU:               1,
@@ -176,6 +178,8 @@ func TestSub(t *testing.T) {
 		SqlLayerCpuTimeMs: 0,
 		KvReadRpcCount:    0,
 		KvWriteRpcCount:   0,
+		TikvRUV2:          4,
+		TidbRUV2:          5,
 	}
 
 	sub(custom1, custom2)
@@ -195,4 +199,33 @@ func TestSub(t *testing.T) {
 
 	sub(custom1, custom2)
 	re.Equal(expected, custom1)
+}
+
+func TestUpdateDeltaConsumption(t *testing.T) {
+	re := require.New(t)
+	last := &rmpb.Consumption{TikvRUV2: 2, TidbRUV2: 3}
+	now := &rmpb.Consumption{TikvRUV2: 5, TidbRUV2: 11}
+
+	delta := updateDeltaConsumption(last, now)
+
+	re.Equal(&rmpb.Consumption{TikvRUV2: 3, TidbRUV2: 8}, delta)
+	re.Equal(now.TikvRUV2, last.TikvRUV2)
+	re.Equal(now.TidbRUV2, last.TidbRUV2)
+}
+
+func TestEqualRU(t *testing.T) {
+	re := require.New(t)
+
+	re.True(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 5, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 6},
+	))
 }

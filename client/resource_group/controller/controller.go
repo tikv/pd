@@ -734,6 +734,42 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 	return gc.getMeta(), nil
 }
 
+// ReportConsumption is used to report ru consumption directly.
+//
+// Currently, this interface is used to report the consumption for TiFlash MPP cost
+// after the query is finished.
+func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, consumption *rmpb.Consumption) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
+		return
+	}
+
+	gc.addRUConsumption(consumption)
+}
+
+// ReportTiKVRUV2Consumption is used to report the experimental TiKV-side v2 RU consumption.
+// RUv2 is only recorded for observation purposes without actual token deduction.
+func (c *ResourceGroupsController) ReportTiKVRUV2Consumption(resourceGroupName string, ruv2 float64) {
+	c.reportRUV2Consumption(resourceGroupName, ruv2, 0)
+}
+
+// ReportTiDBRUV2Consumption is used to report the experimental TiDB-side v2 RU consumption.
+// RUv2 is only recorded for observation purposes without actual token deduction.
+func (c *ResourceGroupsController) ReportTiDBRUV2Consumption(resourceGroupName string, ruv2 float64) {
+	c.reportRUV2Consumption(resourceGroupName, 0, ruv2)
+}
+
+func (c *ResourceGroupsController) reportRUV2Consumption(resourceGroupName string, tikvRUV2, tidbRUV2 float64) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
+		return
+	}
+
+	gc.addRUV2Consumption(tikvRUV2, tidbRUV2)
+}
+
 type groupCostController struct {
 	// invariant attributes
 	name    string
@@ -1563,6 +1599,19 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Unlock()
 
 	return delta, waitDuration, nil
+}
+
+func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
+	gc.mu.Lock()
+	add(gc.mu.consumption, consumption)
+	gc.mu.Unlock()
+}
+
+func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2 float64) {
+	gc.mu.Lock()
+	gc.mu.consumption.TikvRUV2 += tikvRUV2
+	gc.mu.consumption.TidbRUV2 += tidbRUV2
+	gc.mu.Unlock()
 }
 
 // GetActiveResourceGroup is used to get active resource group.

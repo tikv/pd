@@ -234,6 +234,8 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs += custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount += custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
+	custom1.TikvRUV2 += custom2.TikvRUV2
+	custom1.TidbRUV2 += custom2.TidbRUV2
 }
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
@@ -270,6 +272,14 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.KvWriteRpcCount = now.KvWriteRpcCount - last.KvWriteRpcCount
 		last.KvWriteRpcCount = now.KvWriteRpcCount
 	}
+	if now.TikvRUV2 > last.TikvRUV2 {
+		delta.TikvRUV2 = now.TikvRUV2 - last.TikvRUV2
+		last.TikvRUV2 = now.TikvRUV2
+	}
+	if now.TidbRUV2 > last.TidbRUV2 {
+		delta.TidbRUV2 = now.TidbRUV2 - last.TidbRUV2
+		last.TidbRUV2 = now.TidbRUV2
+	}
 	return delta
 }
 
@@ -285,10 +295,15 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs -= custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount -= custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
+	custom1.TikvRUV2 -= custom2.TikvRUV2
+	custom1.TidbRUV2 -= custom2.TidbRUV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
-	return custom1.RRU == custom2.RRU && custom1.WRU == custom2.WRU
+	return custom1.RRU == custom2.RRU &&
+		custom1.WRU == custom2.WRU &&
+		custom1.TikvRUV2 == custom2.TikvRUV2 &&
+		custom1.TidbRUV2 == custom2.TidbRUV2
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.

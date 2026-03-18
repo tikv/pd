@@ -62,6 +62,29 @@ var (
 			Help:      "Counter of the write request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 
+	// RUv2 metrics (experimental v2 RU calculation, recording only).
+	requestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "request_unit_v2_sum",
+			Help:      "Counter of the total experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+	tikvRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tikv_request_unit_v2_sum",
+			Help:      "Counter of the TiKV-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+	tidbRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tidb_request_unit_v2_sum",
+			Help:      "Counter of the TiDB-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+
 	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -192,6 +215,9 @@ func init() {
 	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(requestUnitV2Cost)
+	prometheus.MustRegister(tikvRequestUnitV2Cost)
+	prometheus.MustRegister(tidbRequestUnitV2Cost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)

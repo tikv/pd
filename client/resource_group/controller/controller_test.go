@@ -242,6 +242,67 @@ func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ..
 	return args.Get(0).(*meta_storagepb.GetResponse), args.Error(1)
 }
 
+func TestControllerReportConsumption(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
+	controller.Start(ctx)
+
+	testResourceGroup := &rmpb.ResourceGroup{
+		Name: "test-group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 1000000,
+				},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+	re.NoError(err)
+	re.Equal(testResourceGroup, gc.meta)
+
+	var totalConsumption rmpb.Consumption
+	gc.mu.Lock()
+	totalConsumption = *gc.mu.consumption
+	gc.mu.Unlock()
+
+	delta := &rmpb.Consumption{
+		RRU:               1.0,
+		WRU:               2.0,
+		ReadBytes:         10,
+		WriteBytes:        20,
+		TotalCpuTimeMs:    30.0,
+		SqlLayerCpuTimeMs: 40.0,
+		KvReadRpcCount:    50,
+		KvWriteRpcCount:   60,
+	}
+	controller.ReportConsumption("test-group", delta)
+
+	gc.mu.Lock()
+	add(&totalConsumption, delta)
+	require.Equal(t, gc.mu.consumption, &totalConsumption)
+	gc.mu.Unlock()
+
+	controller.ReportTiKVRUV2Consumption("test-group", 3.0)
+	controller.ReportTiDBRUV2Consumption("test-group", 4.0)
+	gc.mu.Lock()
+	totalConsumption.TikvRUV2 += 3.0
+	totalConsumption.TidbRUV2 += 4.0
+	require.Equal(t, gc.mu.consumption, &totalConsumption)
+	gc.mu.Unlock()
+
+	controller.ReportConsumption("unknown-name", delta)
+	controller.ReportTiKVRUV2Consumption("unknown-name", 1.0)
+	controller.ReportTiDBRUV2Consumption("unknown-name", 1.0)
+}
+
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
