@@ -554,9 +554,11 @@ func (s *Cache) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
 	s.RLock()
 	defer s.RUnlock()
 	var foundID uint32
+	found := false
 	s.tree.AscendGreaterOrEqual(keyspaceItem{keyspaceID: start}, func(i keyspaceItem) bool {
 		if i.keyspaceID <= end {
 			foundID = i.keyspaceID
+			found = true
 			return false
 		}
 		return true
@@ -564,5 +566,5 @@ func (s *Cache) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
 	if foundID != 0 {
 		return foundID, true
 	}
-	return 0, false
+	return foundID, found
 }

@@ -462,7 +462,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	manager.metaLock.Lock(keyspace.Id)
 	defer manager.metaLock.Unlock(keyspace.Id)
 
-	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// Save keyspace ID.
 		// Check if keyspace with that name already exists.
 		nameExists, _, err := manager.store.LoadKeyspaceID(txn, keyspace.Name)
@@ -476,8 +476,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		if err != nil {
 			return err
 		}
-		// Update the keyspace name cache.
-		manager.KeyspaceCache.Save(keyspace.Id, keyspace.Name, keyspace.State)
+
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
 		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.Id)
@@ -489,6 +488,11 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
+
+	if err == nil {
+		manager.KeyspaceCache.Save(keyspace.Id, keyspace.Name, keyspace.State)
+	}
+	return err
 }
 
 // splitKeyspaceRegion waits for the region at keyspace boundaries to be split.

@@ -229,10 +229,7 @@ func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32) (uint32, b
 		return 0, false
 	}
 	if m.allExist {
-		if start+1 < end {
-			return start + 1, true
-		}
-		return 0, false
+		return start, true
 	}
 	found := false
 	var candidate uint32

@@ -227,6 +227,11 @@ func (suite *keyspaceTestSuite) TestKeyspaceRegionSplit() {
 
 	// Test GetKeyspaceSplitKeys function
 	// For a region spanning keyspaces 1-3, it should generate split keys at boundaries 2 and 3
+	testutil.Eventually(re, func() bool {
+		_, ok := suite.server.GetKeyspaceManager().GetKeyspaceIDInRange(1, 3)
+		return ok
+	})
+
 	startKey := keyspace.MakeRegionBound(1).TxnLeftBound
 	endKey := keyspace.MakeRegionBound(3).TxnRightBound
 	splitKeys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, manager)

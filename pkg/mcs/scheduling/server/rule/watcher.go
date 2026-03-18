@@ -312,6 +312,9 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 			if err != nil {
 				return err
 			}
+			if meta.Id != keyspaceID {
+				return fmt.Errorf("keyspace ID in meta does not match the one in key, meta Id: %d, keyspace ID: %d", meta.Id, keyspaceID)
+			}
 			rw.keyspaceCache.Save(meta.Id, meta.Name, meta.State)
 		}
 		bound := keyspace.MakeRegionBound(keyspaceID)
@@ -347,7 +350,7 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 		rw.etcdClient,
 		"scheduling-keyspace-meta-watcher",
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
-		strings.TrimSuffix(rw.keyspaceMetaPathPrefix, "/"),
+		rw.keyspaceMetaPathPrefix,
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
