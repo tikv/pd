@@ -97,9 +97,6 @@ func validateMeteringConfig(c *config.MeteringConfig) error {
 			return errors.New("bucket is required for the metering config")
 		}
 	case storage.ProviderTypeAzure:
-		if len(c.Region) == 0 {
-			return errors.New("region is required for the metering config")
-		}
 		if len(c.Bucket) == 0 {
 			return errors.New("bucket is required for the metering config")
 		}
