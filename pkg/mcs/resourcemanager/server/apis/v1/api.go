@@ -130,6 +130,8 @@ func (s *Service) RegisterRouter() {
 	// With keyspace name, it will get/set the service limit of the given keyspace.
 	configEndpoint.POST("/keyspace/service-limit/:keyspace_name", s.setKeyspaceServiceLimit)
 	configEndpoint.GET("/keyspace/service-limit/:keyspace_name", s.getKeyspaceServiceLimit)
+	// RU version endpoint — sets per-keyspace RU version in controller config.
+	configEndpoint.POST("/controller/ru-version/:keyspace_name", s.setKeyspaceRUVersion)
 }
 
 // RegisterPrimaryRouter registers the router of the primary handler.
@@ -255,6 +257,11 @@ func (s *Service) setControllerConfig(c *gin.Context) {
 // KeyspaceServiceLimitRequest is the request body for setting the service limit of the keyspace.
 type KeyspaceServiceLimitRequest = metadataapi.KeyspaceServiceLimitRequest
 
+// SetKeyspaceRUVersionRequest is the request body for setting the RU version of a keyspace.
+type SetKeyspaceRUVersionRequest struct {
+	RUVersion int32 `json:"ru_version"`
+}
+
 // SetKeyspaceServiceLimit
 //
 //	@Tags		ResourceManager
@@ -282,6 +289,45 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 //	@Router		/config/keyspace/service-limit/{keyspace_name} [get]
 func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 	s.configService.GetKeyspaceServiceLimit(c)
+}
+
+// setKeyspaceRUVersion sets the RU version for the given keyspace in the controller config.
+//
+//	@Tags		ResourceManager
+//	@Summary	Set the RU version of the keyspace.
+//	@Param		keyspace_name	path	string	true	"Keyspace name"
+//	@Param		config			body	object	true	"json params, SetKeyspaceRUVersionRequest"
+//	@Success	200				{string}	string	"Success!"
+//	@Failure	400				{string}	error
+//	@Failure	403				{string}	error
+//	@Failure	500				{string}	error
+//	@Router		/config/controller/ru-version/{keyspace_name} [post]
+func (s *Service) setKeyspaceRUVersion(c *gin.Context) {
+	keyspaceName := c.Param("keyspace_name")
+	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	var req SetKeyspaceRUVersionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.RUVersion <= 0 {
+		c.String(http.StatusBadRequest, "ru_version must be positive")
+		return
+	}
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	if err := s.manager.SetKeyspaceRUVersion(keyspaceID, req.RUVersion); err != nil {
+		if rmserver.IsMetadataWriteDisabledError(err) {
+			c.String(http.StatusForbidden, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.String(http.StatusOK, "Success!")
 }
 
 // GetConfig
