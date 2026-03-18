@@ -15,7 +15,6 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -111,19 +110,6 @@ const DefaultRUVersion = RUVersionV1
 type RUVersionPolicy struct {
 	Default   RUVersion            `json:"default"`
 	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
-}
-
-// validateRUVersionPolicyValue validates the value before applying it as RUVersionPolicy.
-func validateRUVersionPolicyValue(value any) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("invalid ru-version-policy value: %w", err)
-	}
-	var policy RUVersionPolicy
-	if err := json.Unmarshal(data, &policy); err != nil {
-		return fmt.Errorf("invalid ru-version-policy format: %w", err)
-	}
-	return policy.validate()
 }
 
 // validate checks that all RU version values in the policy are positive.

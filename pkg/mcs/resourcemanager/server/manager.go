@@ -336,17 +336,12 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
+	// Save old policy so we can rollback on validation failure.
+	oldPolicy := m.controllerConfig.RUVersionPolicy.Clone()
 	var config any
 	switch kp[0] {
 	case "request-unit":
 		config = &m.controllerConfig.RequestUnit
-	case "ru-version-policy":
-		// Validate before applying: parse the value as RUVersionPolicy and check it.
-		if err := validateRUVersionPolicyValue(value); err != nil {
-			m.Unlock()
-			return err
-		}
-		config = m.controllerConfig
 	default:
 		config = m.controllerConfig
 	}
@@ -359,6 +354,13 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	if !found {
 		m.Unlock()
 		return errors.Errorf("config item %s not found", key)
+	}
+	// Validate RUVersionPolicy after any update, regardless of the key path,
+	// since the default branch merges into the full ControllerConfig.
+	if err := m.controllerConfig.RUVersionPolicy.validate(); err != nil {
+		m.controllerConfig.RUVersionPolicy = oldPolicy
+		m.Unlock()
+		return err
 	}
 	m.Unlock()
 	if updated {

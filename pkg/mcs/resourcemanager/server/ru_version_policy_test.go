@@ -213,6 +213,49 @@ func TestUpdateControllerConfigRUVersionPolicy(t *testing.T) {
 	re.Equal(int32(2), policy.Overrides[42])
 }
 
+func TestUpdateControllerConfigNilRUVersionPolicy(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+
+	// Initially RUVersionPolicy is nil.
+	re.Nil(m.GetRUVersionPolicy())
+
+	// Updating a non-RUVersionPolicy field should succeed when policy is nil.
+	err = m.UpdateControllerConfigItem("enable-controller-trace-log", "true")
+	re.NoError(err)
+	// Policy should still be nil after updating an unrelated field.
+	re.Nil(m.GetRUVersionPolicy())
+}
+
+func TestUpdateControllerConfigValidationViaDefaultPath(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+
+	// First set a valid policy via the dedicated API.
+	err = m.SetKeyspaceRUVersion(1, 2)
+	re.NoError(err)
+	policy := m.GetRUVersionPolicy()
+	re.NotNil(policy)
+	re.Equal(int32(2), policy.Overrides[1])
+
+	// Updating an unrelated config item should not break the existing valid policy.
+	err = m.UpdateControllerConfigItem("enable-controller-trace-log", "true")
+	re.NoError(err)
+	policy = m.GetRUVersionPolicy()
+	re.NotNil(policy)
+	re.Equal(int32(2), policy.Overrides[1])
+}
+
 func TestManagerSetKeyspaceRUVersionResetToDefault(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
