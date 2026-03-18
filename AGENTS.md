@@ -132,6 +132,13 @@
 - Clean with `make clean` (removes failpoints, tmp tests, bin, `.tools/bin`).
 - Avoid committing generated artifacts (junitfile, coverage, dashboard caches) unless required.
 
+## Worktree Workflow
+- Before starting any code change, create a dedicated `git worktree` with a new branch. This is required for AI-driven tasks and strongly recommended for any concurrent development.
+- Use one task and one branch per worktree. Do not let multiple agents or terminals edit the same worktree concurrently.
+- Keep the primary checkout as the integration workspace. Avoid feature edits there while parallel work is active.
+- Before merging or deleting a worktree, disable failpoints and ensure `git status` is clean.
+- Finish work by committing in the task worktree, merging back through the primary checkout as appropriate, then removing the worktree and pruning stale worktree metadata.
+
 ## PRs & Commits
 - Follow `.github/pull_request_template.md`; include `Issue Number: close|ref #...` line.
 - Commit subject: `pkg: message`, <=70 chars; blank line; body wrapped 80 chars; add `Signed-off-by` via `git commit -s`.
