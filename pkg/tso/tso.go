@@ -223,10 +223,13 @@ func (t *timestampOracle) syncTimestamp() error {
 	t.metrics.syncSaveDuration.Observe(time.Since(start).Seconds())
 
 	t.metrics.syncOKEvent.Inc()
-	log.Info("sync and save timestamp",
+	log.Info("persisted tso window to etcd",
+		zap.String("reason", "sync"),
 		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-		zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
-		zap.Time("save", save), zap.Time("next", next))
+		zap.Time("last-saved-time-before", lastSavedTime),
+		zap.Time("saved-time", save),
+		zap.String("member-name", t.member.Name()),
+		zap.Uint64("member-id", t.member.ID()))
 	// save into memory
 	t.setTSOPhysical(next)
 	return nil
@@ -284,6 +287,7 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 	}
 	// save into etcd only if nextPhysical is close to lastSavedTime
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= updateTimestampGuard {
+		lastSavedTime := t.getLastSavedTime()
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
 		if err := t.saveTimestamp(save); err != nil {
@@ -292,6 +296,13 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 		}
 		t.lastSavedTime.Store(save)
 		t.metrics.resetSaveDuration.Observe(time.Since(start).Seconds())
+		log.Info("persisted tso window to etcd",
+			zap.String("reason", "user-reset"),
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+			zap.Time("last-saved-time-before", lastSavedTime),
+			zap.Time("saved-time", save),
+			zap.String("member-name", t.member.Name()),
+			zap.Uint64("member-id", t.member.ID()))
 	}
 	// save into memory only if nextPhysical or nextLogical is greater.
 	t.tsoMux.physical = nextPhysical
@@ -397,13 +408,17 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 			t.metrics.errSaveUpdateTSEvent.Inc()
 			return false, err
 		}
+		lastSavedTime := t.getLastSavedTime()
 		t.lastSavedTime.Store(save)
 		saveDuration := time.Since(start)
 		t.metrics.updateSaveDuration.Observe(saveDuration.Seconds())
-		log.Debug("saved timestamp to etcd",
+		log.Debug("persisted tso window to etcd",
+			zap.String("reason", "update"),
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+			zap.Time("last-saved-time-before", lastSavedTime),
 			zap.Time("saved-time", save),
-			zap.Duration("took", saveDuration))
+			zap.String("member-name", t.member.Name()),
+			zap.Uint64("member-id", t.member.ID()))
 	}
 	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
 	// Otherwise, the caller met logical overflow, so it will allocate physical time to alloc more timestamp in concurrent.

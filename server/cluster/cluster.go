@@ -125,6 +125,12 @@ const (
 	syncRegionTaskRunner = "sync-region-async"
 )
 
+const (
+	tsoDynamicSwitchingStateUnknown int32 = iota
+	tsoDynamicSwitchingStateEnabled
+	tsoDynamicSwitchingStateDisabled
+)
+
 // Server is the interface for cluster.
 type Server interface {
 	GetAllocator() id.Allocator
@@ -166,6 +172,7 @@ type RaftCluster struct {
 
 	running                bool
 	isKeyspaceGroupEnabled bool
+	tsoDynamicSwitchingState atomic.Int32
 	meta                   *metapb.Cluster
 	storage                storage.Storage
 	minResolvedTS          atomic.Value // Store as uint64
@@ -461,25 +468,32 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isKeyspaceGroupEnabled {
-		if !c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
-			log.Debug("TSO dynamic switching is disabled, skipping TSO service check")
-			return
-		}
-		servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
-		if err != nil || len(servers) == 0 {
-			if err := c.startTSOJobsIfNeeded(); err != nil {
-				log.Error("failed to start TSO jobs", errs.ZapError(err))
-				return
+		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateEnabled)
+			if prev == tsoDynamicSwitchingStateDisabled {
+				log.Info("TSO dynamic switching is enabled, resuming TSO service checks")
 			}
-			if c.IsServiceIndependent(constant.TSOServiceName) {
-				log.Info("TSO is provided by PD")
-				c.UnsetServiceIndependent(constant.TSOServiceName)
+			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+			if err != nil || len(servers) == 0 {
+				if err := c.startTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to start TSO jobs", errs.ZapError(err))
+					return
+				}
+				if c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by PD")
+					c.UnsetServiceIndependent(constant.TSOServiceName)
+				}
+			} else {
+				c.stopTSOJobsIfNeeded()
+				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by TSO server")
+					c.SetServiceIndependent(constant.TSOServiceName)
+				}
 			}
 		} else {
-			c.stopTSOJobsIfNeeded()
-			if !c.IsServiceIndependent(constant.TSOServiceName) {
-				log.Info("TSO is provided by TSO server")
-				c.SetServiceIndependent(constant.TSOServiceName)
+			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateDisabled)
+			if prev != tsoDynamicSwitchingStateDisabled {
+				log.Info("TSO dynamic switching is disabled by config, skipping TSO service checks")
 			}
 		}
 		return
