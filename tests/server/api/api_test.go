@@ -896,19 +896,41 @@ func TestRemovingProgress(t *testing.T) {
 		return true
 	})
 
+	ch := make(chan struct{})
+	defer close(ch)
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/blockCheckStores", func() {
+		<-ch
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/blockCheckStores"))
+	}()
+	triggerCheckStores := func() { ch <- struct{}{} }
+
 	// remove store 1 and store 2
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
 	sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete, http.StatusOK)
 
-	time.Sleep(100 * time.Millisecond) // wait for the removing progress to be created
-	// size is not changed.
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	var p api.Progress
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("removing", p.Action)
-	re.Equal(0.0, p.Progress)
-	re.Equal(0.0, p.CurrentSpeed)
-	re.Equal(math.MaxFloat64, p.LeftSeconds)
+	testutil.Eventually(re, func() bool {
+		defer triggerCheckStores()
+		url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
+		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		output, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &p))
+		re.Equal("removing", p.Action)
+		re.Equal(0.0, p.Progress)
+		re.Equal(0.0, p.CurrentSpeed)
+		re.Equal(math.MaxFloat64, p.LeftSeconds)
+		return true
+	})
 
 	// update size
 	tests.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
@@ -916,6 +938,7 @@ func TestRemovingProgress(t *testing.T) {
 
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
+			defer triggerCheckStores()
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}
@@ -928,6 +951,8 @@ func TestRemovingProgress(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				return false
 			}
+			output, err := io.ReadAll(resp.Body)
+			re.NoError(err)
 			// is not prepared
 			re.NoError(json.Unmarshal(output, &p))
 			re.Equal("removing", p.Action)
@@ -939,6 +964,7 @@ func TestRemovingProgress(t *testing.T) {
 	}
 
 	testutil.Eventually(re, func() bool {
+		defer triggerCheckStores()
 		// wait for cluster prepare
 		if leader.GetRaftCluster() == nil {
 			return false
