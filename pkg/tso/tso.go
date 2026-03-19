@@ -409,8 +409,7 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 			return false, err
 		}
 		t.lastSavedTime.Store(save)
-		saveDuration := time.Since(start)
-		t.metrics.updateSaveDuration.Observe(saveDuration.Seconds())
+		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 		log.Debug("persisted tso window to etcd",
 			zap.String("reason", "update"),
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
