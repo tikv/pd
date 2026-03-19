@@ -140,7 +140,9 @@ func (s *Service) FindGroupByKeyspaceID(
 			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),
 		}, nil
 	}
-	if err != nil {
+	// If the error is the ErrGetAllocator, it indicate the server have watched the keyspace group but
+	// the server is not one of the members.
+	if err != nil && !errs.ErrGetAllocator.Equal(err) {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
 		}, nil

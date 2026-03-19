@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"strconv"
 	"strings"
@@ -86,16 +87,17 @@ func (k *keyspaceGroupSvcDiscovery) update(
 ) (oldPrimaryURL string, primarySwitched, success bool) {
 	k.Lock()
 	defer k.Unlock()
-	if k.getModRevision() > modRevision {
-		return "", false, false
-	}
-	success = true
 	// If the new primary URL is empty, we don't switch the primary URL.
 	oldPrimaryURL = k.primaryURL
 	if len(newPrimaryURL) > 0 {
 		primarySwitched = !strings.EqualFold(oldPrimaryURL, newPrimaryURL)
 		k.primaryURL = newPrimaryURL
 	}
+	// the mod revision just ensures the member use is the latest one , but primary can't be protected by the mod revision.
+	if k.getModRevision() > modRevision {
+		return "", false, false
+	}
+	success = true
 
 	if !reflect.DeepEqual(k.secondaryURLs, secondaryURLs) {
 		k.secondaryURLs = secondaryURLs
@@ -196,7 +198,7 @@ func (c *tsoServiceDiscovery) Init() error {
 	log.Info("initializing tso service discovery",
 		zap.Int("max-retry-times", c.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
-	if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+	if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, func() error { return c.updateMember() }); err != nil {
 		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
@@ -246,7 +248,7 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 		// Make sure queryRetryMaxTimes * queryRetryInterval is far less than memberUpdateInterval,
 		// so that we can speed up the process of tso service discovery when failover happens on the
 		// tso service side and also ensures it won't call updateMember too frequently during normal time.
-		if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+		if err := retry.Retry(c.ctx, c.option.MaxRetryTimes, initRetryInterval, func() error { return c.updateMember() }); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -332,7 +334,7 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
-	if err := retry.WithConfig(c.ctx, c.updateMember); err != nil {
+	if err := retry.WithConfig(c.ctx, func() error { return c.updateMember() }); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
 	}
@@ -482,9 +484,28 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		return err
 	}
 
+	failpoint.Inject("tsoServerURLOverride", func(val failpoint.Value) {
+		if val, ok := val.(string); ok {
+			tsoServerURL = val
+		}
+	})
+
+	err = c.updateMemberInner(tsoServerURL)
+	// it maybe access the TSO Server which not one of the group members ,
+	//  and in this case, we should try another TSO Server instead of returning error directly.
+	if err == noPrimaryUrlErr {
+		urls := c.getSecondaryURLs()
+		url := urls[rand.IntN(len(urls))]
+		err = c.updateMemberInner(url)
+	}
+	return err
+}
+
+func (c *tsoServiceDiscovery) updateMemberInner(tsoServerURL string) error {
 	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
 	var modRevision uint64
+	var err error
 	curModRevision := c.keyspaceGroupSD.getModRevision()
 	if len(tsoServerURL) > 0 {
 		keyspaceGroup, modRevision, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getModRevision())
@@ -581,10 +602,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 	oldPrimary, primarySwitched, success :=
 		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls, modRevision)
-	if !success {
-		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("modRevision", modRevision))
-		return errors.Errorf("keyspace group modRevision is stale, current modRevision: %d, new modRevision: %d", c.keyspaceGroupSD.getModRevision(), modRevision)
-	}
+
 	if primarySwitched {
 		log.Info("[tso] updated keyspace group service discovery info",
 			zap.Uint32("keyspace-id-in-request", keyspaceID),
@@ -598,10 +616,16 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	// Even if the primary URL is empty, we still updated other returned info above, including the
 	// keyspace group info and the secondary url.
 	if len(primaryURL) == 0 {
-		return errors.New("no primary URL found")
+		return noPrimaryUrlErr
+	}
+	if !success {
+		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("modRevision", modRevision))
+		return errors.Errorf("keyspace group modRevision is stale, current modRevision: %d, new modRevision: %d", c.keyspaceGroupSD.getModRevision(), modRevision)
 	}
 	return nil
 }
+
+var noPrimaryUrlErr = errors.New("no primary")
 
 // Query the keyspace group info from the tso server by the keyspace ID. The server side will return
 // the info of the keyspace group to which this keyspace belongs.
