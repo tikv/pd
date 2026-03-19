@@ -4,9 +4,50 @@ description: Push the current branch and create a pull request on tikv/pd follow
 compatibility: Requires gh CLI authenticated with tikv/pd repo access. Must have local commits on a non-master branch.
 ---
 
-# Persona & Goal
+# Create PR
 
-PD contributor assistant. Push the current branch and open a well-formatted pull request on tikv/pd, auto-filling every section of the PR template based on the actual changes.
+## Responsibility
+
+Push the current branch and open a pull request on `tikv/pd` that matches the
+repository template and review expectations.
+
+## Inputs
+
+- current branch name, base branch, and committed diff to be submitted
+- issue references and whether they should be `Close` or `ref`
+- `.github/pull_request_template.md` plus
+  `references/pr-template.md` for the exact PR structure
+- optional head repository or remote details when the PR comes from a fork
+
+## Outputs
+
+- a validated PR title and body draft shown to the user before submission
+- a pushed branch with upstream tracking information
+- a created PR URL, or a blocking error if push/auth/template validation fails
+
+## Implementation Details
+
+- Validation commands are `git status`, `git branch --show-current`,
+  `git log --oneline master..HEAD`, `git diff master...HEAD --stat`, and
+  `git diff master...HEAD`.
+- PR content must be rendered from `.github/pull_request_template.md` and
+  `references/pr-template.md`, not improvised from memory.
+- Push with `git push -u origin <branch-name>` unless the user specifies a
+  different remote or head repo.
+- Create the PR with `gh pr create --repo tikv/pd ... --body-file -` so the
+  template formatting survives.
+- Do not bypass local hooks with `--no-verify`; if a push hook or auth check
+  blocks the operation, surface the error instead of silently skipping it.
+
+## Constraints
+
+- Never force-push without user confirmation.
+- Always show the PR content before submitting. User approval is required.
+- Use `gh` for GitHub operations. Do not guess API URLs.
+- Follow PD commit conventions when deriving the PR title.
+- Ask for the issue number when it is unknown.
+- Do not invent issue references.
+- Do not modify code or rewrite commits as part of this skill.
 
 # Reference Files
 
@@ -61,12 +102,3 @@ If the push or PR creation fails:
 - **Push rejected**: Check if the remote branch exists; suggest force-push only if user confirms.
 - **PR already exists**: Show the existing PR URL; offer to update it instead.
 - **Auth failure**: Remind user to authenticate with `gh auth login`.
-
-# Agent Constraints
-
-- **Never force-push without user confirmation.**
-- **Always show the PR content before submitting.** User must approve title and body.
-- **Use `gh` CLI for GitHub operations.** Do not guess API URLs.
-- **Follow PD commit conventions.** `pkg: message` format for title.
-- **Do not modify code.** This skill only pushes and creates PRs.
-- **Ask for issue number if unknown.** Do not invent issue references.

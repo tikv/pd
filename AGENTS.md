@@ -71,5 +71,18 @@
 
 ## Repo-Specific Skills
 - Reusable agent workflows live in `.agents/skills/`.
-- `fix-cherry-pick-pr`: repairs PD cherry-pick PRs while preserving release-branch-only behavior and validating failpoint-sensitive diffs.
-- `create-pr`: pushes the current branch and opens a PR that matches the PD template.
+- [`add-metrics`](.agents/skills/add-metrics/SKILL.md): adds or changes PD
+  Prometheus instrumentation. Inputs: target package or file plus metric name,
+  type, labels, and rollout context. Outputs: metric patch and migration notes.
+  Constraints: cache `WithLabelValues`, avoid hot-path instrumentation, control
+  cardinality, and keep existing metrics backward compatible.
+- [`fix-cherry-pick-pr`](.agents/skills/fix-cherry-pick-pr/SKILL.md): repairs
+  release-branch cherry-pick PRs. Inputs: source PR, cherry-pick PR or branch,
+  and touched files or tests. Outputs: repaired branch plus parity and
+  verification report. Constraints: preserve release-branch-only behavior,
+  compare final aggregate diffs, and follow PD failpoint discipline.
+- [`create-pr`](.agents/skills/create-pr/SKILL.md): pushes the current branch
+  and opens a PR that matches the PD template. Inputs: current branch,
+  committed diff, issue refs, and template context. Outputs: reviewed title and
+  body draft, pushed branch, and PR URL. Constraints: show the draft before
+  submission, use `gh`, and never force-push without approval.
