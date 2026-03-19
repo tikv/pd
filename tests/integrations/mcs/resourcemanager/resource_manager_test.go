@@ -1492,6 +1492,10 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	re := suite.Require()
 	cli := suite.client
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/delayConsume", `return(100)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/delayConsume"))
+	}()
 	group := &rmpb.ResourceGroup{
 		Name: "test_ru_consumption",
 		Mode: rmpb.GroupMode_RUMode,
@@ -1532,10 +1536,23 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		ClientUniqueId:        1,
 	})
 	re.NoError(err)
-	time.Sleep(10 * time.Millisecond)
-	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.NoError(err)
-	re.Equal(g.RUStats, testConsumption)
+	checkRUStats := func() {
+		testutil.Eventually(re, func() bool {
+			g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+			if err != nil || g == nil || g.RUStats == nil {
+				return false
+			}
+			return g.RUStats.RRU == testConsumption.RRU &&
+				g.RUStats.WRU == testConsumption.WRU &&
+				g.RUStats.ReadBytes == testConsumption.ReadBytes &&
+				g.RUStats.WriteBytes == testConsumption.WriteBytes &&
+				g.RUStats.TotalCpuTimeMs == testConsumption.TotalCpuTimeMs &&
+				g.RUStats.SqlLayerCpuTimeMs == testConsumption.SqlLayerCpuTimeMs &&
+				g.RUStats.KvReadRpcCount == testConsumption.KvReadRpcCount &&
+				g.RUStats.KvWriteRpcCount == testConsumption.KvWriteRpcCount
+		})
+	}
+	checkRUStats()
 
 	// update resource group, ru stats not change
 	g.RUSettings.RU.Settings.FillRate = 12345
@@ -1554,9 +1571,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	suite.client = suite.setupPDClient(re)
 	cli = suite.client
 	// check ru stats not loss after restart
-	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.NoError(err)
-	re.Equal(g.RUStats, testConsumption)
+	checkRUStats()
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {

@@ -731,6 +731,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 				continue
 			}
+			if val, _err_ := failpoint.Eval(_curpkg_("delayConsume")); _err_ == nil {
+				time.Sleep(time.Duration(val.(int)) * time.Millisecond)
+			}
 			keyspaceID := consumptionInfo.keyspaceID
 			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
 			if err != nil {
