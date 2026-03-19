@@ -249,7 +249,7 @@ func TestStopDoesNotLeakPendingTokenResponses(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, 2)
 	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).
-		Run(func(args mock.Arguments) {
+		Run(func(_ mock.Arguments) {
 			started <- struct{}{}
 			<-release
 		}).
