@@ -20,16 +20,24 @@
 - `client/` fast tests: `make basic-test`
 - `client/` full tests: `make test`
 
-## Failpoints
-- PD uses `github.com/pingcap/failpoint` for test-only branches, returns, and pauses in specific code paths.
-- Safest path is to use `make gotest`, `make test`, or `make basic-test`, which manage failpoints for you.
-- If a package under test imports `github.com/pingcap/failpoint` and you run raw `go test`, bracket it with `make failpoint-enable` and `make failpoint-disable`.
-- Runtime model: `failpoint.Enable` and `failpoint.Disable` only change runtime evaluation state; a failpoint takes effect only when execution reaches the injected site again; enabling one does not replay startup or initialization logic that already finished.
-- If failpoint semantics are unclear, inspect the injected code path and nearby tests first. Useful lookup: `rg -n "failpoint.Inject|failpoint.InjectCall|failpoint.Enable" pkg tests server`.
-- If tests need controllable fault injection, compare `failpoint` and `mock` before choosing; prefer the simpler option.
-- Do not edit code, build binaries, or commit while failpoints are enabled.
-- If failpoint state is unclear or behavior looks polluted, reset with `make failpoint-disable` or `make clean-test` before continuing.
-- Never commit generated failpoint artifacts.
+## Failpoints Discipline
+- PD uses `github.com/pingcap/failpoint` to inject test-only branches, returns, and pauses into specific code paths.
+- Keep failpoints enabled only for tests; disable immediately after (`make failpoint-disable` or `make clean-test`) to avoid polluting the codebase.
+- Prefer make targets that auto-enable/disable failpoints (recommended: `make gotest ...`, `make test`, `make basic-test`).
+- If you must run `go test` manually, use this rule:
+  - Target uses failpoints (for example imports `github.com/pingcap/failpoint`): `make failpoint-enable` -> `go test ...` -> `make failpoint-disable`.
+  - Target does not use failpoints: run `go test ...` directly.
+- Runtime model:
+  - `failpoint.Enable` / `failpoint.Disable` only change runtime evaluation state.
+  - A failpoint takes effect only when execution reaches the injected site again.
+  - Enabling a failpoint does not replay startup or initialization logic that has already finished.
+- If failpoint semantics are unclear, inspect the injected code path and nearby tests before changing test flow or assertions.
+- Useful lookup pattern: `rg -n "failpoint.Inject|failpoint.InjectCall|failpoint.Enable" pkg tests server`.
+- If that is still not enough, read the upstream `README.md` in `github.com/pingcap/failpoint` before changing the test design.
+- When tests need controllable fault injection, compare `failpoint` and `mock` first; prefer the simpler and more maintainable option instead of defaulting to `mock`.
+- Never edit code or run non-test commands while failpoints are enabled. If unsure about state, run `make failpoint-disable` before continuing.
+- Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
+- If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
 
 ## Generated Or Derived Files
 - `make check` includes `make generate-errdoc`; error-code changes may require updating `errors.toml`.
