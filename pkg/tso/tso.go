@@ -227,7 +227,6 @@ func (t *timestampOracle) syncTimestamp() error {
 		zap.String("reason", "sync"),
 		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 		zap.String("member-name", t.member.Name()),
-		zap.Uint64("member-id", t.member.ID()),
 		zap.Time("etcd-last-saved-time", last),
 		zap.Time("in-memory-last-saved-time", lastSavedTime),
 		zap.Time("next-physical-time", next),
@@ -301,7 +300,6 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 			zap.String("reason", "user-reset"),
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.String("member-name", t.member.Name()),
-			zap.Uint64("member-id", t.member.ID()),
 			zap.Time("saved-time", save),
 		)
 	}
@@ -415,7 +413,6 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 			zap.String("reason", "update"),
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.String("member-name", t.member.Name()),
-			zap.Uint64("member-id", t.member.ID()),
 			zap.Time("saved-time", save),
 		)
 	}
