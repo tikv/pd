@@ -226,7 +226,9 @@ func (t *timestampOracle) syncTimestamp() error {
 	log.Info("persisted tso window to etcd",
 		zap.String("reason", "sync"),
 		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-		zap.Time("last-saved-time-before", lastSavedTime),
+		zap.Time("etcd-last-saved-time", last),
+		zap.Time("in-memory-last-saved-time", lastSavedTime),
+		zap.Time("next-physical-time", next),
 		zap.Time("saved-time", save),
 		zap.String("member-name", t.member.Name()),
 		zap.Uint64("member-id", t.member.ID()))
@@ -287,7 +289,6 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 	}
 	// save into etcd only if nextPhysical is close to lastSavedTime
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= updateTimestampGuard {
-		lastSavedTime := t.getLastSavedTime()
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
 		if err := t.saveTimestamp(save); err != nil {
@@ -299,7 +300,6 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 		log.Info("persisted tso window to etcd",
 			zap.String("reason", "user-reset"),
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-			zap.Time("last-saved-time-before", lastSavedTime),
 			zap.Time("saved-time", save),
 			zap.String("member-name", t.member.Name()),
 			zap.Uint64("member-id", t.member.ID()))
@@ -408,14 +408,12 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 			t.metrics.errSaveUpdateTSEvent.Inc()
 			return false, err
 		}
-		lastSavedTime := t.getLastSavedTime()
 		t.lastSavedTime.Store(save)
 		saveDuration := time.Since(start)
 		t.metrics.updateSaveDuration.Observe(saveDuration.Seconds())
 		log.Debug("persisted tso window to etcd",
 			zap.String("reason", "update"),
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-			zap.Time("last-saved-time-before", lastSavedTime),
 			zap.Time("saved-time", save),
 			zap.String("member-name", t.member.Name()),
 			zap.Uint64("member-id", t.member.ID()))
