@@ -65,7 +65,10 @@ type Manager struct {
 	srv              bs.Server
 	controllerConfig *ControllerConfig
 	groups           map[string]*ResourceGroup
-	storage          endpoint.ResourceGroupStorage
+	storage          interface {
+		endpoint.ResourceGroupStorage
+		endpoint.KeyspaceStorage
+	}
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -365,6 +368,56 @@ func (m *Manager) isResourceGroupLoadingComplete() bool {
 	return atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted
 }
 
+// SetKeyspaceRUVersion sets the RU version for the given keyspace in the controller config.
+func (m *Manager) SetKeyspaceRUVersion(keyspaceID uint32, ruVersion int32) error {
+	m.Lock()
+	if m.controllerConfig.RUVersionPolicy == nil {
+		// DefaultRUVersion (v1) means no RU model change.
+		// There is currently no API to modify this global default; it is
+		// intentionally fixed so that only per-keyspace overrides drive version bumps.
+		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: DefaultRUVersion}
+	}
+	if m.controllerConfig.RUVersionPolicy.Overrides == nil {
+		m.controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]RUVersion)
+	}
+	defaultVersion := m.controllerConfig.RUVersionPolicy.Default
+	if ruVersion == defaultVersion {
+		delete(m.controllerConfig.RUVersionPolicy.Overrides, keyspaceID)
+	} else {
+		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
+	}
+	m.Unlock()
+	return m.storage.SaveControllerConfig(m.controllerConfig)
+}
+
+// GetRUVersionPolicy returns a deep copy of the current RU version policy from the controller config.
+// The returned value is safe to use after the lock is released.
+func (m *Manager) GetRUVersionPolicy() *RUVersionPolicy {
+	m.RLock()
+	defer m.RUnlock()
+	return m.controllerConfig.RUVersionPolicy.Clone()
+}
+
+// GetKeyspaceIDByName resolves a keyspace name to its ID using the keyspace storage.
+func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (uint32, error) {
+	var (
+		loadedID uint32
+		ok       bool
+	)
+	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		var err error
+		ok, loadedID, err = m.storage.LoadKeyspaceID(txn, name)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, errors.Errorf("keyspace %q not found", name)
+	}
+	return loadedID, nil
+}
+
 // UpdateControllerConfigItem updates the controller config item.
 func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	kp := strings.Split(key, ".")
@@ -372,6 +425,8 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
+	// Save old policy so we can rollback on validation failure.
+	oldPolicy := m.controllerConfig.RUVersionPolicy.Clone()
 	var config any
 	switch kp[0] {
 	case "request-unit":
@@ -388,6 +443,13 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	if !found {
 		m.Unlock()
 		return errors.Errorf("config item %s not found", key)
+	}
+	// Validate RUVersionPolicy after any update, regardless of the key path,
+	// since the default branch merges into the full ControllerConfig.
+	if err := m.controllerConfig.RUVersionPolicy.validate(); err != nil {
+		m.controllerConfig.RUVersionPolicy = oldPolicy
+		m.Unlock()
+		return err
 	}
 	m.Unlock()
 	if updated {

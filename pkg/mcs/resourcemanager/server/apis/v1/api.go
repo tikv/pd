@@ -105,6 +105,7 @@ func (s *Service) RegisterRouter() {
 	configEndpoint.DELETE("/group/:name", s.deleteResourceGroup)
 	configEndpoint.GET("/controller", s.getControllerConfig)
 	configEndpoint.POST("/controller", s.setControllerConfig)
+	configEndpoint.POST("/controller/ru-version/:keyspace_name", s.setKeyspaceRUVersion)
 }
 
 func (s *Service) handler() http.Handler {
@@ -260,6 +261,45 @@ func (s *Service) setControllerConfig(c *gin.Context) {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	c.String(http.StatusOK, "Success!")
+}
+
+// SetKeyspaceRUVersionRequest is the request body for setting the RU version of a keyspace.
+type SetKeyspaceRUVersionRequest struct {
+	RUVersion int32 `json:"ru_version"`
+}
+
+// setKeyspaceRUVersion sets the RU version for the given keyspace in the controller config.
+//
+//	@Tags		ResourceManager
+//	@Summary	Set the RU version of the keyspace.
+//	@Param		keyspace_name	path	string	true	"Keyspace name"
+//	@Param		config			body	object	true	"json params, SetKeyspaceRUVersionRequest"
+//	@Success	200				{string}	string	"Success!"
+//	@Failure	400				{string}	error
+//	@Failure	404				{string}	error
+//	@Failure	500				{string}	error
+//	@Router		/config/controller/ru-version/{keyspace_name} [post]
+func (s *Service) setKeyspaceRUVersion(c *gin.Context) {
+	keyspaceName := c.Param("keyspace_name")
+	keyspaceID, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
+	if err != nil {
+		c.String(http.StatusNotFound, err.Error())
+		return
+	}
+	var req SetKeyspaceRUVersionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.RUVersion <= 0 {
+		c.String(http.StatusBadRequest, "ru_version must be positive")
+		return
+	}
+	if err := s.manager.SetKeyspaceRUVersion(keyspaceID, req.RUVersion); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
 	}
 	c.String(http.StatusOK, "Success!")
 }

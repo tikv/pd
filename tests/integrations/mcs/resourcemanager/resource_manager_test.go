@@ -207,7 +207,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 			},
 		},
 	}
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, 0)
 	controller.Start(suite.ctx)
 	defer controller.Stop()
 
@@ -297,8 +297,8 @@ func (suite *resourceManagerClientTestSuite) TestWatchWithSingleGroupByKeyspace(
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/disableWatch"))
 	}()
 	// Distinguish the controller with and without enabling `isSingleGroupByKeyspace`.
-	controllerKeySpace, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, controller.EnableSingleGroupByKeyspace())
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 2, cli, nil)
+	controllerKeySpace, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, 0, controller.EnableSingleGroupByKeyspace())
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, 0)
 	controller.Start(suite.ctx)
 	controllerKeySpace.Start(suite.ctx)
 	defer controllerKeySpace.Stop()
@@ -414,7 +414,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		CPUMsCost:        1,
 	}
 
-	rgsController, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	rgsController, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, 0)
 	rgsController.Start(suite.ctx)
 	defer rgsController.Stop()
 
@@ -544,7 +544,7 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 			},
 		},
 	}
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, 0, controller.EnableSingleGroupByKeyspace())
 	controller.Start(suite.ctx)
 	resourceGroupName := suite.initGroups[1].Name
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 2, times: 100, waitDuration: 0}
@@ -669,7 +669,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 		WriteCostPerByte: 1,
 		CPUMsCost:        1,
 	}
-	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
+	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, 0, controller.EnableSingleGroupByKeyspace())
 	c.Start(suite.ctx)
 
 	resourceGroupName := groupNames[0]
@@ -1232,7 +1232,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/acquireFailed", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, 0)
 	controller.Start(suite.ctx)
 	tc := tokenConsumptionPerSecond{
 		rruTokensAtATime: 0,
@@ -1264,7 +1264,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re := suite.Require()
 	cli := suite.client
 	// Test load from resource manager.
-	ctr, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	ctr, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, 0)
 	re.NoError(err)
 	config := ctr.GetConfig()
 	re.NotNil(config)
@@ -1282,7 +1282,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 		WriteCostPerByte: 4,
 		CPUMsCost:        5,
 	}
-	ctr, err = controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
+	ctr, err = controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig, 0)
 	re.NoError(err)
 	config = ctr.GetConfig()
 	re.NotNil(config)
@@ -1320,7 +1320,7 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	re.Contains(resp, "Success!")
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/fastCleanup", `return(true)`))
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, 0)
 	controller.Start(suite.ctx)
 
 	testConfig := struct {
@@ -1385,7 +1385,7 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 
-	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, 0)
 	c.Start(suite.ctx)
 
 	resourceGroupName := enableBackgroundGroup(false)
@@ -1453,11 +1453,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 
-	c1, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	c1, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, 0)
 	re.NoError(err)
 	c1.Start(suite.ctx)
 	// with client option
-	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, controller.WithMaxWaitDuration(time.Hour))
+	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, 0, controller.WithMaxWaitDuration(time.Hour))
 	re.NoError(err)
 	c2.Start(suite.ctx)
 	// helper function for sending HTTP requests and checking responses
@@ -1558,7 +1558,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	}
 	// restart c1
 	c1.Stop()
-	c1, err = controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	c1, err = controller.NewResourceGroupController(suite.ctx, 1, cli, nil, 0)
 	re.NoError(err)
 	re.EqualValues(expectRUCfg, c1.GetConfig())
 }
