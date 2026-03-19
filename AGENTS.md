@@ -21,8 +21,12 @@
 - `client/` full tests: `make test`
 
 ## Failpoints
-- Many PD test paths rely on failpoints. Safest path is to use `make gotest`, `make test`, or `make basic-test`, which manage them for you.
+- PD uses `github.com/pingcap/failpoint` for test-only branches, returns, and pauses in specific code paths.
+- Safest path is to use `make gotest`, `make test`, or `make basic-test`, which manage failpoints for you.
 - If a package under test imports `github.com/pingcap/failpoint` and you run raw `go test`, bracket it with `make failpoint-enable` and `make failpoint-disable`.
+- Runtime model: `failpoint.Enable` and `failpoint.Disable` only change runtime evaluation state; a failpoint takes effect only when execution reaches the injected site again; enabling one does not replay startup or initialization logic that already finished.
+- If failpoint semantics are unclear, inspect the injected code path and nearby tests first. Useful lookup: `rg -n "failpoint.Inject|failpoint.InjectCall|failpoint.Enable" pkg tests server`.
+- If tests need controllable fault injection, compare `failpoint` and `mock` before choosing; prefer the simpler option.
 - Do not edit code, build binaries, or commit while failpoints are enabled.
 - If failpoint state is unclear or behavior looks polluted, reset with `make failpoint-disable` or `make clean-test` before continuing.
 - Never commit generated failpoint artifacts.
