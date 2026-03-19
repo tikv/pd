@@ -16,6 +16,7 @@ package tso
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -183,6 +184,41 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 
 func (suite *tsoConsistencyTestSuite) reinitializeTSOForFailpoint() {
 	re := suite.Require()
+	targetAllocatorName := suite.pdLeaderServer.GetServer().Name()
+	if !suite.legacy {
+		targetAllocatorName = fmt.Sprintf("%s-%05d", suite.tsoServer.GetAddr(), constant.DefaultKeyspaceGroupID)
+	}
+	allocatorPaused := make(chan struct{}, 1)
+	fallbackFailpointsEnabled := false
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/pauseAllocatorUpdate", "pause"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/tso/beforeAllocatorUpdate", func(name string, keyspaceGroupID uint32) {
+		if name != targetAllocatorName || keyspaceGroupID != constant.DefaultKeyspaceGroupID {
+			return
+		}
+		select {
+		case allocatorPaused <- struct{}{}:
+		default:
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/beforeAllocatorUpdate"))
+		if fallbackFailpointsEnabled {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackSync"))
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackUpdate"))
+		}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/pauseAllocatorUpdate"))
+	}()
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-allocatorPaused:
+			return true
+		default:
+			return false
+		}
+	})
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackSync", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackUpdate", `return(true)`))
+	fallbackFailpointsEnabled = true
 	if suite.legacy {
 		allocator := suite.pdLeaderServer.GetServer().GetTSOAllocator()
 		allocator.Reset(false)
@@ -198,13 +234,9 @@ func (suite *tsoConsistencyTestSuite) reinitializeTSOForFailpoint() {
 func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	re := suite.Require()
 
-	// Reinitialize the TSO allocator after enabling the failpoints so the
-	// startup sync path observes them, without rebuilding the whole PD cluster.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackSync", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackUpdate", `return(true)`))
+	// Pause the live updater before reinitializing so the failpoints only affect
+	// the startup sync path and not a concurrent update tick.
 	suite.reinitializeTSOForFailpoint()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackSync"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackUpdate"))
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
