@@ -130,8 +130,6 @@ func (a *Allocator) allocatorUpdater() {
 			if !a.isServing() || !a.IsInitialize() {
 				continue
 			}
-			failpoint.InjectCall("beforeAllocatorUpdate", a.member.Name(), a.keyspaceGroupID)
-			failpoint.Inject("pauseAllocatorUpdate", nil)
 			if err := a.UpdateTSO(); err != nil {
 				log.Warn("failed to update allocator's timestamp", append(a.logFields, errs.ZapError(err))...)
 				a.Reset(true)
