@@ -929,6 +929,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	leader := cluster.GetServer(leaderName)
 	re.NoError(leader.BootstrapCluster())
 	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
