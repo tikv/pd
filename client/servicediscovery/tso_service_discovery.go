@@ -494,7 +494,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 	err = c.updateMemberInner(tsoServerURL)
 	// Maybe the url is not one of the group members, so it can't get the primary URL but can get the keyspace meta info.
-	// If met noPrimaryUrlErr error, it should try to get primary url from the member url.
+	// If met errNoPrimaryURL error, it should try to get primary url from the member url.
 	if err == errNoPrimaryURL {
 		urls := c.getSecondaryURLs()
 		if len(urls) == 0 {

@@ -322,6 +322,59 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 	checkFn(newGroupID, keyspaceIDs[1], secondAddress, terr)
 }
 
+// ref: https://github.com/tikv/pd/issues/6770
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestClientDoesNotFallbackToDefaultGroupOnUninitializedTSONode() {
+	re := suite.Require()
+	keyspaceGroupID := suite.allocID()
+	keyspaceIDs := []uint32{suite.allocID(), suite.allocID(), suite.allocID()}
+
+	servers := suite.tsoCluster.GetServers()
+	serverList := make([]*tso.Server, 0)
+	for _, s := range servers {
+		serverList = append(serverList, s)
+	}
+	point := fmt.Sprintf("return(\"%s\")", serverList[0].GetAddr())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch", point))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch"))
+	}()
+
+	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:       keyspaceGroupID,
+				UserKind: endpoint.Standard.String(),
+				Members: []endpoint.KeyspaceGroupMember{
+					{Address: serverList[0].GetAddr(), Priority: mcs.DefaultKeyspaceGroupReplicaPriority},
+					{Address: serverList[1].GetAddr(), Priority: mcs.DefaultKeyspaceGroupReplicaPriority},
+				},
+				Keyspaces: keyspaceIDs,
+			},
+		},
+	})
+	cli := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceIDs[0], []string{suite.pdLeaderServer.GetAddr()},
+		opt.WithForwardingOption(true))
+	defer cli.Close()
+	re.NotNil(cli)
+	inner, ok := cli.(interface{ GetTSOServiceDiscovery() sd.ServiceDiscovery })
+	re.True(ok)
+	dis := inner.GetTSOServiceDiscovery()
+	re.NoError(dis.CheckMemberChanged())
+	re.Equal(serverList[1].GetAddr(), dis.GetServingURL())
+	re.Equal(keyspaceGroupID, dis.GetKeyspaceGroupID())
+
+	// request must forward to the second server, and won't fallback to default keyspace group even if the first server is uninitialized.
+	point1 := fmt.Sprintf("return(\"%s\")", serverList[0].GetAddr())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/tsoServerURLOverride", point1))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/tsoServerURLOverride"))
+	}()
+	// modRevision is stale
+	re.ErrorContains(dis.CheckMemberChanged(), "ErrKeyspaceGroupModRevisionStale")
+	re.Equal(serverList[1].GetAddr(), dis.GetServingURL())
+	re.Equal(keyspaceGroupID, dis.GetKeyspaceGroupID())
+}
+
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {
 	// There is only default keyspace group. Any keyspace, which hasn't been assigned to
 	// a keyspace group before, will be served by the default keyspace group.
