@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 const (
@@ -55,7 +56,7 @@ func TestSaveTimestampWithTimeout(t *testing.T) {
 	defer clean()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership)
+	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership, false)
 	re.ErrorIs(err, context.DeadlineExceeded)
 }
 
@@ -64,7 +65,7 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	storage, clean, leadership := prepare(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(defaultContext, testGroupID, expectedTS, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, expectedTS, leadership, false)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -76,11 +77,11 @@ func TestTimestampTxn(t *testing.T) {
 	storage, clean, leadership := prepare(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
-	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS1, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS1, leadership, false)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS2, leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS2, leadership, false)
 	re.Error(err)
 
 	ts, err := storage.LoadTimestamp(testGroupID)
@@ -95,13 +96,13 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 
 	// testLeaderKey -> testLeaderValue
 	globalTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, false)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 
-	err = storage.SaveTimestamp(context.Background(), testGroupID, globalTS.Add(time.Second), &election.Leadership{})
+	err = storage.SaveTimestamp(context.Background(), testGroupID, globalTS.Add(time.Second), &election.Leadership{}, false)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -110,7 +111,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	// testLeaderKey -> ""
 	err = storage.Save(leadership.GetLeaderKey(), "")
 	re.NoError(err)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -119,7 +120,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	// testLeaderKey -> non-existent
 	err = storage.Remove(leadership.GetLeaderKey())
 	re.NoError(err)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -129,9 +130,42 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	err = storage.Save(leadership.GetLeaderKey(), testLeaderValue)
 	re.NoError(err)
 	globalTS = globalTS.Add(time.Second)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, false)
 	re.NoError(err)
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
+}
+
+func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
+	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
+
+	// No TSO primary exists: checkTSOPrimary=true should succeed.
+	globalTS := time.Now().Round(0)
+	re.NoError(storage.SaveTimestamp(defaultContext, 0, globalTS, leadership, true))
+	ts, err := storage.LoadTimestamp(0)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// Simulate a TSO microservice primary by writing to the primary key.
+	tsoPrimaryPath := keypath.TSODefaultPrimaryPath()
+	re.NoError(storage.Save(tsoPrimaryPath, "tso-primary-member-info"))
+
+	// Now checkTSOPrimary=true should fail.
+	nextTS := globalTS.Add(time.Second)
+	err = storage.SaveTimestamp(defaultContext, 0, nextTS, leadership, true)
+	re.Error(err)
+	re.Contains(err.Error(), "tso microservice primary exists, PD in PD service mode must yield")
+	// Timestamp must not advance.
+	ts, err = storage.LoadTimestamp(0)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// checkTSOPrimary=false should still succeed (microservice-aware PD or TSO itself).
+	re.NoError(storage.SaveTimestamp(defaultContext, 0, nextTS, leadership, false))
+	ts, err = storage.LoadTimestamp(0)
+	re.NoError(err)
+	re.Equal(nextTS, ts)
 }

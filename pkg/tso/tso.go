@@ -71,6 +71,10 @@ type timestampOracle struct {
 	tsoMux *tsoObject
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
+	// checkTSOPrimary indicates whether SaveTimestamp should check for an existing
+	// TSO microservice primary before writing. Only true in PD service mode
+	// (isKeyspaceGroupEnabled=false) to prevent dual writers during rolling upgrades.
+	checkTSOPrimary bool
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
@@ -87,7 +91,7 @@ func (t *timestampOracle) getStorageTimeout() time.Duration {
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), t.getStorageTimeout())
 	defer cancel()
-	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership())
+	return t.storage.SaveTimestamp(ctx, t.keyspaceGroupID, ts, t.member.GetLeadership(), t.checkTSOPrimary)
 }
 
 // setTSOCondition is the condition for updating physical time.

@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -594,55 +593,6 @@ func (suite *tsoClientTestSuite) TestTSOServiceDiscovery() {
 	checkServiceDiscovery(re, pdClient, 4)
 	cleanup2()
 	checkServiceDiscovery(re, pdClient, 3)
-}
-
-// When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
-// So we need another cluster to run this test.
-func TestMixedTSODeployment(t *testing.T) {
-	re := require.New(t)
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/skipUpdateServiceMode", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/skipUpdateServiceMode"))
-	}()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
-	leaderServer := cluster.GetServer(cluster.WaitLeader())
-	re.NotNil(leaderServer)
-	backendEndpoints := leaderServer.GetAddr()
-
-	pdSvr, err := cluster.Join(ctx)
-	re.NoError(err)
-	err = pdSvr.Run()
-	re.NoError(err)
-
-	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
-	defer cleanup()
-	tests.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
-
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	checkTSO(ctx1, re, &wg, backendEndpoints)
-	for range 2 {
-		n := rand.IntN(2) + 1
-		time.Sleep(time.Duration(n) * time.Second)
-		err = leaderServer.ResignLeaderWithRetry()
-		re.NoError(err)
-		leaderServer = cluster.GetServer(cluster.WaitLeader())
-		re.NotNil(leaderServer)
-	}
-	cancel1()
-	wg.Wait()
 }
 
 // TestUpgradingPDAndTSOClusters tests the scenario that after we restart the PD cluster
