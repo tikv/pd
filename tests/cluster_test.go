@@ -29,14 +29,28 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestClassifyStartServersError(t *testing.T) {
+func TestShouldRetryCurrentServers(t *testing.T) {
 	t.Parallel()
 
 	re := require.New(t)
-	re.Equal(startServersRetryCurrent, classifyStartServersError(errors.New("[PD:server:ErrCancelStartEtcd]etcd start canceled")))
-	re.Equal(startServersRetryCurrent, classifyStartServersError(errors.New("[PD:server:ErrStartEtcd]start etcd failed")))
-	re.Equal(startServersRetryRecreate, classifyStartServersError(errors.New("listen tcp 127.0.0.1:2379: bind: address already in use")))
-	re.Equal(startServersRetryRecreate, classifyStartServersError(errors.New("Etcd cluster ID mismatch")))
-	re.Equal(startServersNoRetry, classifyStartServersError(errors.New("some other error")))
-	re.Equal(startServersNoRetry, classifyStartServersError(nil))
+	re.True(shouldRetryCurrentServers(errors.New("[PD:server:ErrCancelStartEtcd]etcd start canceled")))
+	re.True(shouldRetryCurrentServers(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed")))
+	re.True(shouldRetryCurrentServers(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed: listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.False(shouldRetryCurrentServers(errors.New("listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.False(shouldRetryCurrentServers(errors.New("Etcd cluster ID mismatch")))
+	re.False(shouldRetryCurrentServers(errors.New("some other error")))
+	re.False(shouldRetryCurrentServers(nil))
+}
+
+func TestClassifyInitialServersError(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	re.Equal(startServersRetryCurrent, classifyInitialServersError(errors.New("[PD:server:ErrCancelStartEtcd]etcd start canceled")))
+	re.Equal(startServersRetryCurrent, classifyInitialServersError(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed")))
+	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed: listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("Etcd cluster ID mismatch")))
+	re.Equal(startServersNoRetry, classifyInitialServersError(errors.New("some other error")))
+	re.Equal(startServersNoRetry, classifyInitialServersError(nil))
 }

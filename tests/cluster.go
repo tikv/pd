@@ -88,7 +88,15 @@ const (
 	startServersRetryRecreate
 )
 
-func classifyStartServersError(err error) startServersRetryAction {
+func shouldRetryCurrentServers(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "ErrCancelStartEtcd") || strings.Contains(errMsg, "ErrStartEtcd")
+}
+
+func classifyInitialServersError(err error) startServersRetryAction {
 	if err == nil {
 		return startServersNoRetry
 	}
@@ -96,7 +104,7 @@ func classifyStartServersError(err error) startServersRetryAction {
 	switch {
 	case strings.Contains(errMsg, "address already in use") || strings.Contains(errMsg, "Etcd cluster ID mismatch"):
 		return startServersRetryRecreate
-	case strings.Contains(errMsg, "ErrCancelStartEtcd") || strings.Contains(errMsg, "ErrStartEtcd"):
+	case shouldRetryCurrentServers(err):
 		return startServersRetryCurrent
 	default:
 		return startServersNoRetry
@@ -712,7 +720,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 			return nil
 		}
 
-		switch classifyStartServersError(lastErr) {
+		switch classifyInitialServersError(lastErr) {
 		case startServersRetryRecreate:
 			// `Etcd cluster ID mismatch` can happen when the allocated peer URL happens to
 			// connect to another test's etcd cluster (port reuse across concurrent `go test`
@@ -786,7 +794,7 @@ func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
 			return nil
 		}
 
-		if classifyStartServersError(lastErr) == startServersRetryCurrent {
+		if shouldRetryCurrentServers(lastErr) {
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			// Stop any partially started servers before retrying
 			for _, s := range servers {
