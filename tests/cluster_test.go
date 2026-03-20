@@ -15,12 +15,14 @@
 package tests
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/pingcap/errors"
+	perrors "github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -33,12 +35,12 @@ func TestShouldRetryCurrentServers(t *testing.T) {
 	t.Parallel()
 
 	re := require.New(t)
-	re.True(shouldRetryCurrentServers(errors.New("[PD:server:ErrCancelStartEtcd]etcd start canceled")))
-	re.True(shouldRetryCurrentServers(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed")))
-	re.True(shouldRetryCurrentServers(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed: listen tcp 127.0.0.1:2379: bind: address already in use")))
-	re.False(shouldRetryCurrentServers(errors.New("listen tcp 127.0.0.1:2379: bind: address already in use")))
-	re.False(shouldRetryCurrentServers(errors.New("Etcd cluster ID mismatch")))
-	re.False(shouldRetryCurrentServers(errors.New("some other error")))
+	re.True(shouldRetryCurrentServers(perrors.New("[PD:server:ErrCancelStartEtcd]etcd start canceled")))
+	re.True(shouldRetryCurrentServers(perrors.New("[PD:etcd:ErrStartEtcd]start etcd failed")))
+	re.True(shouldRetryCurrentServers(perrors.New("[PD:etcd:ErrStartEtcd]start etcd failed: listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.False(shouldRetryCurrentServers(perrors.New("listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.False(shouldRetryCurrentServers(perrors.New("Etcd cluster ID mismatch")))
+	re.False(shouldRetryCurrentServers(perrors.New("some other error")))
 	re.False(shouldRetryCurrentServers(nil))
 }
 
@@ -46,11 +48,41 @@ func TestClassifyInitialServersError(t *testing.T) {
 	t.Parallel()
 
 	re := require.New(t)
-	re.Equal(startServersRetryCurrent, classifyInitialServersError(errors.New("[PD:server:ErrCancelStartEtcd]etcd start canceled")))
-	re.Equal(startServersRetryCurrent, classifyInitialServersError(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed")))
-	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("[PD:etcd:ErrStartEtcd]start etcd failed: listen tcp 127.0.0.1:2379: bind: address already in use")))
-	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("listen tcp 127.0.0.1:2379: bind: address already in use")))
-	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("Etcd cluster ID mismatch")))
-	re.Equal(startServersNoRetry, classifyInitialServersError(errors.New("some other error")))
+	re.Equal(startServersRetryCurrent, classifyInitialServersError(perrors.New("[PD:server:ErrCancelStartEtcd]etcd start canceled")))
+	re.Equal(startServersRetryCurrent, classifyInitialServersError(perrors.New("[PD:etcd:ErrStartEtcd]start etcd failed")))
+	re.Equal(startServersRetryRecreate, classifyInitialServersError(perrors.New("[PD:etcd:ErrStartEtcd]start etcd failed: listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.Equal(startServersRetryRecreate, classifyInitialServersError(perrors.New("listen tcp 127.0.0.1:2379: bind: address already in use")))
+	re.Equal(startServersRetryRecreate, classifyInitialServersError(perrors.New("Etcd cluster ID mismatch")))
+	re.Equal(startServersNoRetry, classifyInitialServersError(perrors.New("some other error")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(nil))
+}
+
+func TestRunTasksFastErrorReturnsLaterFailureWithoutWaitingForEarlierTask(t *testing.T) {
+	re := require.New(t)
+
+	blocked := make(chan struct{})
+	defer close(blocked)
+
+	cleanupCalled := make(chan struct{}, 1)
+	start := time.Now()
+	err := runTasksFastError([]func() error{
+		func() error {
+			<-blocked
+			return nil
+		},
+		func() error {
+			return errors.New("address already in use")
+		},
+	}, func() {
+		cleanupCalled <- struct{}{}
+	})
+
+	re.ErrorContains(err, "address already in use")
+	re.Less(time.Since(start), 500*time.Millisecond)
+
+	select {
+	case <-cleanupCalled:
+	default:
+		t.Fatal("cleanup callback was not triggered")
+	}
 }
