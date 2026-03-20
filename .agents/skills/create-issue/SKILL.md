@@ -53,7 +53,9 @@ Collect the facts needed to file a real issue instead of a placeholder.
 > Load only the matching file under `.github/ISSUE_TEMPLATE/` now.
 
 1. Read the chosen template and keep its headings intact.
-   Extract the template's `name:` field from frontmatter and use that exact value later with `gh issue create --template`.
+   Extract from frontmatter:
+   - `name:` — use as the `--template` argument later.
+   - `labels:` — use as explicit `--label` arguments later (`gh issue create --template` does **not** apply template labels automatically in non-interactive mode).
 
 2. Draft a title that matches the issue type and real scope:
    - bug: concise symptom or component-level failure
@@ -71,12 +73,12 @@ Collect the facts needed to file a real issue instead of a placeholder.
 
 After user approval:
 
-1. Use the selected template's frontmatter `name:` field as the `gh --template` argument so GitHub can apply the template's own defaults.
+1. Use the selected template's frontmatter `name:` field as the `--template` argument.
    If the template metadata is missing or ambiguous, stop and ask the user before creation.
 
-2. Create the issue with `gh`. Preserve formatting with a temporary file or heredoc:
+2. Create the issue with `gh`. Include `--label` for each label from the template's frontmatter (they are not applied automatically in non-interactive mode). Preserve formatting with a temporary file or heredoc:
    ```bash
-   gh issue create --repo tikv/pd --template "<template-name>" --title "<title>" --body-file "<body-file>"
+   gh issue create --repo tikv/pd --template "<template-name>" --label "<label>" --title "<title>" --body-file "<body-file-path>"
    ```
    Keep the selected template and the drafted body aligned. Do not mix a bug body with a development-task template, or vice versa.
 
@@ -85,15 +87,15 @@ After user approval:
 ### Phase 4: Post-Creation Handling
 
 - If `gh issue create` reports an existing issue, permission problem, or template-name error, stop and surface the error directly.
-- If the user explicitly asks for extra labels, milestones, or projects, add them deliberately. Otherwise, rely on the selected template's defaults instead of passing manual `--label` flags.
+- Always pass the template's frontmatter labels via `--label`. If the user explicitly asks for extra labels, milestones, or projects beyond the template defaults, add those as well.
 - For flaky-test issues, do not submit until the failing job name and at least one CI link are available.
 
 ## Common Pitfalls
 
 - Do not skip duplicate search just because the issue seems routine.
 - Do not use one template's headings with another template's `--template` name.
-- Do not hard-code template names or labels when the selected issue template already defines them in frontmatter.
-- Do not add manual `--label` flags for standard PD issue types unless the user explicitly asked for extra labels.
+- Do not hard-code template names; read the `name:` field from the selected template's frontmatter.
+- Always pass template labels explicitly via `--label` — `gh issue create --template` does not apply them in non-interactive mode.
 - Do not file flaky-test issues without the failing job name and a concrete CI link.
 
 ## Agent Constraints
