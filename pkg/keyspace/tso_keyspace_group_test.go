@@ -58,6 +58,21 @@ type keyspaceGroupTestSuite struct {
 	kg     *Manager
 }
 
+func updateKeyspaceForGroupForTest(m *GroupManager, userKind endpoint.UserKind, id string, keyspaceID uint32, mutation int) error {
+	op, cb, err := m.updateKeyspaceForGroupTxnOp(userKind, id, keyspaceID, mutation)
+	if err != nil {
+		return err
+	}
+	if op == nil {
+		return nil
+	}
+	err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		return op(txn)
+	})
+	cb(err)
+	return err
+}
+
 func TestKeyspaceGroupTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupTestSuite))
 }
@@ -361,9 +376,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.Nil(kg4)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 	// update the in-split keyspace group
-	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "2", 444, opAdd)
+	err = updateKeyspaceForGroupForTest(suite.kg.kgm, endpoint.Standard, "2", 444, opAdd)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(2).Error())
-	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "4", 444, opAdd)
+	err = updateKeyspaceForGroupForTest(suite.kg.kgm, endpoint.Standard, "4", 444, opAdd)
 	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 
 	// finish the split of keyspace group 4

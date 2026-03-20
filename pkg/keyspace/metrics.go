@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -30,13 +31,11 @@ const (
 
 // createKeyspaceStep represents the steps in create keyspace operation (for metrics label "step").
 const (
-	StepTotal               = "total"
-	StepAllocateID          = "allocate_id"
-	StepGetConfig           = "get_config"
-	StepSaveKeyspaceMeta    = "save_keyspace_meta"
-	StepSplitRegion         = "split_region"
-	StepEnableKeyspace      = "enable_keyspace"
-	StepUpdateKeyspaceGroup = "update_keyspace_group"
+	StepTotal            = "total"
+	StepAllocateID       = "allocate_id"
+	StepGetConfig        = "get_config"
+	StepSaveKeyspaceMeta = "save_keyspace_meta"
+	StepSplitRegion      = "split_region"
 )
 
 var (
@@ -50,13 +49,11 @@ var (
 		}, []string{"step"})
 
 	// Pre-defined observers per step to avoid repeated WithLabelValues in hot path.
-	createKeyspaceStepDurationTotal          prometheus.Observer
-	createKeyspaceStepDurationAllocateID     prometheus.Observer
-	createKeyspaceStepDurationGetConfig      prometheus.Observer
-	createKeyspaceStepDurationSaveKeyspace   prometheus.Observer
-	createKeyspaceStepDurationSplitRegion    prometheus.Observer
-	createKeyspaceStepDurationEnableKeyspace prometheus.Observer
-	createKeyspaceStepDurationUpdateKG       prometheus.Observer
+	createKeyspaceStepDurationTotal        prometheus.Observer
+	createKeyspaceStepDurationAllocateID   prometheus.Observer
+	createKeyspaceStepDurationGetConfig    prometheus.Observer
+	createKeyspaceStepDurationSaveKeyspace prometheus.Observer
+	createKeyspaceStepDurationSplitRegion  prometheus.Observer
 )
 
 func init() {
@@ -66,8 +63,6 @@ func init() {
 	createKeyspaceStepDurationGetConfig = createKeyspaceStepDuration.WithLabelValues(StepGetConfig)
 	createKeyspaceStepDurationSaveKeyspace = createKeyspaceStepDuration.WithLabelValues(StepSaveKeyspaceMeta)
 	createKeyspaceStepDurationSplitRegion = createKeyspaceStepDuration.WithLabelValues(StepSplitRegion)
-	createKeyspaceStepDurationEnableKeyspace = createKeyspaceStepDuration.WithLabelValues(StepEnableKeyspace)
-	createKeyspaceStepDurationUpdateKG = createKeyspaceStepDuration.WithLabelValues(StepUpdateKeyspaceGroup)
 }
 
 // createKeyspaceTracer traces create-keyspace steps: one callback per step (same pattern as RegionHeartbeatProcessTracer), records metrics and logs per step.
@@ -76,6 +71,7 @@ type createKeyspaceTracer struct {
 	lastCheckTime time.Time
 	keyspaceID    uint32
 	keyspaceName  string
+	userKind      endpoint.UserKind
 }
 
 // Begin starts the tracing.
@@ -109,16 +105,6 @@ func (t *createKeyspaceTracer) OnSaveKeyspaceMetaFinished() {
 // OnSplitRegionFinished is called when split region step is finished.
 func (t *createKeyspaceTracer) OnSplitRegionFinished() {
 	t.onStepFinished(createKeyspaceStepDurationSplitRegion)
-}
-
-// OnEnableKeyspaceFinished is called when enable keyspace step is finished.
-func (t *createKeyspaceTracer) OnEnableKeyspaceFinished() {
-	t.onStepFinished(createKeyspaceStepDurationEnableKeyspace)
-}
-
-// OnUpdateKeyspaceGroupFinished is called when update keyspace group step is finished.
-func (t *createKeyspaceTracer) OnUpdateKeyspaceGroupFinished() {
-	t.onStepFinished(createKeyspaceStepDurationUpdateKG)
 }
 
 // OnCreateKeyspaceComplete is called when the entire create keyspace operation completes successfully.

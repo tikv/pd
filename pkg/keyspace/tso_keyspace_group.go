@@ -348,6 +348,9 @@ func (m *GroupManager) saveKeyspaceGroupsTxnOp(keyspaceGroups []*endpoint.Keyspa
 			if err != nil {
 				return err
 			}
+			failpoint.Inject("saveKeyspaceGroupsTxnOpFailed", func() {
+				failpoint.Return(errs.ErrKeyspaceGroupExists)
+			})
 			if oldKG != nil && !overwrite {
 				return errs.ErrKeyspaceGroupExists
 			}
@@ -458,30 +461,11 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 	return 0, errs.ErrKeyspaceNotInAnyKeyspaceGroup
 }
 
-var failpointOnce sync.Once
-
-// UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
-func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
-	if m == nil {
-		return nil
-	}
-	id, err := strconv.ParseUint(groupID, 10, 64)
-	if err != nil {
-		return err
-	}
-
-	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
-		failpointOnce.Do(func() {
-			addrs := val.(string)
-			_ = m.SetNodesForKeyspaceGroup(constant.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
-		})
-	})
-	m.Lock()
-	defer m.Unlock()
-	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
-}
-
 func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, id string, keyspaceID uint32, mutation int) (txnOp, txnCb, error) {
+	if m == nil {
+		return nil, nil, nil
+	}
+
 	m.Lock()
 	defer m.Unlock()
 	groupID, err := strconv.ParseUint(id, 10, 64)
