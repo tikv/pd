@@ -285,20 +285,40 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
 		Name:           request.Name,
-		State:          keyspacepb.KeyspaceState_DISABLED,
+		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      request.CreateTime,
 		StateChangedAt: request.CreateTime,
 		Config:         request.Config,
 	}
-	err = manager.saveNewKeyspace(keyspace)
-	if err != nil {
-		log.Warn("[create-keyspace] failed to save keyspace before split",
-			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("keyspace-name", keyspace.GetName()),
-			zap.Error(err),
-		)
+
+	if isProtectedKeyspaceID(newID) {
+		err := newModifyProtectedKeyspaceError()
+		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
 		return nil, err
 	}
+	txnOps := make([]txnOp, 0, 2)
+	txnOps = append(txnOps, manager.saveNewKeyspaceTxnOp(keyspace))
+	txnOps = append(txnOps, manager.UpdateKeyspaceStateByIDTxnOp(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime))
+	op, err := manager.kgm.updateKeyspaceForGroupTxnOp(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd)
+	if err != nil {
+		log.Warn("[keyspace] failed to update keyspace group ", errs.ZapError(err))
+		return nil, err
+	}
+	txnOps = append(txnOps, op)
+
+	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		for _, op := range txnOps {
+			if err := op(txn); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Warn("[keyspace] fail to run txn", errs.ZapError(err))
+		return nil, err
+	}
+
 	tracer.OnSaveKeyspaceMetaFinished()
 
 	// Split keyspace region.
@@ -325,22 +345,22 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	tracer.OnSplitRegionFinished()
 
 	// Enable the keyspace metadata after split.
-	keyspace.State = keyspacepb.KeyspaceState_ENABLED
-	_, err = manager.UpdateKeyspaceStateByID(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
-	if err != nil {
-		log.Warn("[create-keyspace] failed to create keyspace",
-			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("keyspace-name", keyspace.GetName()),
-			zap.Error(err),
-		)
-		return nil, err
-	}
+	// keyspace.State = keyspacepb.KeyspaceState_ENABLED
+	// _, err = manager.UpdateKeyspaceStateByID(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
+	// if err != nil {
+	// 	log.Warn("[create-keyspace] failed to create keyspace",
+	// 		zap.Uint32("keyspace-id", keyspace.GetId()),
+	// 		zap.String("keyspace-name", keyspace.GetName()),
+	// 		zap.Error(err),
+	// 	)
+	// 	return nil, err
+	// }
 	tracer.OnEnableKeyspaceFinished()
 
 	// Update keyspace group.
-	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
-		return nil, err
-	}
+	// if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+	// 	return nil, err
+	// }
 	tracer.OnUpdateKeyspaceGroupFinished()
 	tracer.OnCreateKeyspaceComplete()
 
@@ -463,6 +483,38 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		zap.Any("keyspace", keyspace),
 	)
 	return keyspace, nil
+}
+
+type txnOp = func(txn kv.Txn) error
+
+func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) txnOp {
+	return func(txn kv.Txn) error {
+		// Save keyspace ID.
+		// Check if keyspace with that name already exists.
+		nameExists, _, err := manager.store.LoadKeyspaceID(txn, keyspace.Name)
+		if err != nil {
+			return err
+		}
+		if nameExists {
+			return errs.ErrKeyspaceExists
+		}
+		err = manager.store.SaveKeyspaceID(txn, keyspace.Id, keyspace.Name)
+		if err != nil {
+			return err
+		}
+		// Update the keyspace name cache.
+		manager.keyspaceNameLookup.Store(keyspace.Id, keyspace.Name)
+		// Save keyspace meta.
+		// Check if keyspace with that id already exists.
+		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.Id)
+		if err != nil {
+			return err
+		}
+		if loadedMeta != nil {
+			return errs.ErrKeyspaceExists
+		}
+		return manager.store.SaveKeyspaceMeta(txn, keyspace)
+	}
 }
 
 func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
@@ -841,6 +893,30 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		zap.String("new-state", newState.String()),
 	)
 	return meta, nil
+}
+
+// UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
+// It returns error if saving failed, operation not allowed, or if keyspace not exists.
+func (manager *Manager) UpdateKeyspaceStateByIDTxnOp(id uint32, newState keyspacepb.KeyspaceState, now int64) txnOp {
+	var meta *keyspacepb.KeyspaceMeta
+	var err error
+	return func(txn kv.Txn) error {
+		manager.metaLock.Lock(id)
+		defer manager.metaLock.Unlock(id)
+		// Load keyspace by id.
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
+		if err != nil {
+			return err
+		}
+		if meta == nil {
+			return errs.ErrKeyspaceNotFound
+		}
+		// Update keyspace meta.
+		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
+			return err
+		}
+		return manager.store.SaveKeyspaceMeta(txn, meta)
+	}
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
