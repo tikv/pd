@@ -17,12 +17,52 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
+	keyspacepb "github.com/pingcap/kvproto/pkg/keyspacepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/storage/kv"
 )
+
+// mockKeyspaceStorage implements endpoint.KeyspaceStorage for unit tests.
+type mockKeyspaceStorage struct {
+	mu         sync.RWMutex
+	keyspaceID map[string]uint32 // name → ID
+}
+
+func newMockKeyspaceStorage() *mockKeyspaceStorage {
+	return &mockKeyspaceStorage{
+		keyspaceID: make(map[string]uint32),
+	}
+}
+
+func (*mockKeyspaceStorage) SaveKeyspaceMeta(kv.Txn, *keyspacepb.KeyspaceMeta) error { return nil }
+func (*mockKeyspaceStorage) LoadKeyspaceMeta(kv.Txn, uint32) (*keyspacepb.KeyspaceMeta, error) {
+	return nil, nil
+}
+func (s *mockKeyspaceStorage) SaveKeyspaceID(_ kv.Txn, id uint32, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keyspaceID[name] = id
+	return nil
+}
+func (s *mockKeyspaceStorage) LoadKeyspaceID(_ kv.Txn, name string) (bool, uint32, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.keyspaceID[name]
+	return ok, id, nil
+}
+func (*mockKeyspaceStorage) LoadRangeKeyspace(kv.Txn, uint32, int) ([]*keyspacepb.KeyspaceMeta, error) {
+	return nil, nil
+}
+func (*mockKeyspaceStorage) RunInTxn(_ context.Context, f func(txn kv.Txn) error) error {
+	return f(nil)
+}
+func (*mockKeyspaceStorage) GetGlobalSafePointVersion(kv.Txn) (string, error) { return "", nil }
+func (*mockKeyspaceStorage) SaveGlobalSafePointVersion(kv.Txn, string) error  { return nil }
 
 // prepareTestManager creates a Manager suitable for unit tests without requiring a real server.
 func prepareTestManager() *Manager {
@@ -43,6 +83,7 @@ func prepareTestManager() *Manager {
 		consumptionRecord: make(map[consumptionRecordKey]time.Time),
 	}
 	m.storage = storage
+	m.keyspaceStorage = newMockKeyspaceStorage()
 	return m
 }
 
@@ -282,4 +323,30 @@ func TestManagerSetKeyspaceRUVersionResetToDefault(t *testing.T) {
 	re.NotNil(policy)
 	_, exists := policy.Overrides[1]
 	re.False(exists)
+}
+
+func TestGetKeyspaceIDByName(t *testing.T) {
+	re := require.New(t)
+	m := prepareTestManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+
+	ks := m.keyspaceStorage.(*mockKeyspaceStorage)
+
+	// Keyspace not found.
+	_, err = m.GetKeyspaceIDByName(ctx, "nonexistent")
+	re.Error(err)
+	re.Contains(err.Error(), "not found")
+
+	// Add a keyspace and look it up.
+	ks.mu.Lock()
+	ks.keyspaceID["my_keyspace"] = 42
+	ks.mu.Unlock()
+
+	id, err := m.GetKeyspaceIDByName(ctx, "my_keyspace")
+	re.NoError(err)
+	re.Equal(uint32(42), id)
 }

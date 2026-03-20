@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
@@ -65,10 +66,8 @@ type Manager struct {
 	srv              bs.Server
 	controllerConfig *ControllerConfig
 	groups           map[string]*ResourceGroup
-	storage          interface {
-		endpoint.ResourceGroupStorage
-		endpoint.KeyspaceStorage
-	}
+	storage          endpoint.ResourceGroupStorage
+	keyspaceStorage  endpoint.KeyspaceStorage // uses PD root path, for keyspace name → ID lookup
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -129,6 +128,12 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 		log.Info("resource group manager starts to initialize", zap.String("name", srv.Name()))
 		m.storage = endpoint.NewStorageEndpoint(
 			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
+			nil,
+		)
+		// Use PD root path for keyspace name → ID lookup, because keyspace data
+		// is written by PD's Keyspace Manager under /pd/{cluster_id}/keyspaces/id/{name}.
+		m.keyspaceStorage = endpoint.NewStorageEndpoint(
+			kv.NewEtcdKVBase(srv.GetClient(), keypath.PDRootPath()),
 			nil,
 		)
 		m.srv = srv
@@ -404,9 +409,9 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (uint32,
 		loadedID uint32
 		ok       bool
 	)
-	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+	err := m.keyspaceStorage.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
-		ok, loadedID, err = m.storage.LoadKeyspaceID(txn, name)
+		ok, loadedID, err = m.keyspaceStorage.LoadKeyspaceID(txn, name)
 		return err
 	})
 	if err != nil {

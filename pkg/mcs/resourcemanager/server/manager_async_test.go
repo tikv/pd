@@ -22,13 +22,11 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	keyspacepb "github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/kv"
 )
 
 // mockStorage implements ResourceGroupStorage interface for testing
@@ -168,25 +166,6 @@ func (m *mockStorage) LoadControllerConfig() (string, error) {
 	defer m.mu.RUnlock()
 	return m.config, nil
 }
-
-// KeyspaceStorage stubs (not used in resource group tests but required by the interface).
-
-func (*mockStorage) SaveKeyspaceMeta(kv.Txn, *keyspacepb.KeyspaceMeta) error { return nil }
-func (*mockStorage) LoadKeyspaceMeta(kv.Txn, uint32) (*keyspacepb.KeyspaceMeta, error) {
-	return nil, nil
-}
-func (*mockStorage) SaveKeyspaceID(kv.Txn, uint32, string) error { return nil }
-func (*mockStorage) LoadKeyspaceID(kv.Txn, string) (bool, uint32, error) {
-	return false, 0, nil
-}
-func (*mockStorage) LoadRangeKeyspace(kv.Txn, uint32, int) ([]*keyspacepb.KeyspaceMeta, error) {
-	return nil, nil
-}
-func (*mockStorage) RunInTxn(_ context.Context, f func(txn kv.Txn) error) error {
-	return f(nil)
-}
-func (*mockStorage) GetGlobalSafePointVersion(kv.Txn) (string, error) { return "", nil }
-func (*mockStorage) SaveGlobalSafePointVersion(kv.Txn, string) error  { return nil }
 
 func TestAsyncLoadingWith(t *testing.T) {
 	// Create manager directly
