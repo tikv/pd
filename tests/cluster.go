@@ -709,12 +709,11 @@ func RunServers(servers []*TestServer) error {
 func runTasksFastError(tasks []func() error, onError func()) error {
 	res := make(chan error, len(tasks))
 	for _, task := range tasks {
-		task := task
 		go func() {
 			res <- task()
 		}()
 	}
-	for range len(tasks) {
+	for range tasks {
 		if err := <-res; err != nil {
 			if onError != nil {
 				onError()
@@ -728,7 +727,6 @@ func runTasksFastError(tasks []func() error, onError func()) error {
 func runServersFastError(servers []*TestServer) error {
 	tasks := make([]func() error, 0, len(servers))
 	for _, server := range servers {
-		server := server
 		tasks = append(tasks, server.Run)
 	}
 	return runTasksFastError(tasks, func() {
