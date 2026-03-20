@@ -91,16 +91,16 @@ func TestUpgrade(t *testing.T) {
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
-	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getWritePeerPriorities())
 	re.Equal("v2", hb.conf.getRankFormulaVersion())
 	// upgrade from json(null)
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
 	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
-	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getWritePeerPriorities())
 	re.Equal("v2", hb.conf.getRankFormulaVersion())
 	// upgrade from < 5.2
 	config51 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"strict-picking-store":"true","enable-for-tiflash":"true"}`
@@ -2292,8 +2292,8 @@ func TestCompatibility(t *testing.T) {
 	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.6"))
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.CPUDim, utils.ByteDim},
-		{utils.QueryDim, utils.ByteDim},
-		{utils.ByteDim, utils.KeyDim},
+		{utils.CPUDim, utils.ByteDim},
+		{utils.CPUDim, utils.ByteDim},
 	})
 	re.True(hb.(*hotScheduler).conf.lastCPUSupported)
 }
@@ -2401,17 +2401,23 @@ func TestConfigValidation(t *testing.T) {
 	hc.WritePeerPriorities = []string{"query", "byte"}
 	err = hc.validateLocked()
 	re.Error(err)
-	// cpu is not allowed to be set in priorities for write-leader-priorities
+	// cpu is now allowed for write-leader-priorities
 	hc = initHotRegionScheduleConfig()
 	hc.WriteLeaderPriorities = []string{"cpu", "byte"}
 	err = hc.validateLocked()
-	re.Error(err)
-	// cpu is not allowed to be set in priorities for write-peer-priorities
+	re.NoError(err)
+	// cpu is now allowed for write-peer-priorities
 	hc = initHotRegionScheduleConfig()
 	hc.WritePeerPriorities = []string{"cpu", "byte"}
 	err = hc.validateLocked()
+	re.NoError(err)
+	// query and cpu together are not allowed for write-leader-priorities
+	hc = initHotRegionScheduleConfig()
+	hc.WriteLeaderPriorities = []string{"cpu", "query"}
+	err = hc.validateLocked()
 	re.Error(err)
 	// priorities shouldn't be repeated
+	hc = initHotRegionScheduleConfig()
 	hc.WritePeerPriorities = []string{"byte", "byte"}
 	err = hc.validateLocked()
 	re.Error(err)

@@ -197,7 +197,7 @@ func (rw RWType) String() string {
 }
 
 var (
-	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum}
+	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum, RegionWriteCPU}
 	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueryNum, RegionReadCPU}
 )
 
@@ -247,9 +247,6 @@ func (rw RWType) GetLoadRates(deltaLoads []float64, interval uint64) []float64 {
 	loads := make([]float64, DimLen)
 	for dim, k := range rw.RegionStats() {
 		loads[dim] = deltaLoads[k] / float64(interval)
-	}
-	if rw == Write && len(deltaLoads) > int(RegionWriteCPU) {
-		loads[CPUDim] = deltaLoads[RegionWriteCPU] / float64(interval)
 	}
 	return loads
 }

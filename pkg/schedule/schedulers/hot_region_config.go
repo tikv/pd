@@ -45,8 +45,8 @@ const (
 
 var defaultPrioritiesConfig = prioritiesConfig{
 	read:        []string{utils.CPUPriority, utils.BytePriority},
-	writeLeader: []string{utils.QueryPriority, utils.BytePriority},
-	writePeer:   []string{utils.BytePriority, utils.KeyPriority},
+	writeLeader: []string{utils.CPUPriority, utils.BytePriority},
+	writePeer:   []string{utils.CPUPriority, utils.BytePriority},
 }
 
 // because tikv <= 8.5.5 and < 9.0.0-beta.1 does not report cpu information, we will use query and byte as the read priorities
@@ -439,13 +439,11 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 	}
 	if pm, err := isPriorityValid(conf.WriteLeaderPriorities); err != nil {
 		return err
-	} else if pm[utils.CPUPriority] {
-		return errs.ErrSchedulerConfig.FastGenByArgs("cpu is not allowed to be set in priorities for write-leader-priorities")
+	} else if pm[utils.QueryPriority] && pm[utils.CPUPriority] {
+		return errs.ErrSchedulerConfig.FastGenByArgs("query and cpu are not allowed to be set together in priorities for write-leader-priorities")
 	}
 	if pm, err := isPriorityValid(conf.WritePeerPriorities); err != nil {
 		return err
-	} else if pm[utils.CPUPriority] {
-		return errs.ErrSchedulerConfig.FastGenByArgs("cpu is not allowed to be set in priorities for write-peer-priorities")
 	} else if pm[utils.QueryPriority] {
 		return errs.ErrSchedulerConfig.FastGenByArgs("query is not allowed to be set in priorities for write-peer-priorities")
 	}

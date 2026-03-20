@@ -845,7 +845,7 @@ func TestDifferentReportInterval(t *testing.T) {
 	}
 }
 
-func TestWriteCPUIsTrackedButDoesNotTriggerHotness(t *testing.T) {
+func TestWriteCPUTriggersHotness(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -864,22 +864,23 @@ func TestWriteCPUIsTrackedButDoesNotTriggerHotness(t *testing.T) {
 		re.Equal(88.0, peers[0].GetLoad(utils.CPUDim))
 	}
 
-	coldRegion, err := buildRegion(cluster, utils.Write, 3, utils.RegionHeartBeatReportInterval)
+	// A region with low bytes/keys/query but high write CPU should now trigger hotness
+	cpuOnlyRegion, err := buildRegion(cluster, utils.Write, 3, utils.RegionHeartBeatReportInterval)
 	re.NoError(err)
-	coldRegion = coldRegion.Clone(
+	cpuOnlyRegion = cpuOnlyRegion.Clone(
 		core.SetWrittenBytes(1),
 		core.SetWrittenKeys(1),
 		core.SetWrittenQuery(1),
 		core.SetCPUStats(&pdpb.CPUStats{Scheduler: 99}),
 	)
 
-	coldStats := cache.CheckPeerFlow(
-		coldRegion,
-		coldRegion.GetPeers(),
-		coldRegion.GetLoads(),
+	cpuStats := cache.CheckPeerFlow(
+		cpuOnlyRegion,
+		cpuOnlyRegion.GetPeers(),
+		cpuOnlyRegion.GetLoads(),
 		utils.RegionHeartBeatReportInterval,
 	)
-	re.Empty(coldStats)
+	re.NotEmpty(cpuStats)
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
