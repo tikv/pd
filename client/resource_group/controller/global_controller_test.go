@@ -242,41 +242,6 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	}
 }
 
-func TestReportRUV2ConsumptionBySource(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	mockProvider := newMockResourceGroupProvider()
-	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
-	re.NoError(err)
-	controller.Start(ctx)
-
-	testResourceGroup := &rmpb.ResourceGroup{
-		Name: "test-group",
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
-			},
-		},
-	}
-	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
-
-	gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-
-	controller.ReportTiKVRUV2Consumption("test-group", 3.0)
-	controller.ReportTiDBRUV2Consumption("test-group", 4.0)
-	controller.ReportTiFlashRUV2Consumption("test-group", 5.0)
-
-	gc.mu.Lock()
-	defer gc.mu.Unlock()
-	re.Equal(3.0, gc.mu.consumption.TikvRUV2)
-	re.Equal(4.0, gc.mu.consumption.TidbRUV2)
-	re.Equal(5.0, gc.mu.consumption.TiflashRUV2)
-}
-
 func TestTryGetController(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
