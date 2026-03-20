@@ -1,11 +1,10 @@
 ---
 name: create-issue
-description: Draft and create GitHub issues on tikv/pd using the repository's issue templates. Searches for duplicates, picks the right template, drafts the title/body from the current problem statement, shows the draft to the user for approval, and submits via `gh issue create`. Use when you need a new PD bug report, flaky-test issue, development task, enhancement task, or feature request.
+description: Draft and create GitHub issues on tikv/pd using the repository's issue templates. Searches for duplicates, picks the right template, drafts the title/body from the current problem statement, shows the draft to the user for approval, and submits via `gh issue create`.
+compatibility: Requires `gh` CLI authenticated with tikv/pd repo access. Works best from a local tikv/pd checkout so issue templates can be read directly.
 ---
 
 # Create PD Issue
-
-Requires `gh` CLI authenticated with `tikv/pd` repo access. Works best from a local `tikv/pd` checkout so the current issue templates can be read directly.
 
 ## Reference Files
 
@@ -20,8 +19,6 @@ Requires `gh` CLI authenticated with `tikv/pd` repo access. Works best from a lo
 ## Workflow
 
 ### Phase 1: Gather Context
-
-Collect the facts needed to file a real issue instead of a placeholder.
 
 1. Confirm the repo and GitHub auth are usable:
    ```bash
@@ -42,20 +39,18 @@ Collect the facts needed to file a real issue instead of a placeholder.
 
 4. Search for duplicates before drafting. Start narrow, then broaden:
    ```bash
-   gh issue list --repo tikv/pd --state all --search "<keywords>" --limit 10
+   gh issue list --repo tikv/pd --state open --search "<keywords>" --limit 10
    ```
-   Search by error string, test name, component, API name, PR number, or the expected title prefix.
+   Search by error string, test name, component, API name, PR number, or the expected title prefix. If no open duplicates found, optionally broaden with `--state all` to catch recent regressions.
 
 5. If a likely duplicate already exists, show it to the user and ask whether to reuse it instead of creating a new issue.
 
 ### Phase 2: Draft the Issue
 
-> Load only the matching file under `.github/ISSUE_TEMPLATE/` now.
+> Load only the matching template file under `.github/ISSUE_TEMPLATE/` now.
 
 1. Read the chosen template and keep its headings intact.
-   Extract from frontmatter:
-   - `name:` — use as the `--template` argument later.
-   - `labels:` — use as explicit `--label` arguments later (`gh issue create --template` does **not** apply template labels automatically in non-interactive mode).
+   Extract the `labels:` field from frontmatter — these must be passed as explicit `--label` arguments when creating the issue.
 
 2. Draft a title that matches the issue type and real scope:
    - bug: concise symptom or component-level failure
@@ -67,35 +62,31 @@ Collect the facts needed to file a real issue instead of a placeholder.
 
 4. If the issue comes from code review or a PR follow-up, link the triggering PR, commit, or discussion in the body.
 
-5. Show the drafted title and full body to the user before creating the issue. Ask for any missing corrections at this stage.
+5. Show the drafted title and full body to the user before creating the issue. Ask for corrections at this stage.
 
 ### Phase 3: Create the Issue
 
 After user approval:
 
-1. Use the selected template's frontmatter `name:` field as the `--template` argument.
-   If the template metadata is missing or ambiguous, stop and ask the user before creation.
+1. Write the drafted body to a temporary file to preserve formatting.
 
-2. Create the issue with `gh`. Include `--label` for each label from the template's frontmatter (they are not applied automatically in non-interactive mode). Preserve formatting with a temporary file or heredoc:
+2. Create the issue with `gh`, passing the template's labels explicitly:
    ```bash
-   gh issue create --repo tikv/pd --template "<template-name>" --label "<label>" --title "<title>" --body-file "<body-file-path>"
+   gh issue create --repo tikv/pd --label "<label>" --title "<title>" --body-file "<body-file-path>"
    ```
-   Keep the selected template and the drafted body aligned. Do not mix a bug body with a development-task template, or vice versa.
+   Do **not** use `--template` — it is mutually exclusive with `--body-file` and triggers a GraphQL error when combined with `--label` ([cli/cli#5017](https://github.com/cli/cli/issues/5017)).
 
-3. Report the created issue number and URL back to the user.
+3. If creation fails (permission error, label not found, network issue), surface the error directly and stop.
 
-### Phase 4: Post-Creation Handling
+4. Report the created issue number and URL back to the user.
 
-- If `gh issue create` reports an existing issue, permission problem, or template-name error, stop and surface the error directly.
-- Always pass the template's frontmatter labels via `--label`. If the user explicitly asks for extra labels, milestones, or projects beyond the template defaults, add those as well.
-- For flaky-test issues, do not submit until the failing job name and at least one CI link are available.
+5. For flaky-test issues, do not submit until the failing job name and at least one CI link are present in the body.
 
 ## Common Pitfalls
 
-- Do not skip duplicate search just because the issue seems routine.
-- Do not use one template's headings with another template's `--template` name.
-- Do not hard-code template names; read the `name:` field from the selected template's frontmatter.
-- Always pass template labels explicitly via `--label` — `gh issue create --template` does not apply them in non-interactive mode.
+- Do not skip the duplicate search just because the issue seems routine.
+- Do not mix templates: the body headings and `--label` values must come from the same template.
+- Do not use `--template` with `gh issue create` — it conflicts with both `--body-file` and `--label` in the current `gh` CLI.
 - Do not file flaky-test issues without the failing job name and a concrete CI link.
 
 ## Agent Constraints
@@ -103,6 +94,6 @@ After user approval:
 - Always search for duplicates first.
 - Always show the draft before submitting. User approval is required.
 - Use `gh` CLI for GitHub operations.
-- Keep the drafted body consistent with the selected template.
+- Keep the drafted body consistent with the selected template's headings.
 - Keep the issue scoped to one problem or task.
 - Do not modify code. This skill only drafts and creates issues.
