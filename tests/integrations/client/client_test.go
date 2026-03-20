@@ -926,7 +926,9 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leader := cluster.GetServer(cluster.WaitLeader())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := cluster.GetServer(leaderName)
 	re.NoError(leader.BootstrapCluster())
 	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
@@ -945,23 +947,34 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
 	resp.Body.Close()
 	re.NoError(err)
-	time.Sleep(2 * time.Second)
-	re.NoError(leader.Destroy())
-	time.Sleep(2 * time.Second)
-	leader = cluster.GetServer(cluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		return options != nil &&
+			options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled()
+	})
+	re.NoError(cluster.GetServer(leaderName).ResignLeader())
+	newLeaderName := cluster.WaitLeader()
+	re.NotEmpty(newLeaderName)
+	re.NotEqual(leaderName, newLeaderName)
+	leader = cluster.GetServer(newLeaderName)
 	re.NotNil(leader)
-	options := leader.GetPersistOptions()
-	re.NotNil(options)
-	re.Equal(uint64(999), options.GetMaxSnapshotCount())
-	re.False(options.IsLocationReplacementEnabled())
-	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
-	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
-	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
-	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
-	re.Equal(uint64(999), options.GetRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
-	re.Equal(uint64(999), options.GetMergeScheduleLimit())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		if options == nil {
+			return false
+		}
+		return options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled() &&
+			options.GetMaxMergeRegionSize() == 999 &&
+			options.GetMaxMergeRegionKeys() == 999 &&
+			options.GetSchedulerMaxWaitingOperator() == 999 &&
+			options.GetLeaderScheduleLimit() == 999 &&
+			options.GetRegionScheduleLimit() == 999 &&
+			options.GetHotRegionScheduleLimit() == 999 &&
+			options.GetReplicaScheduleLimit() == 999 &&
+			options.GetMergeScheduleLimit() == 999
+	})
 }
 
 func TestCloseClient(t *testing.T) {
