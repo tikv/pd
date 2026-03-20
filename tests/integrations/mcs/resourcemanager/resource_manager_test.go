@@ -1520,6 +1520,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		SqlLayerCpuTimeMs: 40.0,
 		KvReadRpcCount:    5,
 		KvWriteRpcCount:   6,
+		TikvRUV2:          1.5,
+		TidbRUV2:          2.5,
+		TiflashRUV2:       3.5,
 	}
 	_, err = cli.AcquireTokenBuckets(suite.ctx, &rmpb.TokenBucketsRequest{
 		Requests: []*rmpb.TokenBucketRequest{
