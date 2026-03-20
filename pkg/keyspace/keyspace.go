@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
@@ -227,16 +226,20 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
+	return manager.createKeyspaceInner(request.Name, request.Config, request.CreateTime)
+}
+
+func (manager *Manager) createKeyspaceInner(name string, config map[string]string, createTime int64, ids ...uint32) (*keyspacepb.KeyspaceMeta, error) {
 	tracer := &createKeyspaceTracer{}
 	tracer.Begin()
 	// Validate purposed name's legality.
-	if err := validateName(request.Name); err != nil {
+	if err := validateName(name); err != nil {
 		return nil, err
 	}
 	// Check if keyspace with that name already exists before allocating ID.
 	// This prevents unnecessary ID allocation when the name already exists.
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		nameExists, _, err := manager.store.LoadKeyspaceID(txn, request.Name)
+		nameExists, _, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
 			return err
 		}
@@ -248,35 +251,46 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
-	// Allocate new keyspaceID.
-	newID, err := manager.allocID()
-	if err != nil {
+	var newID uint32
+	if len(ids) > 0 {
+		newID = ids[0]
+	} else {
+		// Allocate new keyspaceID.
+		newID, err = manager.allocID()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if isProtectedKeyspaceID(newID) {
+		err := newModifyProtectedKeyspaceError()
+		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
 		return nil, err
 	}
-	tracer.SetKeyspace(newID, request.Name)
+
+	tracer.SetKeyspace(newID, name)
 	tracer.OnAllocateIDFinished()
 
 	// Get keyspace config.
-	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
-	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
+	userKind := endpoint.StringUserKind(config[UserKindKey])
+	ksConfig, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
 		return nil, err
 	}
-	if len(config) != 0 {
-		if request.Config == nil {
-			request.Config = config
+	if len(ksConfig) != 0 {
+		if config == nil {
+			config = ksConfig
 		} else {
-			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
-			request.Config[UserKindKey] = config[UserKindKey]
+			config[TSOKeyspaceGroupIDKey] = ksConfig[TSOKeyspaceGroupIDKey]
+			config[UserKindKey] = ksConfig[UserKindKey]
 		}
 	}
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
-		if request.Config == nil {
-			request.Config = make(map[string]string)
+		if config == nil {
+			config = make(map[string]string)
 		}
-		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
-			request.Config[GCManagementType] = KeyspaceLevelGC
+		if v, ok := config[GCManagementType]; !ok || len(v) == 0 {
+			config[GCManagementType] = KeyspaceLevelGC
 		}
 	}
 	tracer.OnGetConfigFinished()
@@ -284,28 +298,33 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
-		Name:           request.Name,
+		Name:           name,
 		State:          keyspacepb.KeyspaceState_ENABLED,
-		CreatedAt:      request.CreateTime,
-		StateChangedAt: request.CreateTime,
-		Config:         request.Config,
+		CreatedAt:      createTime,
+		StateChangedAt: createTime,
+		Config:         config,
 	}
 
-	if isProtectedKeyspaceID(newID) {
-		err := newModifyProtectedKeyspaceError()
-		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
-		return nil, err
-	}
-	txnOps := make([]txnOp, 0, 2)
-	txnOps = append(txnOps, manager.saveNewKeyspaceTxnOp(keyspace))
-	txnOps = append(txnOps, manager.UpdateKeyspaceStateByIDTxnOp(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime))
-	op, err := manager.kgm.updateKeyspaceForGroupTxnOp(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd)
+	txnOps := make([]txnOp, 0, 3)
+	txnCbs := make([]txnCb, 0, 3)
+	op, cb := manager.saveNewKeyspaceTxnOp(keyspace)
+	txnOps = append(txnOps, op)
+	txnCbs = append(txnCbs, cb)
+	op, cb, err = manager.kgm.updateKeyspaceForGroupTxnOp(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd)
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace group ", errs.ZapError(err))
 		return nil, err
 	}
 	txnOps = append(txnOps, op)
+	txnCbs = append(txnCbs, cb)
 
+	op, cb, err = manager.saveKeyspaceRegionLabelerOp(newID)
+	if err != nil {
+		log.Warn("[keyspace] failed to prepare split keyspace region operation", errs.ZapError(err))
+		return nil, err
+	}
+	txnOps = append(txnOps, op)
+	txnCbs = append(txnCbs, cb)
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		for _, op := range txnOps {
 			if err := op(txn); err != nil {
@@ -314,54 +333,32 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		}
 		return nil
 	})
+	for _, cb := range txnCbs {
+		if cb != nil {
+			cb(err)
+		}
+	}
 	if err != nil {
-		log.Warn("[keyspace] fail to run txn", errs.ZapError(err))
+		log.Warn("[keyspace] txn execute failed", errs.ZapError(err))
 		return nil, err
 	}
 
 	tracer.OnSaveKeyspaceMetaFinished()
 
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
-	if err != nil {
-		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-			idPath := keypath.KeyspaceIDPath(request.Name)
-			metaPath := keypath.KeyspaceMetaPath(newID)
-			e := txn.Remove(idPath)
-			if e != nil {
-				return e
-			}
-			return txn.Remove(metaPath)
-		})
-		if err2 != nil {
-			log.Warn("[create-keyspace] failed to remove pre-created keyspace after split failed",
+	if manager.config.ToWaitRegionSplit() {
+		err = manager.waitKeyspaceRegionSplit(newID)
+		if err != nil {
+			log.Warn("[create-keyspace] failed to wait keyspace region split",
 				zap.Uint32("keyspace-id", keyspace.GetId()),
 				zap.String("keyspace-name", keyspace.GetName()),
-				zap.Error(err2),
+				zap.Error(err),
 			)
+			return nil, err
 		}
-		return nil, err
 	}
+
 	tracer.OnSplitRegionFinished()
-
-	// Enable the keyspace metadata after split.
-	// keyspace.State = keyspacepb.KeyspaceState_ENABLED
-	// _, err = manager.UpdateKeyspaceStateByID(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
-	// if err != nil {
-	// 	log.Warn("[create-keyspace] failed to create keyspace",
-	// 		zap.Uint32("keyspace-id", keyspace.GetId()),
-	// 		zap.String("keyspace-name", keyspace.GetName()),
-	// 		zap.Error(err),
-	// 	)
-	// 	return nil, err
-	// }
-	tracer.OnEnableKeyspaceFinished()
-
-	// Update keyspace group.
-	// if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
-	// 	return nil, err
-	// }
-	tracer.OnUpdateKeyspaceGroupFinished()
 	tracer.OnCreateKeyspaceComplete()
 
 	log.Info("[create-keyspace] keyspace created",
@@ -376,118 +373,22 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if request.ID == nil {
 		return nil, errors.New("keyspace id is empty")
 	}
-	id := *request.ID
-	name := request.Name
-	if len(name) == 0 {
-		return nil, errors.New("keyspace name is empty")
-	}
-	// Validate purposed name's legality.
-	if err := validateName(name); err != nil {
-		return nil, err
-	}
-	// Check if keyspace with that name or ID already exists before processing.
-	// This provides early validation and better error handling.
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		nameExists, _, err := manager.store.LoadKeyspaceID(txn, name)
-		if err != nil {
-			return err
-		}
-		if nameExists {
-			return errs.ErrKeyspaceExists
-		}
-		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, id)
-		if err != nil {
-			return err
-		}
-		if loadedMeta != nil {
-			return errs.ErrKeyspaceExists
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
-	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
-	if err != nil {
-		return nil, err
-	}
-	if len(config) != 0 {
-		if request.Config == nil {
-			request.Config = config
-		} else {
-			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
-			request.Config[UserKindKey] = config[UserKindKey]
-		}
-	}
-	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
-	if kerneltype.IsNextGen() {
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
-		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
-			request.Config[GCManagementType] = KeyspaceLevelGC
-		}
-	}
-	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
-	keyspace := &keyspacepb.KeyspaceMeta{
-		Id:             id,
-		Name:           name,
-		State:          keyspacepb.KeyspaceState_DISABLED,
-		CreatedAt:      request.CreateTime,
-		StateChangedAt: request.CreateTime,
-		Config:         request.Config,
-	}
-	err = manager.saveNewKeyspace(keyspace)
-	if err != nil {
-		log.Warn("[keyspace] failed to save keyspace before split",
-			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("keyspace-name", keyspace.GetName()),
-			zap.Error(err),
-		)
-		return nil, err
-	}
-	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
-	if err != nil {
-		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-			metaPath := keypath.KeyspaceMetaPath(id)
-			return txn.Remove(metaPath)
-		})
-		if err2 != nil {
-			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
-				zap.Uint32("keyspace-id", keyspace.GetId()),
-				zap.String("keyspace-name", keyspace.GetName()),
-				zap.Error(err2),
-			)
-		}
-		return nil, err
-	}
-	// enable the keyspace metadata after split.
-	keyspace.State = keyspacepb.KeyspaceState_ENABLED
-	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
-	if err != nil {
-		log.Warn("[keyspace] failed to create keyspace",
-			zap.Uint32("keyspace-id", keyspace.GetId()),
-			zap.String("keyspace-name", keyspace.GetName()),
-			zap.Error(err),
-		)
-		return nil, err
-	}
-	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
-		return nil, err
-	}
-	log.Info("[keyspace] keyspace created",
-		zap.Uint32("keyspace-id", keyspace.GetId()),
-		zap.String("keyspace-name", keyspace.GetName()),
-		zap.Any("keyspace", keyspace),
-	)
-	return keyspace, nil
+	return manager.createKeyspaceInner(request.Name, request.Config, request.CreateTime, *request.ID)
 }
 
 type txnOp = func(txn kv.Txn) error
+type txnCb = func(err error)
 
-func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) txnOp {
+func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) (txnOp, txnCb) {
+	cb := func(err error) {
+		if err != nil {
+			return
+		}
+		manager.metaLock.Lock(keyspace.Id)
+		defer manager.metaLock.Unlock(keyspace.Id)
+		manager.keyspaceNameLookup.Store(keyspace.Id, keyspace.Name)
+		manager.keyspaceStateLookup.Store(keyspace.Id, keyspace.State)
+	}
 	return func(txn kv.Txn) error {
 		// Save keyspace ID.
 		// Check if keyspace with that name already exists.
@@ -502,8 +403,6 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 		if err != nil {
 			return err
 		}
-		// Update the keyspace name cache.
-		manager.keyspaceNameLookup.Store(keyspace.Id, keyspace.Name)
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
 		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.Id)
@@ -514,7 +413,7 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 			return errs.ErrKeyspaceExists
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
-	}
+	}, cb
 }
 
 func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
@@ -548,6 +447,30 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
+}
+
+func (manager *Manager) saveKeyspaceRegionLabelerOp(id uint32) (txnOp, txnCb, error) {
+	failpoint.Inject("skipSplitRegion", func() {
+		failpoint.Return(nil)
+	})
+	keyspaceRule := MakeLabelRule(id)
+	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
+	if !ok {
+		return nil, nil, errors.New("cluster does not support region label")
+	}
+	err := keyspaceRule.CheckAndAdjust()
+	if err != nil {
+		return nil, nil, err
+	}
+	labeler := cl.GetRegionLabeler()
+	cb := func(err error) {
+		if err == nil {
+			labeler.SaveRuleWithoutTxn(keyspaceRule)
+		}
+	}
+	return func(txn kv.Txn) error {
+		return cl.GetRegionLabeler().GetRuleStorage().SaveRegionRule(txn, keyspaceRule.ID, keyspaceRule)
+	}, cb, nil
 }
 
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
@@ -893,30 +816,6 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		zap.String("new-state", newState.String()),
 	)
 	return meta, nil
-}
-
-// UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
-// It returns error if saving failed, operation not allowed, or if keyspace not exists.
-func (manager *Manager) UpdateKeyspaceStateByIDTxnOp(id uint32, newState keyspacepb.KeyspaceState, now int64) txnOp {
-	var meta *keyspacepb.KeyspaceMeta
-	var err error
-	return func(txn kv.Txn) error {
-		manager.metaLock.Lock(id)
-		defer manager.metaLock.Unlock(id)
-		// Load keyspace by id.
-		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
-		if err != nil {
-			return err
-		}
-		if meta == nil {
-			return errs.ErrKeyspaceNotFound
-		}
-		// Update keyspace meta.
-		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
-			return err
-		}
-		return manager.store.SaveKeyspaceMeta(txn, meta)
-	}
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
