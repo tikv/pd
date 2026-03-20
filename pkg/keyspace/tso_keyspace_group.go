@@ -481,22 +481,22 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
 }
 
-func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, id string, keyspaceID uint32, mutation int) (txnOp, error) {
+func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, id string, keyspaceID uint32, mutation int) (txnOp, txnCb, error) {
 	m.Lock()
 	defer m.Unlock()
 	groupID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	kg := m.groups[userKind].Get(uint32(groupID))
 	if kg == nil {
-		return nil, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(uint32(groupID))
+		return nil, nil, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(uint32(groupID))
 	}
 	if kg.IsSplitting() {
-		return nil, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(groupID))
+		return nil, nil, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(groupID))
 	}
 	if kg.IsMerging() {
-		return nil, errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
+		return nil, nil, errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
 	}
 
 	changed := false
@@ -516,11 +516,22 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 	}
 
 	if changed {
+		cb := func(err error) {
+			if err != nil {
+				switch mutation {
+				case opAdd:
+					kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
+				case opDelete:
+					kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
+				}
+			} else {
+				m.groups[userKind].Put(kg)
+			}
+		}
 		op := m.saveKeyspaceGroupsTxnOp([]*endpoint.KeyspaceGroup{kg}, true)
-		m.groups[userKind].Put(kg)
-		return op, nil
+		return op, cb, nil
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32, mutation int) error {
