@@ -16,6 +16,8 @@ package resourcemanager_test
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,6 +160,8 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherRecoversAfterComp
 	defer pdConn.Close()
 	rmClient, rmConn := suite.newRMClient(primary.GetAddr())
 	defer rmConn.Close()
+	logFile := testutil.InitTempFileLogger("debug")
+	defer os.Remove(logFile)
 
 	group := newWatcherMatrixResourceGroup("compaction_group", 5, 500, &suite.keyspaceID)
 	suite.putResourceGroup(re, pdClient, group)
@@ -175,7 +179,13 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherRecoversAfterComp
 	suite.putResourceGroup(re, pdClient, group)
 	suite.compactGroupSetting(re, group.GetName(), suite.keyspaceID)
 
-	time.Sleep(etcdutil.WatchChTimeoutDuration + 2*etcdutil.RequestProgressInterval)
+	testutil.Eventually(re, func() bool {
+		b, err := os.ReadFile(logFile)
+		re.NoError(err)
+		l := string(b)
+		return strings.Contains(l, "resource-manager-metadata-watcher") &&
+			strings.Contains(l, "watch channel is blocked for a long time")
+	}, testutil.WithWaitFor(etcdutil.WatchChTimeoutDuration+2*etcdutil.RequestProgressInterval), testutil.WithTickInterval(100*time.Millisecond))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
 
 	group.Priority = 7
