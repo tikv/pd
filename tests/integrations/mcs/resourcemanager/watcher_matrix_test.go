@@ -239,12 +239,16 @@ func (suite *resourceManagerWatcherMatrixTestSuite) waitForRMPrimary(excludeAddr
 
 func (suite *resourceManagerWatcherMatrixTestSuite) putResourceGroup(re *require.Assertions, client rmpb.ResourceManagerClient, group *rmpb.ResourceGroup) {
 	re.NotNil(group)
-	resp, err := client.AddResourceGroup(suite.ctx, &rmpb.PutResourceGroupRequest{Group: group})
+	addCtx, addCancel := context.WithTimeout(suite.ctx, 5*time.Second)
+	defer addCancel()
+	resp, err := client.AddResourceGroup(addCtx, &rmpb.PutResourceGroupRequest{Group: group})
 	if err == nil && resp.GetError() == nil {
 		re.Equal("Success!", resp.GetBody())
 		return
 	}
-	resp, err = client.ModifyResourceGroup(suite.ctx, &rmpb.PutResourceGroupRequest{Group: group})
+	modifyCtx, modifyCancel := context.WithTimeout(suite.ctx, 5*time.Second)
+	defer modifyCancel()
+	resp, err = client.ModifyResourceGroup(modifyCtx, &rmpb.PutResourceGroupRequest{Group: group})
 	re.NoError(err)
 	re.Nil(resp.GetError())
 	re.Equal("Success!", resp.GetBody())
@@ -252,7 +256,9 @@ func (suite *resourceManagerWatcherMatrixTestSuite) putResourceGroup(re *require
 
 func (suite *resourceManagerWatcherMatrixTestSuite) waitForGroup(re *require.Assertions, client rmpb.ResourceManagerClient, req *rmpb.GetResourceGroupRequest, priority uint32, fillRate uint64) {
 	testutil.Eventually(re, func() bool {
-		resp, err := client.GetResourceGroup(suite.ctx, req)
+		ctx, cancel := context.WithTimeout(suite.ctx, 5*time.Second)
+		defer cancel()
+		resp, err := client.GetResourceGroup(ctx, req)
 		if err != nil || resp.GetError() != nil || resp.GetGroup() == nil {
 			return false
 		}
