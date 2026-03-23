@@ -49,6 +49,7 @@ type resourceManagerRedirectorTestSuite struct {
 	pdCluster    *tests.TestCluster
 	rmCluster    *tests.TestResourceManagerCluster
 	pdLeader     *tests.TestServer
+	pdFollower   *tests.TestServer
 	rmPrimary    *server.Server
 	keyspaceName string
 	keyspaceID   uint32
@@ -63,7 +64,7 @@ func (suite *resourceManagerRedirectorTestSuite) SetupTest() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.pdCluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1, func(conf *config.Config, _ string) {
+	suite.pdCluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 3, func(conf *config.Config, _ string) {
 		conf.Microservice.EnableResourceManagerFallback = false
 	})
 	re.NoError(err)
@@ -71,6 +72,10 @@ func (suite *resourceManagerRedirectorTestSuite) SetupTest() {
 	leaderName := suite.pdCluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.pdCluster.GetServer(leaderName)
+	followerName := suite.pdCluster.GetFollower()
+	re.NotEmpty(followerName)
+	suite.pdFollower = suite.pdCluster.GetServer(followerName)
+	re.NotNil(suite.pdFollower)
 	re.NoError(suite.pdLeader.BootstrapCluster())
 	suite.rmCluster, err = tests.NewTestResourceManagerCluster(suite.ctx, 1, suite.pdLeader.GetAddr())
 	re.NoError(err)
@@ -299,6 +304,73 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 	re.Equal("Success!", deleteResp.GetBody())
 	testutil.Eventually(re, func() bool {
 		_, getErr := rmClient.GetResourceGroup(ctx, addGetReq)
+		return getErr != nil && strings.Contains(getErr.Error(), "resource group does not exist")
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFromFollowerPD() {
+	re := suite.Require()
+	re.NotNil(suite.pdFollower)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	leaderConn, err := grpcutil.GetClientConn(ctx, suite.pdLeader.GetAddr(), nil)
+	re.NoError(err)
+	defer leaderConn.Close()
+	followerConn, err := grpcutil.GetClientConn(ctx, suite.pdFollower.GetAddr(), nil)
+	re.NoError(err)
+	defer followerConn.Close()
+
+	leaderClient := rmpb.NewResourceManagerClient(leaderConn)
+	followerClient := rmpb.NewResourceManagerClient(followerConn)
+	groupName := "redirector_grpc_follower_group"
+	group := &rmpb.ResourceGroup{
+		Name:     groupName,
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 5,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   320,
+					BurstLimit: 480,
+				},
+			},
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+	}
+
+	addResp, err := leaderClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
+	re.NoError(err)
+	re.Equal("Success!", addResp.GetBody())
+
+	group.Priority = 11
+	group.RUSettings.RU.Settings.FillRate = 960
+	group.RUSettings.RU.Settings.BurstLimit = 1024
+	modifyResp, err := followerClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
+	re.NoError(err)
+	re.Equal("Success!", modifyResp.GetBody())
+
+	getReq := &rmpb.GetResourceGroupRequest{
+		ResourceGroupName: groupName,
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+	}
+	modifiedResp, err := leaderClient.GetResourceGroup(ctx, getReq)
+	re.NoError(err)
+	re.NotNil(modifiedResp.GetGroup())
+	re.Equal(uint32(11), modifiedResp.GetGroup().GetPriority())
+	re.Equal(uint64(960), modifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
+	re.Equal(int64(1024), modifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
+
+	deleteResp, err := followerClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
+		ResourceGroupName: groupName,
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+	})
+	re.NoError(err)
+	re.Equal("Success!", deleteResp.GetBody())
+
+	testutil.Eventually(re, func() bool {
+		_, getErr := leaderClient.GetResourceGroup(ctx, getReq)
 		return getErr != nil && strings.Contains(getErr.Error(), "resource group does not exist")
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
