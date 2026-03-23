@@ -212,14 +212,14 @@ func (s *Server) campaignLeader() {
 	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 
 	log.Info("triggering the primary callback functions")
-		for _, cb := range s.primaryCallbacks {
-			if err := cb(ctx); err != nil {
-				log.Error("failed to trigger the primary callback function", errs.ZapError(err))
-				// Do not promote a half-initialized primary: callback failures mean the
-				// service-ready state was not established, so this campaign must step down.
-				return
-			}
+	for _, cb := range s.primaryCallbacks {
+		if err := cb(ctx); err != nil {
+			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
+			// Do not promote a half-initialized primary: callback failures mean the
+			// service-ready state was not established, so this campaign must step down.
+			return
 		}
+	}
 	// Check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
 	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
