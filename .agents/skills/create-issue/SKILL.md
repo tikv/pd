@@ -1,6 +1,6 @@
 ---
 name: create-issue
-description: Draft and create GitHub issues on tikv/pd using the repository's issue templates. Searches for duplicates, picks the right template, drafts the title/body from the current problem statement, shows the draft to the user for approval, and submits via `gh issue create`.
+description: Use when a problem, task, or idea needs to be tracked as a GitHub issue on tikv/pd. Searches for duplicates, picks the right issue template, drafts the title and body, shows the draft for user approval, and submits via `gh issue create`.
 compatibility: Requires `gh` CLI authenticated with tikv/pd repo access. Works best from a local tikv/pd checkout so issue templates can be read directly.
 ---
 
