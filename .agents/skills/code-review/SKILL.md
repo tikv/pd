@@ -21,9 +21,9 @@ The user provides one of:
 3. **If the PR links an issue** (`Issue Number: close #xxx` or `ref #xxx`), fetch and read the issue content via `gh issue view <number> --repo tikv/pd` to understand the problem background, reproduction steps, and expected behavior.
 4. For each changed file, read enough surrounding context (the full file or relevant sections) to understand the change in situ — **never review a diff in isolation**.
 
-### Phase 2: PD-Specific Review Checklist
+### Phase 2: Review with PD-Specific Focus
 
-Apply the following checks to every changed file. These are PD repo-specific invariants and team conventions — not general code-review advice.
+Perform a thorough code review covering correctness, design, and maintainability as usual. In addition, **pay special attention** to the following PD repo-specific invariants and team conventions:
 
 #### 2.1 Naming and Semantics Clarity
 
@@ -119,15 +119,3 @@ The PD server API (`server/api/`, gorilla/mux) and MCS APIs (`pkg/mcs/*/`, gin) 
 - **Flag what CI cannot catch.** Linter issues are already caught by `make check`. Focus on logic, design, concurrency, and compatibility.
 - **Be specific.** "This looks wrong" is not a finding. "Line 42: `store.GetMeta()` can return nil when store is tombstone, causing nil-pointer dereference on line 45" is a finding.
 
-## References
-
-| File | Purpose |
-|---|---|
-| `AGENTS.md` | Full project conventions, build/test commands, style rules |
-| `.golangci.yml` | Linter configuration — know what is already enforced |
-| `.github/pull_request_template.md` | PR template — verify author filled it properly |
-| `CONTRIBUTING.md` | Commit message and linking conventions |
-| `pkg/errs/errno.go` | Normalized error definitions — check new errors are added here |
-| `pkg/utils/syncutil/` | Custom mutex wrappers with deadlock detection |
-| `pkg/utils/testutil/` | Test utilities — `Eventually`, HTTP helpers, leak check |
-| `pkg/storage/kv/` | etcd abstraction layer — `RunInTxn`, `SlowLogTxn` |
