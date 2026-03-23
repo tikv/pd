@@ -10,6 +10,7 @@ Use these patterns as hypothesis starters. Always validate against current issue
 
 - Compare the failing test against nearby stable tests before choosing a fix shape.
 - Add or strengthen a focused failing test or assertion before changing implementation.
+- A representative PR can appear under more than one pattern when the same fix addresses multiple failure modes; that overlap is intentional.
 - Prefer narrow verification:
 
 ```bash
@@ -26,7 +27,6 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 **Representative PRs**
 - #10184: tests: fix data race in TestOnlineProgress (https://github.com/tikv/pd/pull/10184)
 - #10176: fix(resourcemanager): call getServiceLimit to prevent data race (https://github.com/tikv/pd/pull/10176)
-- #9979: operator: fix data race avoid panic (https://github.com/tikv/pd/pull/9979)
 - #9899: *: fix data race of cluster (https://github.com/tikv/pd/pull/9899)
 - #9843: test: fix data race for `balance-range-scheduler` (https://github.com/tikv/pd/pull/9843)
 - #8539: mcs: fix potential data race in scheduling server (https://github.com/tikv/pd/pull/8539)
@@ -96,7 +96,6 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 **Representative PRs**
 - #9241: test: fix flaky test `TestTSONotLeader` (https://github.com/tikv/pd/pull/9241)
 - #8682: *: fix `TestStoreWatch` panic (https://github.com/tikv/pd/pull/8682)
-- #8605: *: fix data race of `TestWatchResourceGroup` (https://github.com/tikv/pd/pull/8605)
 - #8407: middleware: fix waitForLeader in redirector panic (https://github.com/tikv/pd/pull/8407)
 - #7911: client: avoid panic when leader gRPC conn is nil (https://github.com/tikv/pd/pull/7911)
 
