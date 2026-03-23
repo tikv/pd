@@ -63,7 +63,7 @@ Reviewers probe zero-value semantics deeply because PD's HTTP APIs and configs a
 Reviewers probe what happens during rolling upgrades and mixed-version clusters.
 
 - [ ] **Persistent data (etcd keys, format)**: changes need migration or versioning. Ask: "what happens if the new PD writes this format and then a rollback puts an old PD in charge?"
-- [ ] **Scheduler type names**: new schedulers must register backward-compatible name mappings via `types.SchedulerTypeCompatibleMap`.
+- [ ] **Scheduler type names**: if renaming an existing scheduler that was already persisted, add a mapping to `types.SchedulerTypeCompatibleMap`. Brand-new schedulers don't need compat entries.
 - [ ] **Client compatibility**: `pd-client` is a submodule used by TiKV and TiDB. Adding a method to a public interface in `client/` is a breaking change for all external implementors.
 - [ ] **go.mod alignment**: the repo has 4 Go modules. Dependency versions must be aligned across all of them — this is a guaranteed review blocker.
 - [ ] **Metrics backward compatibility**: do not change type (Counter vs Gauge) or remove/rename labels of existing metrics — Grafana dashboards and alerts depend on them.
@@ -82,7 +82,7 @@ Flaky test fixes are the single most active PR category. Reviewers are highly at
 - [ ] **`testutil.Eventually` anti-pattern**: never use `re.Equal()` / `suite.Equal()` / `re.NoError()` inside `testutil.Eventually` callbacks — these call `t.Errorf()` and permanently mark the test as failed even if a later retry succeeds. Use plain Go comparisons + return bool instead.
 - [ ] **`suite.Require()` in subtests**: inside `suite.T().Run(...)`, create a new `re := require.New(t)` — using the outer suite's `re` captures the wrong `*testing.T`.
 - [ ] **Failpoint discipline**: if the test relies on failpoints, verify it works with `make gotest` (auto enable/disable). Never leave failpoints enabled after test runs.
-- [ ] **No `time.Sleep` for synchronization** — use `testutil.Eventually` with polling, or channels with timeout.
+- [ ] **Avoid `time.Sleep` for polling/synchronization** — prefer `testutil.Eventually` or channels with timeout. Note: `time.Sleep` is accepted for rate-limiting tests, waiting for a ticker to fire, or other cases where a real delay is the intent.
 - [ ] **HTTP test helpers**: use `testutil.ReadGetJSON`, `testutil.CheckPostJSON`, `testutil.StatusOK(re)` for API testing.
 
 #### 2.8 etcd Interaction
@@ -96,10 +96,12 @@ Flaky test fixes are the single most active PR category. Reviewers are highly at
 
 #### 2.9 HTTP API Conventions
 
-- [ ] Use `apiutil.ReadJSONRespondError` for body parsing and `apiutil.ParseUint64VarsField` for path params.
-- [ ] All mutating endpoints should have `localLog` audit label in route registration.
+The PD server API (`server/api/`, gorilla/mux) and MCS APIs (`pkg/mcs/*/`, gin) follow different conventions:
+
+- [ ] **PD server API** (`server/api/`): use `apiutil.ReadJSONRespondError` for body parsing, `apiutil.ParseUint64VarsField` for path params, `registerFunc`/`registerPrefix` for route registration with audit/rate-limiting middleware.
+- [ ] **MCS APIs** (`pkg/mcs/`): use gin's `c.ShouldBindJSON()` for body parsing and gin router for route registration — this is the accepted pattern for microservice modules.
+- [ ] All mutating endpoints should have `localLog` audit label (PD server API) or equivalent logging.
 - [ ] Keep Swagger annotations current when modifying APIs.
-- [ ] New routes need `registerFunc`/`registerPrefix` with proper method constraints and audit/rate-limiting middleware.
 
 #### 2.10 Architecture and Responsibility
 
