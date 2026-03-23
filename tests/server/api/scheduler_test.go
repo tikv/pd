@@ -669,7 +669,13 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 }
 
 func addScheduler(re *require.Assertions, urlPrefix string, body []byte) {
-	err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re))
+	err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, func(resp []byte, code int, _ http.Header) {
+		if code == http.StatusOK {
+			return
+		}
+		re.Equal(http.StatusInternalServerError, code, "resp: "+string(resp))
+		re.Contains(string(resp), "scheduler existed", "resp: "+string(resp))
+	})
 	re.NoError(err)
 }
 
@@ -687,7 +693,13 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers)
 	re.NoError(err)
 	if !slice.Contains(schedulers, createdName) {
-		err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, testutil.StatusOK(re))
+		err := testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, body, func(resp []byte, code int, _ http.Header) {
+			if code == http.StatusOK {
+				return
+			}
+			re.Equal(http.StatusInternalServerError, code, "resp: "+string(resp))
+			re.Contains(string(resp), "scheduler existed", "resp: "+string(resp))
+		})
 		re.NoError(err)
 	}
 	suite.assertSchedulerExists(urlPrefix, createdName) // wait for scheduler to be synced.

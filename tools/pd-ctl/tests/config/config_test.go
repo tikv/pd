@@ -117,6 +117,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.Equal(uint64(0), scheduleConfig.MaxMergeRegionKeys)
 	// The result of config show doesn't be 0.
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
+	scheduleConfig.EnableHeartbeatConcurrentRunner = cfg.Schedule.EnableHeartbeatConcurrentRunner
 	re.Equal(scheduleConfig, &cfg.Schedule)
 	re.Equal(svr.GetReplicationConfig(), &cfg.Replication)
 

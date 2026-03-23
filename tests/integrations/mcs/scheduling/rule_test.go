@@ -202,10 +202,13 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		labelRules = regionLabeler.GetAllLabelRules()
-		return len(labelRules) == 2
-	})
-	sort.Slice(labelRules, func(i, j int) bool {
-		return labelRules[i].ID < labelRules[j].ID
+		if len(labelRules) != 2 {
+			return false
+		}
+		sort.Slice(labelRules, func(i, j int) bool {
+			return labelRules[i].ID < labelRules[j].ID
+		})
+		return labelRules[1].ID == labelRule.ID
 	})
 	re.Len(labelRules, 2)
 	re.Equal(labelRule.ID, labelRules[1].ID)

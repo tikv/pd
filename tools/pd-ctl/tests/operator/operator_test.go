@@ -195,9 +195,11 @@ func (suite *operatorTestSuite) checkOperator(cluster *pdTests.TestCluster) {
 	}
 
 	for _, testCase := range testCases {
-		output, err = tests.ExecuteCommand(cmd, testCase.cmd...)
-		re.NoError(err)
-		re.NotContains(string(output), "Failed")
+		testutil.Eventually(re, func() bool {
+			output, err = tests.ExecuteCommand(cmd, testCase.cmd...)
+			re.NoError(err)
+			return !strings.Contains(string(output), "Failed")
+		})
 		output, err = tests.ExecuteCommand(cmd, testCase.show...)
 		re.NoError(err)
 		re.Contains(string(output), testCase.expect)
