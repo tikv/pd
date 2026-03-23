@@ -25,6 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -150,7 +151,7 @@ func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
 	re.Equal(globalTS, ts)
 
 	// Simulate a TSO microservice primary by writing to the primary key.
-	tsoPrimaryPath := keypath.TSODefaultPrimaryPath()
+	tsoPrimaryPath := keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName})
 	re.NoError(storage.Save(tsoPrimaryPath, "tso-primary-member-info"))
 
 	// Now checkTSOPrimary=true should fail.

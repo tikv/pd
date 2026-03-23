@@ -269,11 +269,6 @@ func TimestampPath(groupID uint32) string {
 	return fmt.Sprintf(msTimestampPathFormat, ClusterID(), groupID)
 }
 
-// TSODefaultPrimaryPath returns the primary election path for the default keyspace group's TSO service.
-func TSODefaultPrimaryPath() string {
-	return fmt.Sprintf(msTsoDefaultPrimaryPathFormat, ClusterID())
-}
-
 // RegionPath returns the region meta info key path with the given region ID.
 func RegionPath(regionID uint64) string {
 	// we use uint64 to represent ID, the max length of uint64 is 20.

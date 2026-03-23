@@ -25,6 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -105,12 +106,12 @@ func (se *StorageEndpoint) SaveTimestamp(
 		// If so, the TSO microservice owns the timeline and this PD must stop
 		// writing to avoid dual writers during a rolling upgrade.
 		if checkTSOPrimary {
-			tsoPrimaryPath := keypath.TSODefaultPrimaryPath()
+			tsoPrimaryPath := keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName})
 			tsoPrimary, err := txn.Load(tsoPrimaryPath)
 			if err != nil {
 				return err
 			}
-			if tsoPrimary != "" {
+			if len(tsoPrimary) != 0 {
 				return errors.Errorf("tso microservice primary exists, PD in PD service mode must yield")
 			}
 		}
