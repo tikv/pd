@@ -118,4 +118,3 @@ The PD server API (`server/api/`, gorilla/mux) and MCS APIs (`pkg/mcs/*/`, gin) 
 - **Do not rewrite the PR.** Suggest minimal, targeted fixes. The goal is to help the author, not to redesign.
 - **Flag what CI cannot catch.** Linter issues are already caught by `make check`. Focus on logic, design, concurrency, and compatibility.
 - **Be specific.** "This looks wrong" is not a finding. "Line 42: `store.GetMeta()` can return nil when store is tombstone, causing nil-pointer dereference on line 45" is a finding.
-
