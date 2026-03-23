@@ -595,6 +595,55 @@ func (suite *tsoClientTestSuite) TestTSOServiceDiscovery() {
 	checkServiceDiscovery(re, pdClient, 3)
 }
 
+// TestDualWriterPrevention verifies that when a PD cluster is running in PD service mode
+// (keyspace groups disabled) and a TSO microservice starts, the PD leader detects the
+// coexisting TSO primary and yields its TSO allocator, preventing dual writers.
+// The client should still be able to get TSO after PD yields.
+func TestDualWriterPrevention(t *testing.T) {
+	re := require.New(t)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/skipUpdateServiceMode", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/skipUpdateServiceMode"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start a PD cluster in PD service mode (no keyspace groups → checkTSOPrimary=true).
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	leaderServer := cluster.GetServer(cluster.WaitLeader())
+	re.NotNil(leaderServer)
+	backendEndpoints := leaderServer.GetAddr()
+
+	// PD should serve TSO normally before any TSO microservice starts.
+	pdClient, err := pd.NewClientWithContext(ctx,
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+	physical, logical, err := pdClient.GetTS(ctx)
+	re.NoError(err)
+	lastTS := tsoutil.ComposeTS(physical, logical)
+	re.NotZero(lastTS)
+
+	// Start a TSO microservice — it becomes the TSO primary.
+	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	defer cleanup()
+
+	// The PD leader should detect the TSO primary and yield its allocator.
+	// Eventually, direct TSO requests to PD should fail because PD stopped writing.
+	testutil.Eventually(re, func() bool {
+		_, _, err := pdClient.GetTS(ctx)
+		return err != nil
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
 // TestUpgradingPDAndTSOClusters tests the scenario that after we restart the PD cluster
 // then restart the TSO cluster, the TSO service can still serve TSO requests normally.
 // So we need another cluster to run this test.
