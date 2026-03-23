@@ -709,19 +709,24 @@ func RunServers(servers []*TestServer) error {
 func runTasksFastError(tasks []func() error, onError func()) error {
 	res := make(chan error, len(tasks))
 	for _, task := range tasks {
-		go func() {
+		go func(task func() error) {
 			res <- task()
-		}()
+		}(task)
 	}
+	var (
+		firstErr  error
+		cleanedUp bool
+	)
 	for range tasks {
-		if err := <-res; err != nil {
-			if onError != nil {
+		if err := <-res; err != nil && firstErr == nil {
+			firstErr = errors.WithStack(err)
+			if onError != nil && !cleanedUp {
 				onError()
+				cleanedUp = true
 			}
-			return errors.WithStack(err)
 		}
 	}
-	return nil
+	return firstErr
 }
 
 func runServersFastError(servers []*TestServer) error {
