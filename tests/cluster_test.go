@@ -119,7 +119,6 @@ func TestRunTasksFastErrorReturnsLaterFailureWithoutWaitingForEarlierTask(t *tes
 	re := require.New(t)
 
 	blocked := make(chan struct{})
-	defer close(blocked)
 
 	cleanupCalled := make(chan struct{}, 1)
 	start := time.Now()
@@ -132,6 +131,7 @@ func TestRunTasksFastErrorReturnsLaterFailureWithoutWaitingForEarlierTask(t *tes
 			return errors.New("address already in use")
 		},
 	}, func() {
+		close(blocked)
 		cleanupCalled <- struct{}{}
 	})
 
