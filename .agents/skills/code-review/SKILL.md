@@ -1,6 +1,7 @@
 ---
 name: code-review
 description: "Review a pull request diff against PD project conventions, concurrency safety, backward compatibility, and accumulated team experience. Produces structured findings with severity levels."
+compatibility: Requires gh CLI authenticated with tikv/pd repo access.
 ---
 
 # Code Review for tikv/pd
@@ -81,9 +82,6 @@ Reviewers probe what happens during rolling upgrades and mixed-version clusters.
 
 - [ ] **Hot path awareness**: TSO allocation, GetRegion/ScanRegions, Region heartbeat, Store heartbeat — these are PD's hottest paths. Changes to them require extra scrutiny on allocations, lock contention, and computational complexity.
 - [ ] **Metrics on hot paths** should use cached `WithLabelValues` (see `add-metrics` skill).
-- [ ] **Unbounded growth**: maps/slices that grow with cluster size need bounds or periodic cleanup.
-- [ ] **Pre-allocate slices/maps** when size is known or can be estimated; avoid repeated `append` growth in hot paths.
-- [ ] **Clone vs no-clone**: when passing data across goroutine boundaries, be explicit about whether a clone is needed.
 - [ ] **Prefer Prometheus metrics over ad-hoc logging for observability.** If a PR adds `log.Info` to track an indicator, ask whether a Prometheus counter/gauge/histogram would be more appropriate — dashboards are better than log-grep.
 - [ ] **Log level must match call frequency.** Use `log.Debug` on high-frequency paths (heartbeat, token request); `log.Info` for infrequent-but-expected events. Retry loops that log on every etcd failure will cause log storms during brief outages.
 
@@ -114,13 +112,9 @@ The PD server API (`server/api/`, gorilla/mux) and MCS APIs (`pkg/mcs/*/`, gin) 
 - [ ] **PD server API** (`server/api/`): use `apiutil.ReadJSONRespondError` for body parsing, `apiutil.ParseUint64VarsField` for path params, `registerFunc`/`registerPrefix` for route registration with audit/rate-limiting middleware.
 - [ ] **MCS APIs** (`pkg/mcs/`): use gin's `c.ShouldBindJSON()` for body parsing and gin router for route registration — this is the accepted pattern for microservice modules.
 - [ ] **All mutating endpoints need audit logging** — `localLog` audit label (PD server API) or equivalent.
-- [ ] **Keep Swagger annotations current** when modifying APIs.
-- [ ] **HTTP status codes must match error semantics.** 400 = malformed client request; 403 = forbidden by server config; 404 = resource not found; 500 = internal error. Do not return 400 for server-side configuration issues or 500 for "not found."
-- [ ] **Always `return` after writing an error response.** A missing `return` after `h.rd.JSON(w, code, err)` or `c.AbortWithStatusJSON(...)` allows the handler to continue executing, potentially double-writing the response or applying the mutation anyway.
 
 #### 2.10 Architecture and Responsibility
 
-- [ ] **Separation of concerns**: a struct should have one responsibility. Don't put unrelated state on a struct just because it's convenient.
 - [ ] **Duplicate type definitions**: if a type is defined identically in both `client/` and `server/`, flag the maintenance risk if the struct evolves differently on either side.
 - [ ] **Bypass paths**: if a generic config endpoint can overwrite specialized config bypassing its validation logic, flag it.
 - [ ] **Scheduler registration**: new schedulers must follow the Register pattern — register both `SliceDecoderBuilder` and `Scheduler` factory.
