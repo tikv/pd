@@ -14,7 +14,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20260312105126-336501798048
+	github.com/pingcap/kvproto v0.0.0-20260320060847-534bbfabf736
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/client_model v0.6.0
@@ -207,4 +207,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/pingcap/kvproto => github.com/tidbcloud/kvproto v0.0.0-20260317052317-c52a9d62c997
+replace github.com/pingcap/kvproto => github.com/tidbcloud/kvproto v0.0.0-20260320080729-95b9c8bb445e

@@ -714,6 +714,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				totalRUV2Metrics         = requestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
 				tikvRUV2Metrics          = tikvRequestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
 				tidbRUV2Metrics          = tidbRequestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
+				tiflashRUV2Metrics       = tiflashRequestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
 				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name)
 				readByteMetrics          = readByteCost.WithLabelValues(name, name, ruLabelType)
 				writeByteMetrics         = writeByteCost.WithLabelValues(name, name, ruLabelType)
@@ -749,7 +750,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			if consumption.TidbRUV2 > 0 {
 				tidbRUV2Metrics.Add(consumption.TidbRUV2)
 			}
-			if ruv2 := consumption.TikvRUV2 + consumption.TidbRUV2; ruv2 > 0 {
+			if consumption.TiflashRUV2 > 0 {
+				tiflashRUV2Metrics.Add(consumption.TiflashRUV2)
+			}
+			if ruv2 := consumption.TikvRUV2 + consumption.TidbRUV2 + consumption.TiflashRUV2; ruv2 > 0 {
 				totalRUV2Metrics.Add(ruv2)
 			}
 			// Byte info.
@@ -794,6 +798,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				requestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
 				tikvRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
 				tidbRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
+				tiflashRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
 				sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
@@ -865,6 +870,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				Collector(requestUnitV2Cost).
 				Collector(tikvRequestUnitV2Cost).
 				Collector(tidbRequestUnitV2Cost).
+				Collector(tiflashRequestUnitV2Cost).
 				Collector(sqlLayerRequestUnitCost).
 				PushContext(pushCtx)
 			cancel()

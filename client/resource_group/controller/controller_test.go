@@ -290,17 +290,16 @@ func TestControllerReportConsumption(t *testing.T) {
 	require.Equal(t, gc.mu.consumption, &totalConsumption)
 	gc.mu.Unlock()
 
-	controller.ReportTiKVRUV2Consumption("test-group", 3.0)
-	controller.ReportTiDBRUV2Consumption("test-group", 4.0)
+	controller.ReportRUV2Consumption("test-group", 3.0, 4.0, 5.0)
 	gc.mu.Lock()
 	totalConsumption.TikvRUV2 += 3.0
 	totalConsumption.TidbRUV2 += 4.0
+	totalConsumption.TiflashRUV2 += 5.0
 	require.Equal(t, gc.mu.consumption, &totalConsumption)
 	gc.mu.Unlock()
 
 	controller.ReportConsumption("unknown-name", delta)
-	controller.ReportTiKVRUV2Consumption("unknown-name", 1.0)
-	controller.ReportTiDBRUV2Consumption("unknown-name", 1.0)
+	controller.ReportRUV2Consumption("unknown-name", 1.0, 1.0, 1.0)
 }
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {

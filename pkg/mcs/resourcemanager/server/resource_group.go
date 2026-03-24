@@ -296,6 +296,7 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 	rc.KvWriteRpcCount += c.KvWriteRpcCount
 	rc.TikvRUV2 += c.TikvRUV2
 	rc.TidbRUV2 += c.TidbRUV2
+	rc.TiflashRUV2 += c.TiflashRUV2
 }
 
 // persistStates persists the resource group tokens.

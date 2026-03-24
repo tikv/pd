@@ -84,6 +84,13 @@ var (
 			Name:      "tidb_request_unit_v2_sum",
 			Help:      "Counter of the TiDB-side experimental v2 request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+	tiflashRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tiflash_request_unit_v2_sum",
+			Help:      "Counter of the TiFlash-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 
 	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -218,6 +225,7 @@ func init() {
 	prometheus.MustRegister(requestUnitV2Cost)
 	prometheus.MustRegister(tikvRequestUnitV2Cost)
 	prometheus.MustRegister(tidbRequestUnitV2Cost)
+	prometheus.MustRegister(tiflashRequestUnitV2Cost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)
