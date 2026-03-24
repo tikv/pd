@@ -731,9 +731,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 				continue
 			}
-			if val, _err_ := failpoint.Eval("github.com/tikv/pd/pkg/mcs/resourcemanager/server/delayConsume"); _err_ == nil {
+			failpoint.Inject("github.com/tikv/pd/pkg/mcs/resourcemanager/server/delayConsume", func(val failpoint.Value) {
 				time.Sleep(time.Duration(val.(int)) * time.Millisecond)
-			}
+			})
 			keyspaceID := consumptionInfo.keyspaceID
 			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
 			if err != nil {
