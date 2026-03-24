@@ -380,7 +380,11 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 
 	endKeyspaceID, endKT := ExtractKeyspaceID(endKey)
 
-	if startKT == KeyTypeUnknown && endKT == KeyTypeUnknown {
+	// If either key has unknown key type, conservatively consider it spans multiple keyspaces to avoid potential data corruption.
+	// This can happen when the key is not in the expected format, or when there is a hole in keyspace allocation.
+	// For example, if startKey has valid keyspace ID but endKey is invalid, we cannot determine the keyspace boundary,
+	// thus we consider it spans multiple keyspaces to be safe.
+	if startKT == KeyTypeUnknown && (endKT == KeyTypeUnknown || len(endKey) == 0) {
 		return false
 	}
 

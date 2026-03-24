@@ -905,6 +905,9 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	if id == constant.NullKeyspaceID {
 		return "", nil
 	}
+	if manager == nil {
+		return "", nil
+	}
 	// Try to get the keyspace name from the cache.
 	item, ok := manager.KeyspaceCache.getKeyspaceByID(id)
 	if ok {
@@ -926,6 +929,9 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 
 // GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
 func (manager *Manager) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+	if manager == nil {
+		return start, true
+	}
 	return manager.KeyspaceCache.GetKeyspaceIDInRange(start, end)
 }
 
