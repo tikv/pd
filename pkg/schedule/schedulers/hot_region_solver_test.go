@@ -645,6 +645,12 @@ func TestBucketFirstStat(t *testing.T) {
 			rwTy:           utils.Read,
 			expect:         utils.RegionReadBytes,
 		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.ByteDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadBytes,
+		},
 	}
 	for _, data := range testdata {
 		bs := &balanceSolver{

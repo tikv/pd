@@ -916,15 +916,16 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 }
 
 // bucketFirstStat returns the first priority statistics of the bucket.
-// if the first priority is query rate, it will return the second priority .
+// If the first priority is a dimension that buckets do not report yet, it
+// falls back to the second priority.
 func (bs *balanceSolver) bucketFirstStat() utils.RegionStatKind {
 	base := utils.RegionReadBytes
 	if bs.rwTy == utils.Write {
 		base = utils.RegionWriteBytes
 	}
 	offset := bs.firstPriority
-	// todo: remove it if bucket's qps has been supported.
-	if bs.firstPriority == utils.QueryDim {
+	// TODO: remove it if buckets report these dimensions.
+	if bs.firstPriority == utils.QueryDim || bs.firstPriority == utils.CPUDim {
 		offset = bs.secondPriority
 	}
 	return base + utils.RegionStatKind(offset)
