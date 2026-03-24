@@ -491,7 +491,7 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 			switched.Store(true)
 			testutil.Eventually(re, func() bool {
 				return atomic.LoadInt64(&okAfter) >= 10
-			}, testutil.WithTickInterval(20*time.Millisecond))
+			}, testutil.WithWaitFor(time.Minute), testutil.WithTickInterval(20*time.Millisecond))
 
 			log.Info("switch during workload finished",
 				zap.Int("startMode", int(tc.startMode)),
@@ -1520,6 +1520,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		SqlLayerCpuTimeMs: 40.0,
 		KvReadRpcCount:    5,
 		KvWriteRpcCount:   6,
+		TikvRUV2:          1.5,
+		TidbRUV2:          2.5,
+		TiflashRUV2:       3.5,
 	}
 	_, err = cli.AcquireTokenBuckets(suite.ctx, &rmpb.TokenBucketsRequest{
 		Requests: []*rmpb.TokenBucketRequest{

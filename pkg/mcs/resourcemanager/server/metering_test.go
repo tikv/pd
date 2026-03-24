@@ -42,14 +42,27 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 			WriteBytes:               1024,
 			ReadCrossAzTrafficBytes:  1024,
 			WriteCrossAzTrafficBytes: 2048,
+			TikvRUV2:                 10.0,
+			TidbRUV2:                 20.0,
 		},
 		isBackground: false,
 		isTiFlash:    false,
 	}
 	collector.Collect(tidbConsumption)
 
-	tiflashConsumption := tidbConsumption
-	tiflashConsumption.isTiFlash = true
+	tiflashConsumption := &consumptionItem{
+		keyspaceName: testKeyspaceName,
+		Consumption: &rmpb.Consumption{
+			RRU:                      70.0,
+			WRU:                      30.0,
+			WriteBytes:               1024,
+			ReadCrossAzTrafficBytes:  1024,
+			WriteCrossAzTrafficBytes: 2048,
+			TiflashRUV2:              40.0,
+		},
+		isBackground: false,
+		isTiFlash:    true,
+	}
 	collector.Collect(tiflashConsumption)
 
 	records := collector.Aggregate()
@@ -60,9 +73,12 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	re.Equal(testKeyspaceName, record[metering.DataClusterIDField])
 	re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
 	re.Equal(metering.NewRUValue(150.0), record[meteringDataOLTPRUField])
-	re.Equal(metering.NewRUValue(150.0), record[meteringDataOLAPRUField])
+	re.Equal(metering.NewRUValue(100.0), record[meteringDataOLAPRUField])
 	re.Equal(metering.NewBytesValue(2048), record[meteringDataWriteBytesField])
 	re.Equal(metering.NewBytesValue(6144), record[meteringDataCrossAZTrafficBytesField])
+	re.Equal(metering.NewRUValue(20.0), record[meteringDataTiDBRUV2Field])
+	re.Equal(metering.NewRUValue(10.0), record[meteringDataTiKVRUV2Field])
+	re.Equal(metering.NewRUValue(40.0), record[meteringDataTiFlashRUV2Field])
 }
 
 func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
@@ -77,6 +93,8 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 			WriteBytes:               1024,
 			ReadCrossAzTrafficBytes:  100,
 			WriteCrossAzTrafficBytes: 200,
+			TikvRUV2:                 5.0,
+			TidbRUV2:                 3.0,
 		},
 		isBackground: false,
 		isTiFlash:    false,
@@ -90,6 +108,7 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 			WriteBytes:               1024,
 			ReadCrossAzTrafficBytes:  300,
 			WriteCrossAzTrafficBytes: 400,
+			TiflashRUV2:              11.0,
 		},
 		isBackground: false,
 		isTiFlash:    true,
@@ -112,6 +131,9 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 			re.Equal(metering.NewRUValue(0.0), record[meteringDataOLAPRUField])
 			re.Equal(metering.NewBytesValue(1024), record[meteringDataWriteBytesField])
 			re.Equal(metering.NewBytesValue(300), record[meteringDataCrossAZTrafficBytesField])
+			re.Equal(metering.NewRUValue(3.0), record[meteringDataTiDBRUV2Field])
+			re.Equal(metering.NewRUValue(5.0), record[meteringDataTiKVRUV2Field])
+			re.Equal(metering.NewRUValue(0.0), record[meteringDataTiFlashRUV2Field])
 		case testKeyspaceName2:
 			re.Equal(testKeyspaceName2, keyspaceName)
 			re.Equal(metering.SourceNamePD, record[metering.DataSourceNameField])
@@ -119,6 +141,9 @@ func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 			re.Equal(metering.NewRUValue(100.0), record[meteringDataOLAPRUField])
 			re.Equal(metering.NewBytesValue(1024), record[meteringDataWriteBytesField])
 			re.Equal(metering.NewBytesValue(700), record[meteringDataCrossAZTrafficBytesField])
+			re.Equal(metering.NewRUValue(0.0), record[meteringDataTiDBRUV2Field])
+			re.Equal(metering.NewRUValue(0.0), record[meteringDataTiKVRUV2Field])
+			re.Equal(metering.NewRUValue(11.0), record[meteringDataTiFlashRUV2Field])
 		default:
 			re.Fail("unexpected keyspace", keyspaceName)
 		}

@@ -105,6 +105,10 @@ func validateMeteringConfig(c *config.MeteringConfig) error {
 		if len(c.Bucket) == 0 {
 			return errors.New("bucket is required for the metering config")
 		}
+	case storage.ProviderTypeAzure:
+		if len(c.Bucket) == 0 {
+			return errors.New("bucket is required for the metering config")
+		}
 	case storage.ProviderTypeLocalFS:
 		if len(c.LocalFS.BasePath) == 0 {
 			return errors.New("base path is required for the metering config")

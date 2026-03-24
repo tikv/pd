@@ -265,6 +265,16 @@ func newInnerClientForRMRouteTest(t *testing.T, ctx context.Context, pdAddr stri
 	return inner
 }
 
+func TestGroupSettingsPathPrefixBytes(t *testing.T) {
+	re := require.New(t)
+	// Null keyspace should use the legacy prefix.
+	prefix := GroupSettingsPathPrefixBytes(constants.NullKeyspaceID)
+	re.Equal("resource_group/settings", string(prefix))
+	// Non-null keyspace should use the keyspace-specific prefix.
+	prefix = GroupSettingsPathPrefixBytes(1)
+	re.Contains(string(prefix), "resource_group/keyspace/settings/1")
+}
+
 func TestResourceManagerWritesUsePDAndReadsUseRM(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

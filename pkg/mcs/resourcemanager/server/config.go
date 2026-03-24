@@ -93,6 +93,56 @@ type Config struct {
 	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
+// RUVersion represents an RU calculation version.
+type RUVersion = int32
+
+const (
+	// RUVersionV1 is the default RU calculation version.
+	RUVersionV1 RUVersion = 1
+	// RUVersionV2 is the new RU calculation version with detailed metrics.
+	RUVersionV2 RUVersion = 2
+)
+
+// DefaultRUVersion is the default RU calculation version used when no policy is configured.
+const DefaultRUVersion = RUVersionV1
+
+// RUVersionPolicy configures which RU calculation version to use per keyspace.
+type RUVersionPolicy struct {
+	Default   RUVersion            `json:"default"`
+	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
+}
+
+// validate checks that all RU version values in the policy are positive.
+func (p *RUVersionPolicy) validate() error {
+	if p == nil {
+		return nil
+	}
+	if p.Default <= 0 {
+		return fmt.Errorf("ru-version-policy default must be positive, got %d", p.Default)
+	}
+	for ks, v := range p.Overrides {
+		if v <= 0 {
+			return fmt.Errorf("ru-version-policy override for keyspace %d must be positive, got %d", ks, v)
+		}
+	}
+	return nil
+}
+
+// Clone returns a deep copy of the RU version policy.
+func (p *RUVersionPolicy) Clone() *RUVersionPolicy {
+	if p == nil {
+		return nil
+	}
+	clone := &RUVersionPolicy{Default: p.Default}
+	if p.Overrides != nil {
+		clone.Overrides = make(map[uint32]RUVersion, len(p.Overrides))
+		for keyspaceID, version := range p.Overrides {
+			clone.Overrides[keyspaceID] = version
+		}
+	}
+	return clone
+}
+
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
 type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
@@ -110,6 +160,8 @@ type ControllerConfig struct {
 
 	// EnableControllerTraceLog is to control whether resource control client enable trace.
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
+
+	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
