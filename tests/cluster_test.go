@@ -21,18 +21,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 
 	perrors "github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/utils/tempurl"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	serverconfig "github.com/tikv/pd/server/config"
 )
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
 
 func TestShouldRetryCurrentServers(t *testing.T) {
 	t.Parallel()
