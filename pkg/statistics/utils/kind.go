@@ -76,6 +76,7 @@ const (
 	RegionWriteBytes
 	RegionWriteKeys
 	RegionWriteQueryNum
+	// Keep RegionReadCPU appended to preserve the existing RegionStatKind values.
 	RegionReadCPU
 
 	RegionStatCount
@@ -111,7 +112,6 @@ const (
 	StoreWriteBytes
 	StoreWriteKeys
 	StoreReadQuery
-	StoreReadCPU
 	StoreWriteQuery
 	StoreCPUUsage
 	StoreDiskReadRate
@@ -119,6 +119,8 @@ const (
 
 	StoreRegionsWriteBytes // Same as StoreWriteBytes, but it is counted by RegionHeartbeat.
 	StoreRegionsWriteKeys  // Same as StoreWriteKeys, but it is counted by RegionHeartbeat.
+	// Keep StoreReadCPU appended to preserve the existing StoreLoadKind values.
+	StoreReadCPU
 
 	StoreLoadCount
 )

@@ -46,6 +46,13 @@ func TestAdjustPrioritiesConfigCPUFallback(t *testing.T) {
 			expect:       getReadPriorities(&queryPrioritiesConfig),
 		},
 		{
+			name:         "cpu-unsupported-keep-query-origins",
+			querySupport: true,
+			cpuSupport:   false,
+			origins:      []string{utils.QueryPriority, utils.BytePriority},
+			expect:       []string{utils.QueryPriority, utils.BytePriority},
+		},
+		{
 			name:         "query-unsupported-fallback-to-compatible",
 			querySupport: false,
 			cpuSupport:   true,

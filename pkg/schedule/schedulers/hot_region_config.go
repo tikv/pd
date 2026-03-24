@@ -597,6 +597,8 @@ func adjustPrioritiesConfig(querySupport, cpuSupport bool, origins []string, get
 	}
 
 	defaults := getPriorities(&defaultPrioritiesConfig)
+	// When CPU is unavailable, malformed or legacy configs should fall back to the
+	// query-based read defaults instead of silently selecting CPU-first priorities.
 	if !cpuSupport {
 		defaults = cpuFallback
 	}
