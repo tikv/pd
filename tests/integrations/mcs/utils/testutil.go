@@ -65,17 +65,9 @@ func WaitForTSOServiceAvailable(
 func WaitForAllTSOServiceAvailable(
 	ctx context.Context, re *require.Assertions, clients []pd.Client,
 ) {
-	wg := sync.WaitGroup{}
-	wg.Add(len(clients))
-
 	for _, client := range clients {
-		go func(cli pd.Client) {
-			defer wg.Done()
-			WaitForTSOServiceAvailable(ctx, re, cli)
-		}(client)
+		WaitForTSOServiceAvailable(ctx, re, client)
 	}
-
-	wg.Wait()
 }
 
 // CheckMultiKeyspacesTSO checks the correctness of TSO for multiple keyspaces.
@@ -84,6 +76,7 @@ func CheckMultiKeyspacesTSO(
 	clients []pd.Client, parallelAct func(),
 ) {
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	wg := sync.WaitGroup{}
 	wg.Add(len(clients))
 	var readyClients atomic.Int64
