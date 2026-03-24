@@ -10,6 +10,33 @@ description: Repair cherry-pick pull requests in tikv/pd when automated cherry-p
 Repair and verify cherry-pick PRs in `tikv/pd`.
 Compare the source PR and the cherry-pick PR first, then fix the cherry-pick branch without losing release-branch-only code.
 
+## Inputs
+
+- source PR number, or a cherry-pick PR that points back to the source PR
+- cherry-pick PR number, head branch, and the remote that owns that branch
+- touched files or packages that need parity and targeted verification
+- release branch context that may contain branch-only APIs, helpers, or tests
+
+## Outputs
+
+- a repaired cherry-pick branch or PR with committed conflict markers removed
+- a semantic parity report against the source PR, including any intentional
+  release-branch-only differences
+- targeted verification commands and results, especially for failpoint-sensitive
+  code paths
+
+## Implementation Details
+
+- Preserve release-branch-only behavior by comparing the final aggregate patch,
+  not raw commit count or GitHub mergeability state.
+- When conflict markers land beside release-only APIs or helpers, keep the
+  release-branch code and insert the source PR behavior in the correct final
+  location instead of deleting branch-only code.
+- Validate failpoint-sensitive diffs with the repo's explicit failpoint flow:
+  `make failpoint-enable`, targeted `go test`, then `make failpoint-disable`.
+- Core commands in this workflow are `gh pr view`, `gh pr diff`, `diff -u`,
+  `rg -n '<<<<<<<|=======|>>>>>>>'`, `git diff`, `git status`, and `git push`.
+
 ## 1. Identify the PR pair
 
 - Inspect the cherry-pick PR with `gh pr view <pr> --repo tikv/pd --json number,title,body,baseRefName,headRefName,headRepositoryOwner,url,commits`.
