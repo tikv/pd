@@ -80,6 +80,37 @@ var (
 	defaultMaxRetryTimes = 5
 )
 
+type startServersRetryAction int
+
+const (
+	startServersNoRetry startServersRetryAction = iota
+	startServersRetryCurrent
+	startServersRetryRecreate
+)
+
+func shouldRetryCurrentServers(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "ErrCancelStartEtcd") || strings.Contains(errMsg, "ErrStartEtcd")
+}
+
+func classifyInitialServersError(err error) startServersRetryAction {
+	if err == nil {
+		return startServersNoRetry
+	}
+	errMsg := err.Error()
+	switch {
+	case strings.Contains(errMsg, "address already in use") || strings.Contains(errMsg, "Etcd cluster ID mismatch"):
+		return startServersRetryRecreate
+	case shouldRetryCurrentServers(err):
+		return startServersRetryCurrent
+	default:
+		return startServersNoRetry
+	}
+}
+
 // TestServer is only for test.
 type TestServer struct {
 	syncutil.RWMutex
@@ -689,9 +720,8 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 			return nil
 		}
 
-		errMsg := lastErr.Error()
-		switch {
-		case strings.Contains(errMsg, "address already in use") || strings.Contains(errMsg, "Etcd cluster ID mismatch"):
+		switch classifyInitialServersError(lastErr) {
+		case startServersRetryRecreate:
 			// `Etcd cluster ID mismatch` can happen when the allocated peer URL happens to
 			// connect to another test's etcd cluster (port reuse across concurrent `go test`
 			// processes). Treat it as a port conflict and recreate servers with new ports.
@@ -738,7 +768,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 			}
 			time.Sleep(backoff)
 			continue
-		case strings.Contains(errMsg, "ErrStartEtcd"):
+		case startServersRetryCurrent:
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			for _, s := range servers {
 				if s.State() == Running {
@@ -764,9 +794,7 @@ func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
 			return nil
 		}
 
-		// If the error is related to etcd start cancellation, we should retry
-		if strings.Contains(lastErr.Error(), "ErrCancelStartEtcd") ||
-			strings.Contains(lastErr.Error(), "ErrStartEtcd") {
+		if shouldRetryCurrentServers(lastErr) {
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			// Stop any partially started servers before retrying
 			for _, s := range servers {
