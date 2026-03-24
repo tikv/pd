@@ -23,7 +23,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
-func TestActiveResourceRequestUnitMetricUsesV1ByDefault(t *testing.T) {
+func TestActiveRequestUnitMetricUsesV1ByDefault(t *testing.T) {
 	re := require.New(t)
 
 	const (
@@ -49,10 +49,10 @@ func TestActiveResourceRequestUnitMetricUsesV1ByDefault(t *testing.T) {
 		RequestUnit: RequestUnitConfig{CPUMsCost: 2},
 	}, keyspaceID)
 
-	re.Equal(float64(36), testutil.ToFloat64(metrics.ActiveResourceRUMetrics))
+	re.Equal(float64(36), testutil.ToFloat64(metrics.ActiveRUMetrics))
 }
 
-func TestActiveResourceRequestUnitMetricUsesV2ForOverriddenKeyspace(t *testing.T) {
+func TestActiveRequestUnitMetricUsesV2ForOverriddenKeyspace(t *testing.T) {
 	re := require.New(t)
 
 	const (
@@ -84,7 +84,7 @@ func TestActiveResourceRequestUnitMetricUsesV2ForOverriddenKeyspace(t *testing.T
 		},
 	}, keyspaceID)
 
-	re.Equal(float64(31), testutil.ToFloat64(metrics.ActiveResourceRUMetrics))
+	re.Equal(float64(31), testutil.ToFloat64(metrics.ActiveRUMetrics))
 }
 
 func TestMaxPerSecCostTracker(t *testing.T) {
