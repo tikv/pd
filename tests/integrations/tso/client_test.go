@@ -436,14 +436,22 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re := suite.Require()
 	var closedTSOAddr string
+	if !suite.legacy {
+		defer func() {
+			if closedTSOAddr == "" {
+				return
+			}
+			re.NoError(suite.tsoCluster.AddServer(closedTSOAddr))
+		}()
+	}
 
 	parallelAct := func() {
 		if !suite.legacy {
-			time.Sleep(2 * time.Second)
 			primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
 			closedTSOAddr = primary.GetAddr()
 			primary.Close()
-			time.Sleep(2 * time.Second)
+			suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+			utils.WaitForAllTSOServiceAvailable(suite.ctx, re, suite.clients)
 		} else {
 			// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 			// currently, the time to discover tso service is usually a little longer than 1s, compared
@@ -458,7 +466,6 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 	if !suite.legacy {
 		re.NotEmpty(closedTSOAddr)
-		re.NoError(suite.tsoCluster.AddServer(closedTSOAddr))
 		return
 	}
 	suite.TearDownSuite()
