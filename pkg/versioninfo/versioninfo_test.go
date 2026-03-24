@@ -36,7 +36,8 @@ func TestIsHotScheduleWithCPUSupported(t *testing.T) {
 		expect  bool
 	}{
 		{"8.5.5", false},
-		{"8.5.6", true},
+		{"8.5.6", false},
+		{"8.5.7", true},
 		{"9.0.0-beta.1", true},
 		{"9.0.0", true},
 		{"9.1.0", true},

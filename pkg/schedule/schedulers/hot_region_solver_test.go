@@ -201,7 +201,7 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	checkSortResult(re, []uint64{1, 2}, u)
 
 	// Verify the CPU-first priority path can pick by CPU dim.
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.6"))
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
 	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
 	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
 	cpuHotPeers := []*statistics.HotPeerStat{{

@@ -98,7 +98,7 @@ func IsFeatureSupported(clusterVersion *semver.Version, f Feature) bool {
 }
 
 var (
-	hotScheduleWithCPUMinVersion   = MustParseVersion("8.5.6")
+	hotScheduleWithCPUMinVersion   = MustParseVersion("8.5.7")
 	hotScheduleWithCPUv9MinVersion = MustParseVersion("9.0.0-beta.1")
 )
 
@@ -107,7 +107,7 @@ func IsHotScheduleWithCPUSupported(clusterVersion *semver.Version) bool {
 	if clusterVersion == nil {
 		return false
 	}
-	// TiKV <= 8.5.5 and < 9.0.0-beta.1 do not report CPU usage.
+	// TiKV <= 8.5.6 and < 9.0.0-beta.1 do not report CPU usage.
 	if clusterVersion.Major >= 9 {
 		return !clusterVersion.LessThan(*hotScheduleWithCPUv9MinVersion)
 	}

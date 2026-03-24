@@ -2289,7 +2289,7 @@ func TestCompatibility(t *testing.T) {
 	})
 	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
 	re.False(hb.(*hotScheduler).conf.lastCPUSupported)
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.6"))
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
