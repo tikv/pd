@@ -67,12 +67,12 @@ var (
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
-	billingRequestUnitCost = prometheus.NewCounterVec(
+	activeResourceRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "billing_request_unit_sum",
-			Help:      "Counter of the billing request unit cost for all resource groups.",
+			Name:      "active_resource_request_unit_sum",
+			Help:      "Counter of the active resource request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	// RUv2 metrics (experimental v2 RU calculation, recording only).
@@ -245,7 +245,7 @@ func init() {
 	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
-	prometheus.MustRegister(billingRequestUnitCost)
+	prometheus.MustRegister(activeResourceRequestUnitCost)
 	prometheus.MustRegister(requestUnitV2Cost)
 	prometheus.MustRegister(tikvRequestUnitV2Cost)
 	prometheus.MustRegister(tidbRequestUnitV2Cost)
@@ -354,7 +354,7 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 type counterMetrics struct {
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter
-	BillingRUMetrics           prometheus.Counter
+	ActiveResourceRUMetrics    prometheus.Counter
 	TotalRUV2Metrics           prometheus.Counter
 	TiKVRUV2Metrics            prometheus.Counter
 	TiDBRUV2Metrics            prometheus.Counter
@@ -374,7 +374,7 @@ func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetr
 	return &counterMetrics{
 		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		BillingRUMetrics:           billingRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ActiveResourceRUMetrics:    activeResourceRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TotalRUV2Metrics:           requestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TiKVRUV2Metrics:            tikvRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TiDBRUV2Metrics:            tidbRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
@@ -401,7 +401,7 @@ func calculateSQLRU(consumption *rmpb.Consumption, controllerConfig *ControllerC
 	return consumption.SqlLayerCpuTimeMs * controllerConfig.RequestUnit.CPUMsCost
 }
 
-func calculateBillingRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) float64 {
+func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) float64 {
 	if controllerConfig.getKeyspaceRUVersion(keyspaceID) == RUVersionV2 {
 		return consumption.TikvRUV2 + consumption.TidbRUV2 + consumption.TiflashRUV2
 	}
@@ -416,8 +416,8 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 	if consumption.WRU > 0 {
 		m.WRUMetrics.Add(consumption.WRU)
 	}
-	if billingRU := calculateBillingRU(consumption, controllerConfig, keyspaceID); billingRU > 0 {
-		m.BillingRUMetrics.Add(billingRU)
+	if activeRU := calculateActiveRU(consumption, controllerConfig, keyspaceID); activeRU > 0 {
+		m.ActiveResourceRUMetrics.Add(activeRU)
 	}
 	// RUv2 info (experimental).
 	if consumption.TikvRUV2 > 0 {
@@ -524,7 +524,7 @@ func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
-	billingRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	activeResourceRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	requestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tikvRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tidbRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
