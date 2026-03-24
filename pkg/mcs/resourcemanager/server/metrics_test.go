@@ -17,10 +17,75 @@ package server
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
+
+func TestBillingRequestUnitMetricUsesV1ByDefault(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "billing-v1-keyspace"
+		groupName    = "billing-v1-group"
+		keyspaceID   = uint32(101)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	metrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
+	metrics.add(&rmpb.Consumption{
+		RRU:               10,
+		WRU:               20,
+		TotalCpuTimeMs:    4,
+		SqlLayerCpuTimeMs: 3,
+		TikvRUV2:          100,
+		TidbRUV2:          200,
+		TiflashRUV2:       300,
+	}, &ControllerConfig{
+		RequestUnit: RequestUnitConfig{CPUMsCost: 2},
+	}, keyspaceID)
+
+	re.Equal(float64(36), testutil.ToFloat64(metrics.BillingRUMetrics))
+}
+
+func TestBillingRequestUnitMetricUsesV2ForOverriddenKeyspace(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "billing-v2-keyspace"
+		groupName    = "billing-v2-group"
+		keyspaceID   = uint32(202)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	metrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
+	metrics.add(&rmpb.Consumption{
+		RRU:               10,
+		WRU:               20,
+		TotalCpuTimeMs:    4,
+		SqlLayerCpuTimeMs: 3,
+		TikvRUV2:          7,
+		TidbRUV2:          11,
+		TiflashRUV2:       13,
+	}, &ControllerConfig{
+		RequestUnit: RequestUnitConfig{CPUMsCost: 2},
+		RUVersionPolicy: &RUVersionPolicy{
+			Default: RUVersionV1,
+			Overrides: map[uint32]RUVersion{
+				keyspaceID: RUVersionV2,
+			},
+		},
+	}, keyspaceID)
+
+	re.Equal(float64(31), testutil.ToFloat64(metrics.BillingRUMetrics))
+}
 
 func TestMaxPerSecCostTracker(t *testing.T) {
 	re := require.New(t)
