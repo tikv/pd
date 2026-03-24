@@ -179,6 +179,7 @@ func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadP
 			future.Loads[utils.ByteDim] += infl.Loads[utils.RegionWriteBytes]
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionWriteKeys]
 			future.Loads[utils.QueryDim] += infl.Loads[utils.RegionWriteQueryNum]
+			future.Loads[utils.CPUDim] += infl.Loads[utils.RegionWriteCPU]
 		}
 		future.HotPeerCount += infl.HotPeerCount
 	}

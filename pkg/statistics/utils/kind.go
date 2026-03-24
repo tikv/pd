@@ -76,8 +76,9 @@ const (
 	RegionWriteBytes
 	RegionWriteKeys
 	RegionWriteQueryNum
-	// Keep RegionReadCPU appended to preserve the existing RegionStatKind values.
+	// Keep RegionReadCPU and RegionWriteCPU appended to preserve the existing RegionStatKind values.
 	RegionReadCPU
+	RegionWriteCPU
 
 	RegionStatCount
 )
@@ -98,6 +99,8 @@ func (k RegionStatKind) String() string {
 		return "write_query"
 	case RegionReadCPU:
 		return "read_cpu"
+	case RegionWriteCPU:
+		return "write_cpu"
 	}
 	return "unknown RegionStatKind"
 }
@@ -196,7 +199,7 @@ func (rw RWType) String() string {
 }
 
 var (
-	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum}
+	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum, RegionWriteCPU}
 	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueryNum, RegionReadCPU}
 )
 

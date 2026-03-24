@@ -432,7 +432,11 @@ func (f *HotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {
-			newItem.rollingLoads = append(newItem.rollingLoads, dim.clone())
+			if dim != nil {
+				newItem.rollingLoads = append(newItem.rollingLoads, dim.clone())
+			} else {
+				newItem.rollingLoads = append(newItem.rollingLoads, nil)
+			}
 		}
 		newItem.allowInherited = false
 	} else {
@@ -495,7 +499,7 @@ func (f *HotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		initItem(newItem, f.kind.DefaultAntiCount())
 	}
 	newItem.actionType = utils.Add
-	newItem.rollingLoads = make([]*dimStat, len(regionStats))
+	newItem.rollingLoads = make([]*dimStat, utils.DimLen)
 	for i, k := range regionStats {
 		ds := newDimStat(f.interval())
 		ds.add(deltaLoads[k], interval)

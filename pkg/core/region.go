@@ -2025,6 +2025,7 @@ func (r *RegionInfo) GetLoads() []float64 {
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
 		float64(r.GetCPUUsage()),
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 
@@ -2038,6 +2039,7 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
 		0,
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 

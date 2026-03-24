@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 func TestHotPeerStatGetLoadBounds(t *testing.T) {
@@ -32,13 +34,15 @@ func TestHotPeerStatGetLoadBounds(t *testing.T) {
 	re.Equal(0.0, stat.GetLoad(2))
 	re.Equal(0.0, stat.GetLoad(-1))
 
+	// When rollingLoads has nil entries, fall back to Loads.
 	stat = &HotPeerStat{
 		Loads:        []float64{3, 4},
-		rollingLoads: []*dimStat{nil},
+		rollingLoads: make([]*dimStat, utils.DimLen), // all nil
 	}
 	re.Equal(3.0, stat.GetLoad(0))
 	re.Equal(4.0, stat.GetLoad(1))
 	re.Equal(0.0, stat.GetLoad(2))
+	re.Equal(0.0, stat.GetLoad(utils.CPUDim))
 }
 
 func TestHotPeerStatIsHotSkipsNilRollingLoads(t *testing.T) {
@@ -48,9 +52,14 @@ func TestHotPeerStatIsHotSkipsNilRollingLoads(t *testing.T) {
 	hotStat := newDimStat(interval)
 	hotStat.add(10, interval)
 
+	rollingLoads := make([]*dimStat, utils.DimLen)
+	rollingLoads[utils.KeyDim] = hotStat
 	stat := &HotPeerStat{
-		rollingLoads: []*dimStat{nil, hotStat},
+		rollingLoads: rollingLoads,
 	}
-	thresholds := []float64{5, 5}
+	thresholds := make([]float64, utils.DimLen)
+	for i := range thresholds {
+		thresholds[i] = 5
+	}
 	re.True(stat.isHot(thresholds))
 }

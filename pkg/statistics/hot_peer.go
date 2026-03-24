@@ -163,19 +163,11 @@ func (stat *HotPeerStat) GetActionType() utils.ActionType {
 
 // GetLoad returns denoising load if possible.
 func (stat *HotPeerStat) GetLoad(dim int) float64 {
-	if dim < 0 {
+	if dim < 0 || dim >= utils.DimLen {
 		return 0
 	}
-	if stat.rollingLoads != nil {
-		if dim < len(stat.rollingLoads) {
-			if stat.rollingLoads[dim] != nil {
-				return math.Round(stat.rollingLoads[dim].get())
-			}
-		}
-		if dim < len(stat.Loads) {
-			return math.Round(stat.Loads[dim])
-		}
-		return 0
+	if stat.rollingLoads != nil && dim < len(stat.rollingLoads) && stat.rollingLoads[dim] != nil {
+		return math.Round(stat.rollingLoads[dim].get())
 	}
 	if dim < len(stat.Loads) {
 		return math.Round(stat.Loads[dim])
@@ -210,9 +202,6 @@ func (stat *HotPeerStat) isHot(thresholds []float64) bool {
 	return slice.AnyOf(stat.rollingLoads, func(i int) bool {
 		if stat.rollingLoads[i] == nil {
 			return false
-		}
-		if i == utils.CPUDim {
-			return stat.rollingLoads[i].isHot(thresholds[i])
 		}
 		return stat.rollingLoads[i].isLastAverageHot(thresholds[i])
 	})
