@@ -1,7 +1,5 @@
 # Fix Flaky Test Playbook
 
-Generated from 218 merged flaky-adjacent PRs.
-
 This checked-in playbook is the maintained summary artifact for the skill; the raw corpus is intentionally kept out of the repository in this iteration.
 
 Use these patterns as hypothesis starters. Always validate against current issue evidence before changing code.
@@ -39,7 +37,6 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 
 **Representative PRs**
 - #10073: resource control: avoid panic when reservation is nil (https://github.com/tikv/pd/pull/10073)
-- #9979: operator: fix data race avoid panic (https://github.com/tikv/pd/pull/9979)
 - #9781: mcs: fix panic of store not found (https://github.com/tikv/pd/pull/9781)
 - #9634: testutil: fix LastHeartbeat assignment and streamline PutMetaStore call (https://github.com/tikv/pd/pull/9634)
 - #8965: cluster: fix panic when minResolvedTS is not initialized (https://github.com/tikv/pd/pull/8965)
