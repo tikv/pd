@@ -142,7 +142,7 @@ tests:
               instance: pd-1
               expr: '(service_member_role{job="pd",service="PD"} == 0) and on(instance,job) (etcd_server_is_leader{job="pd"} == 1)'
             exp_annotations:
-              summary: 'PD leader service is stuck in non-leader state'
+              summary: 'PD service is not the leader while embedded etcd leader is healthy'
               description: 'cluster: ENV_LABELS_ENV, instance: pd-1, PD service is not the PD leader while being the embedded etcd leader; values:0'
               value: '0'
       - eval_time: 6m
@@ -156,7 +156,7 @@ tests:
               instance: pd-1
               expr: '(service_member_role{job="pd",service="PD"} == 0) and on(instance,job) (etcd_server_is_leader{job="pd"} == 1)'
             exp_annotations:
-              summary: 'PD leader service is stuck in non-leader state'
+              summary: 'PD service is not the leader while embedded etcd leader is healthy'
               description: 'cluster: ENV_LABELS_ENV, instance: pd-1, PD service is not the PD leader while being the embedded etcd leader; values:0'
               value: '0'
 
