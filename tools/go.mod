@@ -7,6 +7,11 @@ replace (
 	github.com/tikv/pd/client => ../client
 )
 
+// Due to https://github.com/stretchr/testify/pull/1427, `Eventually` and `EventuallyWithT` starts checking the condition immediately,
+// which will cause several different tests to fail. So this is a temporary workaround to use the old version of `testify`.
+// TODO: fix those flasky tests introduced by the behavior change of `Eventually` and `EventuallyWithT` assertions.
+replace github.com/stretchr/testify => github.com/stretchr/testify v1.10.0
+
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
