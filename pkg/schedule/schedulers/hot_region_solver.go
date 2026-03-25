@@ -761,7 +761,7 @@ var dimToStep = [utils.DimLen]float64{
 	utils.ByteDim:  100,
 	utils.KeyDim:   10,
 	utils.QueryDim: 10,
-	utils.CPUDim:   1,
+	utils.CPUDim:   10,
 }
 
 // compareSrcStore compares the source store of detail1, detail2, the result is:
