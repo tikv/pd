@@ -58,7 +58,12 @@ import (
 
 var _ bs.Server = (*Server)(nil)
 
-const serviceName = "Resource Manager"
+const (
+	serviceName = "Resource Manager"
+	// Back off after service-ready callback failures so an unhealthy node does not
+	// churn the primary key with immediate re-campaign attempts.
+	primaryCallbackFailureRetryInterval = time.Second
+)
 
 // Server is the resource manager server, and it implements bs.Server.
 type Server struct {
@@ -180,11 +185,21 @@ func (s *Server) primaryElectionLoop() {
 			continue
 		}
 
-		s.campaignLeader()
+		if s.campaignLeader() {
+			log.Warn("backing off before retrying resource manager primary campaign after callback failure",
+				zap.Duration("retry-after", primaryCallbackFailureRetryInterval))
+			timer := time.NewTimer(primaryCallbackFailureRetryInterval)
+			select {
+			case <-s.serverLoopCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
 	}
 }
 
-func (s *Server) campaignLeader() {
+func (s *Server) campaignLeader() bool {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
@@ -195,7 +210,7 @@ func (s *Server) campaignLeader() {
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}
-		return
+		return false
 	}
 
 	// Start keepalive the leadership and enable Resource Manager service.
@@ -217,7 +232,8 @@ func (s *Server) campaignLeader() {
 			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
 			// Do not promote a half-initialized primary: callback failures mean the
 			// service-ready state was not established, so this campaign must step down.
-			return
+			// The caller will back off before the next campaign attempt.
+			return true
 		}
 	}
 	// Check expected primary and watch the primary.
@@ -226,7 +242,7 @@ func (s *Server) campaignLeader() {
 		s.cfg.LeaderLease, &keypath.MsParam{ServiceName: constant.ResourceManagerServiceName}, s.participant)
 	if err != nil {
 		log.Error("prepare resource manager primary watch error", errs.ZapError(err))
-		return
+		return false
 	}
 	s.participant.SetExpectedPrimaryLease(lease)
 
@@ -242,15 +258,15 @@ func (s *Server) campaignLeader() {
 		case <-leaderTicker.C:
 			if !s.participant.IsServing() {
 				log.Info("no longer a primary/leader because lease has expired, the resource manager primary/leader will step down")
-				return
+				return false
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
-			return
+			return false
 		case <-exitPrimary:
 			log.Info("no longer be primary because primary have been updated, the resource manager primary/leader will step down")
-			return
+			return false
 		}
 	}
 }
