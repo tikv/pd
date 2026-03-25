@@ -166,7 +166,7 @@ func doRequest(cmd *cobra.Command, prefix string, method string, customHeader ht
 		o(b)
 	}
 	var resp string
-	header := buildDirectHeader(cmd, customHeader)
+	header := buildNoProxyHeader(cmd, customHeader)
 
 	endpoints := getEndpoints(cmd)
 	err := tryURLs(cmd, endpoints, func(endpoint string) error {
@@ -182,7 +182,7 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 		o(b)
 	}
 	var resp string
-	header := buildDirectHeader(cmd, customHeader)
+	header := buildNoProxyHeader(cmd, customHeader)
 
 	err := requestURL(cmd, endpoint, func(endpoint string) error {
 		return do(endpoint, prefix, method, &resp, header, b)
@@ -190,7 +190,7 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 	return resp, err
 }
 
-func buildDirectHeader(cmd *cobra.Command, customHeader http.Header) http.Header {
+func buildNoProxyHeader(cmd *cobra.Command, customHeader http.Header) http.Header {
 	header := customHeader.Clone()
 	if header == nil {
 		header = http.Header{}
