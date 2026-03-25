@@ -99,13 +99,7 @@ Before committing, ensure there is a GitHub issue for this dashboard bump.
 
 2. If a matching issue exists, note its number for the PR.
 
-3. If no matching issue exists, create one:
-   ```bash
-   gh issue create --repo tikv/pd \
-     --title "chore(dashboard): update TiDB Dashboard to <version-timestamp>-<short-hash>" \
-     --body "Routine dependency bump: update \`github.com/pingcap/tidb-dashboard\` to \`<full-version>\`."
-   ```
-   Note the created issue number.
+3. If no matching issue exists, use the `create-issue` skill to draft and open one. The issue should use the `development-task` template with a title like `chore(dashboard): update TiDB Dashboard to <version-timestamp>-<short-hash>` and body describing the routine dependency bump. Note the created issue number.
 
 ## Phase 6: Commit and Create PR
 
