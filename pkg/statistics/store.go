@@ -151,10 +151,10 @@ func newRollingStoreStats() *RollingStoreStats {
 	timeMedians[utils.StoreReadBytes] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultReadMfSize, interval)
 	timeMedians[utils.StoreReadKeys] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultReadMfSize, interval)
 	timeMedians[utils.StoreReadQuery] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultReadMfSize, interval)
+	timeMedians[utils.StoreReadCPU] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultReadMfSize, interval)
 	timeMedians[utils.StoreWriteBytes] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultWriteMfSize, interval)
 	timeMedians[utils.StoreWriteKeys] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultWriteMfSize, interval)
 	timeMedians[utils.StoreWriteQuery] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultWriteMfSize, interval)
-	movingAvgs[utils.StoreReadCPU] = movingaverage.NewMedianFilter(storeCPUStatsRollingWindowsSize)
 	movingAvgs[utils.StoreCPUUsage] = movingaverage.NewMedianFilter(storeCPUStatsRollingWindowsSize)
 	movingAvgs[utils.StoreDiskReadRate] = movingaverage.NewMedianFilter(storeStatsRollingWindowsSize)
 	movingAvgs[utils.StoreDiskWriteRate] = movingaverage.NewMedianFilter(storeStatsRollingWindowsSize)
@@ -200,9 +200,10 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.timeMedians[utils.StoreReadBytes].Add(float64(stats.BytesRead), interval)
 	r.timeMedians[utils.StoreReadKeys].Add(float64(stats.KeysRead), interval)
 	r.timeMedians[utils.StoreReadQuery].Add(float64(readQueryNum), interval)
+	readCPUUsage := StoreReadCPUUsage(stats.GetCpuUsages())
+	r.timeMedians[utils.StoreReadCPU].Add(readCPUUsage*interval.Seconds(), interval)
 
 	// Updates the cpu usages and disk rw rates of store.
-	r.movingAvgs[utils.StoreReadCPU].Add(StoreReadCPUUsage(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreCPUUsage].Add(collect(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreDiskReadRate].Add(collect(stats.GetReadIoRates()))
 	r.movingAvgs[utils.StoreDiskWriteRate].Add(collect(stats.GetWriteIoRates()))
@@ -232,7 +233,7 @@ func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
 	r.timeMedians[utils.StoreReadKeys].Set(float64(stats.KeysRead) / interval)
 	r.timeMedians[utils.StoreReadQuery].Set(float64(readQueryNum) / interval)
 	r.timeMedians[utils.StoreWriteQuery].Set(float64(writeQueryNum) / interval)
-	r.movingAvgs[utils.StoreReadCPU].Set(StoreReadCPUUsage(stats.GetCpuUsages()))
+	r.timeMedians[utils.StoreReadCPU].Set(StoreReadCPUUsage(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreCPUUsage].Set(collect(stats.GetCpuUsages()))
 	r.movingAvgs[utils.StoreDiskReadRate].Set(collect(stats.GetReadIoRates()))
 	r.movingAvgs[utils.StoreDiskWriteRate].Set(collect(stats.GetWriteIoRates()))
@@ -251,9 +252,9 @@ func (r *RollingStoreStats) GetLoad(k utils.StoreLoadKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
-	case utils.StoreReadBytes, utils.StoreReadKeys, utils.StoreReadQuery, utils.StoreWriteBytes, utils.StoreWriteKeys, utils.StoreWriteQuery:
+	case utils.StoreReadBytes, utils.StoreReadKeys, utils.StoreReadQuery, utils.StoreReadCPU, utils.StoreWriteBytes, utils.StoreWriteKeys, utils.StoreWriteQuery:
 		return r.timeMedians[k].Get()
-	case utils.StoreReadCPU, utils.StoreCPUUsage, utils.StoreDiskReadRate, utils.StoreDiskWriteRate, utils.StoreRegionsWriteBytes, utils.StoreRegionsWriteKeys:
+	case utils.StoreCPUUsage, utils.StoreDiskReadRate, utils.StoreDiskWriteRate, utils.StoreRegionsWriteBytes, utils.StoreRegionsWriteKeys:
 		return r.movingAvgs[k].Get()
 	}
 	return 0
@@ -264,9 +265,9 @@ func (r *RollingStoreStats) GetInstantLoad(k utils.StoreLoadKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
-	case utils.StoreReadBytes, utils.StoreReadKeys, utils.StoreReadQuery, utils.StoreWriteBytes, utils.StoreWriteKeys, utils.StoreWriteQuery:
+	case utils.StoreReadBytes, utils.StoreReadKeys, utils.StoreReadQuery, utils.StoreReadCPU, utils.StoreWriteBytes, utils.StoreWriteKeys, utils.StoreWriteQuery:
 		return r.timeMedians[k].GetInstantaneous()
-	case utils.StoreReadCPU, utils.StoreCPUUsage, utils.StoreDiskReadRate, utils.StoreDiskWriteRate, utils.StoreRegionsWriteBytes, utils.StoreRegionsWriteKeys:
+	case utils.StoreCPUUsage, utils.StoreDiskReadRate, utils.StoreDiskWriteRate, utils.StoreRegionsWriteBytes, utils.StoreRegionsWriteKeys:
 		return r.movingAvgs[k].GetInstantaneous()
 	}
 	return 0
