@@ -308,12 +308,6 @@ func (c *RaftCluster) InitCluster(
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
-	if c.opt.IsPlacementRulesEnabled() {
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
-		if err != nil {
-			return err
-		}
-	}
 	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
 }
@@ -380,6 +374,16 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	log.Info("[leader-ready] load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
+
+	log.Info("[leader-ready] start to initialize placement rule manager")
+	placementStart := time.Now()
+	if c.opt.IsPlacementRulesEnabled() {
+		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
+		if err != nil {
+			return err
+		}
+	}
+	log.Info("[leader-ready] initialize placement rule manager completed", zap.Duration("cost", time.Since(placementStart)))
 
 	log.Info("[leader-ready] creating region labeler")
 	labelerStart := time.Now()

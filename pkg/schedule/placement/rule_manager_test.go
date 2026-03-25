@@ -492,6 +492,48 @@ func TestCacheManager(t *testing.T) {
 	re.False(manager.IsRegionFitCached(stores, region))
 }
 
+func TestLoadRuleWithoutAdjust(t *testing.T) {
+	re := require.New(t)
+	infos := core.NewStoresInfo()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"zone": "zone1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"zone": "zone2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"zone": "zone3"})
+	for _, s := range []*core.StoreInfo{store1, store2, store3} {
+		infos.PutStore(s)
+	}
+	manager := NewRuleManager(context.Background(), store, infos, nil)
+	rule := &Rule{
+		GroupID: "g1",
+		ID:      "id",
+		Role:    Voter,
+		Count:   3,
+		LabelConstraints: []LabelConstraint{
+			{Key: "zone", Op: "in", Values: []string{"zone1"}},
+		},
+	}
+	re.NoError(manager.AdjustRule(rule, "g1"))
+	re.NoError(manager.SetRule(rule))
+
+	labels := []*metapb.StoreLabel{
+		{
+			Key:   "zone",
+			Value: "zone99",
+		},
+	}
+	for i, s := range []*core.StoreInfo{store1, store2, store3} {
+		s := s.Clone(core.SetStoreLabels(labels))
+		infos.PutStore(s)
+		re.Equal("zone99", infos.GetStore(uint64(i+1)).GetLabelValue("zone"))
+	}
+
+	// The rule should still be loaded successfully even if it cannot match any store.
+	// It is possible that the rule is set before the store is registered, and the store is registered later.
+	manager.ruleConfig = newRuleConfig()
+	re.NoError(manager.loadRules())
+	re.NotEmpty(manager.ruleConfig.rules)
+}
+
 func dhex(hk string) []byte {
 	k, err := hex.DecodeString(hk)
 	if err != nil {

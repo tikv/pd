@@ -175,7 +175,7 @@ func (m *RuleManager) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
-		err = m.AdjustRule(r, "")
+		err = m.Validate(r, "")
 		if err != nil {
 			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
@@ -225,8 +225,8 @@ func (m *RuleManager) loadGroups() error {
 	})
 }
 
-// AdjustRule check and adjust rule from client or storage.
-func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
+// Validate without store check, used by load rules.
+func (m *RuleManager) Validate(r *Rule, groupID string) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
@@ -286,6 +286,14 @@ func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
 		}
 	}
 
+	return nil
+}
+
+// AdjustRule check and adjust rule from client or storage, add store check.
+func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
+	if err = m.Validate(r, groupID); err != nil {
+		return err
+	}
 	if m.storeSetInformer != nil {
 		stores := m.storeSetInformer.GetStores()
 		if len(stores) > 0 && !checkRule(r, stores) {
