@@ -61,6 +61,13 @@ var (
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+	activeRequestUnitCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "active_request_unit_sum",
+			Help:      "Counter of the active request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 
 	// RUv2 metrics (experimental v2 RU calculation, recording only).
 	requestUnitV2Cost = prometheus.NewCounterVec(
@@ -222,6 +229,7 @@ func init() {
 	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(activeRequestUnitCost)
 	prometheus.MustRegister(requestUnitV2Cost)
 	prometheus.MustRegister(tikvRequestUnitV2Cost)
 	prometheus.MustRegister(tidbRequestUnitV2Cost)
@@ -242,6 +250,26 @@ func init() {
 	prometheus.MustRegister(resourceUnitServiceLimit)
 	prometheus.MustRegister(syncLoadGroupCounter)
 	prometheus.MustRegister(asyncLoadGroupDuration)
+}
+
+func calculateSQLRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig) float64 {
+	if consumption == nil || controllerConfig == nil {
+		return 0
+	}
+	if consumption.TotalCpuTimeMs <= 0 || consumption.SqlLayerCpuTimeMs <= 0 {
+		return 0
+	}
+	return consumption.SqlLayerCpuTimeMs * controllerConfig.RequestUnit.CPUMsCost
+}
+
+func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) float64 {
+	if consumption == nil {
+		return 0
+	}
+	if controllerConfig.getKeyspaceRUVersion(keyspaceID) == RUVersionV2 {
+		return consumption.TikvRUV2 + consumption.TidbRUV2 + consumption.TiflashRUV2
+	}
+	return consumption.RRU + consumption.WRU + calculateSQLRU(consumption, controllerConfig)
 }
 
 func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireTokenBucketsServer) rmpb.ResourceManager_AcquireTokenBucketsServer {

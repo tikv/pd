@@ -183,6 +183,7 @@ func TestAsyncLoadingWith(t *testing.T) {
 		loadingState:     LoadingStateNotStarted,
 		syncLoadedGroups: make(map[string]bool),
 		consumptionDispatcher: make(chan struct {
+			keyspaceID        uint32
 			resourceGroupName string
 			*resource_manager.Consumption
 			isBackground bool

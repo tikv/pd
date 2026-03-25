@@ -71,6 +71,7 @@ type Manager struct {
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
+		keyspaceID        uint32
 		resourceGroupName string
 		*rmpb.Consumption
 		isBackground bool
@@ -114,6 +115,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 		controllerConfig: srv.(T).GetControllerConfig(),
 		groups:           make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
+			keyspaceID        uint32
 			resourceGroupName string
 			*rmpb.Consumption
 			isBackground bool
@@ -693,6 +695,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
 			name := consumptionInfo.resourceGroupName
+			keyspaceID := consumptionInfo.keyspaceID
 			ruLabelType := defaultTypeLabel
 			if consumptionInfo.isBackground {
 				ruLabelType = backgroundTypeLabel
@@ -711,6 +714,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			var (
 				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType)
 				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
+				activeRUMetrics          = activeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
 				totalRUV2Metrics         = requestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
 				tikvRUV2Metrics          = tikvRequestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
 				tidbRUV2Metrics          = tidbRequestUnitV2Cost.WithLabelValues(name, name, ruLabelType)
@@ -743,6 +747,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			}
 			if consumption.WRU > 0 {
 				wruMetrics.Add(consumption.WRU)
+			}
+			if activeRU := calculateActiveRU(consumption, m.controllerConfig, keyspaceID); activeRU > 0 {
+				activeRUMetrics.Add(activeRU)
 			}
 			if consumption.TikvRUV2 > 0 {
 				tikvRUV2Metrics.Add(consumption.TikvRUV2)
@@ -795,11 +802,12 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 			for _, r := range m.getInactiveResourceGroups() {
 				readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				activeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				requestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
 				tikvRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
 				tidbRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
 				tiflashRequestUnitV2Cost.DeleteLabelValues(r.name, r.name, r.ruType)
-				sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+				sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name)
 				readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
 				kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
@@ -867,6 +875,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr st
 				Grouping("pod", podName).
 				Collector(readRequestUnitCost).
 				Collector(writeRequestUnitCost).
+				Collector(activeRequestUnitCost).
 				Collector(requestUnitV2Cost).
 				Collector(tikvRequestUnitV2Cost).
 				Collector(tidbRequestUnitV2Cost).

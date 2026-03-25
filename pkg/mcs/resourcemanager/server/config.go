@@ -144,6 +144,19 @@ type RUVersionPolicy struct {
 	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
 }
 
+func (p *RUVersionPolicy) getKeyspaceRUVersion(keyspaceID uint32) RUVersion {
+	if p == nil {
+		return DefaultRUVersion
+	}
+	if version, ok := p.Overrides[keyspaceID]; ok {
+		return version
+	}
+	if p.Default > 0 {
+		return p.Default
+	}
+	return DefaultRUVersion
+}
+
 // validate checks that all RU version values in the policy are positive.
 func (p *RUVersionPolicy) validate() error {
 	if p == nil {
@@ -173,6 +186,13 @@ func (p *RUVersionPolicy) Clone() *RUVersionPolicy {
 		}
 	}
 	return clone
+}
+
+func (rmc *ControllerConfig) getKeyspaceRUVersion(keyspaceID uint32) RUVersion {
+	if rmc == nil {
+		return DefaultRUVersion
+	}
+	return rmc.RUVersionPolicy.getKeyspaceRUVersion(keyspaceID)
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.

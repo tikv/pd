@@ -75,6 +75,7 @@ func prepareTestManager() *Manager {
 		loadingState:     LoadingStateNotStarted,
 		syncLoadedGroups: make(map[string]bool),
 		consumptionDispatcher: make(chan struct {
+			keyspaceID        uint32
 			resourceGroupName string
 			*rmpb.Consumption
 			isBackground bool

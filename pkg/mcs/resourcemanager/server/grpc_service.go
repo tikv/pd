@@ -188,6 +188,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
+			keyspaceID := ExtractKeyspaceID(resourceGroupName)
 			// Get the resource group from manager to acquire token buckets.
 			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
 			if rg == nil {
@@ -201,11 +202,12 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				return errors.New("background and tiflash cannot be true at the same time")
 			}
 			s.manager.consumptionDispatcher <- struct {
+				keyspaceID        uint32
 				resourceGroupName string
 				*rmpb.Consumption
 				isBackground bool
 				isTiFlash    bool
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
+			}{keyspaceID, resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
 			if isBackground {
 				continue
 			}
