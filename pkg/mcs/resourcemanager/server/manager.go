@@ -732,7 +732,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				continue
 			}
 			failpoint.Inject("github.com/tikv/pd/pkg/mcs/resourcemanager/server/delayConsume", func(val failpoint.Value) {
-				time.Sleep(time.Duration(val.(int)) * time.Millisecond)
+				time.Sleep(time.Duration(val.(int) * int(time.Millisecond)))
 			})
 			keyspaceID := consumptionInfo.keyspaceID
 			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
