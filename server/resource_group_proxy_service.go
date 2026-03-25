@@ -87,7 +87,9 @@ func (s *resourceGroupProxyServer) ListResourceGroups(ctx context.Context, req *
 	}
 	resp, err := client.ListResourceGroups(ctx, req)
 	if err != nil {
-		s.closeClient(ctx)
+		if grpcutil.NeedRebuildConnection(err) {
+			s.closeClient(ctx)
+		}
 		return nil, err
 	}
 	return resp, nil
@@ -101,7 +103,9 @@ func (s *resourceGroupProxyServer) GetResourceGroup(ctx context.Context, req *re
 	}
 	resp, err := client.GetResourceGroup(ctx, req)
 	if err != nil {
-		s.closeClient(ctx)
+		if grpcutil.NeedRebuildConnection(err) {
+			s.closeClient(ctx)
+		}
 		return nil, err
 	}
 	return resp, nil
@@ -119,7 +123,9 @@ func (s *resourceGroupProxyServer) AddResourceGroup(ctx context.Context, req *re
 	if delegateClient != nil {
 		resp, err := delegateClient.AddResourceGroup(grpcutil.ResetForwardContext(ctx), req)
 		if err != nil {
-			s.closeDelegateClient(forwardedHost)
+			if grpcutil.NeedRebuildConnection(err) {
+				s.closeDelegateClient(forwardedHost)
+			}
 			return nil, err
 		}
 		return resp, nil
@@ -145,7 +151,9 @@ func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req 
 	if delegateClient != nil {
 		resp, err := delegateClient.ModifyResourceGroup(grpcutil.ResetForwardContext(ctx), req)
 		if err != nil {
-			s.closeDelegateClient(forwardedHost)
+			if grpcutil.NeedRebuildConnection(err) {
+				s.closeDelegateClient(forwardedHost)
+			}
 			return nil, err
 		}
 		return resp, nil
@@ -171,7 +179,9 @@ func (s *resourceGroupProxyServer) DeleteResourceGroup(ctx context.Context, req 
 	if delegateClient != nil {
 		resp, err := delegateClient.DeleteResourceGroup(grpcutil.ResetForwardContext(ctx), req)
 		if err != nil {
-			s.closeDelegateClient(forwardedHost)
+			if grpcutil.NeedRebuildConnection(err) {
+				s.closeDelegateClient(forwardedHost)
+			}
 			return nil, err
 		}
 		return resp, nil
