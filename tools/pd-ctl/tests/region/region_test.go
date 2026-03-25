@@ -552,13 +552,13 @@ func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
 	}()
 	for _, server := range cluster.GetServers() {
 		serverAddr := server.GetAddr()
-		// leader reject any region info request with --direct, followers should work normally.
+		// leader reject any region info request with --no-forward, followers should work normally.
 		if serverAddr == pdAddr {
-			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--direct")
+			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
 			re.NoError(err)
 			re.Contains(string(output), "Failed to get region")
 		} else {
-			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--direct")
+			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
 			re.NoError(err)
 			outputStr := string(output)
 			re.True(strings.Contains(outputStr, "\"id\":100") || strings.Contains(outputStr, "TiKV cluster not bootstrapped"), outputStr)

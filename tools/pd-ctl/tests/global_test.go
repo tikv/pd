@@ -87,7 +87,7 @@ func TestSendAndGetComponent(t *testing.T) {
 	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
 }
 
-func TestRegionDirectHeader(t *testing.T) {
+func TestRegionNoProxyHeader(t *testing.T) {
 	re := require.New(t)
 	var (
 		mu    sync.Mutex
@@ -126,17 +126,17 @@ func TestRegionDirectHeader(t *testing.T) {
 	re.NoError(err)
 	re.Equal(0, count)
 
-	// PD-Allow-follower-handle is only added when --direct=true.
-	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct")
+	// PD-Allow-follower-handle is only added when --no-forward=true.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward")
 	re.NoError(err)
 	re.Equal(1, count)
 
-	// --direct=false should not add PD-Allow-follower-handle.
-	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=false")
+	// --no-forward=false should not add PD-Allow-follower-handle.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward=false")
 	re.NoError(err)
 	re.Equal(1, count)
 
-	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--direct=true")
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward=true")
 	re.NoError(err)
 	re.Equal(2, count)
 }

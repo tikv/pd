@@ -144,7 +144,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(scanRegion)
 
 	r.Flags().String("jq", "", "jq query")
-	r.PersistentFlags().Bool("direct", false, "direct request to the endpoint instead of forwarding by PD leader if the flag exists")
+	r.PersistentFlags().Bool("no-forward", false, "direct request to the endpoint instead of forwarding by PD leader if the flag exists")
 
 	return r
 }
