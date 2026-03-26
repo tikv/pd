@@ -335,8 +335,99 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 			return false
 		}
 	}
+	bs.logHotOperatorSnapshot()
 	bs.logBestSolution()
 	return true
+}
+
+func hotOperatorLoadFields(prefix string, loads []float64) []zap.Field {
+	byteLoad, queryLoad, cpuLoad := 0.0, 0.0, 0.0
+	if len(loads) > utils.ByteDim {
+		byteLoad = loads[utils.ByteDim]
+	}
+	if len(loads) > utils.QueryDim {
+		queryLoad = loads[utils.QueryDim]
+	}
+	if len(loads) > utils.CPUDim {
+		cpuLoad = loads[utils.CPUDim]
+	}
+	return []zap.Field{
+		zap.Float64(prefix+"-byte", byteLoad),
+		zap.Float64(prefix+"-query", queryLoad),
+		zap.Float64(prefix+"-cpu", cpuLoad),
+	}
+}
+
+func hotOperatorPeerFields(prefix string, peer *statistics.HotPeerStat) []zap.Field {
+	if peer == nil {
+		return nil
+	}
+	loads := peer.GetLoads()
+	fields := []zap.Field{
+		zap.Uint64(prefix+"-store", peer.StoreID),
+		zap.Uint64(prefix+"-region", peer.RegionID),
+		zap.Int(prefix+"-hot-degree", peer.HotDegree),
+		zap.Int(prefix+"-anti-count", peer.AntiCount),
+		zap.Bool(prefix+"-is-leader", peer.IsLeader()),
+	}
+	return append(fields, hotOperatorLoadFields(prefix, loads)...)
+}
+
+func hotOperatorStoreSummaryFields(prefix string, summary *statistics.HotPeersStat) []zap.Field {
+	if summary == nil {
+		return nil
+	}
+	return []zap.Field{
+		zap.Int(prefix+"-hot-peer-count", summary.Count),
+		zap.Float64(prefix+"-store-byte", summary.StoreByteRate),
+		zap.Float64(prefix+"-store-query", summary.StoreQueryRate),
+		zap.Float64(prefix+"-store-cpu", summary.StoreCPURate),
+		zap.Float64(prefix+"-total-hot-byte", summary.TotalBytesRate),
+		zap.Float64(prefix+"-total-hot-query", summary.TotalQueryRate),
+		zap.Float64(prefix+"-total-hot-cpu", summary.TotalCPURate),
+	}
+}
+
+func (bs *balanceSolver) logHotOperatorSnapshot() {
+	if bs.best == nil || len(bs.ops) == 0 || bs.best.mainPeerStat == nil || bs.best.srcStore == nil || bs.best.dstStore == nil {
+		return
+	}
+
+	srcSummary := bs.best.srcStore.ToHotPeersStat()
+	dstSummary := bs.best.dstStore.ToHotPeersStat()
+	fields := []zap.Field{
+		zap.Stringer("rw-type", bs.rwTy),
+		zap.Stringer("op-type", bs.opTy),
+		zap.Stringer("resource-type", bs.resourceTy),
+		zap.String("dim", bs.rankToDimString()),
+		zap.Int64("progressive-rank", bs.best.progressiveRank),
+		zap.Bool("search-revert-regions", bs.sche.searchRevertRegions[bs.resourceTy]),
+		zap.Uint64("src-store", bs.best.srcStore.GetID()),
+		zap.Uint64("dst-store", bs.best.dstStore.GetID()),
+		zap.Uint64("region-id", bs.best.region.GetID()),
+		zap.Bool("has-revert-region", bs.best.revertRegion != nil),
+	}
+	if bs.best.revertRegion != nil {
+		fields = append(fields, zap.Uint64("revert-region-id", bs.best.revertRegion.GetID()))
+	}
+	fields = append(fields, hotOperatorPeerFields("main-peer", bs.best.mainPeerStat)...)
+	fields = append(fields, hotOperatorPeerFields("revert-peer", bs.best.revertPeerStat)...)
+	fields = append(fields, hotOperatorLoadFields("src-current", bs.best.srcStore.LoadPred.Current.Loads[:])...)
+	fields = append(fields, hotOperatorLoadFields("dst-current", bs.best.dstStore.LoadPred.Current.Loads[:])...)
+	fields = append(fields, hotOperatorLoadFields("src-pending", bs.best.srcStore.LoadPred.Pending().Loads[:])...)
+	fields = append(fields, hotOperatorLoadFields("dst-pending", bs.best.dstStore.LoadPred.Pending().Loads[:])...)
+	fields = append(fields, hotOperatorLoadFields("src-future", bs.best.srcStore.LoadPred.Future.Loads[:])...)
+	fields = append(fields, hotOperatorLoadFields("dst-future", bs.best.dstStore.LoadPred.Future.Loads[:])...)
+	fields = append(fields, hotOperatorStoreSummaryFields("src-summary", srcSummary)...)
+	fields = append(fields, hotOperatorStoreSummaryFields("dst-summary", dstSummary)...)
+	if len(bs.ops) > 0 {
+		fields = append(fields, zap.String("operator-0", bs.ops[0].Desc()))
+	}
+	if len(bs.ops) > 1 {
+		fields = append(fields, zap.String("operator-1", bs.ops[1].Desc()))
+	}
+
+	log.Info("dispatch hot operator snapshot", fields...)
 }
 
 func (bs *balanceSolver) collectPendingInfluence(peer *statistics.HotPeerStat) statistics.Influence {
