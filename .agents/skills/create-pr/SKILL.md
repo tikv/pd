@@ -97,7 +97,7 @@ If the push or PR creation fails:
 - **Always show the PR content before submitting.** User must approve title and body.
 - **Use `gh` CLI for GitHub operations.** Do not guess API URLs.
 - **Follow PD commit conventions.** `pkg: message` format for title, subject ≤70 chars, body wrapped at 80 chars.
-- **Preserve language specifiers.** Always use `commit-message` (not generic code blocks) — the PD merge bot extracts this for the final commit. Stripping the specifier breaks DSO compliance.
+- **Preserve language specifiers.** Always use `commit-message` (not generic code blocks) — the PD merge bot extracts this for the final commit. Stripping the specifier breaks DCO compliance.
 - **Enforce commit requirements.** Verify and fix DCO sign-offs, message format, and length limits per the canonical "CRITICAL COMMIT REQUIREMENTS" section before pushing. DCO requires human developer attestation; never use agent identity.
 - **Do not modify code.** This skill only pushes and creates PRs.
 - **Ask for issue number if unknown.** Do not invent issue references.
