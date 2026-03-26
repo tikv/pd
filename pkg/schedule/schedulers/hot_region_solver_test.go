@@ -225,6 +225,47 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	checkSortResult(re, []uint64{1}, u)
 }
 
+func TestFilterHotPeersWithDecisions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
+	cpuLeaderSolver.maxPeerNum = 1
+	hb.regionPendings[1] = &pendingInfluence{}
+
+	hotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			utils.QueryDim: 1,
+			utils.ByteDim:  1,
+			utils.CPUDim:   30,
+		},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			utils.QueryDim: 100,
+			utils.ByteDim:  1,
+			utils.CPUDim:   5,
+		},
+	}}
+
+	filtered, decisions := cpuLeaderSolver.filterHotPeersWithDecisions(&statistics.StoreLoadDetail{HotPeers: hotPeers})
+	re.Empty(filtered)
+	re.Len(decisions, 2)
+
+	reasons := make(map[uint64]hotPeerFilterReason, len(decisions))
+	for _, decision := range decisions {
+		reasons[decision.peer.RegionID] = decision.reason
+	}
+	re.Equal(hotPeerFilterPending, reasons[1])
+	re.Equal(hotPeerFilterTopN, reasons[2])
+}
+
 func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
 	re.Len(hotPeers, len(regions))
 	for _, region := range regions {
