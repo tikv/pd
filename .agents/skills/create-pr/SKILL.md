@@ -27,23 +27,22 @@ Collect all information needed to fill the PR template. Run these in parallel:
 4. `git diff master...HEAD --stat` — summary of changed files.
 5. `git diff master...HEAD` — full diff for analysis.
 6. `git log master..HEAD --format="FULL BODY:%n%s%n%b"` — check each commit for **DCO sign-off**.
+7. `make check` — run tidy + static + generate-errdoc; gate PR creation on success.
+
+**Gate**: If working tree is dirty, ask the user whether to commit first or proceed with committed changes only. If on `master`, stop and ask the user to create a branch.
 
 **CRITICAL COMMIT REQUIREMENTS** (per CONTRIBUTING.md):
 
-Automatically verify and fix commit requirements before pushing:
+Verify and fix commit requirements before pushing. These checks apply to all commits in the range `master..HEAD`:
 
 - ✅ **Signed-off-by line**: Every commit MUST have `Signed-off-by: Author <email>` matching the commit author (the human developer)
-  - Check with: `git log master..HEAD --invert-grep --grep="Signed-off-by:" --pretty=oneline` (any output here indicates commits missing sign-off)
-  - **Fix (requires confirmation)**: If missing, prompt user, then run `git rebase --signoff master` to add sign-offs to all commits
-  - **CRITICAL**: Never use agent identity in Signed-off-by; DCO requires human developer attestation
+  - Check: `git log master..HEAD --invert-grep --grep="Signed-off-by:" --pretty=oneline`
+  - Fix: Prompt user for confirmation, then run `git rebase --signoff master`
+  - **CRITICAL**: DCO requires human developer attestation; never use agent identity in Signed-off-by
 - ✅ **Subject line ≤70 chars**: PR title / final commit subject must be ≤70 characters
 - ✅ **Commit message format**: `pkg: message` or `pkg1, pkg2: message` or `*: message`
 - ✅ **Body wrapped at 80 chars**: Commit message body lines must wrap at 80 characters
 - ✅ **Body describes why and how**: Not just "what changed" — explain the rationale
-
-**Gate**: If working tree is dirty, ask the user whether to commit first or proceed with committed changes only. If on `master`, stop and ask the user to create a branch.
-
-**Fix DCO sign-offs**: If any commit lacks `Signed-off-by`, prompt user for confirmation, then run `git rebase --signoff master` to add sign-offs to all commits. This rewrites commit hashes and preserves commit content while adding the required DCO line.
 
 ## Phase 2: Compose PR Content
 
@@ -66,6 +65,8 @@ Automatically verify and fix commit requirements before pushing:
 5. Show the composed PR title and full body to the user for review **before** creating the PR. Ask if any section needs adjustment (especially the issue number).
 
 ## Phase 3: Push and Create PR
+
+**Gate**: Verify `make check` passed in Phase 1 before proceeding. If it failed, do not push or create the PR.
 
 After user approval:
 
@@ -97,6 +98,6 @@ If the push or PR creation fails:
 - **Use `gh` CLI for GitHub operations.** Do not guess API URLs.
 - **Follow PD commit conventions.** `pkg: message` format for title, subject ≤70 chars, body wrapped at 80 chars.
 - **Preserve language specifiers.** Always use `commit-message` (not generic code blocks) — the PD merge bot extracts this for the final commit. Stripping the specifier breaks DSO compliance.
-- **Fix DCO sign-offs.** Prompt user for confirmation, then run `git rebase --signoff master` if commits lack `Signed-off-by`. This rewrites commit hashes and preserves commit content while adding the required DCO line. **CRITICAL**: The Signed-off-by must match the commit author (the human developer), never the agent.
+- **Enforce commit requirements.** Verify and fix DCO sign-offs, message format, and length limits per the canonical "CRITICAL COMMIT REQUIREMENTS" section before pushing. DCO requires human developer attestation; never use agent identity.
 - **Do not modify code.** This skill only pushes and creates PRs.
 - **Ask for issue number if unknown.** Do not invent issue references.
