@@ -378,7 +378,7 @@ func TestMaxZombieDuration(t *testing.T) {
 	}
 }
 
-func TestFilterSrcStoresReadCPUBytePendingCap(t *testing.T) {
+func TestFilterSrcStoresReadCPUByteHeartbeatEpochCap(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -388,7 +388,7 @@ func TestFilterSrcStoresReadCPUBytePendingCap(t *testing.T) {
 	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
 	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
 
-	store := core.NewStoreInfoWithLabel(1, map[string]string{})
+	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute)))
 	src := &statistics.StoreLoadDetail{
 		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
 		LoadPred: &statistics.StoreLoadPred{
@@ -419,11 +419,129 @@ func TestFilterSrcStoresReadCPUBytePendingCap(t *testing.T) {
 
 	re.Len(bs.filterSrcStores(), 1)
 
-	hb.regionPendings[1] = &pendingInfluence{froms: []uint64{1}}
-	re.Len(bs.filterSrcStores(), 1)
-
-	hb.regionPendings[2] = &pendingInfluence{froms: []uint64{1}}
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpHotRegion|operator.OpLeader, operator.TransferLeader{FromStore: 1, ToStore: 2})
+	hb.regionPendings[1] = &pendingInfluence{op: op, froms: []uint64{1}}
 	re.Empty(bs.filterSrcStores())
+
+	src.StoreSummaryInfo.StoreInfo = src.StoreSummaryInfo.StoreInfo.Clone(core.SetLastHeartbeatTS(op.GetCreateTime().Add(time.Second)))
+	re.Len(bs.filterSrcStores(), 1)
+}
+
+func TestReadCPUDstPrefilter(t *testing.T) {
+	re := require.New(t)
+
+	newDetail := func(id uint64, current, future, expect statistics.Loads) *statistics.StoreLoadDetail {
+		return &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{})},
+			LoadPred: &statistics.StoreLoadPred{
+				Current: statistics.StoreLoad{Loads: current},
+				Future:  statistics.StoreLoad{Loads: future},
+				Expect:  statistics.StoreLoad{Loads: expect},
+			},
+		}
+	}
+
+	candidate := newDetail(
+		2,
+		statistics.Loads{10, 10, 10, 90},
+		statistics.Loads{10, 10, 10, 100},
+		statistics.Loads{100, 100, 100, 100},
+	)
+
+	testCases := []struct {
+		name           string
+		firstPriority  int
+		secondPriority int
+		expectPicked   bool
+	}{
+		{
+			name:           "read cpu-byte rejects dst when future cpu reaches expect",
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.ByteDim,
+			expectPicked:   false,
+		},
+		{
+			name:           "non cpu-byte path keeps existing anyof dst admission",
+			firstPriority:  utils.QueryDim,
+			secondPriority: utils.ByteDim,
+			expectPicked:   true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		bs := &balanceSolver{
+			rwTy:           utils.Read,
+			resourceTy:     readPeer,
+			firstPriority:  testCase.firstPriority,
+			secondPriority: testCase.secondPriority,
+		}
+		bs.rank = initRankV2(bs)
+		re.True(bs.checkDstByPriorityAndTolerance(candidate.LoadPred.Max(), &candidate.LoadPred.Expect, 1.0), testCase.name)
+		re.Equal(testCase.expectPicked, !bs.shouldRejectReadCPUDst(candidate), testCase.name)
+	}
+}
+
+func TestReadCPUDstHistoryPrefilter(t *testing.T) {
+	re := require.New(t)
+
+	candidate := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{})},
+		LoadPred: &statistics.StoreLoadPred{
+			Current: statistics.StoreLoad{
+				Loads: statistics.Loads{10, 10, 10, 90},
+				HistoryLoads: statistics.HistoryLoads{
+					{1, 1},
+					{1, 1},
+					{1, 1},
+					{105, 95},
+				},
+			},
+			Future: statistics.StoreLoad{
+				Loads: statistics.Loads{10, 10, 10, 90},
+			},
+			Expect: statistics.StoreLoad{
+				Loads: statistics.Loads{100, 100, 100, 100},
+				HistoryLoads: statistics.HistoryLoads{
+					{100, 100},
+					{100, 100},
+					{100, 100},
+					{100, 100},
+				},
+			},
+		},
+	}
+
+	testCases := []struct {
+		name           string
+		firstPriority  int
+		secondPriority int
+		expectPicked   bool
+	}{
+		{
+			name:           "read cpu-byte rejects dst history when cpu history reaches expect",
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.ByteDim,
+			expectPicked:   false,
+		},
+		{
+			name:           "non cpu-byte path keeps existing anyof dst history admission",
+			firstPriority:  utils.QueryDim,
+			secondPriority: utils.ByteDim,
+			expectPicked:   true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		bs := &balanceSolver{
+			rwTy:           utils.Read,
+			resourceTy:     readPeer,
+			firstPriority:  testCase.firstPriority,
+			secondPriority: testCase.secondPriority,
+		}
+		bs.rank = initRankV2(bs)
+		re.True(bs.checkDstHistoryLoadsByPriorityAndTolerance(&candidate.LoadPred.Current, &candidate.LoadPred.Expect, 1.0), testCase.name)
+		re.Equal(testCase.expectPicked, !bs.shouldRejectReadCPUDstHistory(candidate), testCase.name)
+	}
 }
 
 func TestExpect(t *testing.T) {

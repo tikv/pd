@@ -423,7 +423,7 @@ type hotPeerFilterReason string
 
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
-	readCPUByteMaxPendingOpsPerSrc                                   = 2
+	readCPUByteMaxPendingOpsPerSrcHeartbeatEpoch                     = 1
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
 	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
@@ -500,6 +500,43 @@ func (bs *balanceSolver) sourceLoadForQualification(detail *statistics.StoreLoad
 		return nil
 	}
 	return detail.LoadPred.Min()
+}
+
+func (bs *balanceSolver) shouldRejectReadCPUDst(detail *statistics.StoreLoadDetail) bool {
+	if !bs.isReadCPUByte() || detail == nil || detail.LoadPred == nil {
+		return false
+	}
+	return detail.LoadPred.Future.Loads[utils.CPUDim] >= detail.LoadPred.Expect.Loads[utils.CPUDim]
+}
+
+func (bs *balanceSolver) shouldRejectReadCPUDstHistory(detail *statistics.StoreLoadDetail) bool {
+	if !bs.isReadCPUByte() || detail == nil || detail.LoadPred == nil {
+		return false
+	}
+	current := detail.LoadPred.Current.HistoryLoads
+	expect := detail.LoadPred.Expect.HistoryLoads
+	if len(current) <= utils.CPUDim || len(expect) <= utils.CPUDim {
+		return false
+	}
+	cpuCurrentHistory := current[utils.CPUDim]
+	cpuExpectHistory := expect[utils.CPUDim]
+	if len(cpuCurrentHistory) == 0 || len(cpuCurrentHistory) != len(cpuExpectHistory) {
+		return false
+	}
+	return slice.AnyOf(cpuCurrentHistory, func(i int) bool {
+		return cpuCurrentHistory[i] >= cpuExpectHistory[i]
+	})
+}
+
+func (bs *balanceSolver) shouldThrottleReadCPUSrcByHeartbeatEpoch(detail *statistics.StoreLoadDetail) bool {
+	if !bs.isReadCPUByte() || detail == nil || detail.StoreSummaryInfo == nil || detail.StoreInfo == nil {
+		return false
+	}
+	lastHeartbeatTS := detail.GetLastHeartbeatTS()
+	if lastHeartbeatTS.IsZero() {
+		return false
+	}
+	return bs.countPendingOpsFromStoreSince(detail.GetID(), lastHeartbeatTS) >= readCPUByteMaxPendingOpsPerSrcHeartbeatEpoch
 }
 
 func (bs *balanceSolver) logHotOperatorSnapshot() {
@@ -615,8 +652,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if bs.isReadCPUByte() && bs.countPendingOpsFromStore(id) >= readCPUByteMaxPendingOpsPerSrc {
-			hotSchedulerResultCounter.WithLabelValues("src-store-pending-cap-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+		if bs.shouldThrottleReadCPUSrcByHeartbeatEpoch(detail) {
+			hotSchedulerResultCounter.WithLabelValues("src-store-heartbeat-epoch-cap-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 
@@ -922,8 +959,16 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 		if filter.Target(bs.GetSchedulerConfig(), store, filters) {
 			id := store.GetID()
+			if bs.shouldRejectReadCPUDst(detail) {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-cpu-prefilter-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				continue
+			}
 			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				continue
+			}
+			if bs.shouldRejectReadCPUDstHistory(detail) {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-history-cpu-prefilter-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
 			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
@@ -1029,10 +1074,13 @@ func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
-// countPendingOpsFromStore counts how many pending ops originate from the given store.
-func (bs *balanceSolver) countPendingOpsFromStore(storeID uint64) int {
+// countPendingOpsFromStoreSince counts pending ops emitted by the given source store after the specified store heartbeat.
+func (bs *balanceSolver) countPendingOpsFromStoreSince(storeID uint64, since time.Time) int {
 	count := 0
 	for _, p := range bs.sche.regionPendings {
+		if p == nil || p.op == nil || p.op.GetCreateTime().Before(since) {
+			continue
+		}
 		for _, from := range p.froms {
 			if from == storeID {
 				count++
