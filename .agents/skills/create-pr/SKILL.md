@@ -33,10 +33,10 @@ Collect all information needed to fill the PR template. Run these in parallel:
 Automatically verify and fix commit requirements before pushing:
 
 - ✅ **Signed-off-by line**: Every commit MUST have `Signed-off-by: Author <email>`
-  - Check with: `git log master..HEAD --grep="Signed-off-by"`
+  - Check with: `git log master..HEAD --invert-grep --grep="Signed-off-by:" --pretty=oneline` (any output here indicates commits missing sign-off)
   - **Auto-fix**: If missing, automatically run `git rebase --signoff master` to add sign-offs to all commits
-- ✅ **Subject line ≤70 chars**: PR title (derived from first commit subject) must be ≤70 characters
-- ✅ **Commit message format**: `pkg: message` or `pkg1,pkg2: message` or `*: message`
+- ✅ **Subject line ≤70 chars**: PR title / final commit subject must be ≤70 characters
+- ✅ **Commit message format**: `pkg: message` or `pkg1, pkg2: message` or `*: message`
 - ✅ **Body wrapped at 80 chars**: Commit message body lines must wrap at 80 characters
 - ✅ **Body describes why and how**: Not just "what changed" — explain the rationale
 
@@ -51,7 +51,7 @@ Automatically verify and fix commit requirements before pushing:
 1. Following the filling guidelines in `references/pr-template.md`, compose the PR title and fill every section of the PR body template.
 2. **PR Title Requirements** (per CONTRIBUTING.md):
    - Maximum **70 characters** (enforced by bot)
-   - Format: `<package>: message` or `<pkg1>,<pkg2>: message` or `*: message`
+   - Format: `<package>: message` or `<pkg1>, <pkg2>: message` or `*: message`
    - Examples:
      - `server: fix race condition in leader election`
      - `pd-client, scheduling: improve region split handling`
