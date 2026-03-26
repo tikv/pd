@@ -252,6 +252,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 					if tokens == nil {
 						continue
 					}
+					if keyspaceName, err := s.manager.getKeyspaceNameByID(s.ctx, keyspaceID); err == nil {
+						observeTokenGrant(rg.Name, keyspaceName, tokens)
+					}
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
 			case rmpb.GroupMode_RawMode:
