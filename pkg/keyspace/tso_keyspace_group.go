@@ -338,38 +338,47 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 	return kg, nil
 }
 
-// saveKeyspaceGroups will try to save the given keyspace groups into the storage.
-// If any keyspace group already exists and `overwrite` is false, it will return ErrKeyspaceGroupExists.
-func (m *GroupManager) saveKeyspaceGroupsTxnOp(keyspaceGroups []*endpoint.KeyspaceGroup, overwrite bool) txnOp {
+// saveKeyspaceGroupTxnOp will try to save the given keyspace group into the storage.
+func (m *GroupManager) saveKeyspaceGroupTxnOp(groupID uint32, keyspaceID uint32, mutation int) txnOp {
 	return func(txn kv.Txn) error {
-		for _, keyspaceGroup := range keyspaceGroups {
-			// Check if keyspace group has already existed.
-			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
-			if err != nil {
-				return err
+		// Check if keyspace group has already existed.
+		oldKG, err := m.store.LoadKeyspaceGroup(txn, groupID)
+		if err != nil {
+			return err
+		}
+		if oldKG == nil {
+			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID)
+		}
+		failpoint.Inject("saveKeyspaceGroupsTxnOpFailed", func() {
+			failpoint.Return(errs.ErrKeyspaceGroupExists)
+		})
+		if oldKG.IsSplitting() {
+			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(groupID)
+		}
+		if oldKG.IsMerging() {
+			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
+		}
+		changed := false
+		switch mutation {
+		case opAdd:
+			if !slice.Contains(oldKG.Keyspaces, keyspaceID) {
+				oldKG.Keyspaces = append(oldKG.Keyspaces, keyspaceID)
+				changed = true
 			}
-			failpoint.Inject("saveKeyspaceGroupsTxnOpFailed", func() {
-				failpoint.Return(errs.ErrKeyspaceGroupExists)
-			})
-			if oldKG != nil && !overwrite {
-				return errs.ErrKeyspaceGroupExists
+		case opDelete:
+			oldSize := len(oldKG.Keyspaces)
+			oldKG.Keyspaces = slice.Remove(oldKG.Keyspaces, keyspaceID)
+			if len(oldKG.Keyspaces) != oldSize {
+				changed = true
 			}
-			if oldKG.IsSplitting() && overwrite {
-				return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(keyspaceGroup.ID)
-			}
-			if oldKG.IsMerging() && overwrite {
-				return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(keyspaceGroup.ID)
-			}
-			newKG := &endpoint.KeyspaceGroup{
-				ID:        keyspaceGroup.ID,
-				UserKind:  keyspaceGroup.UserKind,
-				Members:   keyspaceGroup.Members,
-				Keyspaces: keyspaceGroup.Keyspaces,
-			}
-			err = m.store.SaveKeyspaceGroup(txn, newKG)
-			if err != nil {
-				return err
-			}
+		}
+		if !changed {
+			return nil
+		}
+
+		err = m.store.SaveKeyspaceGroup(txn, oldKG)
+		if err != nil {
+			return err
 		}
 		return nil
 	}
@@ -465,14 +474,13 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 	if m == nil {
 		return nil, nil, nil
 	}
-
-	m.Lock()
-	defer m.Unlock()
 	groupID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
 		return nil, nil, err
 	}
+	m.Lock()
 	kg := m.groups[userKind].Get(uint32(groupID))
+	m.Unlock()
 	if kg == nil {
 		return nil, nil, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(uint32(groupID))
 	}
@@ -483,76 +491,36 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 		return nil, nil, errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
 	}
 
-	changed := false
+	cb := func(err error) {
+		if err == nil {
+			m.Lock()
+			defer m.Unlock()
+			kg := m.groups[userKind].Get(uint32(groupID))
+			if kg == nil {
+				return
+			}
+			changed := false
 
-	switch mutation {
-	case opAdd:
-		if !slice.Contains(kg.Keyspaces, keyspaceID) {
-			kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-			changed = true
-		}
-	case opDelete:
-		lenOfKeyspaces := len(kg.Keyspaces)
-		kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-		if lenOfKeyspaces != len(kg.Keyspaces) {
-			changed = true
-		}
-	}
-
-	if changed {
-		cb := func(err error) {
-			if err != nil {
-				switch mutation {
-				case opAdd:
-					kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-				case opDelete:
+			switch mutation {
+			case opAdd:
+				if !slice.Contains(kg.Keyspaces, keyspaceID) {
 					kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
+					changed = true
 				}
-			} else {
+			case opDelete:
+				lenOfKeyspaces := len(kg.Keyspaces)
+				kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
+				if lenOfKeyspaces != len(kg.Keyspaces) {
+					changed = true
+				}
+			}
+			if changed {
 				m.groups[userKind].Put(kg)
 			}
 		}
-		op := m.saveKeyspaceGroupsTxnOp([]*endpoint.KeyspaceGroup{kg}, true)
-		return op, cb, nil
 	}
-	return nil, nil, nil
-}
-
-func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32, mutation int) error {
-	kg := m.groups[userKind].Get(uint32(groupID))
-	if kg == nil {
-		return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(uint32(groupID))
-	}
-	if kg.IsSplitting() {
-		return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(groupID))
-	}
-	if kg.IsMerging() {
-		return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
-	}
-
-	changed := false
-
-	switch mutation {
-	case opAdd:
-		if !slice.Contains(kg.Keyspaces, keyspaceID) {
-			kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-			changed = true
-		}
-	case opDelete:
-		lenOfKeyspaces := len(kg.Keyspaces)
-		kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-		if lenOfKeyspaces != len(kg.Keyspaces) {
-			changed = true
-		}
-	}
-
-	if changed {
-		if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {
-			return err
-		}
-		m.groups[userKind].Put(kg)
-	}
-	return nil
+	op := m.saveKeyspaceGroupTxnOp(uint32(groupID), keyspaceID, mutation)
+	return op, cb, nil
 }
 
 // UpdateKeyspaceGroup updates the keyspace group.

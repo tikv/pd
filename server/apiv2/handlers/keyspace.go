@@ -171,12 +171,7 @@ func LoadKeyspace(c *gin.Context) {
 		}
 		meta.Config[keyspace.TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(groupID), 10)
 	}
-	// If the keyspace region is not split yet, we treat this keyspace as disabled to avoid clients using the keyspace before region split is done.
-	if meta != nil && meta.State == keyspacepb.KeyspaceState_ENABLED {
-		if svr.GetKeyspaceConfig().ToWaitRegionSplit() && !manager.CheckKeyspaceRegionBound(meta.Id) {
-			meta.State = keyspacepb.KeyspaceState_DISABLED
-		}
-	}
+	manager.CheckKeyspaceState(meta)
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 
@@ -206,11 +201,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if meta != nil && meta.State == keyspacepb.KeyspaceState_ENABLED {
-		if svr.GetKeyspaceConfig().ToWaitRegionSplit() && !manager.CheckKeyspaceRegionBound(meta.Id) {
-			meta.State = keyspacepb.KeyspaceState_DISABLED
-		}
-	}
+	manager.CheckKeyspaceState(meta)
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 

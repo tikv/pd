@@ -18,10 +18,11 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 const (
@@ -72,6 +73,7 @@ type createKeyspaceTracer struct {
 	keyspaceID    uint32
 	keyspaceName  string
 	userKind      endpoint.UserKind
+	waitSplit     bool
 }
 
 // Begin starts the tracing.

@@ -127,6 +127,13 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	return requests
 }
 
+func (suite *keyspaceTestSuite) TestInitTwice() {
+	re := suite.Require()
+	manager := suite.manager
+	re.NoError(manager.initReserveKeyspace(GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName()))
+	re.NoError(manager.initReserveKeyspace(GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName()))
+}
+
 func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re := suite.Require()
 	manager := suite.manager

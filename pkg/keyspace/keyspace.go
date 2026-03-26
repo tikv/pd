@@ -184,6 +184,7 @@ func (manager *Manager) Bootstrap() error {
 
 func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	tracer := &createKeyspaceTracer{userKind: endpoint.Basic}
+	tracer.waitSplit = false
 	tracer.Begin()
 	tracer.SetKeyspace(id, name)
 	tracer.OnAllocateIDFinished()
@@ -191,10 +192,17 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	if err != nil {
 		return err
 	}
+	// It is needed to set for system keyspace in next-gen.
+	if id == constant.SystemKeyspaceID {
+		config[GCManagementType] = KeyspaceLevelGC
+	}
 	tracer.OnGetConfigFinished()
 	now := time.Now().Unix()
 	_, err = manager.createKeyspaceWithoutCheck(tracer, config, now)
-	return err
+	if err != nil && err != errs.ErrKeyspaceExists {
+		return err
+	}
+	return nil
 }
 
 // UpdateConfig update keyspace manager's config.
@@ -232,6 +240,9 @@ func (manager *Manager) createKeyspaceInner(name string, config map[string]strin
 	var newID uint32
 	if len(ids) > 0 {
 		newID = ids[0]
+		if err = validateID(newID); err != nil {
+			return nil, err
+		}
 	} else {
 		// Allocate new keyspaceID.
 		newID, err = manager.allocID()
@@ -240,6 +251,7 @@ func (manager *Manager) createKeyspaceInner(name string, config map[string]strin
 		}
 	}
 	tracer.SetKeyspace(newID, name)
+	tracer.waitSplit = manager.config.ToWaitRegionSplit()
 	tracer.OnAllocateIDFinished()
 	if isProtectedKeyspaceID(newID) {
 		err := newModifyProtectedKeyspaceError()
@@ -297,7 +309,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	}
 	op, cb := manager.saveNewKeyspaceTxnOp(keyspace)
 	addTxn(op, cb)
-	op, cb, err := manager.kgm.updateKeyspaceForGroupTxnOp(tracer.userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd)
+	op, cb, err := manager.kgm.updateKeyspaceForGroupTxnOp(tracer.userKind, config[TSOKeyspaceGroupIDKey], tracer.keyspaceID, opAdd)
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace group ", errs.ZapError(err))
 		return nil, err
@@ -334,7 +346,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	tracer.OnSaveKeyspaceMetaFinished()
 
 	// Split keyspace region.
-	if manager.config.ToWaitRegionSplit() {
+	if tracer.waitSplit {
 		err = manager.waitKeyspaceRegionSplit(tracer.keyspaceID)
 		failpoint.Inject("waitSplitKeyspaceFailed", func() {
 			err = errors.New("failpoint triggered: waitSplitKeyspaceFailed")
@@ -458,6 +470,9 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
 func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
+	failpoint.Inject("skipSplitRegion", func() {
+		failpoint.Return(true)
+	})
 	regionBound := MakeRegionBound(id)
 	return manager.checkBound(regionBound.RawLeftBound) &&
 		manager.checkBound(regionBound.RawRightBound) &&
@@ -499,6 +514,23 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		return nil
 	})
 	return meta, err
+}
+
+// CheckKeyspaceState checks the keyspace state and update it to disabled if the keyspace region is not split yet.
+func (manager *Manager) CheckKeyspaceState(meta *keyspacepb.KeyspaceMeta) {
+	if manager == nil {
+		return
+	}
+	if meta == nil {
+		return
+	}
+	if meta.State != keyspacepb.KeyspaceState_ENABLED {
+		return
+	}
+	if !manager.CheckKeyspaceRegionBound(meta.Id) {
+		meta.State = keyspacepb.KeyspaceState_DISABLED
+		return
+	}
 }
 
 // LoadKeyspaceByID returns the keyspace specified by id.
