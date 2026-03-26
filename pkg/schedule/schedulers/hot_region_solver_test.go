@@ -266,6 +266,29 @@ func TestFilterHotPeersWithDecisions(t *testing.T) {
 	re.Equal(hotPeerFilterTopN, reasons[2])
 }
 
+func TestSelectRejectedHotPeerFilterDecisions(t *testing.T) {
+	re := require.New(t)
+	decisions := []hotPeerFilterDecision{
+		{peer: &statistics.HotPeerStat{RegionID: 1}, reason: hotPeerFilterKept},
+		{peer: &statistics.HotPeerStat{RegionID: 2}, reason: hotPeerFilterPending},
+		{peer: &statistics.HotPeerStat{RegionID: 3}, reason: hotPeerFilterPending},
+		{peer: &statistics.HotPeerStat{RegionID: 4}, reason: hotPeerFilterCooldown},
+		{peer: &statistics.HotPeerStat{RegionID: 5}, reason: hotPeerFilterCooldown},
+		{peer: &statistics.HotPeerStat{RegionID: 6}, reason: hotPeerFilterTopN},
+		{peer: &statistics.HotPeerStat{RegionID: 7}, reason: hotPeerFilterTopN},
+	}
+
+	selected := selectRejectedHotPeerFilterDecisions(decisions, 1)
+	re.Len(selected, 3)
+
+	got := make([]uint64, 0, len(selected))
+	for _, decision := range selected {
+		got = append(got, decision.peer.RegionID)
+		re.NotEqual(hotPeerFilterKept, decision.reason)
+	}
+	re.Equal([]uint64{2, 4, 6}, got)
+}
+
 func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
 	re.Len(hotPeers, len(regions))
 	for _, region := range regions {

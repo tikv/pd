@@ -422,10 +422,11 @@ func hotOperatorPeerSetFields(prefix string, peers []*statistics.HotPeerStat) []
 type hotPeerFilterReason string
 
 const (
-	hotPeerFilterKept     hotPeerFilterReason = "kept"
-	hotPeerFilterPending  hotPeerFilterReason = "pending"
-	hotPeerFilterCooldown hotPeerFilterReason = "cooldown"
-	hotPeerFilterTopN     hotPeerFilterReason = "topn"
+	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
+	hotPeerFilterKept                            hotPeerFilterReason = "kept"
+	hotPeerFilterPending                         hotPeerFilterReason = "pending"
+	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
+	hotPeerFilterTopN                            hotPeerFilterReason = "topn"
 )
 
 type hotPeerFilterDecision struct {
@@ -455,6 +456,30 @@ func hotPeerFilterReasonFields(prefix string, decisions []hotPeerFilterDecision,
 		}
 	}
 	return hotOperatorPeerSetFields(prefix, peers)
+}
+
+func selectRejectedHotPeerFilterDecisions(decisions []hotPeerFilterDecision, limitPerReason int) []hotPeerFilterDecision {
+	if limitPerReason <= 0 || len(decisions) == 0 {
+		return nil
+	}
+	counts := map[hotPeerFilterReason]int{
+		hotPeerFilterPending:  0,
+		hotPeerFilterCooldown: 0,
+		hotPeerFilterTopN:     0,
+	}
+	selected := make([]hotPeerFilterDecision, 0, len(decisions))
+	for _, decision := range decisions {
+		if decision.reason == hotPeerFilterKept {
+			continue
+		}
+		count, ok := counts[decision.reason]
+		if !ok || count >= limitPerReason {
+			continue
+		}
+		selected = append(selected, decision)
+		counts[decision.reason] = count + 1
+	}
+	return selected
 }
 
 func (bs *balanceSolver) isReadCPUByte() bool {
@@ -691,10 +716,6 @@ func (bs *balanceSolver) logReadCPUByteHotPeerFiltering(storeLoad *statistics.St
 	}
 	log.Info("filter hot peers before",
 		append(append([]zap.Field{}, baseFields...), hotOperatorPeerSetFields("before", storeLoad.HotPeers)...)...)
-	for _, peer := range storeLoad.HotPeers {
-		log.Info("filter hot peer before",
-			append(append([]zap.Field{}, baseFields...), hotOperatorPeerFields("peer", peer)...)...)
-	}
 	log.Info("filter hot peers after",
 		append(append(append([]zap.Field{}, baseFields...),
 			hotOperatorPeerSetFields("filtered", filtered)...),
@@ -702,12 +723,8 @@ func (bs *balanceSolver) logReadCPUByteHotPeerFiltering(storeLoad *statistics.St
 				hotPeerFilterReasonFields("removed-pending", decisions, hotPeerFilterPending),
 				hotPeerFilterReasonFields("removed-cooldown", decisions, hotPeerFilterCooldown)...),
 				hotPeerFilterReasonFields("removed-topn", decisions, hotPeerFilterTopN)...)...)...)
-	for _, decision := range decisions {
-		msg := "filter hot peer kept"
-		if decision.reason != hotPeerFilterKept {
-			msg = "filter hot peer rejected"
-		}
-		log.Info(msg,
+	for _, decision := range selectRejectedHotPeerFilterDecisions(decisions, readCPUByteRejectedDecisionLogLimitPerReason) {
+		log.Info("filter hot peer rejected",
 			append(append([]zap.Field{}, baseFields...), hotPeerFilterDecisionFields("peer", decision)...)...)
 	}
 }
