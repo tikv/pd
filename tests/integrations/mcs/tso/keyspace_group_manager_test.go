@@ -921,19 +921,23 @@ func TestGetTSOImmediately(t *testing.T) {
 	// First split keyspace group 0 to 1 with keyspace 2.
 	kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
 	re.NotNil(kgm)
+	keyspace1, err := leaderServer.GetServer().GetKeyspaceManager().LoadKeyspace(keyspaces[0])
+	re.NoError(err)
+	keyspace2, err := leaderServer.GetServer().GetKeyspaceManager().LoadKeyspace(keyspaces[1])
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		err = kgm.SplitKeyspaceGroupByID(0, 1, []uint32{2})
+		err = kgm.SplitKeyspaceGroupByID(0, 1, []uint32{keyspace2.Id})
 		return err == nil
 	})
 
 	// Get the correct bootstrap keyspace ID for the current mode
 	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
-	waitFinishSplit(re, leaderServer, 0, 1, []uint32{bootstrapKeyspaceID, 1}, []uint32{2})
+	waitFinishSplit(re, leaderServer, 0, 1, []uint32{bootstrapKeyspaceID, keyspace1.Id}, []uint32{keyspace2.Id})
 
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
-	re.Equal([]uint32{bootstrapKeyspaceID, 1}, kg0.Keyspaces)
-	re.Equal([]uint32{2}, kg1.Keyspaces)
+	re.Equal([]uint32{bootstrapKeyspaceID, keyspace1.Id}, kg0.Keyspaces)
+	re.Equal([]uint32{keyspace2.Id}, kg1.Keyspaces)
 	re.False(kg0.IsSplitting())
 	re.False(kg1.IsSplitting())
 

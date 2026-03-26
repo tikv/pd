@@ -161,20 +161,23 @@ func (manager *Manager) Bootstrap() error {
 	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
 		go func() {
-			config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
-			if err != nil {
-				log.Error("[keyspace] failed to get keyspace config for pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
-				return
-			}
-			req := &CreateKeyspaceRequest{
-				Name:       keyspaceName,
-				CreateTime: time.Now().Unix(),
-				Config:     config,
-			}
-			_, err = manager.CreateKeyspace(req)
-			// Ignore the keyspaceExists error for the same reason as saving default keyspace.
-			if err != nil && err != errs.ErrKeyspaceExists {
-				log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+			for range 3 {
+				config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+				if err != nil {
+					log.Error("[keyspace] failed to get keyspace config for pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+					continue
+				}
+				req := &CreateKeyspaceRequest{
+					Name:       keyspaceName,
+					CreateTime: time.Now().Unix(),
+					Config:     config,
+				}
+				_, err = manager.CreateKeyspace(req)
+				// Ignore the keyspaceExists error for the same reason as saving default keyspace.
+				if err != nil && err != errs.ErrKeyspaceExists {
+					log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+					continue
+				}
 				return
 			}
 		}()

@@ -492,31 +492,32 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 	}
 
 	cb := func(err error) {
-		if err == nil {
-			m.Lock()
-			defer m.Unlock()
-			kg := m.groups[userKind].Get(uint32(groupID))
-			if kg == nil {
-				return
-			}
-			changed := false
+		if err != nil {
+			return
+		}
+		m.Lock()
+		defer m.Unlock()
+		kg := m.groups[userKind].Get(uint32(groupID))
+		if kg == nil {
+			return
+		}
+		changed := false
 
-			switch mutation {
-			case opAdd:
-				if !slice.Contains(kg.Keyspaces, keyspaceID) {
-					kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-					changed = true
-				}
-			case opDelete:
-				lenOfKeyspaces := len(kg.Keyspaces)
-				kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-				if lenOfKeyspaces != len(kg.Keyspaces) {
-					changed = true
-				}
+		switch mutation {
+		case opAdd:
+			if !slice.Contains(kg.Keyspaces, keyspaceID) {
+				kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
+				changed = true
 			}
-			if changed {
-				m.groups[userKind].Put(kg)
+		case opDelete:
+			lenOfKeyspaces := len(kg.Keyspaces)
+			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
+			if lenOfKeyspaces != len(kg.Keyspaces) {
+				changed = true
 			}
+		}
+		if changed {
+			m.groups[userKind].Put(kg)
 		}
 	}
 	op := m.saveKeyspaceGroupTxnOp(uint32(groupID), keyspaceID, mutation)
