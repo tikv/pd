@@ -44,12 +44,12 @@ curl -fsS "$PD_LEADER/metrics" | grep -E "^etcd_server_is_leader|^service_member
 # etcd_server_is_leader 1
 # service_member_role{service="PD"} 0
 
-# Cleanup - disable all failpoints used in this script
+# Cleanup - disable all failpoints used in this script on all nodes
 echo ""
 echo "Cleaning up failpoints..."
 for port in 2379 2382 2384; do
   curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/$FP_SKIP" -d ''
+  curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/$FP_EXIT" -d ''
+  curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/$FP_CHECK" -d ''
 done
-curl -fsS -X PUT "$PD_LEADER/pd/api/v1/fail/$FP_EXIT" -d ''
-curl -fsS -X PUT "$PD_LEADER/pd/api/v1/fail/$FP_CHECK" -d ''
 echo "Cleanup complete"

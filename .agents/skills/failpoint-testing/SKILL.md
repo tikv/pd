@@ -95,7 +95,7 @@ for port in 2379 2382 2384; do
 done
 ```
 
-**Step down PD leader (requires three failpoints to match TestPDLeaderLostWhileEtcdLeaderIntact):**
+**Step down PD leader (exitCampaignLeader + leaderLoopCheckAgain required; timeoutWaitPDLeader optional — matches TestPDLeaderLostWhileEtcdLeaderIntact; test-pd-leader-stuck.sh uses only the two required failpoints):**
 ```bash
 MEMBER_ID="3474484975246189105"
 
