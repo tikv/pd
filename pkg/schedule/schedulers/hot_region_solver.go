@@ -73,6 +73,8 @@ type balanceSolver struct {
 	rank
 }
 
+var hotStoreDirectionLabels = [...]string{"out", "in", "out-for-revert", "in-for-revert"}
+
 func (bs *balanceSolver) init() {
 	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
@@ -106,6 +108,7 @@ func (bs *balanceSolver) init() {
 		bs.nthHotPeer[detail.GetID()] = make([]*statistics.HotPeerStat, utils.DimLen)
 		bs.filteredHotPeers[detail.GetID()] = bs.filterHotPeers(detail)
 	}
+	bs.preWarmHotStoreDirectionCounters()
 
 	rankStepRatios := []float64{
 		utils.ByteDim:  bs.sche.conf.getByteRankStepRatio(),
@@ -118,6 +121,16 @@ func (bs *balanceSolver) init() {
 	bs.rankStep = &statistics.StoreLoad{
 		Loads:        stepLoads,
 		HotPeerCount: maxCur.HotPeerCount * bs.sche.conf.getCountRankStepRatio(),
+	}
+}
+
+func (bs *balanceSolver) preWarmHotStoreDirectionCounters() {
+	rwLabel := bs.rwTy.String()
+	for storeID := range bs.stLoadDetail {
+		storeLabel := strconv.FormatUint(storeID, 10)
+		for _, direction := range hotStoreDirectionLabels {
+			hotStoreDirectionCounter.WithLabelValues(rwLabel, storeLabel, direction).Add(0)
+		}
 	}
 }
 
@@ -1097,6 +1110,8 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
+		hotStoreDirectionCounter.WithLabelValues(bs.rwTy.String(), sourceLabel, "out"),
+		hotStoreDirectionCounter.WithLabelValues(bs.rwTy.String(), targetLabel, "in"),
 	)
 	op.Counters = append(op.Counters,
 		hotSchedulerNewOperatorCounter,
@@ -1104,7 +1119,9 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 	if isRevert {
 		op.FinishedCounters = append(op.FinishedCounters,
 			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out-for-revert", dim),
-			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in-for-revert", dim))
+			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in-for-revert", dim),
+			hotStoreDirectionCounter.WithLabelValues(bs.rwTy.String(), sourceLabel, "out-for-revert"),
+			hotStoreDirectionCounter.WithLabelValues(bs.rwTy.String(), targetLabel, "in-for-revert"))
 	}
 }
 

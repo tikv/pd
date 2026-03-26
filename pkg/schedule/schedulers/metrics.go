@@ -89,6 +89,16 @@ var (
 			Help:      "Counter of hot region scheduler.",
 		}, []string{"type", "rw", "store", "direction", "dim"})
 
+	// hotStoreDirectionCounter is a low-cardinality store-level companion metric
+	// for paneling hot direction changes without depending on dynamic dim/type labelsets.
+	hotStoreDirectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "hot_region_store_direction",
+			Help:      "Store-level counter of finished hot region operator directions.",
+		}, []string{"rw", "store", "direction"})
+
 	hotPeerHist = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -186,6 +196,7 @@ func init() {
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
+	prometheus.MustRegister(hotStoreDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)

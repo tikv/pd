@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -32,6 +33,43 @@ import (
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 )
+
+func TestPreWarmHotStoreDirectionCounters(t *testing.T) {
+	re := require.New(t)
+	solver := &balanceSolver{
+		rwTy: utils.Read,
+		stLoadDetail: map[uint64]*statistics.StoreLoadDetail{
+			91001: {},
+			91002: {},
+		},
+	}
+
+	solver.preWarmHotStoreDirectionCounters()
+
+	for _, direction := range hotStoreDirectionLabels {
+		re.Equal(0.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "91001", direction)))
+		re.Equal(0.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "91002", direction)))
+	}
+}
+
+func TestDecorateOperatorAttachHotStoreDirectionCounters(t *testing.T) {
+	re := require.New(t)
+	solver := &balanceSolver{rwTy: utils.Read}
+	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpHotRegion, 1)
+
+	re.Equal(0.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "92001", "out")))
+	re.Equal(0.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "92002", "in")))
+
+	solver.decorateOperator(op, true, "92001", "92002", "transfer-leader", "cpu")
+	for _, counter := range op.FinishedCounters {
+		counter.Inc()
+	}
+
+	re.Equal(1.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "92001", "out")))
+	re.Equal(1.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "92002", "in")))
+	re.Equal(1.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "92001", "out-for-revert")))
+	re.Equal(1.0, promtest.ToFloat64(hotStoreDirectionCounter.WithLabelValues(utils.Read.String(), "92002", "in-for-revert")))
+}
 
 func TestSplitBucketsBySize(t *testing.T) {
 	re := require.New(t)
