@@ -69,21 +69,21 @@ curl -s "http://127.0.0.1:2379/pd/api/v1/leader" | python3 -c \
 
 **Enable:**
 ```bash
-curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/<FULL_PATH>" -d '<ACTION>'
+curl -fsS -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/<FULL_PATH>" -d '<ACTION>'
 ```
 
 **Disable:**
 ```bash
-curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/<FULL_PATH>" -d ''
+curl -fsS -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/<FULL_PATH>" -d ''
 ```
 
 ## Action Strings
 
 | Action | Payload | Use When |
 |---|---|---|
-| Block all | `pause` | Indefinite blocking (unblocks on Disable) |
-| Block clean | `return("")` | Permanent blocking |
-| Block named | `return("pd-0")` | Block specific node |
+| Pause at failpoint | `pause` | Indefinite blocking (unblocks on Disable) |
+| Inject empty string | `return("")` | Inject an empty string; effect depends on failpoint implementation |
+| Inject specific string | `return("<value>")` | Inject a specific string (e.g., member ID); effect depends on failpoint implementation |
 | Disable | (empty) | Remove failpoint |
 
 ## Critical Patterns
@@ -91,7 +91,7 @@ curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/<FULL_PATH>" -d ''
 **Block ALL nodes from campaigning:**
 ```bash
 for port in 2379 2382 2384; do
-  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/pkg/election/skipGrantLeader" -d 'pause'
+  curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/pkg/election/skipGrantLeader" -d 'pause'
 done
 ```
 
@@ -100,15 +100,15 @@ done
 MEMBER_ID="3474484975246189105"
 
 # Exit campaign loop (leader steps down)
-curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/exitCampaignLeader" \
+curl -fsS -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/exitCampaignLeader" \
   -d "return(\"$MEMBER_ID\")"
 
 # Prevent re-campaign (keeps leader from campaigning again)
-curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/leaderLoopCheckAgain" \
+curl -fsS -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/leaderLoopCheckAgain" \
   -d "return(\"$MEMBER_ID\")"
 
 # Speed up no-leader timeout (optional, accelerates test)
-curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/timeoutWaitPDLeader" \
+curl -fsS -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/timeoutWaitPDLeader" \
   -d "return(\"1s\")"
 ```
 
@@ -160,11 +160,11 @@ If `skipGrantLeader` with `pause` is applied to ALL nodes, `leaderLoopCheckAgain
 # Disable all failpoints used in this skill
 for port in 2379 2382 2384; do
   # pkg/election failpoints
-  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/pkg/election/skipGrantLeader" -d ''
+  curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/pkg/election/skipGrantLeader" -d ''
   # server failpoints
-  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/exitCampaignLeader" -d ''
-  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/leaderLoopCheckAgain" -d ''
-  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/timeoutWaitPDLeader" -d ''
+  curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/exitCampaignLeader" -d ''
+  curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/leaderLoopCheckAgain" -d ''
+  curl -fsS -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/timeoutWaitPDLeader" -d ''
 done
 
 # Stop cluster

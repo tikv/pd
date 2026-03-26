@@ -58,10 +58,10 @@ for port in 2379 2382 2384; do
   curl -s "http://127.0.0.1:$port/metrics" | \
     grep -E "^etcd_server_is_leader|^service_member_role"
 done
-```
+```text
 
 Expected output (pd-1 at port 2382 is leader):
-```
+```text
 === Port 2379 ===
 etcd_server_is_leader 0
 
@@ -125,6 +125,7 @@ set -euo pipefail
 PD_LEADER="http://127.0.0.1:2382"
 FP_SKIP="github.com/tikv/pd/pkg/election/skipGrantLeader"
 FP_EXIT="github.com/tikv/pd/server/exitCampaignLeader"
+FP_CHECK="github.com/tikv/pd/server/leaderLoopCheckAgain"
 
 # Get leader's member_id
 MEMBER_ID=$(curl -fsS "$PD_LEADER/pd/api/v1/leader" | \
@@ -141,10 +142,15 @@ for port in 2379 2382 2384; do
 done
 echo "Done"
 
-# Force leader to step down
+# Force leader to step down and prevent re-campaign
 echo ""
 echo "Triggering exitCampaignLeader for member $MEMBER_ID..."
 curl -fsS -X PUT "$PD_LEADER/pd/api/v1/fail/$FP_EXIT" \
+  -d "return(\"$MEMBER_ID\")"
+
+echo ""
+echo "Triggering leaderLoopCheckAgain for member $MEMBER_ID..."
+curl -fsS -X PUT "$PD_LEADER/pd/api/v1/fail/$FP_CHECK" \
   -d "return(\"$MEMBER_ID\")"
 echo "Done"
 
@@ -192,7 +198,7 @@ for a in alerts:
 ```
 
 Expected output:
-```
+```text
 Instance: pd-1
 State: firing
 Value: 0
@@ -200,7 +206,7 @@ Value: 0
 
 ## Observed Behavior Timeline
 
-```
+```text
 t=0s    service_member_role=1  etcd_server_is_leader=1  (normal leader)
 t+2s    service_member_role=0  etcd_server_is_leader=1  ← stuck condition
 t+60s   ALERT FIRES (for: 1m satisfied)
