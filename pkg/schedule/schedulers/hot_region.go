@@ -67,9 +67,8 @@ type hotScheduleScopeKey struct {
 }
 
 type sourceStoreFeedbackEpochState struct {
-	firstPriorityLoad  float64
-	secondPriorityLoad float64
-	emittedHotOps      int
+	overExpectMargin float64
+	emittedHotOps    int
 }
 
 type baseHotScheduler struct {
@@ -198,26 +197,21 @@ func normalizeHotLoadSignature(load float64) float64 {
 	return math.Round(load*1000) / 1000
 }
 
-func useFirstPriorityOnlyFeedbackSignature(scope hotScheduleScopeKey) bool {
-	return scope.rwTy == utils.Read && scope.firstPriority == utils.CPUDim && scope.secondPriority == utils.ByteDim
-}
-
-func hotLoadFeedbackSignature(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) (float64, float64, bool) {
+func sourceStoreOverExpectMargin(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) (float64, bool) {
 	if detail == nil || detail.LoadPred == nil {
-		return 0, 0, false
+		return 0, false
 	}
-	firstLoad := normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.firstPriority])
-	if useFirstPriorityOnlyFeedbackSignature(scope) {
-		return firstLoad, 0, true
+	if len(detail.LoadPred.Current.Loads) <= scope.firstPriority || len(detail.LoadPred.Expect.Loads) <= scope.firstPriority {
+		return 0, false
 	}
-	return firstLoad, normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.secondPriority]), true
+	return normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.firstPriority] - detail.LoadPred.Expect.Loads[scope.firstPriority]), true
 }
 
-func (s *baseHotScheduler) allowSourceStoreScheduleInCurrentFeedback(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail, limit int) bool {
+func (s *baseHotScheduler) allowSourceStoreScheduleForImprovedMargin(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail, limit int, deadband float64) bool {
 	if limit <= 0 || detail == nil || detail.StoreInfo == nil {
 		return true
 	}
-	firstLoad, secondLoad, ok := hotLoadFeedbackSignature(scope, detail)
+	margin, ok := sourceStoreOverExpectMargin(scope, detail)
 	if !ok {
 		return true
 	}
@@ -226,7 +220,7 @@ func (s *baseHotScheduler) allowSourceStoreScheduleInCurrentFeedback(scope hotSc
 		return true
 	}
 	state, ok := storeStates[detail.GetID()]
-	if !ok || state.firstPriorityLoad != firstLoad || state.secondPriorityLoad != secondLoad {
+	if !ok || state.overExpectMargin-margin >= deadband {
 		return true
 	}
 	return state.emittedHotOps < limit
@@ -252,7 +246,7 @@ func (s *baseHotScheduler) recordSourceStoreScheduleInCurrentFeedback(scope hotS
 	if detail == nil || detail.StoreInfo == nil {
 		return
 	}
-	firstLoad, secondLoad, ok := hotLoadFeedbackSignature(scope, detail)
+	margin, ok := sourceStoreOverExpectMargin(scope, detail)
 	if !ok {
 		return
 	}
@@ -263,10 +257,9 @@ func (s *baseHotScheduler) recordSourceStoreScheduleInCurrentFeedback(scope hotS
 	}
 	id := detail.GetID()
 	state, ok := storeStates[id]
-	if !ok || state.firstPriorityLoad != firstLoad || state.secondPriorityLoad != secondLoad {
+	if !ok || state.overExpectMargin != margin {
 		state = sourceStoreFeedbackEpochState{
-			firstPriorityLoad:  firstLoad,
-			secondPriorityLoad: secondLoad,
+			overExpectMargin: margin,
 		}
 	}
 	state.emittedHotOps++

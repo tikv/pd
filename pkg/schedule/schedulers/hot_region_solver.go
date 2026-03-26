@@ -424,6 +424,7 @@ type hotPeerFilterReason string
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
 	readCPUByteMaxOpsPerFeedbackEpoch                                = 1
+	readCPUByteOverExpectMarginDeadband                              = 10
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
 	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
@@ -543,7 +544,7 @@ func (bs *balanceSolver) shouldThrottleReadCPUSrcByFeedbackEpoch(detail *statist
 	if bs.sche.countPendingHotOpsFromStore(detail.GetID()) > 0 {
 		return true
 	}
-	return !bs.sche.allowSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), detail, readCPUByteMaxOpsPerFeedbackEpoch)
+	return !bs.sche.allowSourceStoreScheduleForImprovedMargin(bs.hotScheduleScopeKey(), detail, readCPUByteMaxOpsPerFeedbackEpoch, readCPUByteOverExpectMarginDeadband)
 }
 
 func (bs *balanceSolver) logHotOperatorSnapshot() {

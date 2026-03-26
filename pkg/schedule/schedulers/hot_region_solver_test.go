@@ -425,6 +425,9 @@ func TestFilterSrcStoresReadCPUByteFeedbackEpochCap(t *testing.T) {
 	src.LoadPred.Current.Loads[utils.ByteDim] = 170
 	re.Empty(bs.filterSrcStores())
 
+	src.LoadPred.Current.Loads[utils.CPUDim] = 590
+	re.Empty(bs.filterSrcStores())
+
 	hb.regionPendings[1] = &pendingInfluence{froms: []uint64{1}}
 	src.LoadPred.Current.Loads[utils.CPUDim] = 580
 	re.Empty(bs.filterSrcStores())
