@@ -19,6 +19,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -27,12 +28,19 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+)
+
+const (
+	gcStateWatchReceiveBatchSize = 128
+	gcStateWatchMaxResponseBytes = 1 << 20
 )
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -396,12 +404,244 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
 //
-// Deprecated: Poll GetAllKeyspacesGCStates instead.
+// Deprecated: Use WatchGCStates or poll GetAllKeyspacesGCStates instead.
 //
 //nolint:staticcheck
-func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.PD_WatchGCSafePointV2Server) error {
-	log.Error("removed API WatchGCSafePointV2 is called")
-	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
+func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request, stream pdpb.PD_WatchGCSafePointV2Server) error {
+	log.Warn("deprecated API WatchGCSafePointV2 is called", zap.Int64("req-revision", request.GetRevision()))
+
+	// TODO: Decide this parameter.
+	const watchGCSafePointV2SkipLoadingInitial = false
+
+	ctx, cancel, gcStateCh, done, err := s.openGCStateWatch(
+		stream.Context(),
+		request.GetHeader(),
+		watchGCSafePointV2SkipLoadingInitial,
+		true,
+	)
+	if err != nil {
+		return err
+	}
+	// If leadership is lost, GCStateManager closes gcStateCh first. consumeGCStateWatch then returns,
+	// and this deferred cancel() wakes runGCStateWatch waiting on ctx.Done() so the manager-side
+	// goroutine can exit too.
+	defer cancel()
+	if done != nil {
+		defer done()
+	}
+
+	lastSafePoints := make(map[uint32]uint64)
+	return s.consumeGCStateWatch(ctx, gcStateCh, func(gcStates []gc.GCState) error {
+		header := grpcutil.WrapHeader()
+		baseResponse := &pdpb.WatchGCSafePointV2Response{Header: header}
+		currentEvents := make([]*pdpb.SafePointEvent, 0, len(gcStates))
+		currentSize := proto.Size(baseResponse)
+		flush := func() error {
+			if len(currentEvents) == 0 {
+				return nil
+			}
+			if err := stream.Send(&pdpb.WatchGCSafePointV2Response{
+				Header: header,
+				Events: currentEvents,
+			}); err != nil {
+				return err
+			}
+			currentEvents = currentEvents[:0]
+			currentSize = proto.Size(baseResponse)
+			return nil
+		}
+
+		for _, gcState := range gcStates {
+			if gcState.KeyspaceID == constant.NullKeyspaceID {
+				continue
+			}
+			if previous, loaded := lastSafePoints[gcState.KeyspaceID]; loaded && previous == gcState.GCSafePoint {
+				continue
+			}
+			lastSafePoints[gcState.KeyspaceID] = gcState.GCSafePoint
+
+			event := &pdpb.SafePointEvent{
+				KeyspaceId: gcState.KeyspaceID,
+				SafePoint:  gcState.GCSafePoint,
+				Type:       pdpb.EventType_PUT,
+			}
+			eventSize := proto.Size(event)
+			if currentSize+eventSize > gcStateWatchMaxResponseBytes && len(currentEvents) > 0 {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			if currentSize+eventSize > gcStateWatchMaxResponseBytes {
+				log.Warn(
+					"single WatchGCSafePointV2 event exceeds response size limit",
+					zap.Uint32("keyspace-id", gcState.KeyspaceID),
+					zap.Int("response-size", currentSize+eventSize),
+					zap.Int("size-limit", gcStateWatchMaxResponseBytes),
+				)
+			}
+			currentEvents = append(currentEvents, event)
+			currentSize += eventSize
+		}
+
+		return flush()
+	})
+}
+
+// WatchGCStates watches GC state changes.
+func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+	ctx, cancel, gcStateCh, done, err := s.openGCStateWatch(
+		stream.Context(),
+		request.GetHeader(),
+		request.GetSkipLoadingInitial(),
+		request.GetExcludeGcBarriers(),
+	)
+	if err != nil {
+		return err
+	}
+	// The gRPC handler owns cancel() for both the consume loop and the manager-side watch goroutine.
+	// A closed gcStateCh causes consumeGCStateWatch to return; this deferred cancel() then releases
+	// runGCStateWatch from its ctx.Done() wait.
+	defer cancel()
+	if done != nil {
+		defer done()
+	}
+
+	return s.consumeGCStateWatch(ctx, gcStateCh, func(gcStates []gc.GCState) error {
+		header := grpcutil.WrapHeader()
+		baseResponse := &pdpb.WatchGCStatesResponse{Header: header}
+		currentStates := make([]*pdpb.GCState, 0, len(gcStates))
+		currentSize := proto.Size(baseResponse)
+		flush := func() error {
+			if len(currentStates) == 0 {
+				return nil
+			}
+			if err := stream.Send(&pdpb.WatchGCStatesResponse{
+				Header:   header,
+				GcStates: currentStates,
+			}); err != nil {
+				return err
+			}
+			currentStates = currentStates[:0]
+			currentSize = proto.Size(baseResponse)
+			return nil
+		}
+
+		for _, gcState := range gcStates {
+			pbGCState := gcStateToProto(gcState, time.Now())
+			pbGCStateSize := proto.Size(pbGCState)
+			if currentSize+pbGCStateSize > gcStateWatchMaxResponseBytes && len(currentStates) > 0 {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			if currentSize+pbGCStateSize > gcStateWatchMaxResponseBytes {
+				log.Warn(
+					"single WatchGCStates item exceeds response size limit",
+					zap.Uint32("keyspace-id", gcState.KeyspaceID),
+					zap.Int("response-size", currentSize+pbGCStateSize),
+					zap.Int("size-limit", gcStateWatchMaxResponseBytes),
+				)
+			}
+			currentStates = append(currentStates, pbGCState)
+			currentSize += pbGCStateSize
+		}
+
+		return flush()
+	})
+}
+
+func (s *GrpcServer) openGCStateWatch(
+	streamCtx context.Context,
+	header *pdpb.RequestHeader,
+	skipLoadingInitial bool,
+	excludeGCBarriers bool,
+) (context.Context, context.CancelFunc, <-chan gc.GCState, ratelimit.DoneFunc, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if err := s.validateRequest(header); err != nil {
+		if done != nil {
+			done()
+		}
+		return nil, nil, nil, nil, err
+	}
+	if s.GetRaftCluster() == nil {
+		if done != nil {
+			done()
+		}
+		return nil, nil, nil, nil, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+
+	ctx, cancel := context.WithCancel(streamCtx)
+	gcStateCh, err := s.gcStateManager.WatchGCStates(ctx, skipLoadingInitial, excludeGCBarriers)
+	if err != nil {
+		cancel()
+		if done != nil {
+			done()
+		}
+		return nil, nil, nil, nil, err
+	}
+	return ctx, cancel, gcStateCh, done, nil
+}
+
+func (s *GrpcServer) consumeGCStateWatch(
+	ctx context.Context,
+	gcStateCh <-chan gc.GCState,
+	send func([]gc.GCState) error,
+) error {
+	for {
+		gcStates, channelClosed, err := recvGCStateBatch(ctx, gcStateCh)
+		if err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if len(gcStates) > 0 {
+			if err := send(gcStates); err != nil {
+				return err
+			}
+		}
+		if channelClosed {
+			// A closed watch channel means GCStateManager stopped the watch, typically because the PD node
+			// lost leadership or the watcher was too slow. Returning here lets the handler's deferred
+			// cancel() fire, which in turn wakes runGCStateWatch and completes the whole shutdown path.
+			if ctx.Err() != nil {
+				return nil
+			}
+			return status.Errorf(codes.Unavailable, "gc state watch closed")
+		}
+	}
+}
+
+func recvGCStateBatch(ctx context.Context, gcStateCh <-chan gc.GCState) ([]gc.GCState, bool, error) {
+	select {
+	case <-ctx.Done():
+		return nil, false, nil
+	case gcState, ok := <-gcStateCh:
+		if !ok {
+			if ctx.Err() != nil {
+				return nil, false, nil
+			}
+			return nil, true, nil
+		}
+
+		gcStates := make([]gc.GCState, 1, gcStateWatchReceiveBatchSize)
+		gcStates[0] = gcState
+		for len(gcStates) < gcStateWatchReceiveBatchSize {
+			select {
+			case gcState, ok := <-gcStateCh:
+				if !ok {
+					return gcStates, true, nil
+				}
+				gcStates = append(gcStates, gcState)
+			default:
+				return gcStates, false, nil
+			}
+		}
+		return gcStates, false, nil
+	}
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.

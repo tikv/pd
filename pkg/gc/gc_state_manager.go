@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -38,7 +39,7 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-// This file defines the type GCStateManager is the core for managing states of TiKV's GC for MVCC data. The
+// This file defines the type GCStateManager which is the core for managing states of TiKV's GC for MVCC data. The
 // implementation is based on the endpoint.GCStateProvider interface (and should be the only user of
 // endpoint.GCStateProvider) for reading and storing persistent data, and provides a set of primitives (APIs) for
 // reading and operating GC states, directly handling a set of corresponding gRPC APIs.
@@ -102,9 +103,6 @@ import (
 //  4. (weakened) For each GC barrier `b`, each advancement of the txn safe point should not push it to a new value
 //     that is larger than `b.BarrierTS` (`t' <= max{t, min(b.BarrierTS for b in B)}` where `B` is the set of GC
 //     barriers).
-//
-// TODO: Explicitly state the versions that GCStateManager starts to be functional and the old APIs/concepts/terms is
-//       deprecated when these work are all done.
 
 // GCStateManager is the manager for all kinds of states of TiKV's GC for MVCC data.
 // nolint:revive
@@ -119,6 +117,11 @@ type GCStateManager struct {
 	keyspaceManager *keyspace.Manager
 
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
+	gcStateListeners                 []gcStateListener
+	// Note that nodeLeadership is a counter instead of a bool. Theoretically, it's possible that an
+	// OnNodeBecomesFollower invocation of the previous lease is later than the OnNodeBecomesLeader call of the new
+	// lease during PD leader changes. Making this a counter helps in guaranteeing the eventual consistency.
+	nodeLeadership atomic.Int32
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -129,6 +132,22 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		keyspaceManager:                  keyspaceManager,
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
+}
+
+const (
+	gcStateListenerChannelSize = 128
+	gcStateListenerSendTimeout = 3 * time.Second
+)
+
+type gcStateListenerFlags uint64
+
+const (
+	gcStateListenerExcludeGCBarriers gcStateListenerFlags = 1 << iota
+)
+
+type gcStateListener struct {
+	ch    chan GCState
+	flags gcStateListenerFlags
 }
 
 type keyspaceNameKeyType struct{}
@@ -147,6 +166,210 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 		return value
 	}
 	return "<unknown>"
+}
+
+// OnNodeBecomesLeader marks the current PD node as leader for GC state watches.
+func (m *GCStateManager) OnNodeBecomesLeader() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nodeLeadership.Add(1)
+}
+
+// OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
+func (m *GCStateManager) OnNodeBecomesFollower() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nodeLeadership.Add(-1)
+	m.cancelAllGCStateListenersLocked()
+}
+
+func (m *GCStateManager) nodeIsLeader() bool {
+	return m.nodeLeadership.Load() > 0
+}
+
+// WatchGCStates watches GC state updates. The returned channel is closed when the caller's context is done, the
+// current PD node loses leadership, or the watcher becomes too slow to consume updates.
+func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial bool, excludeGCBarriers bool) (<-chan GCState, error) {
+	listener := gcStateListener{
+		ch: make(chan GCState, gcStateListenerChannelSize),
+	}
+	if excludeGCBarriers {
+		listener.flags |= gcStateListenerExcludeGCBarriers
+	}
+
+	m.mu.Lock()
+	if !m.nodeIsLeader() {
+		m.mu.Unlock()
+		close(listener.ch)
+		return nil, errs.ErrNotLeader
+	}
+	m.gcStateListeners = append(m.gcStateListeners, listener)
+	m.mu.Unlock()
+
+	go m.runGCStateWatch(ctx, listener, skipLoadingInitial)
+	return listener.ch, nil
+}
+
+func (m *GCStateManager) runGCStateWatch(ctx context.Context, listener gcStateListener, skipLoadingInitial bool) {
+	defer m.deregisterGCStateListener(listener)
+
+	if !skipLoadingInitial {
+		m.sendInitialGCStates(ctx, listener)
+	}
+
+	// In the gRPC path, leadership loss closes listener.ch first. The consume loop then returns, the
+	// handler's deferred cancel() fires, and this wait is released so the watch goroutine can exit and
+	// run the deferred deregistration.
+	<-ctx.Done()
+}
+
+func (m *GCStateManager) sendInitialGCStates(ctx context.Context, listener gcStateListener) {
+	gcStates, err := m.GetAllKeyspacesGCStates(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Warn("failed to load initial GC states for watcher", zap.Error(err))
+		}
+		return
+	}
+
+	for _, gcState := range gcStates {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		m.mu.Lock()
+		if !m.hasGCStateListenerLocked(listener) {
+			m.mu.Unlock()
+			return
+		}
+		if !m.sendGCStateToListenerLocked(listener, gcState, false) {
+			m.mu.Unlock()
+			return
+		}
+		m.mu.Unlock()
+	}
+}
+
+func (m *GCStateManager) deregisterGCStateListener(listener gcStateListener) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.removeGCStateListenerLocked(listener)
+}
+
+func (m *GCStateManager) hasGCStateListenerLocked(listener gcStateListener) bool {
+	for _, current := range m.gcStateListeners {
+		if current.ch == listener.ch {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener) {
+	for i, current := range m.gcStateListeners {
+		if current.ch != listener.ch {
+			continue
+		}
+		close(current.ch)
+		m.gcStateListeners = slices.Delete(m.gcStateListeners, i, i+1)
+		return
+	}
+}
+
+func (m *GCStateManager) cancelAllGCStateListenersLocked() {
+	for _, listener := range m.gcStateListeners {
+		close(listener.ch)
+	}
+	m.gcStateListeners = nil
+}
+
+func cloneGCBarrier(barrier *endpoint.GCBarrier) *endpoint.GCBarrier {
+	if barrier == nil {
+		return nil
+	}
+	clone := &endpoint.GCBarrier{
+		BarrierID: barrier.BarrierID,
+		BarrierTS: barrier.BarrierTS,
+	}
+	if barrier.ExpirationTime != nil {
+		expirationTime := *barrier.ExpirationTime
+		clone.ExpirationTime = &expirationTime
+	}
+	return clone
+}
+
+func cloneGCStateForListener(gcState GCState, flags gcStateListenerFlags) GCState {
+	cloned := gcState
+	if flags&gcStateListenerExcludeGCBarriers != 0 {
+		cloned.GCBarriers = nil
+		return cloned
+	}
+
+	if len(gcState.GCBarriers) == 0 {
+		return cloned
+	}
+
+	cloned.GCBarriers = make([]*endpoint.GCBarrier, 0, len(gcState.GCBarriers))
+	for _, barrier := range gcState.GCBarriers {
+		cloned.GCBarriers = append(cloned.GCBarriers, cloneGCBarrier(barrier))
+	}
+	return cloned
+}
+
+func (m *GCStateManager) sendGCStateToListenerLocked(listener gcStateListener, gcState GCState, barrierOnly bool) bool {
+	if barrierOnly && listener.flags&gcStateListenerExcludeGCBarriers != 0 {
+		return true
+	}
+
+	timer := time.NewTimer(gcStateListenerSendTimeout)
+	defer timer.Stop()
+
+	select {
+	case listener.ch <- cloneGCStateForListener(gcState, listener.flags):
+		return true
+	case <-timer.C:
+		log.Warn("GC state watcher is too slow and will be closed")
+		m.removeGCStateListenerLocked(listener)
+		return false
+	}
+}
+
+func (m *GCStateManager) triggerGCStateListenersLocked(gcState GCState, barrierOnly bool) {
+	for i := 0; i < len(m.gcStateListeners); {
+		listener := m.gcStateListeners[i]
+		if m.sendGCStateToListenerLocked(listener, gcState, barrierOnly) {
+			i++
+			continue
+		}
+	}
+}
+
+func (m *GCStateManager) loadGCStateLocked(keyspaceID uint32) (GCState, error) {
+	var gcState GCState
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		var err1 error
+		gcState, err1 = m.getGCStateInTransaction(keyspaceID, wb)
+		return err1
+	})
+	return gcState, err
+}
+
+func (m *GCStateManager) notifyGCStateChangeLocked(keyspaceID uint32, barrierOnly bool) {
+	if len(m.gcStateListeners) == 0 {
+		return
+	}
+
+	gcState, err := m.loadGCStateLocked(keyspaceID)
+	if err != nil {
+		log.Warn("failed to load GC state for watchers", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+		return
+	}
+	m.triggerGCStateListenersLocked(gcState, barrierOnly)
 }
 
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
@@ -277,6 +500,9 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 
 	if keyspaceID == constant.NullKeyspaceID {
 		gcSafePointGauge.WithLabelValues("gc_safepoint").Set(float64(target))
+	}
+	if newGCSafePoint != oldGCSafePoint {
+		m.notifyGCStateChangeLocked(keyspaceID, false)
 	}
 
 	return
@@ -452,6 +678,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		simulatedServiceID: simulatedServiceID,
 	}
 	m.logAdvancingTxnSafePoint(ctx, keyspaceID, result, minBlocker, downgradeCompatibleMode)
+	m.notifyGCStateChangeLocked(keyspaceID, false)
 	return result, nil
 }
 
@@ -565,6 +792,7 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 		zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 		zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl),
 		zap.Stringer("new-gc-barrier", newBarrier))
+	m.notifyGCStateChangeLocked(keyspaceID, true)
 
 	return newBarrier, nil
 }
@@ -622,6 +850,7 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 		log.Info("GC barrier deleted",
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 			zap.String("barrier-id", barrierID), zap.Stringer("deleted-gc-barrier", deletedBarrier))
+		m.notifyGCStateChangeLocked(keyspaceID, true)
 	}
 
 	return deletedBarrier, nil
