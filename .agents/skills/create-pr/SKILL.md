@@ -32,9 +32,10 @@ Collect all information needed to fill the PR template. Run these in parallel:
 
 Automatically verify and fix commit requirements before pushing:
 
-- ✅ **Signed-off-by line**: Every commit MUST have `Signed-off-by: Author <email>`
+- ✅ **Signed-off-by line**: Every commit MUST have `Signed-off-by: Author <email>` matching the commit author (the human developer)
   - Check with: `git log master..HEAD --invert-grep --grep="Signed-off-by:" --pretty=oneline` (any output here indicates commits missing sign-off)
   - **Fix (requires confirmation)**: If missing, prompt user, then run `git rebase --signoff master` to add sign-offs to all commits
+  - **CRITICAL**: Never use agent identity in Signed-off-by; DCO requires human developer attestation
 - ✅ **Subject line ≤70 chars**: PR title / final commit subject must be ≤70 characters
 - ✅ **Commit message format**: `pkg: message` or `pkg1, pkg2: message` or `*: message`
 - ✅ **Body wrapped at 80 chars**: Commit message body lines must wrap at 80 characters
@@ -60,7 +61,7 @@ Automatically verify and fix commit requirements before pushing:
    - The bot extracts content from the `commit-message` code block for the final commit
    - Describe **why** the change was made and **how** it works (not just what)
    - Wrap body lines at **80 characters**
-   - **CRITICAL**: Preserve language specifier `commit-message` — never strip to generic code block
+   - **CRITICAL**: Preserve language specifier `commit-message` — never strip to generic code block. The bot fails to parse the commit message without this specifier, breaking DSO compliance.
 4. Summarize the problem being solved based on commit messages and diff analysis.
 5. Show the composed PR title and full body to the user for review **before** creating the PR. Ask if any section needs adjustment (especially the issue number).
 
@@ -95,6 +96,7 @@ If the push or PR creation fails:
 - **Always show the PR content before submitting.** User must approve title and body.
 - **Use `gh` CLI for GitHub operations.** Do not guess API URLs.
 - **Follow PD commit conventions.** `pkg: message` format for title, subject ≤70 chars, body wrapped at 80 chars.
-- **Fix DCO sign-offs.** Prompt user for confirmation, then run `git rebase --signoff master` if commits lack `Signed-off-by`. This rewrites commit hashes and preserves commit content while adding the required DCO line.
+- **Preserve language specifiers.** Always use `commit-message` (not generic code blocks) — the PD merge bot extracts this for the final commit. Stripping the specifier breaks DSO compliance.
+- **Fix DCO sign-offs.** Prompt user for confirmation, then run `git rebase --signoff master` if commits lack `Signed-off-by`. This rewrites commit hashes and preserves commit content while adding the required DCO line. **CRITICAL**: The Signed-off-by must match the commit author (the human developer), never the agent.
 - **Do not modify code.** This skill only pushes and creates PRs.
 - **Ask for issue number if unknown.** Do not invent issue references.
