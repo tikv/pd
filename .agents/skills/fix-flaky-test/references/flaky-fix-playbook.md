@@ -102,8 +102,8 @@ make gotest GOTEST_ARGS='./<pkg> -run <TestName> -count=1 -v'
 - Minimal fix shape: align setup, teardown, and assertion semantics with stable tests in the same suite.
 
 **Representative PRs**
-- #10203: test: fix flaky test TestForwardTestSuite in next-gen (https://github.com/tikv/pd/pull/10203)
-- #10184: tests: fix data race in TestOnlineProgress (https://github.com/tikv/pd/pull/10184)
-- #10176: fix(resourcemanager): call getServiceLimit to prevent data race (https://github.com/tikv/pd/pull/10176)
 - #10134: tests: fix some unstable tests (https://github.com/tikv/pd/pull/10134)
-- #10073: resource control: avoid panic when reservation is nil (https://github.com/tikv/pd/pull/10073)
+- #9465: *: fix flaky test `TestPreparingProgress` and `TestRemovingProgress` (https://github.com/tikv/pd/pull/9465)
+- #9121: tests: fix the flaky test `TestGetPeers` (https://github.com/tikv/pd/pull/9121)
+- #7876: test: fix unstable test TestLevelDBBackend (https://github.com/tikv/pd/pull/7876)
+- #7003: test: fix unstable test TestBasicResourceGroupCURD (https://github.com/tikv/pd/pull/7003)
