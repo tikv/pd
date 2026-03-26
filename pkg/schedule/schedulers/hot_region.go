@@ -226,6 +226,22 @@ func (s *baseHotScheduler) allowSourceStoreScheduleInCurrentFeedback(scope hotSc
 	return state.emittedHotOps < limit
 }
 
+func (s *baseHotScheduler) countPendingHotOpsFromStore(storeID uint64) int {
+	count := 0
+	for _, p := range s.regionPendings {
+		if p == nil {
+			continue
+		}
+		for _, from := range p.froms {
+			if from == storeID {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
 func (s *baseHotScheduler) recordSourceStoreScheduleInCurrentFeedback(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) {
 	if detail == nil || detail.StoreInfo == nil {
 		return

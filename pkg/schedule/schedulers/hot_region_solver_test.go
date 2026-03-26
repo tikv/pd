@@ -331,7 +331,7 @@ func TestMaxZombieDuration(t *testing.T) {
 			typ:            readLeader,
 			firstPriority:  utils.CPUDim,
 			secondPriority: utils.ByteDim,
-			maxZombieDur:   maxZombieDur * utils.StoreHeartBeatReportInterval,
+			maxZombieDur:   2 * maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 		{
 			typ:          writePeer,
@@ -422,7 +422,11 @@ func TestFilterSrcStoresReadCPUByteFeedbackEpochCap(t *testing.T) {
 	hb.recordSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), src)
 	re.Empty(bs.filterSrcStores())
 
+	hb.regionPendings[1] = &pendingInfluence{froms: []uint64{1}}
 	src.LoadPred.Current.Loads[utils.CPUDim] = 580
+	re.Empty(bs.filterSrcStores())
+
+	delete(hb.regionPendings, 1)
 	re.Len(bs.filterSrcStores(), 1)
 }
 

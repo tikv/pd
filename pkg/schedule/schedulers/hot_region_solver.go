@@ -423,7 +423,7 @@ type hotPeerFilterReason string
 
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
-	readCPUByteMaxOpsPerHeartbeatEpoch                               = 1
+	readCPUByteMaxOpsPerFeedbackEpoch                                = 1
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
 	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
@@ -540,7 +540,10 @@ func (bs *balanceSolver) shouldThrottleReadCPUSrcByFeedbackEpoch(detail *statist
 	if !bs.isReadCPUByte() || detail == nil || detail.StoreSummaryInfo == nil || detail.StoreInfo == nil {
 		return false
 	}
-	return !bs.sche.allowSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), detail, readCPUByteMaxOpsPerHeartbeatEpoch)
+	if bs.sche.countPendingHotOpsFromStore(detail.GetID()) > 0 {
+		return true
+	}
+	return !bs.sche.allowSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), detail, readCPUByteMaxOpsPerFeedbackEpoch)
 }
 
 func (bs *balanceSolver) logHotOperatorSnapshot() {
@@ -627,6 +630,9 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 		return bs.sche.conf.getStoreStatZombieDuration()
 	default:
 		dur := bs.sche.conf.getStoreStatZombieDuration()
+		if bs.isReadCPUByte() {
+			return 2 * dur
+		}
 		return dur
 	}
 }
