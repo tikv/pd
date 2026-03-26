@@ -95,17 +95,21 @@ for port in 2379 2382 2384; do
 done
 ```
 
-**Step down PD leader (requires both failpoints):**
+**Step down PD leader (requires three failpoints to match TestPDLeaderLostWhileEtcdLeaderIntact):**
 ```bash
 MEMBER_ID="3474484975246189105"
 
-# Exit campaign loop
+# Exit campaign loop (leader steps down)
 curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/exitCampaignLeader" \
   -d "return(\"$MEMBER_ID\")"
 
-# Prevent re-campaign
+# Prevent re-campaign (keeps leader from campaigning again)
 curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/leaderLoopCheckAgain" \
   -d "return(\"$MEMBER_ID\")"
+
+# Speed up no-leader timeout (optional, accelerates test)
+curl -X PUT "http://127.0.0.1:2379/pd/api/v1/fail/github.com/tikv/pd/server/timeoutWaitPDLeader" \
+  -d "return(\"1s\")"
 ```
 
 **Checkpoint:** Verify stuck state:
@@ -122,7 +126,7 @@ Expected: `etcd_server_is_leader 1` AND `service_member_role{service="PD"} 0`
 |---|---|
 | "PATH doesn't matter" | Tools install to `.tools/bin/`, not PATH |
 | "Cluster ready immediately" | Needs 20-30 seconds to stabilize |
-| "Just `exitCampaignLeader`" | Leader re-campaigns without `skipGrantLeader` |
+| "Just `exitCampaignLeader`" | Leader re-campaigns without `leaderLoopCheckAgain` (or global `skipGrantLeader`) |
 | "Cleanup errors = broken" | `[ErrRedirectNoLeader]` after step-down is expected |
 | "I'll clean up later" | Enabled failpoints persist in running binaries |
 
@@ -142,7 +146,10 @@ Expected: `etcd_server_is_leader 1` AND `service_member_role{service="PD"} 0`
 - Use `return("")` for permanent blocking
 
 **`exitCampaignLeader` alone does NOT step down leader**
-Always pair with `leaderLoopCheckAgain` on the same member ID.
+Always pair with `leaderLoopCheckAgain` on the same member ID to prevent re-campaigning.
+
+**Exception: When using global `skipGrantLeader` block**
+If `skipGrantLeader` with `pause` is applied to ALL nodes, `leaderLoopCheckAgain` is technically optional (since no node can campaign). However, keeping the pair is still recommended for consistency and clarity.
 
 **Cleanup errors are expected**
 `[ErrRedirectNoLeader]` after step-down is normal — leader is gone, commands still succeed.
@@ -150,9 +157,14 @@ Always pair with `leaderLoopCheckAgain` on the same member ID.
 ## Cleanup
 
 ```bash
-# Disable all failpoints
+# Disable all failpoints used in this skill
 for port in 2379 2382 2384; do
+  # pkg/election failpoints
   curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/pkg/election/skipGrantLeader" -d ''
+  # server failpoints
+  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/exitCampaignLeader" -d ''
+  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/leaderLoopCheckAgain" -d ''
+  curl -X PUT "http://127.0.0.1:$port/pd/api/v1/fail/github.com/tikv/pd/server/timeoutWaitPDLeader" -d ''
 done
 
 # Stop cluster
@@ -160,9 +172,18 @@ pkill -9 -f "tiup.*playground"
 rm -rf ~/.tiup/data/alert-test
 ```
 
-## Full Example Script
+## End-to-End Examples
 
-Complete PD_leader_service_stuck test: [scripts/test-pd-leader-stuck.sh](scripts/test-pd-leader-stuck.sh)
+**Testing PD_leader_service_stuck Alert:**
+For a complete example of testing the `PD_leader_service_stuck` alert, including Prometheus setup, triggering the stuck state with failpoints, and verifying the alert fires, see [examples/pd-leader-stuck-alert.md](examples/pd-leader-stuck-alert.md).
+
+Use this example when you need to:
+- Test alert firing conditions with Prometheus
+- Understand how failpoints create sustained stuck states
+- Validate alert rules and timing
+
+**Quick Test Script:**
+For a simpler test script that creates the stuck state without Prometheus, see [scripts/test-pd-leader-stuck.sh](scripts/test-pd-leader-stuck.sh).
 
 ## Finding Failpoints
 
