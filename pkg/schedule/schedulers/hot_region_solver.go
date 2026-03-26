@@ -423,7 +423,7 @@ type hotPeerFilterReason string
 
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
-	readCPUByteMaxPendingOpsPerSrcHeartbeatEpoch                     = 1
+	readCPUByteMaxOpsPerHeartbeatEpoch                               = 1
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
 	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
@@ -495,6 +495,14 @@ func (bs *balanceSolver) isReadCPUByte() bool {
 	}
 }
 
+func (bs *balanceSolver) hotScheduleScopeKey() hotScheduleScopeKey {
+	return hotScheduleScopeKey{
+		rwTy:           bs.rwTy,
+		firstPriority:  bs.firstPriority,
+		secondPriority: bs.secondPriority,
+	}
+}
+
 func (bs *balanceSolver) sourceLoadForQualification(detail *statistics.StoreLoadDetail) *statistics.StoreLoad {
 	if detail == nil || detail.LoadPred == nil {
 		return nil
@@ -528,15 +536,11 @@ func (bs *balanceSolver) shouldRejectReadCPUDstHistory(detail *statistics.StoreL
 	})
 }
 
-func (bs *balanceSolver) shouldThrottleReadCPUSrcByHeartbeatEpoch(detail *statistics.StoreLoadDetail) bool {
+func (bs *balanceSolver) shouldThrottleReadCPUSrcByFeedbackEpoch(detail *statistics.StoreLoadDetail) bool {
 	if !bs.isReadCPUByte() || detail == nil || detail.StoreSummaryInfo == nil || detail.StoreInfo == nil {
 		return false
 	}
-	lastHeartbeatTS := detail.GetLastHeartbeatTS()
-	if lastHeartbeatTS.IsZero() {
-		return false
-	}
-	return bs.countPendingOpsFromStoreSince(detail.GetID(), lastHeartbeatTS) >= readCPUByteMaxPendingOpsPerSrcHeartbeatEpoch
+	return !bs.sche.allowSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), detail, readCPUByteMaxOpsPerHeartbeatEpoch)
 }
 
 func (bs *balanceSolver) logHotOperatorSnapshot() {
@@ -623,11 +627,6 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 		return bs.sche.conf.getStoreStatZombieDuration()
 	default:
 		dur := bs.sche.conf.getStoreStatZombieDuration()
-		// CPU signal has longer feedback delay due to TimeMedian smoothing (~12.5s),
-		// so pending influence needs to persist longer for accurate accumulation.
-		if bs.isReadCPUByte() {
-			return 2 * dur
-		}
 		return dur
 	}
 }
@@ -652,8 +651,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if bs.shouldThrottleReadCPUSrcByHeartbeatEpoch(detail) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-heartbeat-epoch-cap-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+		if bs.shouldThrottleReadCPUSrcByFeedbackEpoch(detail) {
+			hotSchedulerResultCounter.WithLabelValues("src-store-feedback-epoch-cap-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 
@@ -1074,23 +1073,6 @@ func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
-// countPendingOpsFromStoreSince counts pending ops emitted by the given source store after the specified store heartbeat.
-func (bs *balanceSolver) countPendingOpsFromStoreSince(storeID uint64, since time.Time) int {
-	count := 0
-	for _, p := range bs.sche.regionPendings {
-		if p == nil || p.op == nil || p.op.GetCreateTime().Before(since) {
-			continue
-		}
-		for _, from := range p.froms {
-			if from == storeID {
-				count++
-				break
-			}
-		}
-	}
-	return count
-}
-
 func (bs *balanceSolver) getMinRate(dim int) float64 {
 	switch dim {
 	case utils.KeyDim:
@@ -1258,6 +1240,9 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 		log.Debug("fail to create operator", zap.Stringer("rw-type", bs.rwTy), zap.Stringer("op-type", bs.opTy), errs.ZapError(err))
 		hotSchedulerCreateOperatorFailedCounter.Inc()
 		return nil
+	}
+	if bs.isReadCPUByte() {
+		bs.sche.recordSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), bs.cur.srcStore)
 	}
 
 	return

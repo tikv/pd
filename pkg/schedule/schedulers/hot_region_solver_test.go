@@ -331,7 +331,7 @@ func TestMaxZombieDuration(t *testing.T) {
 			typ:            readLeader,
 			firstPriority:  utils.CPUDim,
 			secondPriority: utils.ByteDim,
-			maxZombieDur:   2 * maxZombieDur * utils.StoreHeartBeatReportInterval,
+			maxZombieDur:   maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 		{
 			typ:          writePeer,
@@ -378,7 +378,7 @@ func TestMaxZombieDuration(t *testing.T) {
 	}
 }
 
-func TestFilterSrcStoresReadCPUByteHeartbeatEpochCap(t *testing.T) {
+func TestFilterSrcStoresReadCPUByteFeedbackEpochCap(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -419,11 +419,10 @@ func TestFilterSrcStoresReadCPUByteHeartbeatEpochCap(t *testing.T) {
 
 	re.Len(bs.filterSrcStores(), 1)
 
-	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpHotRegion|operator.OpLeader, operator.TransferLeader{FromStore: 1, ToStore: 2})
-	hb.regionPendings[1] = &pendingInfluence{op: op, froms: []uint64{1}}
+	hb.recordSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), src)
 	re.Empty(bs.filterSrcStores())
 
-	src.StoreSummaryInfo.StoreInfo = src.StoreSummaryInfo.StoreInfo.Clone(core.SetLastHeartbeatTS(op.GetCreateTime().Add(time.Second)))
+	src.LoadPred.Current.Loads[utils.CPUDim] = 580
 	re.Len(bs.filterSrcStores(), 1)
 }
 

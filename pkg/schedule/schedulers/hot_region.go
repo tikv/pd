@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"strconv"
@@ -59,6 +60,18 @@ var (
 	statisticsInterval = time.Second
 )
 
+type hotScheduleScopeKey struct {
+	rwTy           utils.RWType
+	firstPriority  int
+	secondPriority int
+}
+
+type sourceStoreFeedbackEpochState struct {
+	firstPriorityLoad  float64
+	secondPriorityLoad float64
+	emittedHotOps      int
+}
+
 type baseHotScheduler struct {
 	*BaseScheduler
 	// stLoadInfos contain store statistics information by resource type.
@@ -72,6 +85,9 @@ type baseHotScheduler struct {
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
 	regionPendings map[uint64]*pendingInfluence
+	// sourceStoreEpochStates records how many hot ops have already been emitted from a source store
+	// within the store's current visible load-feedback epoch for a given scheduler scope.
+	sourceStoreEpochStates map[hotScheduleScopeKey]map[uint64]sourceStoreFeedbackEpochState
 	// types is the resource types that the scheduler considers.
 	types           []resourceType
 	updateReadTime  time.Time
@@ -85,9 +101,10 @@ func newBaseHotScheduler(
 ) *baseHotScheduler {
 	base := NewBaseScheduler(opController, types.BalanceHotRegionScheduler, schedulerConfig)
 	ret := &baseHotScheduler{
-		BaseScheduler:  base,
-		regionPendings: make(map[uint64]*pendingInfluence),
-		stHistoryLoads: statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
+		BaseScheduler:          base,
+		regionPendings:         make(map[uint64]*pendingInfluence),
+		stHistoryLoads:         statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
+		sourceStoreEpochStates: make(map[hotScheduleScopeKey]map[uint64]sourceStoreFeedbackEpochState),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.types = append(ret.types, ty)
@@ -175,6 +192,63 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 			})
 		}
 	}
+}
+
+func normalizeHotLoadSignature(load float64) float64 {
+	return math.Round(load*1000) / 1000
+}
+
+func hotLoadFeedbackSignature(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) (float64, float64, bool) {
+	if detail == nil || detail.LoadPred == nil {
+		return 0, 0, false
+	}
+	return normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.firstPriority]),
+		normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.secondPriority]),
+		true
+}
+
+func (s *baseHotScheduler) allowSourceStoreScheduleInCurrentFeedback(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail, limit int) bool {
+	if limit <= 0 || detail == nil || detail.StoreInfo == nil {
+		return true
+	}
+	firstLoad, secondLoad, ok := hotLoadFeedbackSignature(scope, detail)
+	if !ok {
+		return true
+	}
+	storeStates, ok := s.sourceStoreEpochStates[scope]
+	if !ok {
+		return true
+	}
+	state, ok := storeStates[detail.GetID()]
+	if !ok || state.firstPriorityLoad != firstLoad || state.secondPriorityLoad != secondLoad {
+		return true
+	}
+	return state.emittedHotOps < limit
+}
+
+func (s *baseHotScheduler) recordSourceStoreScheduleInCurrentFeedback(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) {
+	if detail == nil || detail.StoreInfo == nil {
+		return
+	}
+	firstLoad, secondLoad, ok := hotLoadFeedbackSignature(scope, detail)
+	if !ok {
+		return
+	}
+	storeStates, ok := s.sourceStoreEpochStates[scope]
+	if !ok {
+		storeStates = make(map[uint64]sourceStoreFeedbackEpochState)
+		s.sourceStoreEpochStates[scope] = storeStates
+	}
+	id := detail.GetID()
+	state, ok := storeStates[id]
+	if !ok || state.firstPriorityLoad != firstLoad || state.secondPriorityLoad != secondLoad {
+		state = sourceStoreFeedbackEpochState{
+			firstPriorityLoad:  firstLoad,
+			secondPriorityLoad: secondLoad,
+		}
+	}
+	state.emittedHotOps++
+	storeStates[id] = state
 }
 
 func (s *baseHotScheduler) randomType() resourceType {
