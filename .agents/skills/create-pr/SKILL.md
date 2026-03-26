@@ -26,7 +26,7 @@ Collect all information needed to fill the PR template. Run these in parallel:
 3. `git log --oneline master..HEAD` — list all commits being submitted.
 4. `git diff master...HEAD --stat` — summary of changed files.
 5. `git diff master...HEAD` — full diff for analysis.
-6. `git log master..HEAD --format="FULL BODY:%n%s%n%b"` — check each commit for **DCO sign-off**.
+6. `git log master..HEAD --format="%B"` — check each commit for **DCO sign-off**.
 7. `make check` — run tidy + static + generate-errdoc; gate PR creation on success.
 
 **Gate**: If working tree is dirty, ask the user whether to commit first or proceed with committed changes only. If on `master`, stop and ask the user to create a branch.
@@ -35,7 +35,7 @@ Collect all information needed to fill the PR template. Run these in parallel:
 
 Verify and fix commit requirements before pushing. These checks apply to all commits in the range `master..HEAD`:
 
-- ✅ **Signed-off-by line**: Every commit MUST have `Signed-off-by: Author <email>` matching the commit author (the human developer)
+- ✅ **Signed-off-by line**: Every commit MUST have `Signed-off-by: Name <email>` matching the commit author (the human developer)
   - Check: `git log master..HEAD --invert-grep --grep="Signed-off-by:" --pretty=oneline`
   - Fix: Prompt user for confirmation, then run `git rebase --signoff master`
   - **CRITICAL**: DCO requires human developer attestation; never use agent identity in Signed-off-by
@@ -60,7 +60,7 @@ Verify and fix commit requirements before pushing. These checks apply to all com
    - The bot extracts content from the `commit-message` code block for the final commit
    - Describe **why** the change was made and **how** it works (not just what)
    - Wrap body lines at **80 characters**
-   - **CRITICAL**: Preserve language specifier `commit-message` — never strip to generic code block. The bot fails to parse the commit message without this specifier, breaking DSO compliance.
+   - **CRITICAL**: Preserve language specifier `commit-message` — never strip to generic code block. The bot fails to parse the commit message without this specifier, breaking DCO compliance.
 4. Summarize the problem being solved based on commit messages and diff analysis.
 5. Show the composed PR title and full body to the user for review **before** creating the PR. Ask if any section needs adjustment (especially the issue number).
 
