@@ -423,6 +423,7 @@ type hotPeerFilterReason string
 
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
+	readCPUByteMaxPendingOpsPerSrc                                   = 2
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
 	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
@@ -612,6 +613,10 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			srcToleranceRatio += tiflashToleranceRatioCorrection
 		}
 		if len(detail.HotPeers) == 0 {
+			continue
+		}
+		if bs.isReadCPUByte() && bs.countPendingOpsFromStore(id) >= readCPUByteMaxPendingOpsPerSrc {
+			hotSchedulerResultCounter.WithLabelValues("src-store-pending-cap-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 
@@ -1020,19 +1025,7 @@ func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
 	if srcRate <= dstRate {
 		return false
 	}
-	ampFactor := pendingAmpFactor
-	// For read+cpu,byte, scale the amplification factor by the number of in-flight ops
-	// from the same source store. This progressively throttles burst scheduling:
-	// 0 pending ops → factor=2 (unchanged), 1 → 4, 2 → 6, 3 → 8, etc.
-	if bs.isReadCPUByte() {
-		srcStoreID := bs.cur.srcStore.GetID()
-		if reverse {
-			srcStoreID = bs.cur.dstStore.GetID()
-		}
-		srcPendingCount := bs.countPendingOpsFromStore(srcStoreID)
-		ampFactor = pendingAmpFactor * float64(1+srcPendingCount)
-	}
-	pendingAmp := 1 + ampFactor*srcRate/(srcRate-dstRate)
+	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 

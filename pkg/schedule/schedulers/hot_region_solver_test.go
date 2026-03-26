@@ -378,48 +378,52 @@ func TestMaxZombieDuration(t *testing.T) {
 	}
 }
 
-func TestIsToleranceReadCPUByteAdaptivePendingAmp(t *testing.T) {
+func TestFilterSrcStoresReadCPUBytePendingCap(t *testing.T) {
 	re := require.New(t)
-	srcStore := core.NewStoreInfoWithLabel(1, map[string]string{})
-	dstStore := core.NewStoreInfoWithLabel(2, map[string]string{})
-	src := &statistics.StoreLoadDetail{
-		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: srcStore},
-		LoadPred: &statistics.StoreLoadPred{
-			Current: statistics.StoreLoad{Loads: statistics.Loads{
-				utils.CPUDim: 594,
-			}},
-			Future: statistics.StoreLoad{Loads: statistics.Loads{
-				utils.CPUDim: 513,
-			}},
-		},
-	}
-	dst := &statistics.StoreLoadDetail{
-		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: dstStore},
-		LoadPred: &statistics.StoreLoadPred{
-			Current: statistics.StoreLoad{Loads: statistics.Loads{
-				utils.CPUDim: 47,
-			}},
-			Future: statistics.StoreLoad{Loads: statistics.Loads{
-				utils.CPUDim: 47,
-			}},
-		},
-	}
-	bs := &balanceSolver{
-		sche:           &hotScheduler{baseHotScheduler: &baseHotScheduler{regionPendings: make(map[uint64]*pendingInfluence)}},
-		rwTy:           utils.Read,
-		resourceTy:     readLeader,
-		firstPriority:  utils.CPUDim,
-		secondPriority: utils.ByteDim,
-		cur: &solution{
-			srcStore: src,
-			dstStore: dst,
-		},
-	}
-	re.True(bs.isTolerance(utils.CPUDim, false))
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
 
-	bs.sche.regionPendings[1] = &pendingInfluence{froms: []uint64{1}}
-	bs.sche.regionPendings[2] = &pendingInfluence{froms: []uint64{1}}
-	re.False(bs.isTolerance(utils.CPUDim, false))
+	store := core.NewStoreInfoWithLabel(1, map[string]string{})
+	src := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+		LoadPred: &statistics.StoreLoadPred{
+			Current: statistics.StoreLoad{Loads: statistics.Loads{
+				utils.ByteDim: 180,
+				utils.CPUDim:  594,
+			}},
+			Future: statistics.StoreLoad{Loads: statistics.Loads{
+				utils.ByteDim: 120,
+				utils.CPUDim:  513,
+			}},
+			Expect: statistics.StoreLoad{Loads: statistics.Loads{
+				utils.ByteDim: 60,
+				utils.CPUDim:  100,
+			}},
+		},
+		HotPeers: []*statistics.HotPeerStat{{
+			StoreID:  1,
+			RegionID: 1,
+			Loads: []float64{
+				utils.ByteDim: 50,
+				utils.CPUDim:  30,
+			},
+		}},
+	}
+	bs := newBalanceSolver(hb, tc, utils.Read, transferLeader)
+	bs.stLoadDetail = map[uint64]*statistics.StoreLoadDetail{1: src}
+
+	re.Len(bs.filterSrcStores(), 1)
+
+	hb.regionPendings[1] = &pendingInfluence{froms: []uint64{1}}
+	re.Len(bs.filterSrcStores(), 1)
+
+	hb.regionPendings[2] = &pendingInfluence{froms: []uint64{1}}
+	re.Empty(bs.filterSrcStores())
 }
 
 func TestExpect(t *testing.T) {
