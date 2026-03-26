@@ -634,6 +634,14 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				metrics.TokenConsumedHistogram.DeleteLabelValues(resourceGroupName)
+				metrics.TokenConsumedByTypeCounter.DeleteLabelValues(resourceGroupName, "rru")
+				metrics.TokenConsumedByTypeCounter.DeleteLabelValues(resourceGroupName, "wru")
+				metrics.TokenBalanceGauge.DeleteLabelValues(resourceGroupName)
+				metrics.FillRateGauge.DeleteLabelValues(resourceGroupName)
+				metrics.BurstLimitGauge.DeleteLabelValues(resourceGroupName)
+				metrics.AvgRUPerSecGauge.DeleteLabelValues(resourceGroupName)
+				metrics.ThrottledGauge.DeleteLabelValues(resourceGroupName)
 				return true
 			}
 			gc.inactive = true
