@@ -198,13 +198,19 @@ func normalizeHotLoadSignature(load float64) float64 {
 	return math.Round(load*1000) / 1000
 }
 
+func useFirstPriorityOnlyFeedbackSignature(scope hotScheduleScopeKey) bool {
+	return scope.rwTy == utils.Read && scope.firstPriority == utils.CPUDim && scope.secondPriority == utils.ByteDim
+}
+
 func hotLoadFeedbackSignature(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) (float64, float64, bool) {
 	if detail == nil || detail.LoadPred == nil {
 		return 0, 0, false
 	}
-	return normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.firstPriority]),
-		normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.secondPriority]),
-		true
+	firstLoad := normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.firstPriority])
+	if useFirstPriorityOnlyFeedbackSignature(scope) {
+		return firstLoad, 0, true
+	}
+	return firstLoad, normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.secondPriority]), true
 }
 
 func (s *baseHotScheduler) allowSourceStoreScheduleInCurrentFeedback(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail, limit int) bool {
