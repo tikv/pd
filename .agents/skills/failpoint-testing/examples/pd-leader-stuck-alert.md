@@ -58,7 +58,7 @@ for port in 2379 2382 2384; do
   curl -s "http://127.0.0.1:$port/metrics" | \
     grep -E "^etcd_server_is_leader|^service_member_role"
 done
-```text
+```
 
 Expected output (pd-1 at port 2382 is leader):
 ```text

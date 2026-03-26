@@ -143,7 +143,7 @@ Expected: `etcd_server_is_leader 1` AND `service_member_role{service="PD"} 0`
 **`pause` vs `return("")`**
 - `pause` freezes goroutine inside call; unblocks on Disable
 - `return("")` exits cleanly; goroutine continues its loop
-- Use `return("")` for permanent blocking
+- Use `pause` for indefinite blocking; use `return("")` when you need the failpoint to inject a value and continue
 
 **`exitCampaignLeader` alone does NOT step down leader**
 Always pair with `leaderLoopCheckAgain` on the same member ID to prevent re-campaigning.
