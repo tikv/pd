@@ -860,10 +860,9 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 		testutil.Eventually(re, func() bool {
 			return newLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
 		})
+		// TSO should remain available after each leader transfer.
+		utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
 	}
-
-	// TSO should remain available throughout.
-	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
 }
 
 func checkTSO(
