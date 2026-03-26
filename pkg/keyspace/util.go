@@ -439,10 +439,13 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 	}
 
 	endKeyspaceID, endKT := ExtractKeyspaceID(endKey)
-
 	// If either key has unknown key type, cannot determine keyspace boundaries
 	if startKT == KeyTypeUnknown && endKT == KeyTypeUnknown {
 		return nil
+	}
+	// If endKey is unknown, set the endKeyspaceID to the max valid keyspace ID to generate split keys for all keyspaces after startKeyspaceID.
+	if endKT == KeyTypeUnknown {
+		endKeyspaceID = constant.MaxValidKeyspaceID
 	}
 
 	// If same keyspace, no split needed
@@ -462,13 +465,14 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 			return nil
 		}
 	}
-
+	// If startKeyspaceID and endKeyspaceID are different, the end keyspace id should be biggest to find all split keys.
+	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
+		endKeyspaceID = constant.MaxValidKeyspaceID
+	}
 	// Generate split keys for each keyspace boundary between start and end.
 	// Iterate existing keyspaces in (startKeyspaceID, endKeyspaceID).
 	var splitKeys [][]byte
-	if endKT == KeyTypeUnknown {
-		endKeyspaceID = constant.MaxValidKeyspaceID
-	}
+
 	nextID, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
 	if !ok {
 		return nil
@@ -559,8 +563,8 @@ func (s *Cache) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
 	defer s.RUnlock()
 	var foundID uint32
 	found := false
-	s.tree.AscendGreaterOrEqual(keyspaceItem{keyspaceID: start}, func(i keyspaceItem) bool {
-		if i.keyspaceID <= end {
+	s.tree.DescendLessOrEqual(keyspaceItem{keyspaceID: end}, func(i keyspaceItem) bool {
+		if i.keyspaceID >= start {
 			foundID = i.keyspaceID
 			found = true
 			return false

@@ -940,6 +940,9 @@ func (manager *Manager) KeyspaceExist(id uint32) bool {
 	if id == constant.NullKeyspaceID {
 		return true
 	}
+	if id == constant.MaxValidKeyspaceID {
+		return true
+	}
 	// don't direct check the cache because the keyspace may exist in storage
 	// but not in cache, we should check the storage to make sure the existence of the keyspace.
 	_, err := manager.GetKeyspaceNameByID(id)

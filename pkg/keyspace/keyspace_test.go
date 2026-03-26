@@ -744,17 +744,27 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
 	re := suite.Require()
 	manager := suite.manager
-	requests := makeCreateKeyspaceRequests(5)
+	requests := makeCreateKeyspaceByIDRequests(5)
 	for _, request := range requests {
-		_, err := manager.CreateKeyspace(request)
+		_, err := manager.CreateKeyspaceByID(request)
 		re.NoError(err)
 	}
 
-	_, ok := manager.GetKeyspaceIDInRange(2, 5)
+	id, ok := manager.GetKeyspaceIDInRange(2, 5)
 	re.True(ok)
+	re.Equal(uint32(5), id)
 
-	_, ok = manager.GetKeyspaceIDInRange(6, 10)
+	id, ok = manager.GetKeyspaceIDInRange(1, 4)
+	re.True(ok)
+	re.Equal(uint32(4), id)
+
+	id, ok = manager.GetKeyspaceIDInRange(1, 6)
+	re.True(ok)
+	re.Equal(uint32(5), id)
+
+	id, ok = manager.GetKeyspaceIDInRange(6, 10)
 	re.False(ok)
+	re.Equal(uint32(0), id)
 }
 
 // TestUpdateMultipleKeyspace checks that updating multiple keyspace's config simultaneously

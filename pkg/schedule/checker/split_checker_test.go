@@ -111,3 +111,26 @@ func TestKeyspaceSplit(t *testing.T) {
 	re.Len(splitKeys, 1)
 	re.Equal(hex.EncodeToString(bound100.TxnRightBound), hex.EncodeToString(splitKeys[0]))
 }
+
+func TestKeyspaceSplitMixRange(t *testing.T) {
+	re := require.New(t)
+
+	starthexKey := "7200019200000000FB"
+	endHexKey := "7800019100000000FB"
+	startkey, err := hex.DecodeString(starthexKey)
+	re.NoError(err)
+	endKey, err := hex.DecodeString(endHexKey)
+	re.NoError(err)
+
+	cfg := mockconfig.NewTestOptions()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, cfg)
+	ruleManager := cluster.RuleManager
+	regionLabeler := cluster.RegionLabeler
+	sc := NewSplitChecker(cluster, ruleManager, regionLabeler)
+
+	re.True(keyspace.RegionSpansMultipleKeyspaces(startkey, endKey, sc.cluster.(checkGetter)))
+	keys := keyspace.GetKeyspaceSplitKeys(startkey, endKey, sc.cluster.(checkGetter))
+	re.NotEmpty(keys)
+}
