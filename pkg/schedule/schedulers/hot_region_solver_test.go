@@ -304,10 +304,11 @@ func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*stati
 }
 
 type maxZombieDurTestCase struct {
-	typ           resourceType
-	isTiFlash     bool
-	firstPriority int
-	maxZombieDur  int
+	typ            resourceType
+	isTiFlash      bool
+	firstPriority  int
+	secondPriority int
+	maxZombieDur   int
 }
 
 func TestMaxZombieDuration(t *testing.T) {
@@ -325,6 +326,12 @@ func TestMaxZombieDuration(t *testing.T) {
 		{
 			typ:          readLeader,
 			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:            readLeader,
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.ByteDim,
+			maxZombieDur:   2 * maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 		{
 			typ:          writePeer,
@@ -361,13 +368,58 @@ func TestMaxZombieDuration(t *testing.T) {
 			}
 		}
 		bs := &balanceSolver{
-			sche:          hb.(*hotScheduler),
-			resourceTy:    testCase.typ,
-			firstPriority: testCase.firstPriority,
-			best:          &solution{srcStore: src},
+			sche:           hb.(*hotScheduler),
+			resourceTy:     testCase.typ,
+			firstPriority:  testCase.firstPriority,
+			secondPriority: testCase.secondPriority,
+			best:           &solution{srcStore: src},
 		}
 		re.Equal(time.Duration(testCase.maxZombieDur)*time.Second, bs.calcMaxZombieDur())
 	}
+}
+
+func TestIsToleranceReadCPUByteAdaptivePendingAmp(t *testing.T) {
+	re := require.New(t)
+	srcStore := core.NewStoreInfoWithLabel(1, map[string]string{})
+	dstStore := core.NewStoreInfoWithLabel(2, map[string]string{})
+	src := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: srcStore},
+		LoadPred: &statistics.StoreLoadPred{
+			Current: statistics.StoreLoad{Loads: statistics.Loads{
+				utils.CPUDim: 594,
+			}},
+			Future: statistics.StoreLoad{Loads: statistics.Loads{
+				utils.CPUDim: 513,
+			}},
+		},
+	}
+	dst := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: dstStore},
+		LoadPred: &statistics.StoreLoadPred{
+			Current: statistics.StoreLoad{Loads: statistics.Loads{
+				utils.CPUDim: 47,
+			}},
+			Future: statistics.StoreLoad{Loads: statistics.Loads{
+				utils.CPUDim: 47,
+			}},
+		},
+	}
+	bs := &balanceSolver{
+		sche:           &hotScheduler{baseHotScheduler: &baseHotScheduler{regionPendings: make(map[uint64]*pendingInfluence)}},
+		rwTy:           utils.Read,
+		resourceTy:     readLeader,
+		firstPriority:  utils.CPUDim,
+		secondPriority: utils.ByteDim,
+		cur: &solution{
+			srcStore: src,
+			dstStore: dst,
+		},
+	}
+	re.True(bs.isTolerance(utils.CPUDim, false))
+
+	bs.sche.regionPendings[1] = &pendingInfluence{froms: []uint64{1}}
+	bs.sche.regionPendings[2] = &pendingInfluence{froms: []uint64{1}}
+	re.False(bs.isTolerance(utils.CPUDim, false))
 }
 
 func TestExpect(t *testing.T) {

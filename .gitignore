@@ -37,4 +37,3 @@ tmp*
 !.claude/
 .claude/*
 !.claude/skills
-pd-server
