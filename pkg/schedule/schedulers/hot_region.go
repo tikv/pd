@@ -62,11 +62,13 @@ var (
 
 type hotScheduleScopeKey struct {
 	rwTy           utils.RWType
+	resourceTy     resourceType
 	firstPriority  int
 	secondPriority int
 }
 
 type sourceStoreFeedbackEpochState struct {
+	currentCPU       float64
 	overExpectMargin float64
 	emittedHotOps    int
 }
@@ -85,7 +87,7 @@ type baseHotScheduler struct {
 	// be selected if its owner region is tracked in this attribute.
 	regionPendings map[uint64]*pendingInfluence
 	// sourceStoreEpochStates records how many hot ops have already been emitted from a source store
-	// within the store's current visible load-feedback epoch for a given scheduler scope.
+	// within the store's current CPU-feedback epoch for a given scheduler scope.
 	sourceStoreEpochStates map[hotScheduleScopeKey]map[uint64]sourceStoreFeedbackEpochState
 	// types is the resource types that the scheduler considers.
 	types           []resourceType
@@ -197,21 +199,29 @@ func normalizeHotLoadSignature(load float64) float64 {
 	return math.Round(load*1000) / 1000
 }
 
-func sourceStoreOverExpectMargin(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) (float64, bool) {
+func sourceStoreCPUCurrentAndOverExpectMargin(detail *statistics.StoreLoadDetail) (float64, float64, bool) {
 	if detail == nil || detail.LoadPred == nil {
-		return 0, false
+		return 0, 0, false
 	}
-	if len(detail.LoadPred.Current.Loads) <= scope.firstPriority || len(detail.LoadPred.Expect.Loads) <= scope.firstPriority {
-		return 0, false
+	if len(detail.LoadPred.Current.Loads) <= utils.CPUDim || len(detail.LoadPred.Expect.Loads) <= utils.CPUDim {
+		return 0, 0, false
 	}
-	return normalizeHotLoadSignature(detail.LoadPred.Current.Loads[scope.firstPriority] - detail.LoadPred.Expect.Loads[scope.firstPriority]), true
+	currentCPU := normalizeHotLoadSignature(detail.LoadPred.Current.Loads[utils.CPUDim])
+	overExpectMargin := normalizeHotLoadSignature(detail.LoadPred.Current.Loads[utils.CPUDim] - detail.LoadPred.Expect.Loads[utils.CPUDim])
+	return currentCPU, overExpectMargin, true
 }
 
-func (s *baseHotScheduler) allowSourceStoreScheduleForImprovedMargin(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail, limit int, deadband float64) bool {
+func (s *baseHotScheduler) allowSourceStoreScheduleForImprovedCPUAndMargin(
+	scope hotScheduleScopeKey,
+	detail *statistics.StoreLoadDetail,
+	limit int,
+	currentCPUDeadband float64,
+	overExpectMarginDeadband float64,
+) bool {
 	if limit <= 0 || detail == nil || detail.StoreInfo == nil {
 		return true
 	}
-	margin, ok := sourceStoreOverExpectMargin(scope, detail)
+	currentCPU, margin, ok := sourceStoreCPUCurrentAndOverExpectMargin(detail)
 	if !ok {
 		return true
 	}
@@ -220,16 +230,18 @@ func (s *baseHotScheduler) allowSourceStoreScheduleForImprovedMargin(scope hotSc
 		return true
 	}
 	state, ok := storeStates[detail.GetID()]
-	if !ok || state.overExpectMargin-margin >= deadband {
+	if !ok ||
+		(state.currentCPU-currentCPU >= currentCPUDeadband &&
+			state.overExpectMargin-margin >= overExpectMarginDeadband) {
 		return true
 	}
 	return state.emittedHotOps < limit
 }
 
-func (s *baseHotScheduler) countPendingHotOpsFromStore(storeID uint64) int {
+func (s *baseHotScheduler) countPendingHotOpsFromStore(scope hotScheduleScopeKey, storeID uint64) int {
 	count := 0
 	for _, p := range s.regionPendings {
-		if p == nil {
+		if p == nil || p.scope != scope {
 			continue
 		}
 		for _, from := range p.froms {
@@ -242,11 +254,11 @@ func (s *baseHotScheduler) countPendingHotOpsFromStore(storeID uint64) int {
 	return count
 }
 
-func (s *baseHotScheduler) recordSourceStoreScheduleInCurrentFeedback(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) {
+func (s *baseHotScheduler) recordSourceStoreScheduleInCurrentCPUFeedback(scope hotScheduleScopeKey, detail *statistics.StoreLoadDetail) {
 	if detail == nil || detail.StoreInfo == nil {
 		return
 	}
-	margin, ok := sourceStoreOverExpectMargin(scope, detail)
+	currentCPU, margin, ok := sourceStoreCPUCurrentAndOverExpectMargin(detail)
 	if !ok {
 		return
 	}
@@ -257,8 +269,9 @@ func (s *baseHotScheduler) recordSourceStoreScheduleInCurrentFeedback(scope hotS
 	}
 	id := detail.GetID()
 	state, ok := storeStates[id]
-	if !ok || state.overExpectMargin != margin {
+	if !ok || state.currentCPU != currentCPU || state.overExpectMargin != margin {
 		state = sourceStoreFeedbackEpochState{
+			currentCPU:       currentCPU,
 			overExpectMargin: margin,
 		}
 	}
@@ -393,7 +406,14 @@ func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster)
 	return ops
 }
 
-func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []uint64, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
+func (s *hotScheduler) tryAddPendingInfluence(
+	op *operator.Operator,
+	srcStore []uint64,
+	dstStore uint64,
+	infl statistics.Influence,
+	maxZombieDur time.Duration,
+	scope hotScheduleScopeKey,
+) bool {
 	regionID := op.RegionID()
 	_, ok := s.regionPendings[regionID]
 	if ok {
@@ -401,7 +421,7 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 		return false
 	}
 
-	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur)
+	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur, scope)
 	s.regionPendings[regionID] = influence
 
 	utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {

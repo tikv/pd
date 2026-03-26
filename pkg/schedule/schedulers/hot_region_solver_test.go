@@ -416,20 +416,36 @@ func TestFilterSrcStoresReadCPUByteFeedbackEpochCap(t *testing.T) {
 	}
 	bs := newBalanceSolver(hb, tc, utils.Read, transferLeader)
 	bs.stLoadDetail = map[uint64]*statistics.StoreLoadDetail{1: src}
+	scope := bs.hotScheduleScopeKey()
 
 	re.Len(bs.filterSrcStores(), 1)
 
-	hb.recordSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), src)
+	hb.recordSourceStoreScheduleInCurrentCPUFeedback(scope, src)
 	re.Empty(bs.filterSrcStores())
 
 	src.LoadPred.Current.Loads[utils.ByteDim] = 170
 	re.Empty(bs.filterSrcStores())
 
-	src.LoadPred.Current.Loads[utils.CPUDim] = 590
+	src.LoadPred.Expect.Loads[utils.CPUDim] = 130
 	re.Empty(bs.filterSrcStores())
 
-	hb.regionPendings[1] = &pendingInfluence{froms: []uint64{1}}
 	src.LoadPred.Current.Loads[utils.CPUDim] = 580
+	src.LoadPred.Expect.Loads[utils.CPUDim] = 85
+	re.Empty(bs.filterSrcStores())
+
+	hb.regionPendings[1] = &pendingInfluence{
+		froms: []uint64{1},
+		scope: hotScheduleScopeKey{
+			rwTy:           utils.Write,
+			resourceTy:     writePeer,
+			firstPriority:  utils.ByteDim,
+			secondPriority: utils.KeyDim,
+		},
+	}
+	src.LoadPred.Expect.Loads[utils.CPUDim] = 130
+	re.Len(bs.filterSrcStores(), 1)
+
+	hb.regionPendings[1] = &pendingInfluence{froms: []uint64{1}, scope: scope}
 	re.Empty(bs.filterSrcStores())
 
 	delete(hb.regionPendings, 1)

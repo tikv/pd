@@ -157,7 +157,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		op.Start()
 		op.SetStatusReachTime(operator.CREATED, time.Now().Add(-5*utils.StoreHeartBeatReportInterval*time.Second))
 		op.SetStatusReachTime(operator.STARTED, time.Now().Add((-5*utils.StoreHeartBeatReportInterval+1)*time.Second))
-		return newPendingInfluence(op, []uint64{2}, 4, statistics.Influence{}, hb.conf.getStoreStatZombieDuration())
+		return newPendingInfluence(op, []uint64{2}, 4, statistics.Influence{}, hb.conf.getStoreStatZombieDuration(), hotScheduleScopeKey{})
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := notDoneOpInfluence(region, ty)

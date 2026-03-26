@@ -322,7 +322,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		dstStoreID = bs.best.dstStore.GetID()
 	}
 	infl := bs.collectPendingInfluence(bs.best.mainPeerStat)
-	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreIDs, dstStoreID, infl, maxZombieDur) {
+	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreIDs, dstStoreID, infl, maxZombieDur, bs.hotScheduleScopeKey()) {
 		return false
 	}
 	if isSplit {
@@ -331,7 +331,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// revert peers
 	if bs.best.revertPeerStat != nil && len(bs.ops) > 1 {
 		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
-		if !bs.sche.tryAddPendingInfluence(bs.ops[1], srcStoreIDs, dstStoreID, infl, maxZombieDur) {
+		if !bs.sche.tryAddPendingInfluence(bs.ops[1], srcStoreIDs, dstStoreID, infl, maxZombieDur, bs.hotScheduleScopeKey()) {
 			return false
 		}
 	}
@@ -424,6 +424,7 @@ type hotPeerFilterReason string
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
 	readCPUByteMaxOpsPerFeedbackEpoch                                = 1
+	readCPUByteCurrentCPUDeadband                                    = 10
 	readCPUByteOverExpectMarginDeadband                              = 10
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
@@ -499,6 +500,7 @@ func (bs *balanceSolver) isReadCPUByte() bool {
 func (bs *balanceSolver) hotScheduleScopeKey() hotScheduleScopeKey {
 	return hotScheduleScopeKey{
 		rwTy:           bs.rwTy,
+		resourceTy:     bs.resourceTy,
 		firstPriority:  bs.firstPriority,
 		secondPriority: bs.secondPriority,
 	}
@@ -541,10 +543,17 @@ func (bs *balanceSolver) shouldThrottleReadCPUSrcByFeedbackEpoch(detail *statist
 	if !bs.isReadCPUByte() || detail == nil || detail.StoreSummaryInfo == nil || detail.StoreInfo == nil {
 		return false
 	}
-	if bs.sche.countPendingHotOpsFromStore(detail.GetID()) > 0 {
+	scope := bs.hotScheduleScopeKey()
+	if bs.sche.countPendingHotOpsFromStore(scope, detail.GetID()) > 0 {
 		return true
 	}
-	return !bs.sche.allowSourceStoreScheduleForImprovedMargin(bs.hotScheduleScopeKey(), detail, readCPUByteMaxOpsPerFeedbackEpoch, readCPUByteOverExpectMarginDeadband)
+	return !bs.sche.allowSourceStoreScheduleForImprovedCPUAndMargin(
+		scope,
+		detail,
+		readCPUByteMaxOpsPerFeedbackEpoch,
+		readCPUByteCurrentCPUDeadband,
+		readCPUByteOverExpectMarginDeadband,
+	)
 }
 
 func (bs *balanceSolver) logHotOperatorSnapshot() {
@@ -1249,7 +1258,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 		return nil
 	}
 	if bs.isReadCPUByte() {
-		bs.sche.recordSourceStoreScheduleInCurrentFeedback(bs.hotScheduleScopeKey(), bs.cur.srcStore)
+		bs.sche.recordSourceStoreScheduleInCurrentCPUFeedback(bs.hotScheduleScopeKey(), bs.cur.srcStore)
 	}
 
 	return
