@@ -287,6 +287,13 @@ func (*testStore) GetControllerConfig() *rmserver.ControllerConfig {
 	return &rmserver.ControllerConfig{}
 }
 
+func (s *testStore) UpdateControllerConfigItems(items map[string]any) error {
+	for key := range items {
+		s.updatedControllerConfigItems = append(s.updatedControllerConfigItems, key)
+	}
+	return nil
+}
+
 func (s *testStore) UpdateControllerConfigItem(key string, _ any) error {
 	s.updatedControllerConfigItems = append(s.updatedControllerConfigItems, key)
 	return nil
