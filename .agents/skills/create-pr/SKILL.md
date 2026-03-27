@@ -51,7 +51,10 @@ Verify and fix commit requirements before pushing. These checks apply to all com
 1. Following the filling guidelines in `references/pr-template.md`, compose the PR title and fill every section of the PR body template.
 2. **PR Title Requirements** (per CONTRIBUTING.md):
    - Maximum **70 characters** (enforced by bot)
-   - Format: `<package>: message` or `<pkg1>, <pkg2>: message` or `*: message`
+   - Format depends on number of **non-test** packages changed:
+     - 1 package: `pkg: message`
+     - 2 packages: `pkg1, pkg2: message`
+     - 3+ packages (test-only files excluded from count): `*: message`
    - Examples:
      - `server: fix race condition in leader election`
      - `pd-client, scheduling: improve region split handling`
@@ -72,8 +75,9 @@ After user approval:
 
 1. Push the branch:
    ```bash
-   git push -u origin <branch-name>
+   git push -u <fork-remote> <branch-name>
    ```
+   `<fork-remote>` is the remote pointing to your fork (usually `origin`). Run `git remote -v` to identify it if unsure.
 
 2. Create the PR:
    ```bash
