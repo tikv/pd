@@ -995,8 +995,8 @@ func (c *RaftCluster) GetKeyspaceManager() *keyspace.Manager {
 }
 
 // GetKeyspaceIDInRange returns the keyspace info by the keyspace ID.
-func (c *RaftCluster) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
-	return c.keyspaceManager.GetKeyspaceIDInRange(start, end)
+func (c *RaftCluster) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	return c.keyspaceManager.GetKeyspaceIDInRange(start, end, limit)
 }
 
 // KeyspaceExist returns whether the keyspace exists by the keyspace ID.

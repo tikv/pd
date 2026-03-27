@@ -224,24 +224,25 @@ func (m *mockKeyspaceChecker) KeyspaceExist(id uint32) bool {
 	return m.existingKeyspaces[id]
 }
 
-func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+func (m *mockKeyspaceChecker) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
 	if start >= end {
-		return 0, false
+		return nil, false
 	}
 	if m.allExist {
-		return start, true
+		return []uint32{start}, true
 	}
 	found := false
-	var candidate uint32
+	ret := make([]uint32, 0)
 	for id, exists := range m.existingKeyspaces {
 		if exists && id >= start && id <= end {
-			if !found || id < candidate {
-				candidate = id
-				found = true
+			ret = append(ret, id)
+			found = true
+			if limit > 0 && len(ret) >= limit {
+				break
 			}
 		}
 	}
-	return candidate, found
+	return ret, found
 }
 
 func TestRegionSpansMultipleKeyspaces(t *testing.T) {
@@ -361,16 +362,12 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 func TestGetKeyspaceSplitKeys(t *testing.T) {
 	re := require.New(t)
 
-	// Mock checker where all keyspaces exist
 	allExistChecker := &mockKeyspaceChecker{allExist: true}
-
 	oneExistChecker := &mockKeyspaceChecker{
 		existingKeyspaces: map[uint32]bool{
 			101: true,
 		},
 	}
-
-	// Mock checker where only specific keyspaces exist
 	specificChecker := &mockKeyspaceChecker{
 		existingKeyspaces: map[uint32]bool{
 			100: true,
@@ -388,11 +385,20 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 		expectedSplitKeys [][]byte
 	}{
 		{
-			name:              "non-keyspace keys should not split",
+			name:              "non-keyspace keys should not split 99",
 			startKey:          []byte{'t', 1, 2, 4},
 			endKey:            MakeRegionBound(99).TxnLeftBound,
 			checker:           specificChecker,
 			expectedSplitKeys: nil,
+		},
+		{
+			name:     "non-keyspace keys should not split",
+			startKey: MakeRegionBound(102).RawLeftBound,
+			endKey:   []byte{'t', 1, 2, 4},
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(103).RawLeftBound,
+			},
 		},
 		{
 			name:     "non-keyspace keys should not split",
@@ -401,7 +407,7 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).TxnLeftBound,
-				MakeRegionBound(100).TxnRightBound,
+				MakeRegionBound(101).TxnLeftBound,
 			},
 		},
 		{
@@ -411,7 +417,9 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawLeftBound,
-				MakeRegionBound(100).RawRightBound,
+				MakeRegionBound(101).RawLeftBound,
+				MakeRegionBound(102).RawLeftBound,
+				MakeRegionBound(103).RawLeftBound,
 			},
 		},
 		{
@@ -474,15 +482,35 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 			checker:  specificChecker,
 			expectedSplitKeys: [][]byte{
 				MakeRegionBound(100).RawLeftBound,
-				MakeRegionBound(100).RawRightBound,
+				MakeRegionBound(101).RawLeftBound,
+				MakeRegionBound(102).RawLeftBound,
+				MakeRegionBound(103).RawLeftBound,
 				MakeRegionBound(100).TxnLeftBound,
-				MakeRegionBound(100).TxnRightBound,
+				MakeRegionBound(101).TxnLeftBound,
+				MakeRegionBound(102).TxnLeftBound,
+				MakeRegionBound(103).TxnLeftBound,
 			},
 		},
 		{
 			name:              "not keys with no keyspace key",
 			startKey:          []byte{'t', 1, 2, 3},
 			endKey:            []byte{'t', 1, 2, 4},
+			checker:           specificChecker,
+			expectedSplitKeys: nil,
+		},
+		{
+			name:     "span two keyspaces mix mode",
+			startKey: MakeRegionBound(102).RawLeftBound,
+			endKey:   MakeRegionBound(102).TxnLeftBound,
+			checker:  specificChecker,
+			expectedSplitKeys: [][]byte{
+				MakeRegionBound(103).RawLeftBound,
+			},
+		},
+		{
+			name:              "span two keyspaces mix mode with latest keyspace",
+			startKey:          MakeRegionBound(103).RawLeftBound,
+			endKey:            MakeRegionBound(103).TxnLeftBound,
 			checker:           specificChecker,
 			expectedSplitKeys: nil,
 		},
@@ -501,14 +529,18 @@ func TestKeyspaceCache(t *testing.T) {
 	cache := NewCache()
 
 	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
-	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
 	cache.Save(101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED)
+	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
+	cache.Save(103, "ks-102", keyspacepb.KeyspaceState_TOMBSTONE)
 
 	item, ok := cache.getKeyspaceByID(101)
 	re.True(ok)
 	re.Equal(uint32(101), item.keyspaceID)
 	re.Equal("ks-101", item.name)
 	re.Equal(keyspacepb.KeyspaceState_ARCHIVED, item.state)
+
+	ok = cache.KeyspaceExist(103)
+	re.False(ok)
 
 	all := func() []uint32 {
 		var ret []uint32
@@ -518,26 +550,27 @@ func TestKeyspaceCache(t *testing.T) {
 		})
 		return ret
 	}
-	re.Equal([]uint32{100, 101, 102}, all())
+	re.Equal([]uint32{100, 101, 102, 103}, all())
 
-	id, ok := cache.GetKeyspaceIDInRange(100, 103)
+	ids, ok := cache.GetKeyspaceIDInRange(100, 103, 1)
 	re.True(ok)
-	re.Equal(uint32(100), id)
+	re.Equal([]uint32{102}, ids)
 
-	id, ok = cache.GetKeyspaceIDInRange(101, 102)
+	ids, ok = cache.GetKeyspaceIDInRange(101, 102, 1)
 	re.True(ok)
-	re.Equal(uint32(101), id)
+	re.Equal([]uint32{102}, ids)
 
-	id, ok = cache.GetKeyspaceIDInRange(103, 104)
+	ids, ok = cache.GetKeyspaceIDInRange(103, 104, 1)
 	re.False(ok)
-	re.Zero(id)
+	re.Empty(ids)
 
 	cache.DeleteKeyspace(101)
 	_, ok = cache.getKeyspaceByID(101)
 	re.False(ok)
-	re.Equal([]uint32{100, 102}, all())
+	re.Equal([]uint32{100, 102, 103}, all())
 
-	id, ok = cache.GetKeyspaceIDInRange(100, 103)
+	ids, ok = cache.GetKeyspaceIDInRange(100, 103, 5)
 	re.True(ok)
-	re.Equal(uint32(100), id)
+	re.Len(ids, 2)
+	re.Equal([]uint32{102, 100}, ids)
 }

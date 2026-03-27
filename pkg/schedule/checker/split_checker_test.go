@@ -97,7 +97,7 @@ func TestKeyspaceSplit(t *testing.T) {
 	re.NotNil(op, "region spanning multiple keyspaces should be split")
 	re.Equal(1, op.Len())
 	splitKeys := op.Step(0).(operator.SplitRegion).SplitKeys
-	// Should have one split key at the boundary between keyspace 100 and 101
+	// 101 txn left bound should be the only split key
 	re.Len(splitKeys, 1)
 	re.Equal(hex.EncodeToString(bound100.TxnRightBound), hex.EncodeToString(splitKeys[0]))
 
@@ -108,7 +108,8 @@ func TestKeyspaceSplit(t *testing.T) {
 	re.NotNil(op, "region spanning multiple keyspaces should be split")
 	re.Equal(1, op.Len())
 	splitKeys = op.Step(0).(operator.SplitRegion).SplitKeys
-	re.Len(splitKeys, 1)
+	// (105-100)=5 split keys expected, but we only generate 10 keys at most to avoid too many operators.
+	re.Len(splitKeys, 5)
 	re.Equal(hex.EncodeToString(bound100.TxnRightBound), hex.EncodeToString(splitKeys[0]))
 }
 

@@ -928,11 +928,11 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 }
 
 // GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
-func (manager *Manager) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
 	if manager == nil {
-		return start, true
+		return []uint32{start}, true
 	}
-	return manager.KeyspaceCache.GetKeyspaceIDInRange(start, end)
+	return manager.KeyspaceCache.GetKeyspaceIDInRange(start, end, limit)
 }
 
 // KeyspaceExist checks if a keyspace exists by ID.
@@ -943,10 +943,15 @@ func (manager *Manager) KeyspaceExist(id uint32) bool {
 	if id == constant.MaxValidKeyspaceID {
 		return true
 	}
-	// don't direct check the cache because the keyspace may exist in storage
-	// but not in cache, we should check the storage to make sure the existence of the keyspace.
-	_, err := manager.GetKeyspaceNameByID(id)
-	return err == nil
+	if manager == nil {
+		return true
+	}
+	state, err := manager.GetKeyspaceStateByID(id)
+	if err != nil {
+		return false
+	}
+
+	return state != keyspacepb.KeyspaceState_TOMBSTONE
 }
 
 // UpdateKeyspaceMetaToCache updates keyspace cache from keyspace metadata.

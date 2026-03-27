@@ -231,7 +231,7 @@ func (c *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 }
 
 type checkGetter interface {
-	GetKeyspaceIDInRange(start, end uint32) (uint32, bool)
+	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool)
 	KeyspaceExist(keyspaceID uint32) bool
 }
 

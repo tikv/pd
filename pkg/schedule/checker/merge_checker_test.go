@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"encoding/hex"
+	"slices"
 	"testing"
 	"time"
 
@@ -605,24 +606,27 @@ func (m *mockKeyspaceManagerForMerge) KeyspaceExist(id uint32) bool {
 	return ok && exist
 }
 
-func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
 	if start >= end {
-		return 0, false
+		return nil, false
 	}
 	if m.existing == nil {
-		return start, false
+		return nil, false
 	}
 	found := false
-	var candidate uint32
+	ret := make([]uint32, 0, limit)
+
 	for id, exists := range m.existing {
 		if exists && id >= start && id <= end {
-			if !found || id < candidate {
-				candidate = id
-				found = true
+			ret = append(ret, id)
+			found = true
+			if limit > 0 && len(ret) >= limit {
+				break
 			}
 		}
 	}
-	return candidate, found
+	slices.Sort(ret)
+	return ret, found
 }
 
 type mockClusterWithKeyspaceManager struct {
@@ -630,8 +634,8 @@ type mockClusterWithKeyspaceManager struct {
 	manager *mockKeyspaceManagerForMerge
 }
 
-func (c *mockClusterWithKeyspaceManager) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
-	return c.manager.GetKeyspaceIDInRange(start, end)
+func (c *mockClusterWithKeyspaceManager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	return c.manager.GetKeyspaceIDInRange(start, end, limit)
 }
 
 func (c *mockClusterWithKeyspaceManager) KeyspaceExist(id uint32) bool {

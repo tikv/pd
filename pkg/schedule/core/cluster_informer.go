@@ -68,9 +68,9 @@ type SharedCluster interface {
 	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
 	GetPrepareRegionCount() (int, error)
-	// GetKeyspaceIDInRange returns the keyspace ID in [start, end].
-	// The second return value indicates whether the keyspace ID is valid.
-	GetKeyspaceIDInRange(start, end uint32) (uint32, bool)
+	// GetKeyspaceIDInRange returns the keyspace IDs in [start, end].
+	// The second return value indicates whether the keyspace IDDs are valid.
+	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool)
 
 	// ExistKeyspaceID returns whether the ID exists.
 	KeyspaceExist(id uint32) bool

@@ -15,10 +15,12 @@
 package keyspace
 
 import (
+	"bytes"
 	"container/heap"
 	"encoding/binary"
 	"encoding/hex"
 	"regexp"
+	"slices"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/google/btree"
@@ -349,7 +351,7 @@ func ExtractKeyspaceID(key []byte) (uint32, KeyType) {
 // Checker is an interface to check keyspace existence.
 type Checker interface {
 	// GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
-	GetKeyspaceIDInRange(start, end uint32) (uint32, bool)
+	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool)
 	// ExistKeyspaceID returns whether the keyspace ID exists.
 	KeyspaceExist(keyspaceID uint32) bool
 }
@@ -358,8 +360,8 @@ type Checker interface {
 type AlwaysExistChecker struct{}
 
 // GetKeyspaceIDInRange returns the first keyspace ID in (start, end).
-func (AlwaysExistChecker) GetKeyspaceIDInRange(start, _ uint32) (uint32, bool) {
-	return start, true
+func (AlwaysExistChecker) GetKeyspaceIDInRange(start, _ uint32) ([]uint32, bool) {
+	return []uint32{start}, true
 }
 
 // RegionSpansMultipleKeyspaces checks if a region spans across multiple keyspaces.
@@ -396,6 +398,10 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	if startKeyspaceID == endKeyspaceID && startKT == endKT {
 		return false
 	}
+	// If keyspace IDs are different, but the key type is different, we consider it does not span multiple keyspaces.
+	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
+		return true
+	}
 
 	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
 	// check if endKey is at the exact boundary (right bound of startKeyspace)
@@ -420,6 +426,8 @@ func RegionSpansMultipleKeyspaces(startKey, endKey []byte, checker Checker) bool
 	// Otherwise, the region spans multiple keyspaces
 	return true
 }
+
+const scanLimit = 10
 
 // GetKeyspaceSplitKeys returns the split keys for a region that spans multiple keyspaces.
 // It returns a list of keys where the region should be split to separate keyspaces.
@@ -449,8 +457,12 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 	}
 
 	// If same keyspace, no split needed
-	if startKeyspaceID == endKeyspaceID {
+	if startKeyspaceID == endKeyspaceID && startKT == endKT {
 		return nil
+	}
+	// If startKeyspaceID and endKeyspaceID are different, the end keyspace id should be biggest to find all split keys.
+	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
+		endKeyspaceID = constant.MaxValidKeyspaceID
 	}
 
 	// If endKey's keyspace ID is exactly startKeyspace ID + 1,
@@ -465,32 +477,38 @@ func GetKeyspaceSplitKeys(startKey, endKey []byte, checker Checker) [][]byte {
 			return nil
 		}
 	}
-	// If startKeyspaceID and endKeyspaceID are different, the end keyspace id should be biggest to find all split keys.
-	if startKT == KeyTypeRaw && endKT == KeyTypeTxn {
-		endKeyspaceID = constant.MaxValidKeyspaceID
-	}
+
 	// Generate split keys for each keyspace boundary between start and end.
 	// Iterate existing keyspaces in (startKeyspaceID, endKeyspaceID).
 	var splitKeys [][]byte
 
-	nextID, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
+	keyspaceList, ok := checker.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, scanLimit)
 	if !ok {
 		return nil
 	}
-	bound := MakeRegionBound(nextID)
-	if keyutil.Between(startKey, endKey, bound.RawLeftBound) {
-		splitKeys = append(splitKeys, bound.RawLeftBound)
+	if keyspaceList == nil {
+		return nil
 	}
-	if keyutil.Between(startKey, endKey, bound.RawRightBound) {
-		splitKeys = append(splitKeys, bound.RawRightBound)
+	for _, nextID := range keyspaceList {
+		bound := MakeRegionBound(nextID)
+		if keyutil.Between(startKey, endKey, bound.RawLeftBound) {
+			splitKeys = append(splitKeys, bound.RawLeftBound)
+		}
+		if keyutil.Between(startKey, endKey, bound.RawRightBound) {
+			splitKeys = append(splitKeys, bound.RawRightBound)
+		}
+		if keyutil.Between(startKey, endKey, bound.TxnLeftBound) {
+			splitKeys = append(splitKeys, bound.TxnLeftBound)
+		}
+		if keyutil.Between(startKey, endKey, bound.TxnRightBound) {
+			splitKeys = append(splitKeys, bound.TxnRightBound)
+		}
 	}
-	if keyutil.Between(startKey, endKey, bound.TxnLeftBound) {
-		splitKeys = append(splitKeys, bound.TxnLeftBound)
+	if len(splitKeys) == 0 {
+		return nil
 	}
-	if keyutil.Between(startKey, endKey, bound.TxnRightBound) {
-		splitKeys = append(splitKeys, bound.TxnRightBound)
-	}
-	return splitKeys
+	slices.SortFunc(splitKeys, bytes.Compare)
+	return slices.CompactFunc(splitKeys, bytes.Equal)
 }
 
 // Cache is a cache for keyspace information, which is used to quickly determine keyspace existence and get keyspace name by ID.
@@ -553,26 +571,31 @@ func (s *Cache) scanAllKeyspaces(f func(keyspaceID uint32, name string) bool) {
 func (s *Cache) KeyspaceExist(id uint32) bool {
 	s.RLock()
 	defer s.RUnlock()
-	_, found := s.tree.Get(keyspaceItem{keyspaceID: id})
+	item, found := s.tree.Get(keyspaceItem{keyspaceID: id})
+	if found && item.state == keyspacepb.KeyspaceState_TOMBSTONE {
+		return false
+	}
 	return found
 }
 
-// GetKeyspaceIDInRange returns the first keyspace ID in the range [start, end].
-func (s *Cache) GetKeyspaceIDInRange(start, end uint32) (uint32, bool) {
+// GetKeyspaceIDInRange returns the keyspace IDs in the range [start, end].
+func (s *Cache) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
 	s.RLock()
 	defer s.RUnlock()
-	var foundID uint32
+	ret := make([]uint32, 0)
 	found := false
-	s.tree.DescendLessOrEqual(keyspaceItem{keyspaceID: end}, func(i keyspaceItem) bool {
-		if i.keyspaceID >= start {
-			foundID = i.keyspaceID
+	s.tree.DescendLessOrEqual(keyspaceItem{keyspaceID: end}, func(item keyspaceItem) bool {
+		if item.state == keyspacepb.KeyspaceState_TOMBSTONE {
+			return true
+		}
+		if item.keyspaceID >= start {
+			ret = append(ret, item.keyspaceID)
 			found = true
-			return false
+			if limit > 0 && len(ret) >= limit {
+				return false
+			}
 		}
 		return true
 	})
-	if foundID != 0 {
-		return foundID, true
-	}
-	return foundID, found
+	return ret, found
 }

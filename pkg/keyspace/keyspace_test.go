@@ -750,19 +750,19 @@ func (suite *keyspaceTestSuite) TestGetKeyspaceIDInRange() {
 		re.NoError(err)
 	}
 
-	id, ok := manager.GetKeyspaceIDInRange(2, 5)
+	id, ok := manager.GetKeyspaceIDInRange(2, 5, 1)
 	re.True(ok)
 	re.Equal(uint32(5), id)
 
-	id, ok = manager.GetKeyspaceIDInRange(1, 4)
+	id, ok = manager.GetKeyspaceIDInRange(1, 4, 1)
 	re.True(ok)
 	re.Equal(uint32(4), id)
 
-	id, ok = manager.GetKeyspaceIDInRange(1, 6)
+	id, ok = manager.GetKeyspaceIDInRange(1, 6, 1)
 	re.True(ok)
 	re.Equal(uint32(5), id)
 
-	id, ok = manager.GetKeyspaceIDInRange(6, 10)
+	id, ok = manager.GetKeyspaceIDInRange(6, 10, 1)
 	re.False(ok)
 	re.Equal(uint32(0), id)
 }

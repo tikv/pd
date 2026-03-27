@@ -199,9 +199,9 @@ func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return c.persistConfig
 }
 
-// GetKeyspaceIDInRange returns the keyspace ID in the specified range.
-func (c *Cluster) GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID uint32) (uint32, bool) {
-	return c.keyspaceCache.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID)
+// GetKeyspaceIDInRange returns the keyspace IDs in the specified range.
+func (c *Cluster) GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID uint32, limit int) ([]uint32, bool) {
+	return c.keyspaceCache.GetKeyspaceIDInRange(startKeyspaceID, endKeyspaceID, limit)
 }
 
 // KeyspaceExist checks if a keyspace exists by ID.
