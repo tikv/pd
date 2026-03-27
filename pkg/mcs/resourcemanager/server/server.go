@@ -199,6 +199,9 @@ func (s *Server) primaryElectionLoop() {
 	}
 }
 
+// campaignLeader campaigns the primary/leader.
+// It returns true only when the server won the campaign but service-ready
+// callbacks failed, so the caller should back off before retrying.
 func (s *Server) campaignLeader() bool {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
