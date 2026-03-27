@@ -174,6 +174,140 @@ func TestResourceGroupThrottledError(t *testing.T) {
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
 }
 
+func TestAcquireTokensSignalAwareWait(t *testing.T) {
+	re := require.New(t)
+	group := &rmpb.ResourceGroup{
+		Name: "test",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000},
+			},
+		},
+	}
+	notifyCh := make(chan notifyMsg, 1)
+	cfg := DefaultRUConfig()
+	cfg.WaitRetryInterval = 5 * time.Second
+	cfg.WaitRetryTimes = 3
+	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1))
+	re.NoError(err)
+
+	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		NewTokens: 1000,
+		NewRate:   0,
+		NewBurst:  0,
+	})
+
+	delta := &rmpb.Consumption{RRU: 5000}
+	type acquireResult struct {
+		err          error
+		waitDuration time.Duration
+	}
+	resultCh := make(chan acquireResult, 1)
+	go func() {
+		var waitDuration time.Duration
+		_, err := gc.acquireTokens(context.Background(), delta, &waitDuration, false)
+		resultCh <- acquireResult{err: err, waitDuration: waitDuration}
+	}()
+
+	select {
+	case <-notifyCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for low-RU notification")
+	}
+
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		NewTokens: 100000,
+		NewRate:   100000,
+		NewBurst:  0,
+	})
+
+	select {
+	case r := <-resultCh:
+		re.NoError(r.err)
+		re.Less(r.waitDuration, cfg.WaitRetryInterval)
+	case <-time.After(cfg.WaitRetryInterval):
+		t.Fatal("acquireTokens was not woken up promptly by Reconfigure signal")
+	}
+}
+
+func TestAcquireTokensContextCancellation(t *testing.T) {
+	re := require.New(t)
+	group := &rmpb.ResourceGroup{
+		Name: "test",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000},
+			},
+		},
+	}
+	notifyCh := make(chan notifyMsg, 1)
+	cfg := DefaultRUConfig()
+	cfg.WaitRetryInterval = time.Second
+	cfg.WaitRetryTimes = 3
+	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1))
+	re.NoError(err)
+
+	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		NewTokens: 1000,
+		NewRate:   0,
+		NewBurst:  0,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	delta := &rmpb.Consumption{RRU: 5000}
+	type acquireResult struct {
+		err          error
+		waitDuration time.Duration
+	}
+	resultCh := make(chan acquireResult, 1)
+	go func() {
+		var waitDuration time.Duration
+		_, err := gc.acquireTokens(ctx, delta, &waitDuration, false)
+		resultCh <- acquireResult{err: err, waitDuration: waitDuration}
+	}()
+
+	select {
+	case <-notifyCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for low-RU notification")
+	}
+
+	cancel()
+
+	select {
+	case r := <-resultCh:
+		re.ErrorIs(r.err, context.Canceled)
+		re.Less(r.waitDuration, cfg.WaitRetryInterval)
+	case <-time.After(cfg.WaitRetryInterval):
+		t.Fatal("acquireTokens did not stop promptly after context cancellation")
+	}
+}
+
+func TestAcquireTokensFallbackToTimer(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.mainCfg.WaitRetryInterval = 50 * time.Millisecond
+	gc.mainCfg.WaitRetryTimes = 3
+	gc.mainCfg.LTBMaxWaitDuration = 100 * time.Millisecond
+
+	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		NewTokens: 1000,
+		NewRate:   0,
+		NewBurst:  0,
+	})
+
+	var waitDuration time.Duration
+	_, err := gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 5000}, &waitDuration, false)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+	re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
+}
+
 // MockResourceGroupProvider is a mock implementation of the ResourceGroupProvider interface.
 type MockResourceGroupProvider struct {
 	mock.Mock

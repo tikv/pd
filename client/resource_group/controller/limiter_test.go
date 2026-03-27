@@ -235,6 +235,69 @@ func TestQPS(t *testing.T) {
 	}
 }
 
+func TestReconfiguredCh(t *testing.T) {
+	re := require.New(t)
+
+	var lim Limiter
+	ch := lim.GetReconfiguredCh()
+	select {
+	case <-ch:
+		t.Fatal("reconfiguredCh should not be closed before Reconfigure")
+	default:
+	}
+
+	args := tokenBucketReconfigureArgs{NewTokens: 10, NewRate: 1}
+	lim.Reconfigure(t1, args)
+	select {
+	case <-ch:
+	default:
+		t.Fatal("reconfiguredCh should be closed after Reconfigure")
+	}
+
+	ch2 := lim.GetReconfiguredCh()
+	re.NotEqual(fmt.Sprintf("%p", ch), fmt.Sprintf("%p", ch2))
+	select {
+	case <-ch2:
+		t.Fatal("new reconfiguredCh should not be closed yet")
+	default:
+	}
+
+	lim.Reconfigure(t2, args)
+	select {
+	case <-ch2:
+	default:
+		t.Fatal("second reconfiguredCh should be closed after second Reconfigure")
+	}
+}
+
+func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 1, 0, 0, nc)
+
+	const numWaiters = 5
+	ch := lim.GetReconfiguredCh()
+	wokenUp := make(chan struct{}, numWaiters)
+
+	var wg sync.WaitGroup
+	for range numWaiters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-ch:
+				wokenUp <- struct{}{}
+			case <-time.After(2 * time.Second):
+			}
+		}()
+	}
+
+	// Close by reconfiguring.
+	lim.Reconfigure(t1, tokenBucketReconfigureArgs{NewTokens: 10, NewRate: 1})
+	wg.Wait()
+
+	require.Len(t, wokenUp, numWaiters)
+}
+
 const testCaseRunTime = 4 * time.Second
 
 func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru float64, needWait time.Duration) {
