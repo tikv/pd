@@ -378,49 +378,6 @@ func TestMaxZombieDuration(t *testing.T) {
 	}
 }
 
-func TestReadCPUSrcFutureBudget(t *testing.T) {
-	re := require.New(t)
-
-	candidate := &statistics.StoreLoadDetail{
-		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{})},
-		LoadPred: &statistics.StoreLoadPred{
-			Current: statistics.StoreLoad{Loads: statistics.Loads{10, 10, 10, 594}},
-			Future:  statistics.StoreLoad{Loads: statistics.Loads{10, 10, 10, 120}},
-			Expect:  statistics.StoreLoad{Loads: statistics.Loads{100, 100, 100, 120}},
-		},
-	}
-
-	testCases := []struct {
-		name           string
-		firstPriority  int
-		secondPriority int
-		reject         bool
-	}{
-		{
-			name:           "read cpu-byte rejects source when future cpu reaches expect",
-			firstPriority:  utils.CPUDim,
-			secondPriority: utils.ByteDim,
-			reject:         true,
-		},
-		{
-			name:           "non cpu-byte path keeps existing source admission",
-			firstPriority:  utils.QueryDim,
-			secondPriority: utils.ByteDim,
-			reject:         false,
-		},
-	}
-
-	for _, testCase := range testCases {
-		bs := &balanceSolver{
-			rwTy:           utils.Read,
-			resourceTy:     readPeer,
-			firstPriority:  testCase.firstPriority,
-			secondPriority: testCase.secondPriority,
-		}
-		re.Equal(testCase.reject, bs.shouldRejectReadCPUSrcFutureBudget(candidate), testCase.name)
-	}
-}
-
 func TestReadCPUTransferLeaderCooldownHits(t *testing.T) {
 	re := require.New(t)
 	bs := &balanceSolver{
@@ -493,69 +450,6 @@ func TestReadCPUDstPrefilter(t *testing.T) {
 		bs.rank = initRankV2(bs)
 		re.True(bs.checkDstByPriorityAndTolerance(candidate.LoadPred.Max(), &candidate.LoadPred.Expect, 1.0), testCase.name)
 		re.Equal(testCase.expectPicked, !bs.shouldRejectReadCPUDst(candidate), testCase.name)
-	}
-}
-
-func TestReadCPUDstHistoryPrefilter(t *testing.T) {
-	re := require.New(t)
-
-	candidate := &statistics.StoreLoadDetail{
-		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(2, map[string]string{})},
-		LoadPred: &statistics.StoreLoadPred{
-			Current: statistics.StoreLoad{
-				Loads: statistics.Loads{10, 10, 10, 90},
-				HistoryLoads: statistics.HistoryLoads{
-					{1, 1},
-					{1, 1},
-					{1, 1},
-					{105, 95},
-				},
-			},
-			Future: statistics.StoreLoad{
-				Loads: statistics.Loads{10, 10, 10, 90},
-			},
-			Expect: statistics.StoreLoad{
-				Loads: statistics.Loads{100, 100, 100, 100},
-				HistoryLoads: statistics.HistoryLoads{
-					{100, 100},
-					{100, 100},
-					{100, 100},
-					{100, 100},
-				},
-			},
-		},
-	}
-
-	testCases := []struct {
-		name           string
-		firstPriority  int
-		secondPriority int
-		expectPicked   bool
-	}{
-		{
-			name:           "read cpu-byte rejects dst history when cpu history reaches expect",
-			firstPriority:  utils.CPUDim,
-			secondPriority: utils.ByteDim,
-			expectPicked:   false,
-		},
-		{
-			name:           "non cpu-byte path keeps existing anyof dst history admission",
-			firstPriority:  utils.QueryDim,
-			secondPriority: utils.ByteDim,
-			expectPicked:   true,
-		},
-	}
-
-	for _, testCase := range testCases {
-		bs := &balanceSolver{
-			rwTy:           utils.Read,
-			resourceTy:     readPeer,
-			firstPriority:  testCase.firstPriority,
-			secondPriority: testCase.secondPriority,
-		}
-		bs.rank = initRankV2(bs)
-		re.True(bs.checkDstHistoryLoadsByPriorityAndTolerance(&candidate.LoadPred.Current, &candidate.LoadPred.Expect, 1.0), testCase.name)
-		re.Equal(testCase.expectPicked, !bs.shouldRejectReadCPUDstHistory(candidate), testCase.name)
 	}
 }
 

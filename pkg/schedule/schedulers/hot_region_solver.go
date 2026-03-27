@@ -424,7 +424,6 @@ type hotPeerFilterReason string
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
 	readCPUByteTransferLeaderCooldownHits                            = 12
-	readCPUByteSrcFutureBudgetSafetyMargin                           = 0.0
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
 	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
@@ -519,25 +518,6 @@ func (bs *balanceSolver) shouldRejectReadCPUDst(detail *statistics.StoreLoadDeta
 	return detail.LoadPred.Future.Loads[utils.CPUDim] >= detail.LoadPred.Expect.Loads[utils.CPUDim]
 }
 
-func (bs *balanceSolver) shouldRejectReadCPUDstHistory(detail *statistics.StoreLoadDetail) bool {
-	if !bs.isReadCPUByte() || detail == nil || detail.LoadPred == nil {
-		return false
-	}
-	current := detail.LoadPred.Current.HistoryLoads
-	expect := detail.LoadPred.Expect.HistoryLoads
-	if len(current) <= utils.CPUDim || len(expect) <= utils.CPUDim {
-		return false
-	}
-	cpuCurrentHistory := current[utils.CPUDim]
-	cpuExpectHistory := expect[utils.CPUDim]
-	if len(cpuCurrentHistory) == 0 || len(cpuCurrentHistory) != len(cpuExpectHistory) {
-		return false
-	}
-	return slice.AnyOf(cpuCurrentHistory, func(i int) bool {
-		return cpuCurrentHistory[i] >= cpuExpectHistory[i]
-	})
-}
-
 func (bs *balanceSolver) transferLeaderCooldownHits() int {
 	if bs.isReadCPUByte() && bs.minHotDegree < readCPUByteTransferLeaderCooldownHits {
 		return readCPUByteTransferLeaderCooldownHits
@@ -550,16 +530,6 @@ func (bs *balanceSolver) shouldCoolDownTransferLeader(item *statistics.HotPeerSt
 		return false
 	}
 	return item.IsNeedCoolDownTransferLeader(bs.transferLeaderCooldownHits(), bs.rwTy)
-}
-
-func (bs *balanceSolver) shouldRejectReadCPUSrcFutureBudget(detail *statistics.StoreLoadDetail) bool {
-	if !bs.isReadCPUByte() || detail == nil || detail.LoadPred == nil {
-		return false
-	}
-	if len(detail.LoadPred.Future.Loads) <= utils.CPUDim || len(detail.LoadPred.Expect.Loads) <= utils.CPUDim {
-		return false
-	}
-	return detail.LoadPred.Future.Loads[utils.CPUDim] <= detail.LoadPred.Expect.Loads[utils.CPUDim]+readCPUByteSrcFutureBudgetSafetyMargin
 }
 
 func (bs *balanceSolver) logHotOperatorSnapshot() {
@@ -675,11 +645,6 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if bs.shouldRejectReadCPUSrcFutureBudget(detail) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-future-budget-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-			continue
-		}
-
 		if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
 			hotSchedulerResultCounter.WithLabelValues("src-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
@@ -988,10 +953,6 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			}
 			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-				continue
-			}
-			if bs.shouldRejectReadCPUDstHistory(detail) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-history-cpu-prefilter-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
 			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
