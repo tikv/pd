@@ -423,9 +423,8 @@ type hotPeerFilterReason string
 
 const (
 	readCPUByteRejectedDecisionLogLimitPerReason                     = 5
-	readCPUByteMaxOpsPerFeedbackEpoch                                = 1
-	readCPUByteCurrentCPUDeadband                                    = 10
-	readCPUByteOverExpectMarginDeadband                              = 10
+	readCPUByteTransferLeaderCooldownHits                            = 12
+	readCPUByteSrcFutureBudgetSafetyMargin                           = 0.0
 	hotPeerFilterKept                            hotPeerFilterReason = "kept"
 	hotPeerFilterPending                         hotPeerFilterReason = "pending"
 	hotPeerFilterCooldown                        hotPeerFilterReason = "cooldown"
@@ -539,21 +538,28 @@ func (bs *balanceSolver) shouldRejectReadCPUDstHistory(detail *statistics.StoreL
 	})
 }
 
-func (bs *balanceSolver) shouldThrottleReadCPUSrcByFeedbackEpoch(detail *statistics.StoreLoadDetail) bool {
-	if !bs.isReadCPUByte() || detail == nil || detail.StoreSummaryInfo == nil || detail.StoreInfo == nil {
+func (bs *balanceSolver) transferLeaderCooldownHits() int {
+	if bs.isReadCPUByte() && bs.minHotDegree < readCPUByteTransferLeaderCooldownHits {
+		return readCPUByteTransferLeaderCooldownHits
+	}
+	return bs.minHotDegree
+}
+
+func (bs *balanceSolver) shouldCoolDownTransferLeader(item *statistics.HotPeerStat) bool {
+	if item == nil {
 		return false
 	}
-	scope := bs.hotScheduleScopeKey()
-	if bs.sche.countPendingHotOpsFromStore(scope, detail.GetID()) > 0 {
-		return true
+	return item.IsNeedCoolDownTransferLeader(bs.transferLeaderCooldownHits(), bs.rwTy)
+}
+
+func (bs *balanceSolver) shouldRejectReadCPUSrcFutureBudget(detail *statistics.StoreLoadDetail) bool {
+	if !bs.isReadCPUByte() || detail == nil || detail.LoadPred == nil {
+		return false
 	}
-	return !bs.sche.allowSourceStoreScheduleForImprovedCPUAndMargin(
-		scope,
-		detail,
-		readCPUByteMaxOpsPerFeedbackEpoch,
-		readCPUByteCurrentCPUDeadband,
-		readCPUByteOverExpectMarginDeadband,
-	)
+	if len(detail.LoadPred.Future.Loads) <= utils.CPUDim || len(detail.LoadPred.Expect.Loads) <= utils.CPUDim {
+		return false
+	}
+	return detail.LoadPred.Future.Loads[utils.CPUDim] <= detail.LoadPred.Expect.Loads[utils.CPUDim]+readCPUByteSrcFutureBudgetSafetyMargin
 }
 
 func (bs *balanceSolver) logHotOperatorSnapshot() {
@@ -594,6 +600,8 @@ func (bs *balanceSolver) logHotOperatorSnapshot() {
 	fields = append(fields, hotOperatorLoadFields("dst-pending", bs.best.dstStore.LoadPred.Pending().Loads[:])...)
 	fields = append(fields, hotOperatorLoadFields("src-future", bs.best.srcStore.LoadPred.Future.Loads[:])...)
 	fields = append(fields, hotOperatorLoadFields("dst-future", bs.best.dstStore.LoadPred.Future.Loads[:])...)
+	fields = append(fields, zap.Float64("src-future-minus-expect-cpu",
+		bs.best.srcStore.LoadPred.Future.Loads[utils.CPUDim]-bs.best.srcStore.LoadPred.Expect.Loads[utils.CPUDim]))
 	fields = append(fields, hotOperatorStoreSummaryFields("src-summary", srcSummary)...)
 	fields = append(fields, hotOperatorStoreSummaryFields("dst-summary", dstSummary)...)
 	fields = append(fields, hotOperatorFilteredPeerFields("src-filtered-hot", bs.filteredHotPeers[srcID])...)
@@ -667,8 +675,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if bs.shouldThrottleReadCPUSrcByFeedbackEpoch(detail) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-feedback-epoch-cap-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+		if bs.shouldRejectReadCPUSrcFutureBudget(detail) {
+			hotSchedulerResultCounter.WithLabelValues("src-store-future-budget-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 
@@ -720,7 +728,7 @@ func (bs *balanceSolver) filterHotPeersWithDecisions(storeLoad *statistics.Store
 		if _, ok := bs.sche.regionPendings[item.ID()]; ok {
 			return hotPeerFilterPending
 		}
-		if item.IsNeedCoolDownTransferLeader(bs.minHotDegree, bs.rwTy) {
+		if bs.shouldCoolDownTransferLeader(item) {
 			return hotPeerFilterCooldown
 		}
 		return hotPeerFilterKept
@@ -1256,9 +1264,6 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 		log.Debug("fail to create operator", zap.Stringer("rw-type", bs.rwTy), zap.Stringer("op-type", bs.opTy), errs.ZapError(err))
 		hotSchedulerCreateOperatorFailedCounter.Inc()
 		return nil
-	}
-	if bs.isReadCPUByte() {
-		bs.sche.recordSourceStoreScheduleInCurrentCPUFeedback(bs.hotScheduleScopeKey(), bs.cur.srcStore)
 	}
 
 	return

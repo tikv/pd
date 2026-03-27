@@ -378,78 +378,68 @@ func TestMaxZombieDuration(t *testing.T) {
 	}
 }
 
-func TestFilterSrcStoresReadCPUByteFeedbackEpochCap(t *testing.T) {
+func TestReadCPUSrcFutureBudget(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
-	re.NoError(err)
-	hb := sche.(*hotScheduler)
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
-	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
 
-	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute)))
-	src := &statistics.StoreLoadDetail{
-		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: store},
+	candidate := &statistics.StoreLoadDetail{
+		StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(1, map[string]string{})},
 		LoadPred: &statistics.StoreLoadPred{
-			Current: statistics.StoreLoad{Loads: statistics.Loads{
-				utils.ByteDim: 180,
-				utils.CPUDim:  594,
-			}},
-			Future: statistics.StoreLoad{Loads: statistics.Loads{
-				utils.ByteDim: 120,
-				utils.CPUDim:  513,
-			}},
-			Expect: statistics.StoreLoad{Loads: statistics.Loads{
-				utils.ByteDim: 60,
-				utils.CPUDim:  100,
-			}},
-		},
-		HotPeers: []*statistics.HotPeerStat{{
-			StoreID:  1,
-			RegionID: 1,
-			Loads: []float64{
-				utils.ByteDim: 50,
-				utils.CPUDim:  30,
-			},
-		}},
-	}
-	bs := newBalanceSolver(hb, tc, utils.Read, transferLeader)
-	bs.stLoadDetail = map[uint64]*statistics.StoreLoadDetail{1: src}
-	scope := bs.hotScheduleScopeKey()
-
-	re.Len(bs.filterSrcStores(), 1)
-
-	hb.recordSourceStoreScheduleInCurrentCPUFeedback(scope, src)
-	re.Empty(bs.filterSrcStores())
-
-	src.LoadPred.Current.Loads[utils.ByteDim] = 170
-	re.Empty(bs.filterSrcStores())
-
-	src.LoadPred.Expect.Loads[utils.CPUDim] = 130
-	re.Empty(bs.filterSrcStores())
-
-	src.LoadPred.Current.Loads[utils.CPUDim] = 580
-	src.LoadPred.Expect.Loads[utils.CPUDim] = 85
-	re.Empty(bs.filterSrcStores())
-
-	hb.regionPendings[1] = &pendingInfluence{
-		froms: []uint64{1},
-		scope: hotScheduleScopeKey{
-			rwTy:           utils.Write,
-			resourceTy:     writePeer,
-			firstPriority:  utils.ByteDim,
-			secondPriority: utils.KeyDim,
+			Current: statistics.StoreLoad{Loads: statistics.Loads{10, 10, 10, 594}},
+			Future:  statistics.StoreLoad{Loads: statistics.Loads{10, 10, 10, 120}},
+			Expect:  statistics.StoreLoad{Loads: statistics.Loads{100, 100, 100, 120}},
 		},
 	}
-	src.LoadPred.Expect.Loads[utils.CPUDim] = 130
-	re.Len(bs.filterSrcStores(), 1)
 
-	hb.regionPendings[1] = &pendingInfluence{froms: []uint64{1}, scope: scope}
-	re.Empty(bs.filterSrcStores())
+	testCases := []struct {
+		name           string
+		firstPriority  int
+		secondPriority int
+		reject         bool
+	}{
+		{
+			name:           "read cpu-byte rejects source when future cpu reaches expect",
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.ByteDim,
+			reject:         true,
+		},
+		{
+			name:           "non cpu-byte path keeps existing source admission",
+			firstPriority:  utils.QueryDim,
+			secondPriority: utils.ByteDim,
+			reject:         false,
+		},
+	}
 
-	delete(hb.regionPendings, 1)
-	re.Len(bs.filterSrcStores(), 1)
+	for _, testCase := range testCases {
+		bs := &balanceSolver{
+			rwTy:           utils.Read,
+			resourceTy:     readPeer,
+			firstPriority:  testCase.firstPriority,
+			secondPriority: testCase.secondPriority,
+		}
+		re.Equal(testCase.reject, bs.shouldRejectReadCPUSrcFutureBudget(candidate), testCase.name)
+	}
+}
+
+func TestReadCPUTransferLeaderCooldownHits(t *testing.T) {
+	re := require.New(t)
+	bs := &balanceSolver{
+		rwTy:           utils.Read,
+		resourceTy:     readLeader,
+		firstPriority:  utils.CPUDim,
+		secondPriority: utils.ByteDim,
+		minHotDegree:   3,
+	}
+	re.Equal(readCPUByteTransferLeaderCooldownHits, bs.transferLeaderCooldownHits())
+
+	other := &balanceSolver{
+		rwTy:           utils.Read,
+		resourceTy:     readLeader,
+		firstPriority:  utils.QueryDim,
+		secondPriority: utils.ByteDim,
+		minHotDegree:   3,
+	}
+	re.Equal(3, other.transferLeaderCooldownHits())
 }
 
 func TestReadCPUDstPrefilter(t *testing.T) {
