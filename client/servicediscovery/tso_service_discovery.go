@@ -80,7 +80,7 @@ func (k *keyspaceGroupSvcDiscovery) getModRevision() uint64 {
 }
 
 // metaChanged indicates whether the keyspace group meta has been updated,
-// it don't include the change of primary URLs.
+// it doesn't include the change of primary URLs.
 func (k *keyspaceGroupSvcDiscovery) update(
 	keyspaceGroup *tsopb.KeyspaceGroup,
 	newPrimaryURL string,
@@ -95,7 +95,7 @@ func (k *keyspaceGroupSvcDiscovery) update(
 		primarySwitched = !strings.EqualFold(oldPrimaryURL, newPrimaryURL)
 		k.primaryURL = newPrimaryURL
 	}
-	// the mod revision just ensures the member use is the latest one , but primary can't be protected by the mod revision.
+	// the mod revision just ensures the member use is the latest one, and the primary can't be protected by the mod revision.
 	if k.getModRevision() > modRevision {
 		return oldPrimaryURL, primarySwitched, false
 	}
