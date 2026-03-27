@@ -15,6 +15,7 @@
 package scheduling
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/cluster"
@@ -128,4 +130,37 @@ func (suite *metaTestSuite) getRaftCluster() *cluster.RaftCluster {
 	cluster := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(cluster)
 	return cluster
+}
+
+func (suite *metaTestSuite) TestKeyspaceMetaWatch() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
+
+	now := time.Now().Unix()
+	request := &keyspace.CreateKeyspaceRequest{
+		Name: fmt.Sprintf("test_keyspace_%d", 0),
+		Config: map[string]string{
+			"config_entry_1": "100",
+		},
+		CreateTime: now,
+	}
+	resp, err := suite.cluster.GetLeaderServer().GetKeyspaceManager().CreateKeyspace(request)
+	re.NoError(err)
+	re.NotNil(resp)
+	re.Positive(resp.Id)
+	bound := keyspace.MakeRegionBound(resp.Id)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	se := tc.WaitForPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		kr, exist := se.GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
+		if exist {
+			return (bytes.Equal(kr[0], bound.TxnLeftBound) && bytes.Equal(kr[1], bound.TxnRightBound)) || (bytes.Equal(kr[0], bound.RawLeftBound) && bytes.Equal(kr[1], bound.RawRightBound))
+		}
+		return false
+	})
 }

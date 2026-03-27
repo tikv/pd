@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/keyspace_meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -117,6 +118,7 @@ type Server struct {
 	ruleWatcher     *rule.Watcher
 	metaWatcher     *meta.Watcher
 	affinityWatcher *affinity.Watcher
+	keyspaceWatcher *keyspace_meta.Watcher
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -529,6 +531,11 @@ func (s *Server) startCluster(context.Context) error {
 	}
 	// Start the affinity watcher after the cluster is created.
 	s.affinityWatcher, err = affinity.NewWatcher(s.Context(), s.GetClient(), cluster.GetAffinityManager())
+	if err != nil {
+		return err
+	}
+	s.keyspaceWatcher, err = keyspace_meta.NewWatcher(s.Context(), s.GetClient(),
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetKeyspaceCache())
 	if err != nil {
 		return err
 	}
