@@ -269,6 +269,44 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
 	re.Len(kg3.Keyspaces, 1)
 }
 
+func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceForGroupTxnOpUsesCommittedSnapshot() {
+	re := suite.Require()
+
+	err := suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:        2,
+		UserKind:  endpoint.Standard.String(),
+		Keyspaces: []uint32{111},
+	}})
+	re.NoError(err)
+
+	addOp, addCb, err := suite.kgm.updateKeyspaceForGroupTxnOp(endpoint.Standard, "2", 222, opAdd)
+	re.NoError(err)
+	deleteOp, deleteCb, err := suite.kgm.updateKeyspaceForGroupTxnOp(endpoint.Standard, "2", 222, opDelete)
+	re.NoError(err)
+
+	err = suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return addOp(txn)
+	})
+	re.NoError(err)
+	err = suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return deleteOp(txn)
+	})
+	re.NoError(err)
+
+	deleteCb(nil)
+	addCb(nil)
+
+	stored, err := suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal([]uint32{111}, stored.Keyspaces)
+
+	suite.kgm.RLock()
+	defer suite.kgm.RUnlock()
+	cached := suite.kgm.groups[endpoint.Standard].Get(2)
+	re.NotNil(cached)
+	re.Equal([]uint32{111}, cached.Keyspaces)
+}
+
 func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackOnSaveError() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
