@@ -13,7 +13,6 @@ This skill is runtime-only. It selects one flaky issue from `tikv/pd`, performs 
 
 - Process exactly one issue per run.
 - Candidate issue must be `state=open`, `label=type/ci`, and contain one of: `flaky|unstable|timeout|deadlock|data race|go leak|panic` in title/body.
-- Skip issue if an open PR in `tikv/pd` already references `#<issue-number>` in title/body.
 - Some issues, even after being fixed, still experience unstable failures again. In such cases, it is still necessary to investigate why the instability reappeared.
 - Before modifying any code, fetch and pin base from `upstream/master`, verify clean workspace, and create a dedicated branch from that base.
 - If workspace is dirty before branch creation, stop and report; do not continue on mixed local changes.
