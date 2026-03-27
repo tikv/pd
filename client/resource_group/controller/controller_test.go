@@ -176,6 +176,9 @@ func TestResourceGroupThrottledError(t *testing.T) {
 
 func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	re := require.New(t)
+
+	// Build controller with a buffered lowRUNotifyChan so the test can
+	// observe the notify() call inside reserveN as a synchronization point.
 	group := &rmpb.ResourceGroup{
 		Name: "test",
 		Mode: rmpb.GroupMode_RUMode,
@@ -192,6 +195,8 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1))
 	re.NoError(err)
 
+	// Set fillRate=0 so reservation always fails with InfDuration,
+	// which is the exact scenario described in issue #10251.
 	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
 	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
 		NewTokens: 1000,
@@ -208,15 +213,19 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	go func() {
 		var waitDuration time.Duration
 		_, err := gc.acquireTokens(context.Background(), delta, &waitDuration, false)
-		resultCh <- acquireResult{err: err, waitDuration: waitDuration}
+		resultCh <- acquireResult{err, waitDuration}
 	}()
 
+	// Wait for notify — Reserve has failed and the retry path is entered.
 	select {
 	case <-notifyCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for low-RU notification")
 	}
 
+	// Now reconfigure with enough tokens and a real fillRate.
+	// This closes the reconfiguredCh (waking the select) and provides
+	// tokens so the next Reserve() succeeds.
 	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
 		NewTokens: 100000,
 		NewRate:   100000,
@@ -235,10 +244,12 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 func TestAcquireTokensFallbackToTimer(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
+	// Short retry interval so the test runs fast.
 	gc.mainCfg.WaitRetryInterval = 50 * time.Millisecond
 	gc.mainCfg.WaitRetryTimes = 3
 	gc.mainCfg.LTBMaxWaitDuration = 100 * time.Millisecond
 
+	// Set fillRate=0 and never reconfigure — no signal will arrive.
 	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
 	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
 		NewTokens: 1000,
@@ -246,10 +257,15 @@ func TestAcquireTokensFallbackToTimer(t *testing.T) {
 		NewBurst:  0,
 	})
 
+	delta := &rmpb.Consumption{RRU: 5000}
+	ctx := context.Background()
 	var waitDuration time.Duration
-	_, err := gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 5000}, &waitDuration, false)
+	_, err := gc.acquireTokens(ctx, delta, &waitDuration, false)
+
+	// Without a Reconfigure signal, all retries should exhaust and return an error.
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+	// waitDuration should be roughly retryTimes * retryInterval.
 	re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
 }
 
