@@ -31,35 +31,19 @@ Collect all information needed to fill the PR template. Run these in parallel:
 
 **Gate**: If working tree is dirty, ask the user whether to commit first or proceed with committed changes only. If on `master`, stop and ask the user to create a branch.
 
-**CRITICAL COMMIT REQUIREMENTS** (per CONTRIBUTING.md):
+**Commit Requirements** (policy in CLAUDE.md § PRs & Commits):
 
-Verify and fix commit requirements before pushing. These checks apply to all commits in the range `master..HEAD`:
+Verify all commits in `master..HEAD` comply before pushing:
 
-- ✅ **Signed-off-by line**: Every commit MUST have `Signed-off-by: Name <email>` matching the commit author (the human developer)
-  - Check: `git log master..HEAD --invert-grep --grep="Signed-off-by:" --pretty=oneline`
-  - Fix: Prompt user for confirmation, then run `git rebase --signoff master`
-  - **CRITICAL**: DCO requires human developer attestation; never use agent identity in Signed-off-by
-- ✅ **Subject line ≤70 chars**: PR title / final commit subject must be ≤70 characters
-- ✅ **Commit message format**: `pkg: message` or `pkg1, pkg2: message` or `*: message`
-- ✅ **Body wrapped at 80 chars**: Commit message body lines must wrap at 80 characters
-- ✅ **Body describes why and how**: Not just "what changed" — explain the rationale
+- **Signed-off-by**: `git log master..HEAD --invert-grep --grep="Signed-off-by:" --pretty=oneline` — if any commits are listed, prompt user for confirmation then run `git rebase --signoff master`. Use human author identity only; never agent identity.
+- **Subject, format, body**: verify from the `git log --format="%B"` output collected above.
 
 ## Phase 2: Compose PR Content
 
 > **Load `.github/pull_request_template.md` and [references/pr-template.md](references/pr-template.md) now.**
 
 1. Following the filling guidelines in `references/pr-template.md`, compose the PR title and fill every section of the PR body template.
-2. **PR Title Requirements** (per CONTRIBUTING.md):
-   - Maximum **70 characters** (enforced by bot)
-   - Format depends on number of **non-test** packages changed:
-     - 1 package: `pkg: message`
-     - 2 packages: `pkg1, pkg2: message`
-     - 3+ packages (test-only files excluded from count): `*: message`
-   - Examples:
-     - `server: fix race condition in leader election`
-     - `pd-client, scheduling: improve region split handling`
-     - `*: upgrade to Go 1.23`
-3. **Commit Message Block Requirements**:
+2. **Commit Message Block Requirements**:
    - The bot extracts content from the `commit-message` code block for the final commit
    - Describe **why** the change was made and **how** it works (not just what)
    - Wrap body lines at **80 characters**
@@ -100,8 +84,8 @@ If the push or PR creation fails:
 - **Never force-push without user confirmation.**
 - **Always show the PR content before submitting.** User must approve title and body.
 - **Use `gh` CLI for GitHub operations.** Do not guess API URLs.
-- **Follow PD commit conventions.** `pkg: message` format for title, subject ≤70 chars, body wrapped at 80 chars.
+- **Follow PD commit conventions.** See CLAUDE.md § PRs & Commits for the full requirements.
 - **Preserve language specifiers.** Always use `commit-message` (not generic code blocks) — the PD merge bot extracts this for the final commit. Stripping the specifier breaks DCO compliance.
-- **Enforce commit requirements.** Verify and fix DCO sign-offs, message format, and length limits per the canonical "CRITICAL COMMIT REQUIREMENTS" section before pushing. DCO requires human developer attestation; never use agent identity.
+- **Enforce commit requirements.** Verify and fix DCO sign-offs, message format, and length limits (per CLAUDE.md § PRs & Commits) before pushing.
 - **Do not modify code.** This skill only pushes and creates PRs.
 - **Ask for issue number if unknown.** Do not invent issue references.
