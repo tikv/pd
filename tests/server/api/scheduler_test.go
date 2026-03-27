@@ -249,7 +249,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"min-hot-byte-rate":          100.0,
 					"min-hot-key-rate":           10.0,
 					"min-hot-query-rate":         10.0,
-					"min-hot-cpu-rate":           1.0,
+					"min-hot-cpu-rate":           10.0,
 					"max-zombie-rounds":          3.0,
 					"max-peer-number":            1000.0,
 					"byte-rate-rank-step-ratio":  0.05,
