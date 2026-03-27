@@ -22,6 +22,12 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
+// DFSStats is used to calculate the DFS stats info for each scope.
+type DFSStats struct {
+	WrittenBytes  uint64
+	WriteRequests uint64
+}
+
 type storeStats struct {
 	mu       syncutil.RWMutex
 	rawStats *pdpb.StoreStats
@@ -42,10 +48,9 @@ func (ss *storeStats) updateRawStats(rawStats *pdpb.StoreStats) {
 	defer ss.mu.Unlock()
 	ss.rawStats = rawStats
 
-	if ss.avgAvailable == nil {
-		return
+	if ss.avgAvailable != nil {
+		ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 	}
-	ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 }
 
 // GetStoreStats returns the statistics information of the store.

@@ -122,7 +122,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter}
+	affinityFilter := filter.NewAffinityFilter(cluster)
+	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, affinityFilter}
 	switch cluster.(type) {
 	case *rangeCluster:
 		// allow empty region to be scheduled in range cluster
@@ -225,7 +226,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(),
 			solver.Region, solver.Source, solver.fit),
 	}
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {
 		solver.Step++
 	}
@@ -262,10 +263,9 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			collector.Collect()
 		}
 		solver.Step--
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))

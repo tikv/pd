@@ -30,9 +30,11 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -140,6 +142,30 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			},
 			KeyspaceId: keyspaceID,
 		}
+		missingGroup := &rmpb.ResourceGroup{
+			Name:     "test_group_non_existing",
+			Mode:     groupToAdd.Mode,
+			Priority: groupToAdd.Priority,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   groupToAdd.GetRUSettings().GetRU().GetSettings().GetFillRate(),
+						BurstLimit: groupToAdd.GetRUSettings().GetRU().GetSettings().GetBurstLimit(),
+					},
+				},
+			},
+			KeyspaceId: keyspaceID,
+		}
+		bodyBytes, statusCode := sendRequest(
+			re,
+			suite.cluster.GetLeaderServer().GetAddr(),
+			http.MethodPut,
+			"/config/group",
+			nil,
+			missingGroup,
+		)
+		re.Equal(http.StatusNotFound, statusCode)
+		re.NotEmpty(string(bodyBytes))
 		suite.mustAddResourceGroup(re, groupToAdd)
 		// Get the resource group.
 		group := suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
@@ -364,12 +390,46 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	}
 	// Try to set a non-existing keyspace's service limit.
 	resp, statusCode := tryToSetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace", 1.0)
-	re.Equal(http.StatusBadRequest, statusCode)
-	re.Equal("keyspace not found with name: non_existing_keyspace", resp)
+	re.Equal(http.StatusNotFound, statusCode)
+	re.Equal(errs.ErrKeyspaceNotExistsByName.FastGenByArgs("non_existing_keyspace").Error(), resp)
 	// Try to get a non-existing keyspace's service limit.
 	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
-	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal(http.StatusNotFound, statusCode)
 	re.Equal(0.0, limit)
+
+	// Test RU version via controller config API.
+	// Initially no RU version policy in controller config.
+	config := suite.mustGetControllerConfig(re)
+	re.Nil(config.RUVersionPolicy)
+	// Set a negative ru_version, should fail.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", -1)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be positive", resp)
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 0)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be positive", resp)
+	// Set ru_version > 0 should update the controller config's RUVersionPolicy.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 3)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	config = suite.mustGetControllerConfig(re)
+	re.NotNil(config.RUVersionPolicy)
+	// The keyspace ID is resolved from the name; check the overrides map has the entry.
+	re.NotEmpty(config.RUVersionPolicy.Overrides)
+	// Update ru_version to a different value.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 5)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	config = suite.mustGetControllerConfig(re)
+	re.NotNil(config.RUVersionPolicy)
+	re.NotEmpty(config.RUVersionPolicy.Overrides)
+	// Try to set a non-existing keyspace's RU version.
+	_, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "non_existing_keyspace", 3)
+	re.Equal(http.StatusBadRequest, statusCode)
+}
+
+type serviceLimitResponse struct {
+	ServiceLimit float64 `json:"service_limit"`
 }
 
 func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
@@ -377,9 +437,7 @@ func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
-	var limiter struct {
-		ServiceLimit float64 `json:"service_limit"`
-	}
+	var limiter serviceLimitResponse
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
 	return limiter.ServiceLimit, statusCode
 }
@@ -396,4 +454,107 @@ func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 		},
 	)
 	return string(bodyBytes), statusCode
+}
+
+func tryToSetKeyspaceRUVersion(re *require.Assertions, leaderAddr, keyspaceName string, ruVersion int32) (string, int) {
+	bodyBytes, statusCode := sendRequest(
+		re,
+		leaderAddr,
+		http.MethodPost,
+		"/config/controller/ru-version/"+keyspaceName,
+		nil,
+		apis.SetKeyspaceRUVersionRequest{
+			RUVersion: ruVersion,
+		},
+	)
+	return string(bodyBytes), statusCode
+}
+
+// resourceManagerForwardingTestSuite is a test suite for testing the forwarding behavior of Resource Manager APIs.
+type resourceManagerForwardingTestSuite struct {
+	suite.Suite
+	ctx              context.Context
+	cancel           context.CancelFunc
+	pdCluster        *tests.TestCluster
+	rmCluster        *tests.TestResourceManagerCluster
+	backendEndpoints string
+	primary          *server.Server
+	follower         *server.Server
+}
+
+func TestResourceManagerForwarding(t *testing.T) {
+	suite.Run(t, new(resourceManagerForwardingTestSuite))
+}
+
+func (suite *resourceManagerForwardingTestSuite) SetupTest() {
+	re := suite.Require()
+	var err error
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+
+	suite.pdCluster, err = tests.NewTestCluster(suite.ctx, 1)
+	re.NoError(err)
+	err = suite.pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := suite.pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
+	re.NoError(pdLeaderServer.BootstrapCluster())
+	suite.backendEndpoints = pdLeaderServer.GetAddr()
+
+	suite.rmCluster, err = tests.NewTestResourceManagerCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+
+	suite.primary = suite.rmCluster.WaitForPrimaryServing(re)
+	re.NotNil(suite.primary)
+	for _, srv := range suite.rmCluster.GetServers() {
+		if srv.GetAddr() != suite.primary.GetAddr() {
+			suite.follower = srv
+			break
+		}
+	}
+	re.NotNil(suite.follower, "follower should not be nil")
+	re.False(suite.follower.IsServing(), "follower should not be serving")
+}
+
+func (suite *resourceManagerForwardingTestSuite) TearDownTest() {
+	suite.cancel()
+	suite.rmCluster.Destroy()
+	suite.pdCluster.Destroy()
+}
+
+// TestResourceManagerForwardingBehavior checks that requests are correctly forwarded or handled locally.
+func (suite *resourceManagerForwardingTestSuite) TestResourceManagerForwardingBehavior() {
+	re := suite.Require()
+	followerAddr := suite.follower.GetAddr()
+	followerURL := func(path string) string {
+		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
+	}
+
+	// Case 1: PUT /admin/log should be handled by the follower locally.
+	logURL := followerURL("admin/log")
+	level := "debug"
+	logPayload, err := json.Marshal(level)
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
+	re.NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	// Case 2: GET /config should be handled by the follower locally.
+	configURL := followerURL("config")
+	var followerCfg server.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &followerCfg, testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(suite.follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.NotEqual(suite.primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(level, followerCfg.Log.Level)
+
+	// Case 3: GET /config/groups should be handled by the follower forwarded to the primary.
+	controllerURL := followerURL("config/groups")
+	groups := make([]*server.ResourceGroup, 0)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, controllerURL, &groups, testutil.StatusOK(re))
+	re.NoError(err)
 }

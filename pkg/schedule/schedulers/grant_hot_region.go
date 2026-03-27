@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strconv"
@@ -242,7 +243,7 @@ func (s *grantHotRegionScheduler) dispatch(typ resourceType, cluster sche.Schedu
 }
 
 func (s *grantHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
-	isLeader := s.r.Int()%2 == 1
+	isLeader := rand.Int()%2 == 1
 	for _, srcStore := range srcStores {
 		srcStoreID := srcStore.GetID()
 		if isLeader {
@@ -312,7 +313,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	if srcPeer == nil {
 		return nil, errs.ErrStoreNotFound
 	}
-	i := s.r.Int() % len(destStoreIDs)
+	i := rand.Int() % len(destStoreIDs)
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {

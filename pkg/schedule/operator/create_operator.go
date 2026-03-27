@@ -16,7 +16,7 @@ package operator
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 
 	"go.uber.org/zap"
 
@@ -171,7 +171,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
+	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind, region.GetApproximateSize(), step)
 	op.SetAdditionalInfo("region-start-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey())))
 	op.SetAdditionalInfo("region-end-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey())))
 	return op, nil
@@ -211,8 +211,8 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	})
 
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
-	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, source.GetApproximateSize(), steps...)
-	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, target.GetApproximateSize(), MergeRegion{
+	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind, source.GetApproximateSize(), steps...)
+	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind, target.GetApproximateSize(), MergeRegion{
 		FromRegion: source.GetMeta(),
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
@@ -246,7 +246,7 @@ func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *cor
 	}
 	var leader uint64
 	if len(ids) > 0 {
-		leader = ids[rand.Intn(len(ids))]
+		leader = ids[rand.IntN(len(ids))]
 	}
 	if targetLeader != 0 {
 		leader = targetLeader

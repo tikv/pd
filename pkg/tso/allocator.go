@@ -43,9 +43,6 @@ import (
 )
 
 const (
-	// GlobalDCLocation is the Global TSO Allocator's DC location label.
-	// Deprecated: This is a legacy label, it should be removed in the future.
-	GlobalDCLocation = "global"
 	// maxUpdateTSORetryCount is the max retry count for updating TSO.
 	// When encountering a network partition, manually retrying may help the next request succeed with the new endpoint according to https://github.com/etcd-io/etcd/issues/8711
 	maxUpdateTSORetryCount = 3
@@ -98,9 +95,9 @@ func NewAllocator(
 			updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
 			maxResetTSGap:          cfg.GetMaxResetTSGap,
 			tsoMux:                 &tsoObject{},
-			metrics:                newTSOMetrics(keyspaceGroupIDStr, GlobalDCLocation),
+			metrics:                newTSOMetrics(keyspaceGroupIDStr),
 		},
-		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr, GlobalDCLocation),
+		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr),
 		logFields: []zap.Field{
 			logutil.CondUint32("keyspace-group-id", keyspaceGroupID, keyspaceGroupID > 0),
 			zap.String("name", member.Name()),
@@ -169,16 +166,20 @@ func (a *Allocator) IsInitialize() bool {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (a *Allocator) UpdateTSO() (err error) {
+	var overflowed bool
 	for i := range maxUpdateTSORetryCount {
-		err = a.timestampOracle.updateTimestamp()
+		overflowed, err = a.timestampOracle.updateTimestamp(intervalUpdate)
 		if err == nil {
 			return nil
 		}
 		log.Warn("try to update the tso but failed",
-			zap.Int("retry-count", i), zap.Duration("retry-interval", updateTSORetryInterval), errs.ZapError(err))
+			zap.Int("retry-count", i),
+			zap.Duration("retry-interval", updateTSORetryInterval),
+			zap.Bool("overflowed", overflowed),
+			errs.ZapError(err))
 		time.Sleep(updateTSORetryInterval)
 	}
-	return
+	return err
 }
 
 // SetTSO sets the physical part with given TSO.

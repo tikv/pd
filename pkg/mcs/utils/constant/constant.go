@@ -49,8 +49,12 @@ const (
 	PDServiceName = "pd"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
+	// ResourceManagerServiceName is the name of resource manager server.
+	ResourceManagerServiceName = "resource_manager"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
+	// RouterServiceName is the name of router server.
+	RouterServiceName = "router"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards

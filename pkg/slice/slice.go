@@ -56,10 +56,15 @@ func Remove[T comparable](slice []T, value T) []T {
 			j++
 		}
 	}
+	var zero T
+	for k := j; k < len(slice); k++ {
+		slice[k] = zero
+	}
 	return slice[:j]
 }
 
 // EqualWithoutOrder checks if two slices are equal without considering the order.
+// Both slices a and b must not contain any duplicate elements.
 func EqualWithoutOrder[T comparable](a, b []T) bool {
 	if len(a) != len(b) {
 		return false
@@ -70,4 +75,31 @@ func EqualWithoutOrder[T comparable](a, b []T) bool {
 		}
 	}
 	return true
+}
+
+// HasDupInSorted takes a sorted slice and checks whether it contains any duplicate elements.
+func HasDupInSorted[T comparable](sortedSlice []T) bool {
+	for i := 1; i < len(sortedSlice); i++ {
+		if sortedSlice[i] == sortedSlice[i-1] {
+			return true
+		}
+	}
+	return false
+}
+
+// SplitIntoBatches splits the slice of items of type T into batches with `batchSize` items per batch.
+func SplitIntoBatches[T any](slice []T, batchSize int) [][]T {
+	if batchSize <= 0 {
+		return [][]T{slice}
+	}
+	sliceLen := len(slice)
+	batches := make([][]T, 0, (sliceLen+batchSize-1)/batchSize)
+	for i := 0; i < sliceLen; i += batchSize {
+		end := i + batchSize
+		if end > sliceLen {
+			end = sliceLen
+		}
+		batches = append(batches, slice[i:end])
+	}
+	return batches
 }

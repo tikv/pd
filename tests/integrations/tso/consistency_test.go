@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -53,6 +52,7 @@ type tsoConsistencyTestSuite struct {
 	tsoClientConn    *grpc.ClientConn
 
 	pdClient  pdpb.PDClient
+	conn      *grpc.ClientConn
 	tsoClient tsopb.TSOClient
 }
 
@@ -88,7 +88,7 @@ func (suite *tsoConsistencyTestSuite) SetupSuite() {
 	re.NoError(err)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
-		suite.pdClient = testutil.MustNewGrpcClient(re, backendEndpoints)
+		suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, backendEndpoints)
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())
@@ -101,6 +101,9 @@ func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 		suite.tsoClientConn.Close()
 		suite.tsoServerCleanup()
 	}
+	if suite.conn != nil {
+		suite.conn.Close()
+	}
 	suite.cluster.Destroy()
 }
 
@@ -109,9 +112,8 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
-			Header:     &pdpb.RequestHeader{ClusterId: clusterID},
-			DcLocation: tsopkg.GlobalDCLocation,
-			Count:      count,
+			Header: &pdpb.RequestHeader{ClusterId: clusterID},
+			Count:  count,
 		}
 		tsoClient, err := suite.pdClient.Tso(ctx)
 		re.NoError(err)
@@ -125,9 +127,8 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 		return checkAndReturnTimestampResponse(re, resp)
 	}
 	req := &tsopb.TsoRequest{
-		Header:     &tsopb.RequestHeader{ClusterId: clusterID},
-		DcLocation: tsopkg.GlobalDCLocation,
-		Count:      count,
+		Header: &tsopb.RequestHeader{ClusterId: clusterID},
+		Count:  count,
 	}
 	var resp *tsopb.TsoResponse
 	testutil.Eventually(re, func() bool {

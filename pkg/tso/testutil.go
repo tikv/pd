@@ -40,8 +40,8 @@ func (c *TestServiceConfig) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints field of TestServiceConfig.
-func (c *TestServiceConfig) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints field of TestServiceConfig.
+func (c *TestServiceConfig) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 

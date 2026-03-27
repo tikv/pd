@@ -101,8 +101,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 

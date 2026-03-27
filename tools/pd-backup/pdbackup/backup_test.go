@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,7 +64,7 @@ type backupTestSuite struct {
 }
 
 func TestBackupTestSuite(t *testing.T) {
-	servers, etcdClient, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, etcdClient, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	server, serverConfig := setupServer()

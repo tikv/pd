@@ -33,7 +33,7 @@ const (
 	defaultEnableTSOFollowerProxy                = false
 	defaultEnableFollowerHandle                  = false
 	defaultTSOClientRPCConcurrency               = 1
-	defaultEnableRouterClient                    = false
+	defaultEnableRouterClient                    = true
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -244,7 +244,8 @@ func WithEnableFollowerHandle(enable bool) ClientOption {
 
 // GetStoreOp represents available options when getting stores.
 type GetStoreOp struct {
-	ExcludeTombstone bool
+	ExcludeTombstone         bool
+	AllowRouterServiceHandle bool
 }
 
 // GetStoreOption configures GetStoreOp.
@@ -253,6 +254,18 @@ type GetStoreOption func(*GetStoreOp)
 // WithExcludeTombstone excludes tombstone stores from the result.
 func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.ExcludeTombstone = true }
+}
+
+// WithAllowRouterServiceHandleStoreRequest means that client can use router service to handle this store request.
+func WithAllowRouterServiceHandleStoreRequest() GetStoreOption {
+	return func(op *GetStoreOp) { op.AllowRouterServiceHandle = true }
+}
+
+// WithPDLeaderHandleStoreRequestOnly means the store request must be handled by PD leader.
+func WithPDLeaderHandleStoreRequestOnly() GetStoreOption {
+	return func(op *GetStoreOp) {
+		op.AllowRouterServiceHandle = false
+	}
 }
 
 // RegionsOp represents available options when operate regions
@@ -285,6 +298,7 @@ type GetRegionOp struct {
 	NeedBuckets                  bool
 	AllowFollowerHandle          bool
 	OutputMustContainAllKeyRange bool
+	AllowRouterServiceHandle     bool
 }
 
 // GetRegionOption configures GetRegionOp.
@@ -300,9 +314,22 @@ func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.AllowFollowerHandle = true }
 }
 
+// WithAllowRouterServiceHandle means that client can use router service to handle this request.
+func WithAllowRouterServiceHandle() GetRegionOption {
+	return func(op *GetRegionOp) { op.AllowRouterServiceHandle = true }
+}
+
 // WithOutputMustContainAllKeyRange means the output must contain all key ranges.
 func WithOutputMustContainAllKeyRange() GetRegionOption {
 	return func(op *GetRegionOp) { op.OutputMustContainAllKeyRange = true }
+}
+
+// WithAllowPDLeaderOnly means the request must be handled by PD leader.
+func WithAllowPDLeaderOnly() GetRegionOption {
+	return func(op *GetRegionOp) {
+		op.AllowRouterServiceHandle = false
+		op.AllowFollowerHandle = false
+	}
 }
 
 // MetaStorageOp represents available options when using meta storage client.

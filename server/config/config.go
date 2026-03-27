@@ -34,6 +34,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
@@ -164,6 +165,8 @@ type Config struct {
 	Microservice MicroserviceConfig `toml:"micro-service" json:"micro-service"`
 
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
 // NewConfig creates a new config.
@@ -213,8 +216,6 @@ const (
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
-	defaultEnableWitness       = false
-	defaultHaltScheduling      = false
 
 	defaultDashboardAddress = "auto"
 
@@ -223,7 +224,8 @@ const (
 	defaultMaxConcurrentTSOProxyStreamings = 5000
 	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
 
-	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
+	// DefaultTSOSaveInterval is the default value of the config `TSOSaveInterval`.
+	DefaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	// MaxTSOUpdatePhysicalInterval is the max value of the config `TSOUpdatePhysicalInterval`.
@@ -239,7 +241,7 @@ const (
 	defaultServerMemoryLimitGCTrigger = 0.7
 	minServerMemoryLimitGCTrigger     = 0.5
 	maxServerMemoryLimitGCTrigger     = 0.99
-	defaultEnableGOGCTuner            = false
+	defaultEnableGOGCTuner            = true
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
@@ -249,8 +251,9 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback  = true
-	defaultEnableTSODynamicSwitching = false
+	defaultEnableSchedulingFallback      = true
+	defaultEnableTSODynamicSwitching     = false
+	defaultEnableResourceManagerFallback = true
 )
 
 var (
@@ -398,7 +401,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
 
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
+	configutil.AdjustDuration(&c.TSOSaveInterval, DefaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > MaxTSOUpdatePhysicalInterval {
@@ -745,6 +748,7 @@ type DashboardConfig struct {
 	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
 	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
 	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	TempDir               string `toml:"temp-dir" json:"temp-dir"`
 	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
@@ -826,6 +830,10 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type MicroserviceConfig struct {
 	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	// If EnableResourceManagerFallback is false, resource manager service only
+	// works when api service is healthy. Please make sure api service is highly
+	// available before disabling this option.
+	EnableResourceManagerFallback bool `toml:"enable-resource-manager-fallback" json:"enable-resource-manager-fallback,string"`
 }
 
 func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
@@ -834,6 +842,9 @@ func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("enable-tso-dynamic-switching") {
 		c.EnableTSODynamicSwitching = defaultEnableTSODynamicSwitching
+	}
+	if !meta.IsDefined("enable-resource-manager-fallback") {
+		c.EnableResourceManagerFallback = defaultEnableResourceManagerFallback
 	}
 }
 
@@ -851,6 +862,11 @@ func (c *MicroserviceConfig) IsSchedulingFallbackEnabled() bool {
 // IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
 func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 	return c.EnableTSODynamicSwitching
+}
+
+// IsResourceManagerFallbackEnabled returns whether to enable resource manager service fallback to api service.
+func (c *MicroserviceConfig) IsResourceManagerFallbackEnabled() bool {
+	return c.EnableResourceManagerFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.

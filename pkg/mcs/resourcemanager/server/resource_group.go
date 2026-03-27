@@ -204,7 +204,18 @@ func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLi
 func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 	rg.Lock()
 	defer rg.Unlock()
+	return rg.patchSettingsLocked(metaGroup, true)
+}
 
+// ApplySettings applies the resource group settings only.
+// It does not patch token delta.
+func (rg *ResourceGroup) ApplySettings(metaGroup *rmpb.ResourceGroup) error {
+	rg.Lock()
+	defer rg.Unlock()
+	return rg.patchSettingsLocked(metaGroup, false)
+}
+
+func (rg *ResourceGroup) patchSettingsLocked(metaGroup *rmpb.ResourceGroup, patchTokens bool) error {
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
@@ -220,7 +231,11 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		if settings == nil {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
-		rg.RUSettings.RU.patch(settings.GetRU())
+		if patchTokens {
+			rg.RUSettings.RU.patch(settings.GetRU())
+		} else {
+			rg.RUSettings.RU.applySettings(settings.GetRU())
+		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}
@@ -259,12 +274,16 @@ func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
-	sl *serviceLimiter,
+	grt *groupRUTracker, sl *serviceLimiter,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
+	}
+	// Inject the group RU tracker into the resource group.
+	if rg.RUSettings.RU.grt == nil {
+		rg.RUSettings.RU.grt = grt
 	}
 	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
@@ -273,13 +292,16 @@ func (rg *ResourceGroup) RequestRU(
 	}
 	// Then, try to apply the service limit.
 	grantedTokens := tb.GetTokens()
-	limitedTokens := sl.applyServiceLimit(now, grantedTokens)
+	limitedTokens, minTrickleTimeMs := sl.applyServiceLimit(now, grantedTokens)
 	if limitedTokens < grantedTokens {
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
 		if rg.getBurstLimitLocked() > 0 {
 			rg.RUSettings.RU.reservedServiceTokens += grantedTokens - limitedTokens
 		}
+	}
+	if trickleTimeMs < minTrickleTimeMs {
+		trickleTimeMs = minTrickleTimeMs
 	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
@@ -383,6 +405,9 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 	rc.KvWriteRpcCount += c.KvWriteRpcCount
 	rc.ReadCrossAzTrafficBytes += c.ReadCrossAzTrafficBytes
 	rc.WriteCrossAzTrafficBytes += c.WriteCrossAzTrafficBytes
+	rc.TikvRUV2 += c.TikvRUV2
+	rc.TidbRUV2 += c.TidbRUV2
+	rc.TiflashRUV2 += c.TiflashRUV2
 }
 
 // persistStates persists the resource group tokens.

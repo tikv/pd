@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -33,6 +34,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -113,7 +116,7 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, "mcs-etcd-client")
+	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, etcdutil.McsEtcdClientPurpose, true)
 	if err != nil {
 		return err
 	}
@@ -171,10 +174,16 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime: 5 * time.Second,
 		}),
+		grpc.UnaryInterceptor(grpcprometheus.UnaryServerInterceptor),
+		grpc.StreamInterceptor(grpcprometheus.StreamServerInterceptor),
 	)
+	hs := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, hs)
+	grpcprometheus.Register(grpcServer)
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
+	hs.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	s.ServerLoopWgAdd(1)
 	go startGRPCServer(s, grpcL)
 

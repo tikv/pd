@@ -26,13 +26,21 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
-// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig() *embed.Config {
+// NewTestEtcdConfig is used to create a etcd config for the unit test purpose.
+func NewTestEtcdConfig(c ...*log.Config) *embed.Config {
 	cfg := embed.NewConfig()
+	if len(c) > 0 {
+		lg, p, _ := log.InitLogger(c[0])
+		log.ReplaceGlobals(lg, p)
+		cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
+	}
+
 	cfg.Name = genRandName()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
@@ -55,16 +63,24 @@ func genRandName() string {
 	return "pd" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
+// TestEtcdClusterOptions is the options for NewTestEtcdCluster.
+type TestEtcdClusterOptions struct {
+	ServerCfgModifier func(cfg *embed.Config)
+}
+
 // NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.
-func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdClient *clientv3.Client, clean func()) {
+func NewTestEtcdCluster(t testing.TB, count int, opt *TestEtcdClusterOptions) (servers []*embed.Etcd, etcdClient *clientv3.Client, clean func()) {
 	re := require.New(t)
 	servers = make([]*embed.Etcd, 0, count)
 
-	cfg := NewTestSingleConfig()
+	cfg := NewTestEtcdConfig()
 	cfg.Dir = t.TempDir()
+	if opt != nil && opt.ServerCfgModifier != nil {
+		opt.ServerCfgModifier(cfg)
+	}
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls)
+	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 	servers = append(servers, etcd)
@@ -104,9 +120,9 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 }
 
 // MustAddEtcdMember is used to add a new etcd member to the cluster for test.
-func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
+func MustAddEtcdMember(t testing.TB, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
 	re := require.New(t)
-	cfg2 := NewTestSingleConfig()
+	cfg2 := NewTestEtcdConfig()
 	cfg2.Dir = t.TempDir()
 	cfg2.Name = genRandName()
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.ListenPeerUrls[0])

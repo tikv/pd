@@ -252,7 +252,10 @@ func (m *Manager) GetProgressByStoreID(storeID uint64) *Progress {
 	if !exist {
 		return nil
 	}
-	return p.Progress
+	// Return a copy to avoid data race when the caller reads fields
+	// after the lock is released while another goroutine may be updating them.
+	progressCopy := *p.Progress
+	return &progressCopy
 }
 
 // GetAverageProgressByAction gets the average progress of all stores

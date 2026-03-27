@@ -502,6 +502,10 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			name:        "evict-slow-store-scheduler",
 			createdName: "evict-slow-store-scheduler",
 		},
+		{
+			name:        "evict-stopping-store-scheduler",
+			createdName: "evict-stopping-store-scheduler",
+		},
 	}
 	for _, testCase := range testCases {
 		input := make(map[string]any)
@@ -649,7 +653,9 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	assertNoScheduler(re, urlPrefix, name)
-	suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	if suite.env == tests.NonMicroserviceEnv {
+		suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	}
 
 	// reset schedule config
 	scheduleConfig.Schedulers = originSchedulers

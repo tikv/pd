@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"testing"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -65,54 +67,18 @@ func (suite *regionTestSuite) TearDownTest() {
 	suite.env.Reset(re)
 }
 
-func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
-	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
-	suite.env.RunTest(suite.checkAccelerateRegionsScheduleInRange)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
-}
-
-func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tests.TestCluster) {
-	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
-	re := suite.Require()
-	for i := 1; i <= 3; i++ {
-		s1 := &metapb.Store{
-			Id:        uint64(i),
-			State:     metapb.StoreState_Up,
-			NodeState: metapb.NodeState_Serving,
-		}
-		tests.MustPutStore(re, cluster, s1)
-	}
-	regionCount := uint64(3)
-	for i := uint64(1); i <= regionCount; i++ {
-		r1 := core.NewTestRegionInfo(550+i, 1, []byte("a"+strconv.FormatUint(i, 10)), []byte("a"+strconv.FormatUint(i+1, 10)))
-		r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 100 + i, StoreId: (i + 1) % regionCount}, &metapb.Peer{Id: 200 + i, StoreId: (i + 2) % regionCount})
-		tests.MustPutRegionInfo(re, cluster, r1)
-	}
-	checkRegionCount(re, cluster, regionCount)
-
-	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
-	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
-		testutil.StatusOK(re))
-	re.NoError(err)
-	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
-	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
-	}
-	re.Len(idList, 2, len(idList))
-}
-
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
 	re := suite.Require()
+	// Ensure the pending processed regions are not added or removed during the test.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions", "return(true)"))
 	suite.env.RunTest(suite.checkAccelerateRegionsScheduleInRanges)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipPatrolRegions"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 }
 
 func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *tests.TestCluster) {
 	leader := cluster.GetLeaderServer()
-	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	re := suite.Require()
 	for i := 1; i <= 6; i++ {
 		s1 := &metapb.Store{
@@ -130,16 +96,40 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 	}
 	checkRegionCount(re, cluster, regionCount)
 
+	var checkerController *checker.Controller
+	if sche := cluster.GetSchedulingPrimaryServer(); sche == nil {
+		checkerController = leader.GetRaftCluster().GetCoordinator().GetCheckerController()
+	} else {
+		checkerController = sche.GetCluster().GetCoordinator().GetCheckerController()
+	}
+
+	checkerController.ClearPendingProcessedRegions()
+	re.Empty(checkerController.GetPendingProcessedRegions())
+
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+	// Test accelerate schedule in ranges.
 	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`,
 		hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
 	err := testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body),
 		testutil.StatusOK(re))
 	re.NoError(err)
-	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
-	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
-	}
-	re.Len(idList, 4)
+
+	testutil.Eventually(re, func() bool {
+		return len(checkerController.GetPendingProcessedRegions()) == 4
+	})
+
+	checkerController.ClearPendingProcessedRegions()
+	re.Empty(checkerController.GetPendingProcessedRegions())
+
+	// Test accelerate schedule in range.
+	body = fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
+		testutil.StatusOK(re))
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		return len(checkerController.GetPendingProcessedRegions()) == 2
+	})
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
@@ -385,12 +375,13 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "down-peer")
 	r2 := &response.RegionsInfo{}
+	expected := &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r2); err != nil {
 			return false
 		}
 		r2.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+		return reflect.DeepEqual(expected, r2)
 	})
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "pending-peer")
@@ -409,36 +400,37 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
+	expected = &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r5); err != nil {
 			return false
 		}
 		r5.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+		return reflect.DeepEqual(expected, r5)
 	})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-size")
 	r6 := make([]*api.HistItem, 1)
+	histSizes := []*api.HistItem{{Start: 1, End: 1, Count: 1}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r6); err != nil {
 			return false
 		}
-		histSizes := []*api.HistItem{{Start: 1, End: 1, Count: 1}}
-		return suite.Equal(histSizes, r6)
+		return reflect.DeepEqual(histSizes, r6)
 	})
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-keys")
 	r7 := make([]*api.HistItem, 1)
+	histKeys := []*api.HistItem{{Start: 1000, End: 1999, Count: 1}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r7); err != nil {
 			return false
 		}
-		histKeys := []*api.HistItem{{Start: 1000, End: 1999, Count: 1}}
-		return suite.Equal(histKeys, r7)
+		return reflect.DeepEqual(histKeys, r7)
 	})
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
@@ -456,8 +448,8 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r8); err != nil {
 			return false
 		}
-		r4.Adjust()
-		return suite.Equal(r.GetID(), r8.Regions[0].ID) && r8.Count == 1
+		r8.Adjust()
+		return r8.Count == 1 && len(r8.Regions) > 0 && r.GetID() == r8.Regions[0].ID
 	})
 }
 

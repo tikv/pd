@@ -408,6 +408,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		re.NoError(e)
 		err := testutil.CheckPostJSON(tests.TestDialClient, configURL, reqData, testutil.StatusOK(re))
 		re.NoError(err)
+		// Wait for the leader server to update the config
+		testutil.Eventually(re, func() bool {
+			return cluster.GetLeaderServer().GetRaftCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
+		})
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			// wait for the scheduling server to update the config
 			testutil.Eventually(re, func() bool {
@@ -492,7 +496,7 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 		ConfVer: 1,
 		Version: 1,
 	}, resp[0].RegionEpoch)
-	re.Equal(operator.OpAdmin|operator.OpMerge, resp[0].Kind)
+	re.Equal(operator.OpAdmin, resp[0].Kind)
 	re.Truef(resp[0].Status == operator.CREATED || resp[0].Status == operator.STARTED, "unexpected status %s", resp[0].Status)
 	re.Equal(uint64(20), resp[1].RegionID)
 	re.Equal("admin-merge-region", resp[1].Desc)

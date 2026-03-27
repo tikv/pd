@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -52,6 +51,7 @@ type tsoServerTestSuite struct {
 	tsoClientConn    *grpc.ClientConn
 
 	pdClient  pdpb.PDClient
+	conn      *grpc.ClientConn
 	tsoClient tsopb.TSOClient
 }
 
@@ -87,7 +87,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re.NoError(err)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
-		suite.pdClient = testutil.MustNewGrpcClient(re, backendEndpoints)
+		suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, backendEndpoints)
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())
@@ -103,6 +103,9 @@ func (suite *tsoServerTestSuite) TearDownSuite() {
 	if !suite.legacy {
 		suite.tsoClientConn.Close()
 		suite.tsoServerCleanup()
+	}
+	if suite.conn != nil {
+		suite.conn.Close()
 	}
 	suite.cluster.Destroy()
 }
@@ -124,9 +127,8 @@ func (suite *tsoServerTestSuite) request(ctx context.Context, re *require.Assert
 	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
-			Header:     &pdpb.RequestHeader{ClusterId: clusterID},
-			DcLocation: tsopkg.GlobalDCLocation,
-			Count:      count,
+			Header: &pdpb.RequestHeader{ClusterId: clusterID},
+			Count:  count,
 		}
 		tsoClient, err := suite.pdClient.Tso(ctx)
 		re.NoError(err)
@@ -139,9 +141,8 @@ func (suite *tsoServerTestSuite) request(ctx context.Context, re *require.Assert
 		return err
 	}
 	req := &tsopb.TsoRequest{
-		Header:     &tsopb.RequestHeader{ClusterId: clusterID},
-		DcLocation: tsopkg.GlobalDCLocation,
-		Count:      count,
+		Header: &tsopb.RequestHeader{ClusterId: clusterID},
+		Count:  count,
 	}
 	tsoClient, err := suite.tsoClient.Tso(ctx)
 	re.NoError(err)

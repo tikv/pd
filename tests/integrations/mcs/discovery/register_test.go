@@ -75,6 +75,7 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 func (suite *serverRegisterTestSuite) TestServerRegister() {
 	for range 3 {
 		suite.checkServerRegister(constant.TSOServiceName)
+		suite.checkServerRegister(constant.ResourceManagerServiceName)
 	}
 }
 
@@ -110,6 +111,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
 	suite.checkServerPrimaryChange(constant.TSOServiceName, 3)
+	suite.checkServerPrimaryChange(constant.ResourceManagerServiceName, 3)
 }
 
 func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName string, serverNum int) {
@@ -157,6 +159,12 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	switch serviceName {
 	case constant.TSOServiceName:
 		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	case constant.ResourceManagerServiceName:
+		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	case constant.RouterServiceName:
+		server, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		re.NoError(err)
+		return server, cleanup
 	default:
 		return nil, nil
 	}

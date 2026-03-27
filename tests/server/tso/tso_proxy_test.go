@@ -22,11 +22,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -41,6 +41,7 @@ type tsoProxyTestSuite struct {
 	follower     *tests.TestServer
 
 	pdClient     pdpb.PDClient
+	conn         *grpc.ClientConn
 	defaultReq   *pdpb.TsoRequest
 	proxyClient  pdpb.PD_TsoClient
 	clientCtx    context.Context
@@ -70,12 +71,11 @@ func (s *tsoProxyTestSuite) SetupTest() {
 		}
 	}
 
-	s.pdClient = testutil.MustNewGrpcClient(re, s.follower.GetAddr())
+	s.pdClient, s.conn = testutil.MustNewGrpcClient(re, s.follower.GetAddr())
 	clusterID := s.leader.GetClusterID()
 	s.defaultReq = &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 
 	s.reCreateProxyClient()
@@ -114,6 +114,9 @@ func (s *tsoProxyTestSuite) TearDownTest() {
 		if err != nil && err != io.EOF {
 			re.NoError(err)
 		}
+	}
+	if s.conn != nil {
+		s.conn.Close()
 	}
 	s.clientCancel()
 	s.cluster.Destroy()

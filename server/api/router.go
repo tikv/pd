@@ -79,15 +79,16 @@ func getFunctionName(f any) string {
 }
 
 // The returned function is used as a lazy router to avoid the data race problem.
-// @title          Placement Driver Core API
-// @version        1.0
-// @description    This is placement driver.
-// @contact.name   Placement Driver Support
-// @contact.url    https://github.com/tikv/pd/issues
-// @contact.email  info@pingcap.com
-// @license.name   Apache 2.0
-// @license.url    http://www.apache.org/licenses/LICENSE-2.0.html
-// @BasePath       /pd/api/v1
+//
+//	@title			Placement Driver Core API
+//	@version		1.0
+//	@description	This is placement driver.
+//	@contact.name	Placement Driver Support
+//	@contact.url	https://github.com/tikv/pd/issues
+//	@contact.email	info@pingcap.com
+//	@license.name	Apache 2.0
+//	@license.url	http://www.apache.org/licenses/LICENSE-2.0.html
+//	@BasePath		/pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddle := newServiceMiddlewareBuilder(svr)
 	registerPrefix := func(router *mux.Router, prefixPath, name string,
@@ -302,9 +303,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	statsHandler := newStatsHandler(svr, rd)
 	registerFunc(clusterRouter, "/stats/region", statsHandler.GetRegionStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
-	trendHandler := newTrendHandler(svr, rd)
-	registerFunc(apiRouter, "/trend", trendHandler.GetTrend, setMethods(http.MethodGet), setAuditBackend(prometheus))
-
 	adminHandler := newAdminHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/admin/storage/region/{id}", adminHandler.DeleteRegionStorage, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
@@ -313,6 +311,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.isSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.markSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.unmarkSnapshotRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/pitr-restore-mode", adminHandler.isPitrRestoreMode, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/pitr-restore-mode", adminHandler.markPitrRestoreMode, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/pitr-restore-mode", adminHandler.unmarkPitrRestoreMode, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.recoverAllocID, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)

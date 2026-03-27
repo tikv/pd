@@ -51,7 +51,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -87,7 +86,8 @@ func TestBootstrap(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 
 	// IsBootstrapped returns false.
@@ -127,7 +127,8 @@ func TestDamagedRegion(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
@@ -211,7 +212,8 @@ func TestRegionStatistics(t *testing.T) {
 
 	leaderName := tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
@@ -305,7 +307,8 @@ func TestStaleRegion(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 
@@ -352,7 +355,8 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
@@ -369,7 +373,8 @@ func TestConcurrencyGetPutConfig(t *testing.T) {
 			defer wg.Done()
 			for j := range 100 {
 				storeID := peer.GetStoreId()
-				client := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+				client, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+				defer conn.Close()
 				store := getStore(re, clusterID, client, storeID)
 				store.Address = "mock://tikv-1:1"
 				store.Labels = []*metapb.StoreLabel{
@@ -399,7 +404,8 @@ func TestGetPutConfig(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
@@ -638,7 +644,8 @@ func TestRaftClusterRestart(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 
@@ -670,7 +677,8 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	// add an offline store
@@ -812,7 +820,8 @@ func TestGetPDMembers(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.GetMembersRequest{Header: testutil.NewRequestHeader(clusterID)}
 	resp, err := grpcPDClient.GetMembers(context.Background(), req)
@@ -832,7 +841,8 @@ func TestNotLeader(t *testing.T) {
 	re.NoError(tc.RunInitialServers())
 	tc.WaitLeader()
 	followerServer := tc.GetServer(tc.GetFollower())
-	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
+	defer conn.Close()
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(clusterID)}
 	resp, err := grpcPDClient.AllocID(context.Background(), req)
@@ -856,7 +866,8 @@ func TestStoreVersionChange(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	svr := leaderServer.GetServer()
@@ -896,7 +907,8 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	storeAddrs := []string{"mock://tikv-1:0", "mock://tikv-1:1", "mock://tikv-1:2"}
@@ -962,9 +974,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 				default:
 					_, err = stream.Recv()
 					if err != nil {
-						isCanceled := strings.Contains(err.Error(), "context canceled")
-						isEOF := strings.Contains(err.Error(), "EOF")
-						re.True(isCanceled || isEOF)
+						re.ErrorContains(err, "code = Canceled")
 					}
 				}
 			}
@@ -1018,7 +1028,8 @@ func TestSetScheduleOpt(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 
@@ -1180,7 +1191,8 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 
@@ -1233,7 +1245,8 @@ func TestReplicationModeStatus(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	req := newBootstrapRequest(clusterID)
 	res, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -1334,7 +1347,8 @@ func TestOfflineStoreLimit(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	leaderServer.GetPersistOptions().SetMaxReplicas(1) // ensure it is successful to offline store
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
@@ -1428,7 +1442,8 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
@@ -1486,7 +1501,8 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
@@ -1525,7 +1541,7 @@ func TestStaleTermHeartbeat(t *testing.T) {
 		Term:            5,
 		ApproximateSize: 10,
 	}
-	flowRoundDivisor := leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit
+	flowRoundDivisor := core.GetFlowRoundDivisorByDigit(leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit)
 	region := core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
@@ -1584,7 +1600,8 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.NotNil(rc)
 
 	storesNum := 2
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	for i := 1; i <= storesNum; i++ {
 		store := &metapb.Store{
 			Id:      uint64(i),
@@ -1626,7 +1643,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	leader = tc.WaitLeader()
 	re.NotEmpty(leader)
 	leaderServer = tc.GetLeaderServer()
-	rc1 := leaderServer.GetServer().GetRaftCluster()
+	rc1 := leaderServer.GetRaftCluster()
 	re.NotNil(rc1)
 	err = rc1.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
@@ -1634,8 +1651,9 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	// region heartbeat
 	id = leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc1, id, 1)
-	time.Sleep(time.Second)
-	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	testutil.Eventually(re, func() bool {
+		return rc1.GetCoordinator().AreSchedulersInitialized()
+	})
 	// Check scheduler updated.
 	schedulersController = rc1.GetCoordinator().GetSchedulersController()
 	testutil.Eventually(re, func() bool {
@@ -1651,7 +1669,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	leader = tc.WaitLeader()
 	re.NotEmpty(leader)
 	leaderServer = tc.GetLeaderServer()
-	rc = leaderServer.GetServer().GetRaftCluster()
+	rc = leaderServer.GetRaftCluster()
 	re.NotNil(rc)
 	err = rc.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
@@ -1659,7 +1677,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	id = leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
 	testutil.Eventually(re, func() bool {
-		return leaderServer.GetRaftCluster().IsPrepared()
+		return rc.GetCoordinator().AreSchedulersInitialized()
 	})
 	// Check scheduler updated
 	schedulersController = rc.GetCoordinator().GetSchedulersController()
@@ -1756,7 +1774,8 @@ func TestMinResolvedTS(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	id := leaderServer.GetAllocator()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
@@ -1935,7 +1954,8 @@ func TestExternalTimestamp(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
@@ -2000,9 +2020,8 @@ func TestExternalTimestamp(t *testing.T) {
 		ts = resp.GetTimestamp()
 		// get global ts
 		req2 := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      1,
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  1,
 		}
 		re.NoError(tsoClient.Send(req2))
 		resp2, err := tsoClient.Recv()
@@ -2024,9 +2043,8 @@ func TestExternalTimestamp(t *testing.T) {
 		re.NoError(err)
 		// get global ts again
 		req5 := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      1,
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  1,
 		}
 		re.NoError(tsoClient.Send(req5))
 		resp5, err := tsoClient.Recv()
@@ -2142,4 +2160,62 @@ func TestFollowerExitSyncTime(t *testing.T) {
 
 	// Assert that the sync exit time is within expected range
 	re.Less(elapsedTime, time.Second)
+}
+
+func TestPutStoreInvalidEngineLabel(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
+	clusterID := leaderServer.GetClusterID()
+
+	// Bootstrap cluster first
+	bootstrapCluster(re, clusterID, grpcPDClient)
+
+	testCases := []struct {
+		name        string
+		engineValue string
+		expectError bool
+	}{
+		{"empty engine label", "", false},
+		{"tikv engine", core.EngineTiKV, false},
+		{"tiflash engine", core.EngineTiFlash, false},
+		{"tiflash_compute engine", core.EngineTiFlashCompute, false},
+		{"invalid engine value", "invalid_engine", true},
+		{"case sensitive TiKV", "TiKV", true},
+		{"case sensitive TiFlash", "TiFlash", true},
+	}
+
+	for i, tc := range testCases {
+		t.Run(tc.name, func(_ *testing.T) {
+			store := &metapb.Store{
+				Id:      uint64(100 + i),
+				Address: fmt.Sprintf("mock://tikv-%d:%d", 100+i, 100+i),
+				Version: "2.0.1",
+			}
+			if tc.engineValue != "" {
+				store.Labels = []*metapb.StoreLabel{
+					{Key: core.EngineKey, Value: tc.engineValue},
+				}
+			}
+
+			resp, err := putStore(grpcPDClient, clusterID, store)
+			re.NoError(err)
+			if tc.expectError {
+				re.NotNil(resp.GetHeader().GetError())
+				re.Contains(resp.GetHeader().GetError().GetMessage(), "invalid store engine label value")
+			} else {
+				re.Nil(resp.GetHeader().GetError())
+			}
+		})
+	}
 }

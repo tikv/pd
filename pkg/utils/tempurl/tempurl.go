@@ -29,8 +29,8 @@ import (
 )
 
 var (
-	testAddrMutex syncutil.Mutex
-	testAddrMap   = make(map[string]struct{})
+	testPortMutex syncutil.Mutex
+	testPortMap   = make(map[string]struct{})
 )
 
 // AllocURLFromUT is the environment variable used to get the test URL from UT.
@@ -57,22 +57,25 @@ func tryAllocTestURL() string {
 	if err != nil {
 		log.Fatal("listen failed", errs.ZapError(err))
 	}
-	addr := fmt.Sprintf("http://%s", l.Addr())
 	err = l.Close()
 	if err != nil {
 		log.Fatal("close failed", errs.ZapError(err))
 	}
 
-	testAddrMutex.Lock()
-	defer testAddrMutex.Unlock()
-	if _, ok := testAddrMap[addr]; ok {
+	_, port, err := net.SplitHostPort(l.Addr().String())
+	if err != nil {
+		log.Fatal("split host port failed", errs.ZapError(err))
+	}
+	testPortMutex.Lock()
+	defer testPortMutex.Unlock()
+	if _, ok := testPortMap[port]; ok {
 		return ""
 	}
-	if !environmentCheck(addr) {
+	if !environmentCheck(port) {
 		return ""
 	}
-	testAddrMap[addr] = struct{}{}
-	return addr
+	testPortMap[port] = struct{}{}
+	return fmt.Sprintf("http://%s", l.Addr())
 }
 
 func getFromUT() string {

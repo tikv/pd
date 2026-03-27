@@ -44,9 +44,20 @@ type serviceLimiter struct {
 	keyspaceID uint32
 	// storage is used to persist the service limit.
 	storage endpoint.ResourceGroupStorage
+	// writeRole controls whether metadata writes can be persisted.
+	writeRole ResourceGroupWriteRole
 }
 
-func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint.ResourceGroupStorage) *serviceLimiter {
+func newServiceLimiter(
+	keyspaceID uint32,
+	serviceLimit float64,
+	storage endpoint.ResourceGroupStorage,
+	writeRoles ...ResourceGroupWriteRole,
+) *serviceLimiter {
+	writeRole := ResourceGroupWriteRoleLegacyAll
+	if len(writeRoles) > 0 {
+		writeRole = writeRoles[0]
+	}
 	// The service limit should be non-negative.
 	serviceLimit = math.Max(0, serviceLimit)
 	return &serviceLimiter{
@@ -54,10 +65,19 @@ func newServiceLimiter(keyspaceID uint32, serviceLimit float64, storage endpoint
 		LastUpdate:   time.Now(),
 		keyspaceID:   keyspaceID,
 		storage:      storage,
+		writeRole:    writeRole,
 	}
 }
 
 func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
+	krl.setServiceLimitInternal(newServiceLimit, true)
+}
+
+func (krl *serviceLimiter) setServiceLimitNoPersist(newServiceLimit float64) {
+	krl.setServiceLimitInternal(newServiceLimit, false)
+}
+
+func (krl *serviceLimiter) setServiceLimitInternal(newServiceLimit float64, persist bool) {
 	// The service limit should be non-negative.
 	newServiceLimit = math.Max(0, newServiceLimit)
 	krl.Lock()
@@ -80,8 +100,8 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 		krl.refillTokensLocked(now)
 	}
 
-	// Persist the service limit to storage
-	if krl.storage != nil {
+	// Persist the service limit to storage.
+	if persist && krl.writeRole.AllowsMetadataWrite() && krl.storage != nil {
 		if err := krl.storage.SaveServiceLimit(krl.keyspaceID, newServiceLimit); err != nil {
 			log.Error("failed to persist service limit",
 				zap.Uint32("keyspace-id", krl.keyspaceID),
@@ -91,13 +111,16 @@ func (krl *serviceLimiter) setServiceLimit(newServiceLimit float64) {
 	}
 }
 
-// GetServiceLimit return the service limit value of this keyspace.
-func (krl *serviceLimiter) GetServiceLimit() float64 {
+func (krl *serviceLimiter) getServiceLimit() float64 {
 	if krl == nil {
 		return 0.0
 	}
 	krl.RLock()
 	defer krl.RUnlock()
+	return krl.getServiceLimitLocked()
+}
+
+func (krl *serviceLimiter) getServiceLimitLocked() float64 {
 	return krl.ServiceLimit
 }
 
@@ -130,16 +153,16 @@ func (krl *serviceLimiter) refillTokensLocked(now time.Time) {
 func (krl *serviceLimiter) applyServiceLimit(
 	now time.Time,
 	requestedTokens float64,
-) (limitedTokens float64) {
+) (limitedTokens float64, minTrickleTimeMs int64) {
 	if krl == nil {
-		return requestedTokens
+		return requestedTokens, 0
 	}
 	krl.Lock()
 	defer krl.Unlock()
 
 	// No limit configured, allow all tokens.
 	if krl.ServiceLimit <= 0 {
-		return requestedTokens
+		return requestedTokens, 0
 	}
 
 	// Refill first to ensure the available tokens is up to date.
@@ -147,18 +170,18 @@ func (krl *serviceLimiter) applyServiceLimit(
 
 	// If the requested tokens is less than the available tokens, grant all tokens.
 	if requestedTokens <= krl.AvailableTokens {
+		limitedTokens = requestedTokens
 		krl.AvailableTokens -= requestedTokens
-		return requestedTokens
-	}
-
-	// If the requested tokens is greater than the available tokens, grant all available tokens.
-	if requestedTokens > krl.AvailableTokens {
+	} else {
+		// If the requested tokens is greater than the available tokens, grant all available tokens.
 		limitedTokens = math.Max(0, krl.AvailableTokens)
-		// TODO: allow the loan to decrease the allocation at a smooth rate.
 		krl.AvailableTokens = 0
 	}
 
-	return limitedTokens
+	// Calculate a minimum trickle time to ensure the granted tokens' rate in client won't exceed the service limit.
+	minTrickleTimeMs = int64(math.Round(limitedTokens * 1000.0 / krl.getServiceLimitLocked()))
+
+	return limitedTokens, minTrickleTimeMs
 }
 
 // Clone returns a copy of the service limiter.

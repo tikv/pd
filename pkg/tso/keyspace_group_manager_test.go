@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 	"sort"
 	"strconv"
@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -45,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
@@ -68,7 +71,7 @@ func TestKeyspaceGroupManagerTestSuite(t *testing.T) {
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	suite.backendEndpoints, suite.etcdClient, suite.clean = servers[0].Config().ListenClientUrls[0].String(), client, clean
 	suite.cfg = suite.createConfig()
 }
@@ -425,51 +428,53 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.NoError(err)
 
 	// Should be able to get the allocators for the default/null keyspace and keyspace 1, 2 in keyspace group 0.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should still succeed even keyspace 3 isn't explicitly assigned to any
 	// keyspace group. It will be assigned to the default keyspace group.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should succeed and get the meta of keyspace group 0, because keyspace 0
 	// belongs to group 0, though the specified group 1 doesn't exist.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
 	re.NotNil(kg)
 	// Should fail because keyspace 3 isn't explicitly assigned to any keyspace
 	// group, and the specified group isn't the default keyspace group.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100)
 	re.Error(err)
 	re.Equal(uint32(100), kgid)
 	re.Nil(allocator)
 	re.Nil(kg)
 }
 
-// TestDefaultMembershipRestriction tests the restriction of default keyspace always
+// TestDefaultMembershipRestriction tests the restriction of bootstrap keyspace always
 // belongs to default keyspace group.
+// In Classic mode: protects keyspace 0 (default keyspace)
+// In NextGen mode: protects keyspace 16777214 (system keyspace), allows keyspace 0 to move freely
 func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	re := suite.Require()
 
@@ -480,11 +485,12 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	svcAddr := mgr.tsoServiceID.ServiceAddr
 
 	var (
-		allocator *Allocator
-		kg        *endpoint.KeyspaceGroup
-		kgid      uint32
-		err       error
-		event     *etcdEvent
+		allocator   *Allocator
+		kg          *endpoint.KeyspaceGroup
+		kgid        uint32
+		err         error
+		event       *etcdEvent
+		modRevision uint64
 	)
 
 	// Create keyspace group 0 which contains keyspace 0, 1, 2.
@@ -502,7 +508,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	re.NoError(err)
 
 	// Should be able to get the allocator for keyspace 0 in keyspace group 0.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
+	allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
 		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
@@ -521,18 +527,31 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	// Sleep for a while to wait for the events to propagate. If the logic doesn't work
 	// as expected, it will cause random failure.
 	time.Sleep(1 * time.Second)
-	// Should still be able to get the allocator for keyspace 0 in keyspace group 0.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
-	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
-	re.NotNil(allocator)
-	re.NotNil(kg)
-	// Should succeed and return the keyspace group meta from the default keyspace group
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
-	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
-	re.NotNil(allocator)
+	oldModRevision := modRevision
+	// Behavior differs between Classic and NextGen modes
+	if kerneltype.IsNextGen() {
+		// In NextGen mode, keyspace 0 should be allowed to move to keyspace group 3
+		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		re.NoError(err)
+		re.Equal(uint32(3), kgid) // Should be in group 3
+		re.NotNil(allocator)
+		re.NotNil(kg)
+		re.Less(oldModRevision, modRevision)
+	} else {
+		// In Classic mode, keyspace 0 should stay in the default keyspace group 0
+		allocator, kg, kgid, modRevision, err = mgr.getKeyspaceGroupMetaWithCheck(
+			constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		re.NoError(err)
+		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
+		re.NotNil(allocator)
+		re.NotNil(kg)
+		// Should succeed and return the keyspace group meta from the default keyspace group
+		allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
+		re.NoError(err)
+		re.Equal(constant.DefaultKeyspaceGroupID, kgid)
+		re.NotNil(allocator)
+		re.Less(oldModRevision, modRevision)
+	}
 	re.NotNil(kg)
 }
 
@@ -576,7 +595,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 
 	// Should be able to get the allocator for keyspace 10 in keyspace group 0.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(allocator)
@@ -589,7 +608,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 	// Wait until the keyspace 10 is served by keyspace group 1.
 	testutil.Eventually(re, func() bool {
-		_, _, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+		_, _, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
 		return err == nil && kgid == 1
 	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
@@ -602,7 +621,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	// it will cause random failure.
 	time.Sleep(1 * time.Second)
 	// Should still be able to get the allocator for keyspace 10 in keyspace group 1.
-	allocator, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
+	allocator, kg, kgid, _, err = mgr.getKeyspaceGroupMetaWithCheck(10, 1)
 	re.NoError(err)
 	re.Equal(uint32(1), kgid)
 	re.NotNil(allocator)
@@ -734,13 +753,12 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 				endID = numberOfKeyspaceGroupsToAdd
 			}
 
-			randomGen := rand.New(rand.NewSource(time.Now().UnixNano()))
 			for j := startID; j < endID; j++ {
 				assignToMe := false
 				// Assign the keyspace group to this host/pod with the given probability,
 				// and the keyspace group manager only loads the keyspace groups with id
 				// less than len(mgr.ams).
-				if j < len(mgr.allocators) && randomGen.Intn(100) < probabilityAssignToMe {
+				if j < len(mgr.allocators) && rand.IntN(100) < probabilityAssignToMe {
 					assignToMe = true
 					mux.Lock()
 					expectedGroupIDs = append(expectedGroupIDs, uint32(j))
@@ -1131,6 +1149,124 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	wg.Wait()
 }
 
+// TestKeyspaceListLengthMetric tests that tso_keyspace_group_keyspace_list_length can be set
+// (by TSO keyspaceGroupMetricsSyncer or getOrInitKeyspaceCountGauge(...).Set)
+// and removed when the group is deleted (DeleteKeyspaceListLengthMetric on TSO service).
+func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceListLengthMetric() {
+	re := suite.Require()
+	groupID := uint32(1)
+
+	getGaugeValue := func(g prometheus.Gauge) float64 {
+		var out dto.Metric
+		re.NoError(g.(prometheus.Metric).Write(&out))
+		return out.GetGauge().GetValue()
+	}
+
+	// Test getOrInitKeyspaceCountGauge(...).Set (keyspace list length metric)
+	getOrInitKeyspaceCountGauge(groupID).Set(3)
+	gauge, err := keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(3.0, getGaugeValue(gauge))
+
+	getOrInitKeyspaceCountGauge(groupID).Set(5)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(5.0, getGaugeValue(gauge))
+
+	getOrInitKeyspaceCountGauge(groupID).Set(0)
+	gauge, err = keyspaceGroupKeyspaceCountGauge.GetMetricWithLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	re.NoError(err)
+	re.Equal(0.0, getGaugeValue(gauge))
+
+	// Test DeleteKeyspaceListLengthMetric: set group 2 via metrics, then delete, gather and ensure group 2 is not present
+	groupID2 := uint32(2)
+	getOrInitKeyspaceCountGauge(groupID2).Set(10)
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	var foundGroup2Before bool
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						foundGroup2Before = true
+						re.Equal(10.0, m.GetGauge().GetValue())
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+	re.True(foundGroup2Before, "metric for group 2 should exist before delete")
+
+	DeleteKeyspaceListLengthMetric(groupID2)
+	mfs, err = prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	for _, mf := range mfs {
+		if mf.GetName() == "tso_keyspace_group_keyspace_list_length" {
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == "2" {
+						re.Fail("metric for group 2 should be removed after DeleteKeyspaceListLengthMetric")
+					}
+				}
+			}
+			break
+		}
+	}
+}
+
+// TestDeleteKeyspaceGroupClearsListLengthMetric verifies that the delete flow
+// (deleteKeyspaceGroup) triggers DeleteKeyspaceListLengthMetric so the keyspace-list-length metric
+// is removed. The test calls deleteKeyspaceGroup only; it does not call DeleteKeyspaceListLengthMetric
+// directly. The merge path (mergingChecker calls DeleteKeyspaceListLengthMetric for mergeList after
+// finishMergeKeyspaceGroup) is a separate code path and is covered by integration tests
+// (e.g. tests/integrations/mcs/tso TestTSOKeyspaceGroupMerge).
+func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLengthMetric() {
+	re := suite.Require()
+	metricName := "tso_keyspace_group_keyspace_list_length"
+
+	metricExists := func(mfs []*dto.MetricFamily, groupID uint32) bool {
+		groupStr := strconv.FormatUint(uint64(groupID), 10)
+		for _, mf := range mfs {
+			if mf.GetName() != metricName {
+				continue
+			}
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "group" && lp.GetValue() == groupStr {
+						return true
+					}
+				}
+			}
+			break
+		}
+		return false
+	}
+
+	// Delete path: deleteKeyspaceGroup must trigger DeleteKeyspaceListLengthMetric (no direct call in test).
+	kgm := &KeyspaceGroupManager{
+		state:   state{},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
+	groupID := uint32(2)
+	kgm.Lock()
+	kgm.kgs[groupID] = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{groupID}}
+	kgm.Unlock()
+
+	getOrInitKeyspaceCountGauge(groupID).Set(10)
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	re.True(metricExists(mfs, groupID), "metric for group 2 should exist before delete")
+
+	kgm.deleteKeyspaceGroup(groupID)
+	mfs, err = prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	re.False(metricExists(mfs, groupID), "deleteKeyspaceGroup should trigger DeleteKeyspaceListLengthMetric and remove metric")
+}
+
 // Register TSO server.
 func (suite *keyspaceGroupManagerTestSuite) registerTSOServer(
 	re *require.Assertions, svcAddr string, cfg *TestServiceConfig,
@@ -1197,4 +1333,106 @@ func waitForPrimariesServing(
 		}
 		return true
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroup() {
+	re := suite.Require()
+	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
+	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
+	re.NoError(err)
+	clusterIDStr := strconv.FormatUint(clusterID, 10)
+	keypath.SetClusterID(clusterID)
+
+	electionNamePrefix := "tso-server-" + clusterIDStr
+	groupID := uint32(1)
+
+	kgm := NewKeyspaceGroupManager(
+		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix, suite.cfg)
+	defer kgm.Close()
+	re.NoError(kgm.Initialize())
+
+	// case 1 : watch resign node->rejoin node-> another node restart
+
+	// define checkFn function to verify keyspace lookup table state
+	index := 1
+	checkFn := func(address string, exist bool) {
+		// Create a KeyspaceGroup for testing, including keyspaces [1, 2, 3, 10, 6]
+		// The member address is set to the passed-in address parameter
+		newGroup := &endpoint.KeyspaceGroup{
+			ID:        groupID,
+			Keyspaces: []uint32{1, 2, 3, 10, 6},
+			Members:   []endpoint.KeyspaceGroupMember{{Address: address, Priority: 1}},
+		}
+		// Call updateKeyspaceGroup to update keyspaceLookupTable
+		kgm.updateKeyspaceGroup(newGroup)
+		// check keyspace 6 whether exist in global lookup table (RLock to avoid data race with background watchers)
+		kgm.RLock()
+		for _, id := range []uint32{6} {
+			groupID1, ok := kgm.keyspaceLookupTable[id]
+			debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, address, id)
+			if exist {
+				re.True(ok, debug)
+				re.Equal(groupID, groupID1, debug)
+			} else {
+				re.False(ok, debug)
+			}
+		}
+		kgm.RUnlock()
+		index++
+	}
+
+	// watch resign node
+	checkFn("", true)
+
+	// watch rejoin node
+	checkFn(kgm.cfg.GetAdvertiseListenAddr(), true)
+
+	// watch another tso restart
+	checkFn(kgm.cfg.GetAdvertiseListenAddr(), true)
+
+	// case 2 : watch new keyspace added
+	newGroup := &endpoint.KeyspaceGroup{
+		ID:        groupID,
+		Keyspaces: []uint32{1, 2, 3, 10, 6, 11}, // keyspace 11 added
+		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.cfg.GetAdvertiseListenAddr(), Priority: 1}},
+	}
+	kgm.updateKeyspaceGroup(newGroup)
+	// verify keyspaces 6, 10, and 11 exist in the global lookup table (RLock to avoid data race with background watchers)
+	kgm.RLock()
+	for _, id := range []uint32{6, 10, 11} {
+		groupID1, ok := kgm.keyspaceLookupTable[id]
+		debug := fmt.Sprintf("checkFn index:%d address:%s id:%d", index, kgm.cfg.GetAdvertiseListenAddr(), id)
+		re.True(ok, debug)
+		re.Equal(groupID, groupID1, debug)
+	}
+	kgm.RUnlock()
+	index++
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestStaleCache() {
+	re := suite.Require()
+	groupID := uint32(1)
+	oldGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{}}
+	newGroup := &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
+	kgm := &KeyspaceGroupManager{
+		state: state{
+			keyspaceLookupTable: make(map[uint32]uint32),
+		},
+	}
+
+	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
+	for _, id := range []uint32{6, 10} {
+		groupID1, ok := kgm.keyspaceLookupTable[id]
+		re.True(ok)
+		re.Equal(groupID, groupID1)
+	}
+
+	oldGroup = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
+	newGroup = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: []uint32{1, 2, 3, 10, 6}}
+	kgm.updateKeyspaceGroupMembership(oldGroup, newGroup, true)
+	for _, id := range []uint32{6, 10} {
+		groupID1, ok := kgm.keyspaceLookupTable[id]
+		re.True(ok, id)
+		re.Equal(groupID, groupID1)
+	}
 }

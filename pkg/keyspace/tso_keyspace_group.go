@@ -341,7 +341,7 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 // saveKeyspaceGroups will try to save the given keyspace groups into the storage.
 // If any keyspace group already exists and `overwrite` is false, it will return ErrKeyspaceGroupExists.
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup, overwrite bool) error {
-	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for _, keyspaceGroup := range keyspaceGroups {
 			// Check if keyspace group has already existed.
 			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
@@ -370,10 +370,21 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 		}
 		return nil
 	})
+	return err
 }
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
 func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[string]string, error) {
+	failpoint.Inject("assignToSpecificKeyspaceGroup", func(val failpoint.Value) {
+		if groupID, ok := val.(int); ok {
+			config := map[string]string{
+				UserKindKey:           userKind.String(),
+				TSOKeyspaceGroupIDKey: strconv.Itoa(groupID),
+			}
+			failpoint.Return(config, nil)
+		}
+	})
+
 	if m == nil {
 		return map[string]string{}, nil
 	}
@@ -520,6 +531,12 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	}
 
 	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true); err != nil {
+		if updateOld {
+			oldKG.Keyspaces = append(oldKG.Keyspaces, keyspaceID)
+		}
+		if updateNew {
+			newKG.Keyspaces = slice.Remove(newKG.Keyspaces, keyspaceID)
+		}
 		return err
 	}
 
@@ -587,9 +604,6 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 		splitSourceKg.SplitState = &endpoint.SplitState{
 			SplitSource: splitSourceKg.ID,
 		}
-		if err = m.store.SaveKeyspaceGroup(txn, splitSourceKg); err != nil {
-			return err
-		}
 		splitTargetKg = &endpoint.KeyspaceGroup{
 			ID: splitTargetID,
 			// Keep the same user kind and members as the old keyspace group.
@@ -600,8 +614,18 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 				SplitSource: splitSourceKg.ID,
 			},
 		}
+		// Save the split target keyspace group first, then save the split source keyspace group.
+		// The order matters: if we save splitSourceKg first (which removes some keyspaces from it),
+		// there will be a brief moment where those keyspaces don't belong to any group, causing
+		// them to fallback to group 0. By saving splitTargetKg first (which contains the split
+		// keyspaces), we ensure the keyspaces always belong to a valid group during the transition.
+
 		// Create the new split keyspace group.
-		return m.store.SaveKeyspaceGroup(txn, splitTargetKg)
+		if err = m.store.SaveKeyspaceGroup(txn, splitTargetKg); err != nil {
+			return err
+		}
+		// Update the source keyspace group.
+		return m.store.SaveKeyspaceGroup(txn, splitSourceKg)
 	}); err != nil {
 		return err
 	}
@@ -611,9 +635,9 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 	return nil
 }
 
+// `old` is the original keyspace list which will be split out,
+// `new` is the keyspace list which will be split from the old keyspace list.
 func buildSplitKeyspaces(
-	// `old` is the original keyspace list which will be split out,
-	// `new` is the keyspace list which will be split from the old keyspace list.
 	old, new []uint32,
 	startKeyspaceID, endKeyspaceID uint32,
 ) (oldSplit, newSplit []uint32, err error) {
@@ -695,6 +719,9 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 	var splitTargetKg, splitSourceKg *endpoint.KeyspaceGroup
 	m.Lock()
 	defer m.Unlock()
+
+	failpoint.Inject("pauseFinishSplitBeforeTxn", nil)
+
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
 		// Load the split target keyspace group first.
 		splitTargetKg, err = m.store.LoadKeyspaceGroup(txn, splitTargetID)

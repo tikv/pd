@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"sort"
@@ -23,11 +24,14 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -56,6 +60,7 @@ const (
 // consumptionItem is used to send the consumption info to the background metrics flusher.
 type consumptionItem struct {
 	keyspaceID        uint32
+	keyspaceName      string
 	resourceGroupName string
 	*rmpb.Consumption
 	isBackground bool
@@ -64,35 +69,113 @@ type consumptionItem struct {
 
 type keyspaceResourceGroupManager struct {
 	syncutil.RWMutex
-	groups     map[string]*ResourceGroup
-	ruTrackers map[string]*ruTracker
-	sl         *serviceLimiter
+	groups          map[string]*ResourceGroup
+	groupRUTrackers map[string]*groupRUTracker
+	serviceLimiter  *serviceLimiter
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
+	writeRole  ResourceGroupWriteRole
 }
 
-func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.ResourceGroupStorage) *keyspaceResourceGroupManager {
+func newKeyspaceResourceGroupManager(
+	keyspaceID uint32,
+	storage endpoint.ResourceGroupStorage,
+	writeRoles ...ResourceGroupWriteRole,
+) *keyspaceResourceGroupManager {
+	writeRole := ResourceGroupWriteRoleLegacyAll
+	if len(writeRoles) > 0 {
+		writeRole = writeRoles[0]
+	}
 	return &keyspaceResourceGroupManager{
-		groups:     make(map[string]*ResourceGroup),
-		ruTrackers: make(map[string]*ruTracker),
-		keyspaceID: keyspaceID,
-		storage:    storage,
-		sl:         newServiceLimiter(keyspaceID, 0, storage),
+		groups:          make(map[string]*ResourceGroup),
+		groupRUTrackers: make(map[string]*groupRUTracker),
+		keyspaceID:      keyspaceID,
+		storage:         storage,
+		writeRole:       writeRole,
+		serviceLimiter:  newServiceLimiter(keyspaceID, 0, storage, writeRole),
 	}
 }
 
-func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, rawValue string) error {
+func (krgm *keyspaceResourceGroupManager) parseResourceGroupFromRaw(name, rawValue string) (*rmpb.ResourceGroup, error) {
 	group := &rmpb.ResourceGroup{}
 	if err := proto.Unmarshal([]byte(rawValue), group); err != nil {
 		log.Error("failed to parse the keyspace resource group meta info",
 			zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
+		return nil, err
+	}
+	if group.Name != name {
+		err := errors.Errorf("resource group key name %s does not match payload name %s", name, group.Name)
+		log.Error("resource group name mismatch in storage payload",
+			zap.Uint32("keyspace-id", krgm.keyspaceID),
+			zap.String("raw-value", rawValue),
+			zap.Error(err))
+		return nil, err
+	}
+	return group, nil
+}
+
+func validateResourceGroupProto(grouppb *rmpb.ResourceGroup) error {
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > maxGroupNameLength {
+		return errs.ErrInvalidGroup.FastGenByArgs("the group name")
+	}
+	if grouppb.GetPriority() > maxPriority {
+		return errs.ErrInvalidGroup.FastGenByArgs("the group priority")
+	}
+	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, rawValue string) error {
+	group, err := krgm.parseResourceGroupFromRaw(name, rawValue)
+	if err != nil {
 		return err
 	}
+	if err := validateResourceGroupProto(group); err != nil {
+		return err
+	}
+	resourceGroup := FromProtoResourceGroup(group)
 	krgm.Lock()
-	krgm.groups[group.Name] = FromProtoResourceGroup(group)
+	krgm.groups[group.Name] = resourceGroup
 	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(resourceGroup)
 	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string, rawValue string) error {
+	group, err := krgm.parseResourceGroupFromRaw(name, rawValue)
+	if err != nil {
+		return err
+	}
+	if err := validateResourceGroupProto(group); err != nil {
+		return err
+	}
+
+	krgm.RLock()
+	existing := krgm.groups[group.Name]
+	krgm.RUnlock()
+	if existing != nil {
+		if err := existing.ApplySettings(group); err != nil {
+			log.Error("failed to apply the keyspace resource group settings from raw value",
+				zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
+			return err
+		}
+		krgm.syncBurstabilityWithServiceLimit(existing)
+		return nil
+	}
+
+	resourceGroup := FromProtoResourceGroup(group)
+	krgm.Lock()
+	krgm.groups[group.Name] = resourceGroup
+	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(resourceGroup)
+	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromCache(name string) {
+	krgm.Lock()
+	delete(krgm.groups, name)
+	delete(krgm.groupRUTrackers, name)
+	krgm.Unlock()
 }
 
 func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name string, rawValue string) error {
@@ -117,48 +200,80 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	if ok {
 		return
 	}
-	defaultGroup := &ResourceGroup{
-		Name: DefaultResourceGroupName,
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &RequestUnitSettings{
-			RU: &GroupTokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   UnlimitedRate,
-					BurstLimit: UnlimitedBurstLimit,
-				},
-			},
-		},
-		Priority: middlePriority,
-	}
+	defaultGroup := newDefaultResourceGroup()
 	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
 		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
 	}
 }
 
-func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
-	if len(grouppb.Name) == 0 || len(grouppb.Name) > maxGroupNameLength {
-		return errs.ErrInvalidGroup
+func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {
+	krgm.RLock()
+	_, ok := krgm.groups[DefaultResourceGroupName]
+	krgm.RUnlock()
+	if ok {
+		return
 	}
-	// Check the Priority.
-	if grouppb.GetPriority() > maxPriority {
-		return errs.ErrInvalidGroup
+	defaultGroup := newDefaultResourceGroup()
+	inserted := false
+	krgm.Lock()
+	if _, ok := krgm.groups[DefaultResourceGroupName]; !ok {
+		krgm.groups[DefaultResourceGroupName] = defaultGroup
+		inserted = true
+	}
+	krgm.Unlock()
+	if inserted {
+		krgm.syncBurstabilityWithServiceLimit(defaultGroup)
+	}
+}
+
+func newDefaultResourceGroup() *ResourceGroup {
+	return &ResourceGroup{
+		Name: DefaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: NewRequestUnitSettings(DefaultResourceGroupName, &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   UnlimitedRate,
+				BurstLimit: UnlimitedBurstLimit,
+			},
+		}),
+		Priority:      middlePriority,
+		RUConsumption: &rmpb.Consumption{},
+	}
+}
+
+func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserved() {
+	defaultGroup := newDefaultResourceGroup()
+	krgm.Lock()
+	krgm.groups[DefaultResourceGroupName] = defaultGroup
+	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(defaultGroup)
+}
+
+func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	if err := validateResourceGroupProto(grouppb); err != nil {
+		return err
 	}
 	group := FromProtoResourceGroup(grouppb)
+	if krgm.writeRole.AllowsMetadataWrite() {
+		if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
+			return err
+		}
+	}
+	if krgm.writeRole.AllowsStateWrite() {
+		if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
+			return err
+		}
+	}
 	krgm.Lock()
-	defer krgm.Unlock()
-	if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
-		return err
-	}
-	if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
-		return err
-	}
 	krgm.groups[group.Name] = group
+	krgm.Unlock()
+	krgm.syncBurstabilityWithServiceLimit(group)
 	return nil
 }
 
 func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if group == nil || group.Name == "" {
-		return errs.ErrInvalidGroup
+		return errs.ErrInvalidGroup.FastGenByArgs("the group name")
 	}
 	krgm.RLock()
 	curGroup, ok := krgm.groups[group.Name]
@@ -166,7 +281,9 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 	if !ok {
 		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
-
+	if !krgm.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
+	}
 	err := curGroup.PatchSettings(group)
 	if err != nil {
 		return err
@@ -184,12 +301,32 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 	if !ok {
 		return errs.ErrResourceGroupNotExists.FastGenByArgs(name)
 	}
-	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
-		return err
+	if !krgm.writeRole.AllowsMetadataWrite() {
+		return errMetadataWriteDisabled
 	}
-	krgm.Lock()
-	delete(krgm.groups, name)
-	krgm.Unlock()
+	if txnStorage, ok := krgm.storage.(interface {
+		RunInTxn(context.Context, func(txn kv.Txn) error) error
+	}); ok {
+		if err := txnStorage.RunInTxn(context.Background(), func(txn kv.Txn) error {
+			if err := txn.Remove(keypath.KeyspaceResourceGroupSettingPath(krgm.keyspaceID, name)); err != nil {
+				return err
+			}
+			return txn.Remove(keypath.KeyspaceResourceGroupStatePath(krgm.keyspaceID, name))
+		}); err != nil {
+			return err
+		}
+	} else {
+		if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
+			return err
+		}
+		if err := krgm.storage.DeleteResourceGroupStates(krgm.keyspaceID, name); err != nil {
+			log.Warn("failed to delete resource group states after deleting settings",
+				zap.Uint32("keyspace-id", krgm.keyspaceID),
+				zap.String("name", name),
+				zap.Error(err))
+		}
+	}
+	krgm.deleteResourceGroupFromCache(name)
 	return nil
 }
 
@@ -235,6 +372,9 @@ func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats, includ
 }
 
 func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
+	if !krgm.writeRole.AllowsStateWrite() {
+		return
+	}
 	krgm.RLock()
 	keys := make([]string, 0, len(krgm.groups))
 	for k := range krgm.groups {
@@ -258,11 +398,23 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 }
 
 func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) {
+	krgm.updateServiceLimit(serviceLimit, true)
+}
+
+func (krgm *keyspaceResourceGroupManager) setServiceLimitFromStorage(serviceLimit float64) {
+	krgm.updateServiceLimit(serviceLimit, false)
+}
+
+func (krgm *keyspaceResourceGroupManager) updateServiceLimit(serviceLimit float64, persist bool) {
 	krgm.RLock()
-	sl := krgm.sl
+	serviceLimiter := krgm.serviceLimiter
 	krgm.RUnlock()
 	// Set the new service limit to the limiter.
-	sl.setServiceLimit(serviceLimit)
+	if persist {
+		serviceLimiter.setServiceLimit(serviceLimit)
+	} else {
+		serviceLimiter.setServiceLimitNoPersist(serviceLimit)
+	}
 	// Cleanup the overrides if the service limit is set to 0.
 	if serviceLimit <= 0 {
 		krgm.cleanupOverrides()
@@ -274,38 +426,50 @@ func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) 
 func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	return krgm.sl
+	return krgm.serviceLimiter
 }
 
-func (krgm *keyspaceResourceGroupManager) getOrCreateRUTracker(name string) *ruTracker {
-	rt := krgm.getRUTracker(name)
-	if rt == nil {
+func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	if krgm.serviceLimiter == nil {
+		return 0, false
+	}
+	serviceLimit := krgm.serviceLimiter.getServiceLimit()
+	if serviceLimit == 0 {
+		return 0, false
+	}
+	return serviceLimit, true
+}
+
+func (krgm *keyspaceResourceGroupManager) getOrCreateGroupRUTracker(name string) *groupRUTracker {
+	grt := krgm.getGroupRUTracker(name)
+	if grt == nil {
 		krgm.Lock()
 		// Double check the RU tracker is not created by other goroutine.
-		rt = krgm.ruTrackers[name]
-		if rt == nil {
-			rt = newRUTracker(defaultRUTrackerTimeConstant)
-			krgm.ruTrackers[name] = rt
+		grt = krgm.groupRUTrackers[name]
+		if grt == nil {
+			grt = newGroupRUTracker()
+			krgm.groupRUTrackers[name] = grt
 		}
 		krgm.Unlock()
 	}
-	return rt
+	return grt
 }
 
-func (krgm *keyspaceResourceGroupManager) getRUTracker(name string) *ruTracker {
+func (krgm *keyspaceResourceGroupManager) getGroupRUTracker(name string) *groupRUTracker {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	return krgm.ruTrackers[name]
+	return krgm.groupRUTrackers[name]
 }
 
-// ruTracker is used to track the RU consumption within a keyspace.
-// It uses the algorithm of time-aware exponential moving average (EMA) to
-// sample and calculate the real-time RU/s of each resource group. The main
-// reason for choosing this EMA algorithm is that conventional EMA algorithms or
-// moving average algorithms over a time window cannot handle non-fixed frequency
-// data sampling well. Since the reporting interval of RU consumption depends on
-// the RU consumption rate of the workload, it is necessary to introduce a time
-// dimension to calculate real-time RU/s more accurately.
+// ruTracker is used to track the RU consumption dynamically.
+// It uses the algorithm of time-aware exponential moving average (EMA) to sample
+// and calculate the real-time RU/s. The main reason for choosing this EMA algorithm
+// is that conventional EMA algorithms or moving average algorithms over a time window
+// cannot handle non-fixed frequency data sampling well. Since the reporting interval
+// of RU consumption depends on the RU consumption rate of the workload, it is necessary
+// to introduce a time dimension to calculate real-time RU/s more accurately.
 type ruTracker struct {
 	syncutil.RWMutex
 	initialized bool
@@ -326,17 +490,25 @@ func newRUTracker(timeConstant time.Duration) *ruTracker {
 // Sample the RU consumption and calculate the real-time RU/s as `lastEMA`.
 // - `now` is the current time point to sample the RU consumption.
 // - `totalRU` is the total RU consumption within the `dur`.
-func (rt *ruTracker) sample(now time.Time, totalRU float64) {
+func (rt *ruTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
 	rt.Lock()
 	defer rt.Unlock()
 	// Calculate the elapsed duration since the last sample time.
+	prevSampleTime := rt.lastSampleTime
 	var dur time.Duration
-	if !rt.lastSampleTime.IsZero() {
-		dur = now.Sub(rt.lastSampleTime)
+	if !prevSampleTime.IsZero() {
+		dur = now.Sub(prevSampleTime)
 	}
 	rt.lastSampleTime = now
 	// If `dur` is not greater than 0, skip this record.
 	if dur <= 0 {
+		log.Info("skip ru tracker sample due to non-positive duration",
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Duration("dur", dur),
+			zap.Time("prev-sample-time", prevSampleTime),
+			zap.Time("now", now),
+			zap.Float64("total-ru", totalRU),
+		)
 		return
 	}
 	durSeconds := dur.Seconds()
@@ -346,6 +518,12 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64) {
 	if !rt.initialized {
 		rt.initialized = true
 		rt.lastEMA = ruPerSec
+		log.Info("init ru tracker ema",
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Float64("ru-per-sec", ruPerSec),
+			zap.Float64("total-ru", totalRU),
+			zap.Duration("dur", dur),
+		)
 		return
 	}
 	// By using e^{-β·Δt} to calculate the decay factor, we can have the following behavior:
@@ -364,6 +542,73 @@ func (rt *ruTracker) getRUPerSec() float64 {
 	rt.RLock()
 	defer rt.RUnlock()
 	return rt.lastEMA
+}
+
+func (rt *ruTracker) isInitialized() bool {
+	rt.RLock()
+	defer rt.RUnlock()
+	return rt.initialized
+}
+
+// groupRUTracker is used to track the RU consumption of a resource group.
+// It matains a map of RU trackers for each client unique ID.
+type groupRUTracker struct {
+	syncutil.RWMutex
+	ruTrackers map[uint64]*ruTracker
+}
+
+func newGroupRUTracker() *groupRUTracker {
+	return &groupRUTracker{
+		ruTrackers: make(map[uint64]*ruTracker),
+	}
+}
+
+func (grt *groupRUTracker) getOrCreateRUTracker(clientUniqueID uint64) *ruTracker {
+	grt.RLock()
+	rt := grt.ruTrackers[clientUniqueID]
+	grt.RUnlock()
+	if rt == nil {
+		grt.Lock()
+		// Double check the RU tracker is not created by other goroutine.
+		rt = grt.ruTrackers[clientUniqueID]
+		if rt == nil {
+			rt = newRUTracker(defaultRUTrackerTimeConstant)
+			grt.ruTrackers[clientUniqueID] = rt
+			log.Info("create ru tracker",
+				zap.Uint64("client-unique-id", clientUniqueID),
+			)
+		}
+		grt.Unlock()
+	}
+	return rt
+}
+
+func (grt *groupRUTracker) sample(clientUniqueID uint64, now time.Time, totalRU float64) {
+	grt.getOrCreateRUTracker(clientUniqueID).sample(clientUniqueID, now, totalRU)
+}
+
+func (grt *groupRUTracker) getRUPerSec() float64 {
+	grt.RLock()
+	defer grt.RUnlock()
+	totalRUPerSec := 0.0
+	for _, rt := range grt.ruTrackers {
+		totalRUPerSec += rt.getRUPerSec()
+	}
+	return totalRUPerSec
+}
+
+func (grt *groupRUTracker) cleanupStaleRUTrackers() []uint64 {
+	grt.Lock()
+	defer grt.Unlock()
+	staleClientUniqueIDs := make([]uint64, 0, len(grt.ruTrackers))
+	for clientUniqueID, rt := range grt.ruTrackers {
+		if time.Since(rt.lastSampleTime) < slotExpireTimeout {
+			continue
+		}
+		delete(grt.ruTrackers, clientUniqueID)
+		staleClientUniqueIDs = append(staleClientUniqueIDs, clientUniqueID)
+	}
+	return staleClientUniqueIDs
 }
 
 // conciliateFillRates is used to conciliate the fill rate of each resource group.
@@ -410,16 +655,16 @@ func (rt *ruTracker) getRUPerSec() float64 {
 // - No group exceeds its configured limits
 // - Inactive groups (no RU consumption) are skipped to avoid unnecessary computation
 func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
-	serviceLimiter := krgm.getServiceLimiter()
+	serviceLimit, isSet := krgm.getServiceLimit()
 	// No need to conciliate if the service limit is not set or is 0.
-	if serviceLimiter == nil || serviceLimiter.ServiceLimit == 0 {
+	if !isSet || serviceLimit == 0 {
 		return
 	}
 	priorityQueues := krgm.getPriorityQueues()
 	if len(priorityQueues) == 0 {
 		return
 	}
-	remainingServiceLimit := serviceLimiter.ServiceLimit
+	remainingServiceLimit := serviceLimit
 	for _, queue := range priorityQueues {
 		if len(queue) == 0 {
 			continue
@@ -501,8 +746,8 @@ func (krgm *keyspaceResourceGroupManager) getPriorityQueues() [][]*ResourceGroup
 
 func (krgm *keyspaceResourceGroupManager) setZeroFillRateForAllGroups(queue []*ResourceGroup) {
 	for _, group := range queue {
-		ruTracker := krgm.getRUTracker(group.Name)
-		if ruTracker == nil || ruTracker.getRUPerSec() == 0 {
+		grt := krgm.getGroupRUTracker(group.Name)
+		if grt == nil || grt.getRUPerSec() == 0 {
 			continue
 		}
 		// Only set the active resource groups to avoid unnecessary overrides.
@@ -516,12 +761,12 @@ func (krgm *keyspaceResourceGroupManager) calculateDemandInfo(queue []*ResourceG
 		burstRUDemandMap: make(map[string]float64, len(queue)),
 	}
 	for _, group := range queue {
-		ruTracker := krgm.getRUTracker(group.Name)
+		grt := krgm.getGroupRUTracker(group.Name)
 		// Not found the RU tracker, skip this group.
-		if ruTracker == nil {
+		if grt == nil {
 			continue
 		}
-		ruPerSec := ruTracker.getRUPerSec()
+		ruPerSec := grt.getRUPerSec()
 		fillRateSetting := group.getFillRate(true)
 		burstLimitSetting := float64(group.getBurstLimit(true))
 		// Calculate the basic RU demand of the resource group.
@@ -633,6 +878,19 @@ func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
 	for _, group := range krgm.getMutableResourceGroupList() {
 		group.overrideFillRateAndBurstLimit(-1, -1)
 	}
+}
+
+// Newly loaded groups can miss the initial service-limit replay, so apply the
+// same baseline burst invalidation when they enter the cache.
+func (krgm *keyspaceResourceGroupManager) syncBurstabilityWithServiceLimit(group *ResourceGroup) {
+	if group == nil || group.getBurstLimit(true) >= 0 || group.getOverrideBurstLimit() >= 0 {
+		return
+	}
+	serviceLimit, isSet := krgm.getServiceLimit()
+	if !isSet || serviceLimit <= 0 {
+		return
+	}
+	group.overrideBurstLimit(int64(serviceLimit))
 }
 
 // Since the burstable resource groups won't require tokens from the server anymore,

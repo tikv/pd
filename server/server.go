@@ -19,7 +19,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,6 +46,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
@@ -65,8 +66,10 @@ import (
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -90,6 +93,7 @@ import (
 	"github.com/tikv/pd/server/config"
 
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/router/server/apis/v1"          // init router API group
 	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 )
 
@@ -172,6 +176,8 @@ type Server struct {
 	keyspaceManager *keyspace.Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
+	// metering writer
+	meteringWriter *metering.Writer
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -224,11 +230,12 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry                 *registry.ServiceRegistry
-	isKeyspaceGroupEnabled   bool
-	servicePrimaryMap        sync.Map /* Store as map[string]string */
-	tsoPrimaryWatcher        *etcdutil.LoopWatcher
-	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+	registry                      *registry.ServiceRegistry
+	isKeyspaceGroupEnabled        bool
+	servicePrimaryMap             sync.Map /* Store as map[string]string */
+	tsoPrimaryWatcher             *etcdutil.LoopWatcher
+	schedulingPrimaryWatcher      *etcdutil.LoopWatcher
+	resourceManagerPrimaryWatcher *etcdutil.LoopWatcher
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -273,7 +280,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	// create audit backend
 	s.auditBackends = []audit.Backend{
 		audit.NewLocalLogBackend(true),
-		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
+		audit.NewPrometheusBackend(serviceAuditHistogram, serviceAuditCounter, false),
 	}
 	s.serviceRateLimiter = ratelimit.NewController(s.ctx, "http", apiConcurrencyGauge)
 	s.grpcServiceRateLimiter = ratelimit.NewController(s.ctx, "grpc", apiConcurrencyGauge)
@@ -296,12 +303,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	failpoint.Inject("useGlobalRegistry", func() {
-		s.registry = registry.ServerServiceRegistry
-	})
+	runResourceManager := cfg.Microservice.IsResourceManagerFallbackEnabled()
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
-	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
-	// Register the microservices REST path.
+	if runResourceManager {
+		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	}
+	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
@@ -309,7 +316,11 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		// Register the microservices GRPC service.
+		if !runResourceManager {
+			// resource manager proxy
+			resource_manager.RegisterResourceManagerServer(gs, &resourceGroupProxyServer{GrpcServer: grpcServer})
+		}
+		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
 		s.grpcServer = gs
 	}
@@ -319,7 +330,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	return s, nil
 }
 
-func (s *Server) startEtcd(ctx context.Context) error {
+func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	newCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
 	defer cancel()
 
@@ -327,6 +338,34 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
+	cleanup := func() {
+		// NOTE: `embed.Etcd.Close()` can block for a long time in some failure paths
+		// (e.g. when starting a removed member that can never become ready). Avoid
+		// blocking the caller (tests may wait for the start error) by stopping the
+		// server synchronously and closing the embedded etcd asynchronously.
+		if etcd.Server != nil {
+			etcd.Server.Stop()
+		}
+		go etcd.Close()
+		if s.client != nil {
+			if cerr := s.client.Close(); cerr != nil {
+				log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
+			}
+		}
+		if s.electionClient != nil {
+			if cerr := s.electionClient.Close(); cerr != nil {
+				log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, cerr))
+			}
+		}
+		if s.httpClient != nil {
+			s.httpClient.CloseIdleConnections()
+		}
+	}
+	defer func() {
+		if retErr != nil {
+			cleanup()
+		}
+	}()
 
 	// Check cluster ID
 	urlMap, err := etcdtypes.NewURLsMap(s.cfg.InitialCluster)
@@ -384,12 +423,12 @@ func (s *Server) startClient() error {
 	}
 	/* Starting two different etcd clients here is to avoid the throttling. */
 	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
-	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "server-etcd-client")
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ServerEtcdClientPurpose, true)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
-	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "election-etcd-client")
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientPurpose, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -468,7 +507,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
+	tsoStorage := storage.NewStorageWithEtcdBackend(s.electionClient)
+	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
@@ -481,6 +521,17 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	// Only start the metering writer if a valid metering config is provided.
+	if len(s.cfg.Metering.Type) > 0 {
+		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
+		if err != nil {
+			log.Warn("failed to initialize the metering writer", errs.ZapError(err))
+		} else {
+			s.meteringWriter.Start()
+		}
+	} else {
+		log.Info("no metering config provided, the metering writer will not be started")
+	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
@@ -534,6 +585,9 @@ func (s *Server) Close() {
 	}
 	if s.tsoAllocator != nil {
 		s.tsoAllocator.Close()
+	}
+	if s.meteringWriter != nil {
+		s.meteringWriter.Stop()
 	}
 
 	if s.client != nil {
@@ -646,6 +700,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	if s.IsKeyspaceGroupEnabled() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
+		s.initResourceManagerPrimaryWatcher()
 	}
 }
 
@@ -909,6 +964,17 @@ func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager
 }
 
+// SetKeyspaceGroupManager sets the keyspace group manager of server.
+// Note: it is only used for test.
+func (s *Server) SetKeyspaceGroupManager(keyspaceGroupManager *keyspace.GroupManager) {
+	s.keyspaceGroupManager = keyspaceGroupManager
+}
+
+// GetMeteringWriter returns the metering writer.
+func (s *Server) GetMeteringWriter() *metering.Writer {
+	return s.meteringWriter
+}
+
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
@@ -1050,7 +1116,7 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range rc.GetStores() {
-				if !s.IsRemoved() && s.IsTiFlash() {
+				if !s.IsRemoved() && !s.IsTiKV() {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
@@ -1251,22 +1317,24 @@ func (s *Server) GetPDServerConfig() *config.PDServerConfig {
 
 // SetPDServerConfig sets the server config.
 func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
-	switch cfg.DashboardAddress {
-	case "auto":
-	case "none":
-	default:
-		if !strings.HasPrefix(cfg.DashboardAddress, "http") {
-			cfg.DashboardAddress = fmt.Sprintf("%s://%s", s.GetClientScheme(), cfg.DashboardAddress)
-		}
-		if !cluster.IsClientURL(cfg.DashboardAddress, s.client) {
-			return errors.Errorf("%s is not the client url of any member", cfg.DashboardAddress)
-		}
-	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-
 	old := s.persistOptions.GetPDServerConfig()
+	// See https://github.com/tikv/pd/issues/10114 for more details
+	if old.DashboardAddress != cfg.DashboardAddress {
+		switch cfg.DashboardAddress {
+		case "auto":
+		case "none":
+		default:
+			if !strings.HasPrefix(cfg.DashboardAddress, "http") {
+				cfg.DashboardAddress = fmt.Sprintf("%s://%s", s.GetClientScheme(), cfg.DashboardAddress)
+			}
+			if !cluster.IsClientURL(cfg.DashboardAddress, s.client) {
+				return errors.Errorf("dashboard address %s is not the client url of any member", cfg.DashboardAddress)
+			}
+		}
+	}
 	s.persistOptions.SetPDServerConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetPDServerConfig(old)
@@ -1630,11 +1698,11 @@ func (s *Server) leaderLoop() {
 			if s.member.GetLeader() == nil {
 				lastUpdated := s.member.GetLastLeaderUpdatedTime()
 				// use random timeout to avoid leader campaigning storm.
-				randomTimeout := time.Duration(rand.Intn(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
+				randomTimeout := time.Duration(rand.IntN(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
 				failpoint.Inject("timeoutWaitPDLeader", func() {
 					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
-					randomTimeout = time.Duration(rand.Intn(10))*time.Millisecond + 100*time.Millisecond
+					randomTimeout = time.Duration(rand.IntN(10))*time.Millisecond + 100*time.Millisecond
 				})
 				if lastUpdated.Add(randomTimeout).Before(time.Now()) && !lastUpdated.IsZero() && etcdLeader != 0 {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
@@ -1954,6 +2022,36 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	return err
 }
 
+// MarkPitrRestoreMode mark pd that we're pitr restore mode
+func (s *Server) MarkPitrRestoreMode() error {
+	log.Info("mark pitr restore mode")
+	markPath := keypath.PitrRestoreModeMarkPath()
+	// the value doesn't matter, set to a static string
+	_, err := kv.NewSlowLogTxn(s.client).
+		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
+		Then(clientv3.OpPut(markPath, "on")).
+		Commit()
+	// if other client already marked, return success too
+	return err
+}
+
+// IsPitrRestoreMode check whether pitr-restore-mode-mark marked
+func (s *Server) IsPitrRestoreMode(ctx context.Context) (bool, error) {
+	resp, err := s.client.Get(ctx, keypath.PitrRestoreModeMarkPath())
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
+}
+
+// UnmarkPitrRestoreMode unmark pitr restore mode mark
+func (s *Server) UnmarkPitrRestoreMode(ctx context.Context) error {
+	log.Info("unmark pitr restore mode")
+	_, err := s.client.Delete(ctx, keypath.PitrRestoreModeMarkPath())
+	// if other client already unmarked, return success too
+	return err
+}
+
 // GetServicePrimaryAddr returns the primary address for a given service.
 // Note: This function will only return primary address without judging if it's alive.
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
@@ -1997,6 +2095,15 @@ func (s *Server) initSchedulingPrimaryWatcher() {
 	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
+}
+
+func (s *Server) initResourceManagerPrimaryWatcher() {
+	serviceName := mcs.ResourceManagerServiceName
+	primaryKey := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: serviceName,
+	})
+	s.resourceManagerPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
+	s.resourceManagerPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string) *etcdutil.LoopWatcher {
@@ -2108,4 +2215,17 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
+}
+
+// GetAffinityManager gets the affinity manager.
+func (s *Server) GetAffinityManager() (*affinity.Manager, error) {
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	manager := rc.GetAffinityManager()
+	if manager == nil {
+		return nil, errs.ErrAffinityInternal
+	}
+	return manager, nil
 }

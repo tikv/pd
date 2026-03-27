@@ -13,13 +13,13 @@
 // limitations under the License.
 
 //go:build tools
-// +build tools
 
 package tools
 
 import (
 	_ "github.com/AlekSi/gocov-xml"
 	_ "github.com/axw/gocov/gocov"
+	_ "github.com/mailru/easyjson/easyjson"
 	_ "github.com/pingcap/errors/errdoc-gen"
 	_ "github.com/pingcap/failpoint/failpoint-ctl"
 	_ "github.com/rleungx/leakcheck/cmd/leakcheck"

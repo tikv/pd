@@ -14,6 +14,7 @@ dev-basic: build check basic-test
 
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
+TEST_TAGS ?=
 BUILD_CGO_ENABLED := 0
 BUILD_TOOL_CGO_ENABLED := 0
 BUILD_GOEXPERIMENT ?=
@@ -57,6 +58,8 @@ endif
 
 ifeq ($(NEXT_GEN), 1)
 	BUILD_TAGS += nextgen
+	BUILD_TAGS += without_dashboard
+	TEST_TAGS = nextgen
 endif
 
 RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
@@ -95,6 +98,7 @@ ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
 	PD_SERVER_DEP += dashboard-replace-distro-info
 endif
 PD_SERVER_DEP += dashboard-ui
+PD_SERVER_DEP += generate-easyjson
 
 pre-build: ${PD_SERVER_DEP}
 
@@ -133,7 +137,7 @@ regions-dump:
 stores-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
 pd-ut: pd-xprog
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '$(TEST_TAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
 pd-xprog:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
 
@@ -153,7 +157,7 @@ docker-image:
 #### Build utils ###
 
 swagger-spec: install-tools
-	swag init --parseDependency --parseInternal --parseDepth 1 --dir server --generalInfo api/router.go --output docs/swagger
+	swag init --tags swagger --parseDependency --parseInternal --parseDepth 1 --dir server --generalInfo api/router.go --output docs/swagger
 	swag fmt --dir server
 
 dashboard-ui:
@@ -176,7 +180,12 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.1.2
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v2.6.0
+	@which promtool >/dev/null 2>&1 || { \
+		GOWORK=off go mod download github.com/prometheus/prometheus@v0.310.0; \
+		prom_dir=$$(go env GOMODCACHE)/github.com/prometheus/prometheus@v0.310.0; \
+		(cd $$prom_dir && GOWORK=off go install ./cmd/promtool); \
+	}
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
@@ -193,6 +202,9 @@ static: install-tools pre-build
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
 	@ echo "leakcheck ..."
 	@ leakcheck -exclude-files="tests/server/join/join_test.go" $(PACKAGES)
+	@ echo "promtool ..."
+	@ promtool check rules metrics/alertmanager/pd.rules.yml
+	@ promtool test rules tests/alertmanager/pd.rules.test.yml
 
 
 # Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
@@ -214,6 +226,10 @@ generate-errdoc: install-tools
 check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
+
+generate-easyjson: install-tools
+	@echo "generating easyjson..."
+	easyjson -all ./pkg/response/region.go
 
 .PHONY: check static tidy generate-errdoc check-plugin
 
@@ -261,6 +277,14 @@ basic-test: install-tools
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
+# gotest runs a targeted go test with failpoints automatically enabled/disabled.
+# Usage: make gotest GOTEST_ARGS='./pkg/gctuner -run TestInitGCTuner -count=1'
+GOTEST_ARGS ?= ./...
+gotest: install-tools
+	@$(FAILPOINT_ENABLE)
+	go test $(GOTEST_ARGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
+
 ci-test-job: install-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
 	./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
@@ -281,7 +305,7 @@ test-real-cluster:
 	# testing with the real cluster...
 	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
 
-.PHONY: test basic-test test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
+.PHONY: test basic-test gotest test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 

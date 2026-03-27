@@ -16,8 +16,10 @@ package apis
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -34,9 +36,11 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -82,6 +86,11 @@ type server struct {
 	*scheserver.Server
 }
 
+// AffinityGroupsResponse defines the response payload for listing affinity groups.
+type AffinityGroupsResponse struct {
+	AffinityGroups map[string]*affinity.GroupState `json:"affinity_groups"`
+}
+
 // GetCluster returns the cluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.Server.GetCluster()
@@ -106,9 +115,9 @@ func NewService(srv *scheserver.Service) *Service {
 	})
 	apiHandlerEngine.GET("metrics", mcsutils.PromHandler())
 	apiHandlerEngine.GET("status", mcsutils.StatusHandler)
+	apiHandlerEngine.GET("health", getHealth)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
-	root.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
@@ -124,6 +133,7 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterRegionsRouter()
 	s.RegisterStoresRouter()
 	s.RegisterPrimaryRouter()
+	s.RegisterAffinityRouter()
 	return s
 }
 
@@ -131,13 +141,16 @@ func NewService(srv *scheserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.PUT("/log", changeLogLevel)
-	router.DELETE("cache/regions", deleteAllRegionCache)
-	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
+	redirector := multiservicesapi.ServiceRedirector()
+	router.DELETE("cache/regions", redirector, deleteAllRegionCache)
+	router.DELETE("cache/regions/:id", redirector, deleteRegionCacheByID)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
 func (s *Service) RegisterSchedulersRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("schedulers")
+	router.Use(redirector)
 	router.GET("", getSchedulers)
 	router.GET("/diagnostic/:name", getDiagnosticResult)
 	router.GET("/config", getSchedulerConfig)
@@ -149,14 +162,18 @@ func (s *Service) RegisterSchedulersRouter() {
 
 // RegisterCheckersRouter registers the router of the checkers handler.
 func (s *Service) RegisterCheckersRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("checkers")
+	router.Use(redirector)
 	router.GET("/:name", getCheckerByName)
 	router.POST("/:name", pauseOrResumeChecker)
 }
 
 // RegisterHotspotRouter registers the router of the hotspot handler.
 func (s *Service) RegisterHotspotRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("hotspot")
+	router.Use(redirector)
 	router.GET("/regions/write", getHotWriteRegions)
 	router.GET("/regions/read", getHotReadRegions)
 	router.GET("/regions/history", getHistoryHotRegions)
@@ -166,7 +183,9 @@ func (s *Service) RegisterHotspotRouter() {
 
 // RegisterOperatorsRouter registers the router of the operators handler.
 func (s *Service) RegisterOperatorsRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("operators")
+	router.Use(redirector)
 	router.GET("", getOperators)
 	router.POST("", createOperator)
 	router.DELETE("", deleteOperators)
@@ -177,14 +196,18 @@ func (s *Service) RegisterOperatorsRouter() {
 
 // RegisterStoresRouter registers the router of the stores handler.
 func (s *Service) RegisterStoresRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("stores")
+	router.Use(redirector)
 	router.GET("", getAllStores)
 	router.GET("/:id", getStoreByID)
 }
 
 // RegisterRegionsRouter registers the router of the regions handler.
 func (s *Service) RegisterRegionsRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("regions")
+	router.Use(redirector)
 	router.GET("", getAllRegions)
 	router.GET("/:id", getRegionByID)
 	router.GET("/count", getRegionCount)
@@ -197,8 +220,11 @@ func (s *Service) RegisterRegionsRouter() {
 
 // RegisterConfigRouter registers the router of the config handler.
 func (s *Service) RegisterConfigRouter() {
+	// /config should not be redirected.
 	router := s.root.Group("config")
 	router.GET("", getConfig)
+	redirector := multiservicesapi.ServiceRedirector()
+	router.Use(redirector)
 
 	rules := router.Group("rules")
 	rules.GET("", getAllRules)
@@ -232,8 +258,34 @@ func (s *Service) RegisterConfigRouter() {
 
 // RegisterPrimaryRouter registers the router of the primary handler.
 func (s *Service) RegisterPrimaryRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
 	router := s.root.Group("primary")
+	router.Use(redirector)
 	router.POST("transfer", transferPrimary)
+}
+
+// RegisterAffinityRouter registers affinity routes to the v1 API group.
+func (s *Service) RegisterAffinityRouter() {
+	redirector := multiservicesapi.ServiceRedirector()
+	router := s.root.Group("affinity-groups")
+	router.Use(redirector)
+	router.GET("", getAllAffinityGroups)
+	router.GET("/:group_id", getAffinityGroup)
+}
+
+// getHealth returns the health status of the TSO service.
+func getHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.String(http.StatusServiceUnavailable, errs.ErrServerNotStarted.GenWithStackByArgs().Error())
+		return
+	}
+	if svr.GetParticipant().IsPrimaryElected() {
+		c.String(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no primary elected")
 }
 
 // @Tags     admin
@@ -265,9 +317,50 @@ func changeLogLevel(c *gin.Context) {
 // @Router   /config [get]
 func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	cfg := svr.GetConfig()
-	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, cfg)
+	localCfg := svr.GetConfig()
+	if svr.IsServing() {
+		c.IndentedJSON(http.StatusOK, localCfg)
+		return
+	}
+
+	// If the server is not serving, it means it is a follower.
+	// We need to get the dynamic config from the primary server.
+	// If no primary server is found, return an error.
+	// Or if the primary server is itself but not serving, return an error.
+	primaryAddrs := svr.GetParticipant().GetServingUrls()
+	if len(primaryAddrs) == 0 || primaryAddrs[0] == svr.GetAddr() {
+		c.String(http.StatusServiceUnavailable, "no available primary server found, cannot get dynamic config")
+		return
+	}
+
+	primaryURL := fmt.Sprintf("%s%s/config", primaryAddrs[0], APIPathPrefix)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, primaryURL, nil)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "failed to create request to primary: "+err.Error())
+		return
+	}
+	resp, err := svr.GetHTTPClient().Do(req)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "failed to request primary: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		c.String(resp.StatusCode, fmt.Sprintf("primary returned non-200 status: %s", string(body)))
+		return
+	}
+	var primaryCfg config.Config
+	if err := json.NewDecoder(resp.Body).Decode(&primaryCfg); err != nil {
+		c.String(http.StatusInternalServerError, "failed to decode primary's config: "+err.Error())
+		return
+	}
+
+	// Schedule and Replication are dynamic configs managed by primary, so we need to merge them.
+	mergedCfg := localCfg
+	mergedCfg.Schedule = primaryCfg.Schedule
+	mergedCfg.Replication = primaryCfg.Replication
+	c.IndentedJSON(http.StatusOK, &mergedCfg)
 }
 
 // @Tags     admin
@@ -1493,7 +1586,7 @@ func getRegionByID(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", b)
 }
 
-// TransferPrimary transfers the primary member to `new_primary`.
+// transferPrimary transfers the primary member to `new_primary`.
 // @Tags     primary
 // @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
@@ -1519,4 +1612,87 @@ func transferPrimary(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, "success")
+}
+
+func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsClosed() {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrServerNotStarted.FastGenByArgs().Error())
+		return nil, false
+	}
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return nil, false
+	}
+	manager := cluster.GetAffinityManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrAffinityInternal.FastGenByArgs().Error())
+		return nil, false
+	}
+	return manager, true
+}
+
+// @Tags     affinity-groups
+// @Summary  List all affinity groups.
+// @Param    ids  query  []string  false  "Optional affinity group IDs. Repeat as ids=a&ids=b."
+// @Produce  json
+// @Success  200  {object}  AffinityGroupsResponse
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /affinity-groups [get]
+func getAllAffinityGroups(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+
+	rawIDs := c.QueryArray("ids")
+	var (
+		groupStates map[string]*affinity.GroupState
+		err         error
+	)
+	if len(rawIDs) == 0 {
+		groupStates = affinity.CollectAllGroupStates(manager)
+	} else {
+		groupStates, err = affinity.CollectGroupStates(manager, rawIDs)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	resp := AffinityGroupsResponse{
+		AffinityGroups: groupStates,
+	}
+	c.IndentedJSON(http.StatusOK, resp)
+}
+
+// @Tags     affinity-groups
+// @Summary  Get an affinity group by group id.
+// @Param    group_id  path  string  true  "The group id of the affinity group"
+// @Produce  json
+// @Success  200  {object}  *affinity.GroupState
+// @Failure  404  {string}  string  "Affinity group not found."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /affinity-groups/{group_id} [get]
+func getAffinityGroup(c *gin.Context) {
+	manager, ok := getAffinityManager(c)
+	if !ok {
+		return
+	}
+	groupID := c.Param("group_id")
+	groupState, err := manager.CheckAndGetAffinityGroupState(groupID)
+	if err != nil {
+		switch {
+		case errs.ErrInvalidGroupID.Equal(err):
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		case errs.ErrAffinityGroupNotFound.Equal(err):
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+		default:
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	c.IndentedJSON(http.StatusOK, groupState)
 }

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,12 +28,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -63,7 +68,6 @@ func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
@@ -85,7 +89,6 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -95,11 +98,22 @@ func (suite *serverTestSuite) TestAllocID() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	time.Sleep(200 * time.Millisecond)
-	id, _, err := tc.GetPrimaryServer().GetCluster().AllocID(1)
-	re.NoError(err)
+	id := retryAllocID(re, tc.GetPrimaryServer().GetCluster())
 	re.NotEqual(uint64(0), id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+}
+
+func retryAllocID(re *require.Assertions, cluster *scheduling.Cluster) uint64 {
+	var allocID uint64
+	testutil.Eventually(re, func() bool {
+		id, _, err := cluster.AllocID(1)
+		if err != nil {
+			return false
+		}
+		allocID = id
+		return true
+	})
+	return allocID
 }
 
 func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
@@ -114,10 +128,8 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	time.Sleep(200 * time.Millisecond)
 	cluster := tc.GetPrimaryServer().GetCluster()
-	id, _, err := cluster.AllocID(1)
-	re.NoError(err)
+	id := retryAllocID(re, cluster)
 	re.NotEqual(uint64(0), id)
 	err = suite.cluster.ResignLeader()
 	re.NoError(err)
@@ -126,8 +138,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	time.Sleep(time.Second)
-	id1, _, err := cluster.AllocID(1)
-	re.NoError(err)
+	id1 := retryAllocID(re, cluster)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 	// Update the pdLeader in test suite.
@@ -145,10 +156,17 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
+	expectedSchedulerCount := len(types.DefaultSchedulers)
+	// Wait for the cluster to be ready and set it as prepared
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
 	})
 	// change primary
 	primary.Close()
@@ -156,10 +174,17 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
+	// Wait for the cluster to be ready
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	// Set the cluster as prepared so that the coordinator can start running schedulers
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
 	})
 }
 
@@ -237,7 +262,15 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs.
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 	tc.GetPrimaryServer().Close()
 	// Stop scheduling server. PD will execute scheduling jobs again.
@@ -254,7 +287,15 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs again.
 	testutil.Eventually(re, func() bool {
-		return tc1.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc1.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 }
 
@@ -263,8 +304,9 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
-		re.NotNil(suite.pdLeader.GetServer())
-		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
+		if suite.pdLeader.GetServer() == nil || suite.pdLeader.GetServer().GetRaftCluster() == nil {
+			return false
+		}
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
@@ -294,7 +336,15 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs.
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 	// Disable scheduling service fallback and stop scheduling server. PD won't execute scheduling jobs again.
 	conf.EnableSchedulingFallback = false
@@ -313,6 +363,8 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the PD.
@@ -377,15 +429,16 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String())
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// The default scheduler could not be deleted, it could only be disabled.
 	defaultSchedulerNames := []string{
 		types.BalanceLeaderScheduler.String(),
 		types.BalanceRegionScheduler.String(),
 		types.BalanceHotRegionScheduler.String(),
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
-		re.NotNil(schedulersController.GetScheduler(name), name)
 		testutil.Eventually(re, func() bool {
+			if schedulersController.GetScheduler(name) == nil {
+				return false
+			}
 			disabled, err := schedulersController.IsSchedulerDisabled(name)
 			re.NoError(err, name)
 			return disabled == shouldDisabled
@@ -394,10 +447,15 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, false)
 		tests.MustDeleteScheduler(re, suite.backendEndpoints, name)
-		checkDisabled(name, true)
 	}
+
 	for _, name := range defaultSchedulerNames {
-		checkDisabled(name, true)
+		testutil.Eventually(re, func() bool {
+			return schedulersController.GetScheduler(name) == nil
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
 		tests.MustAddScheduler(re, suite.backendEndpoints, name, nil)
 		checkDisabled(name, false)
 	}
@@ -427,6 +485,51 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 	re.ElementsMatch(evictStoreIDs, expected)
 }
 
+func (suite *serverTestSuite) TestRemoveScheduler() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+
+	// Check the default schedulers exist.
+	defaultSchedulerNames := []string{
+		types.BalanceLeaderScheduler.String(),
+		types.BalanceRegionScheduler.String(),
+		types.BalanceHotRegionScheduler.String(),
+		types.EvictSlowStoreScheduler.String(),
+	}
+	checkSchedulerExist := func(name string, shouldExist bool) {
+		testutil.Eventually(re, func() bool {
+			exist := schedulersController.GetScheduler(name) != nil
+			return exist == shouldExist
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
+		checkSchedulerExist(name, true)
+	}
+
+	// Disable evict-slow-store-scheduler by calling DELETE API.
+	// For the scheduling cluster, when a default scheduler is marked as disabled in config,
+	// the updateScheduler goroutine will detect this and remove the scheduler from the controller.
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String())
+
+	// Wait and verify the scheduler is removed from the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), false)
+
+	// Re-enable the scheduler by calling ADD API.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String(), nil)
+
+	// Verify the scheduler exists again in the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
+}
+
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
@@ -451,14 +554,22 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 	queryStats := &pdpb.QueryStats{
 		Get:                    5,
 		Coprocessor:            6,
@@ -477,7 +588,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		DownPeers:       downPeers,
 		PendingPeers:    pendingPeers,
 		BytesWritten:    10,
@@ -498,9 +609,144 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		return region != nil && region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
 			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
 			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers)
+	})
+}
+
+func (suite *serverTestSuite) TestForwardReportBuckets() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
+
+	// First create a region via region heartbeat
+	heartbeatStream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		_ = heartbeatStream.CloseSend()
+	}()
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
+
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region: &metapb.Region{
+			Id:       10,
+			Peers:    peers,
+			StartKey: []byte("a"),
+			EndKey:   []byte("z"),
+		},
+		Leader:          leaderPeer,
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+	}
+	err = heartbeatStream.Send(regionReq)
+	re.NoError(err)
+
+	// Wait for the region to be created
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetApproximateKeys() == 300
+	})
+
+	// Now test ReportBuckets forwarding with multiple requests
+	bucketStream, err := grpcPDClient.ReportBuckets(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		_ = bucketStream.CloseSend()
+	}()
+
+	// Send multiple bucket reports to test streaming
+	for version := uint64(1); version <= 3; version++ {
+		// Create bucket stats with increasing read/write metrics for each version
+		bucketStats := &metapb.BucketStats{
+			ReadBytes:  []uint64{100 * version, 200 * version, 150 * version},
+			ReadKeys:   []uint64{10 * version, 20 * version, 15 * version},
+			ReadQps:    []uint64{5 * version, 10 * version, 8 * version},
+			WriteBytes: []uint64{50 * version, 100 * version, 75 * version},
+			WriteKeys:  []uint64{5 * version, 10 * version, 7 * version},
+			WriteQps:   []uint64{2 * version, 5 * version, 3 * version},
+		}
+
+		buckets := &metapb.Buckets{
+			RegionId:   10,
+			Version:    version,
+			Keys:       [][]byte{[]byte("a"), []byte("m"), []byte("r"), []byte("z")},
+			Stats:      bucketStats,
+			PeriodInMs: 10000, // 10 seconds
+		}
+
+		bucketReq := &pdpb.ReportBucketsRequest{
+			Header:      testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Buckets:     buckets,
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: version},
+		}
+
+		err = bucketStream.Send(bucketReq)
+		re.NoError(err)
+
+		// Wait a bit between requests to simulate real streaming
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Close the stream (ReportBuckets is fire-and-forget)
+	err = bucketStream.CloseSend()
+	re.NoError(err)
+
+	// Verify the buckets are processed by the scheduling server
+	// The scheduling server should receive and process the bucket keys and version
+	// Should have the latest version (3) after all requests
+	testutil.Eventually(re, func() bool {
+		// Check if the scheduling server has the region and bucket information
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetBuckets() != nil &&
+			region.GetBuckets().GetVersion() == 3 &&
+			len(region.GetBuckets().GetKeys()) == 4
+	})
+
+	// Verify bucket keys are properly stored (stats are not stored in scheduling server)
+	// Should contain the final version (3) with correct keys
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		if region == nil || region.GetBuckets() == nil {
+			return false
+		}
+		buckets := region.GetBuckets()
+		return buckets.GetRegionId() == 10 &&
+			buckets.GetVersion() == 3 &&
+			len(buckets.GetKeys()) == 4 &&
+			string(buckets.GetKeys()[0]) == "a" &&
+			string(buckets.GetKeys()[3]) == "z"
 	})
 }
 
@@ -510,6 +756,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Additional wait to ensure config watcher is ready
+	waitForConfigWatcherReady(re, tc)
 
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
 	leaderServer := suite.pdLeader.GetServer()
@@ -517,7 +765,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	conf.MaxReplicas = 1
 	err = leaderServer.SetReplicationConfig(*conf)
 	re.NoError(err)
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
 			context.Background(), &pdpb.PutStoreRequest{
@@ -536,8 +785,15 @@ func (suite *serverTestSuite) TestStoreLimit() {
 
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	for i := uint64(2); i <= 10; i++ {
 		peers := []*metapb.Peer{{Id: i, StoreId: 1}}
+		if len(peers) == 0 {
+			re.FailNow("peer list should not be empty")
+		}
+		leaderPeer := peers[0]
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -546,7 +802,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 				StartKey: []byte(fmt.Sprintf("t%d", i)),
 				EndKey:   []byte(fmt.Sprintf("t%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 		}
 		err = stream.Send(regionReq)
@@ -627,9 +883,39 @@ func checkOperatorFail(re *require.Assertions, oc *operator.Controller, op *oper
 	re.False(oc.RemoveOperator(op))
 }
 
+// waitForConfigWatcherReady ensures the config watcher is properly initialized and working
+func waitForConfigWatcherReady(re *require.Assertions, tc *tests.TestSchedulingCluster) {
+	testutil.Eventually(re, func() bool {
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		// Try to get cluster version - if config watcher is working, this should be available
+		sharedConfig := cluster.GetSharedConfig()
+		if sharedConfig == nil {
+			return false
+		}
+		version := sharedConfig.GetClusterVersion()
+		// If we can get a valid cluster version, config watcher is likely working
+		return version != nil && version.String() != ""
+	})
+}
+
 func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ storelimit.Type, expectedLimit float64) {
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
 	})
 }
 
@@ -707,6 +993,159 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 	rc = suite.pdLeader.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	rc.IsPrepared()
+}
+
+func (suite *serverTestSuite) TestPrepareChecker() {
+	re := suite.Require()
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Create stores
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	// Send enough regions to satisfy the prepare checker in the initial cluster
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
+
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
+
+	// Send many regions to ensure the initial scheduling cluster's prepare checker is satisfied
+	for i := uint64(1); i <= 100; i++ {
+		regionReq := &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:       i,
+				Peers:    peers,
+				StartKey: []byte(fmt.Sprintf("k%d", i)),
+				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+			},
+			Leader:          leaderPeer,
+			ApproximateSize: 10 * units.MiB,
+			ApproximateKeys: 100,
+		}
+		err = stream.Send(regionReq)
+		re.NoError(err)
+	}
+
+	// Wait for the initial cluster's prepare checker to be satisfied
+	primary1 := tc.GetPrimaryServer()
+	cluster1 := primary1.GetCluster()
+	coordinator1 := cluster1.GetCoordinator()
+	prepareChecker1 := coordinator1.GetPrepareChecker()
+
+	testutil.Eventually(re, func() bool {
+		return prepareChecker1.IsPrepared()
+	})
+
+	re.True(prepareChecker1.IsPrepared(), "initial cluster's prepare checker should be prepared")
+	re.True(coordinator1.ShouldRun(), "initial cluster's coordinator should run when prepare checker is ready")
+
+	primary1.Close()
+
+	// Wait for a new primary to be elected from the remaining servers
+	testutil.Eventually(re, func() bool {
+		primary2 := tc.GetPrimaryServer()
+		return primary2 != nil && primary2 != primary1
+	})
+
+	// Get the new primary server
+	primary2 := tc.GetPrimaryServer()
+	re.NotNil(primary2)
+
+	// Get the current cluster components
+	cluster2 := primary2.GetCluster()
+	coordinator2 := cluster2.GetCoordinator()
+	prepareChecker2 := coordinator2.GetPrepareChecker()
+
+	// After closing, the new scheduling server should NOT be prepared
+	// because it hasn't received enough fresh region heartbeats
+	re.False(prepareChecker2.IsPrepared())
+	re.False(coordinator2.ShouldRun())
+
+	// Send only a small number of region heartbeats (insufficient for prepare checker)
+	for i := uint64(1); i <= 50; i++ {
+		regionReq := &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:       i,
+				Peers:    peers,
+				StartKey: []byte(fmt.Sprintf("k%d", i)),
+				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+			},
+			Leader:          leaderPeer,
+			ApproximateSize: 10 * units.MiB,
+			ApproximateKeys: 100,
+		}
+		err = stream.Send(regionReq)
+		re.NoError(err)
+	}
+
+	// Wait a bit to ensure the prepare checker has time to process the incoming heartbeats
+	time.Sleep(2 * time.Second)
+
+	// The prepare checker should still be checking and potentially not satisfied
+	shouldRun := coordinator2.ShouldRun()
+	isPrepared := prepareChecker2.IsPrepared()
+
+	// The coordinator's readiness should be controlled by the prepare checker
+	re.False(isPrepared)
+	re.False(shouldRun)
+
+	// Send enough regions to eventually satisfy the prepare checker
+	for i := uint64(51); i <= 100; i++ {
+		regionReq := &pdpb.RegionHeartbeatRequest{
+			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+			Region: &metapb.Region{
+				Id:       i,
+				Peers:    peers,
+				StartKey: []byte(fmt.Sprintf("k%d", i)),
+				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
+			},
+			Leader:          leaderPeer,
+			ApproximateSize: 10 * units.MiB,
+			ApproximateKeys: 100,
+		}
+		err = stream.Send(regionReq)
+		re.NoError(err)
+	}
+
+	// Finally verify that once prepared, the coordinator should be ready to run
+	testutil.Eventually(re, func() bool {
+		return prepareChecker2.IsPrepared()
+	})
+
+	re.True(coordinator2.ShouldRun())
 }
 
 func (suite *serverTestSuite) TestOnlineProgress() {
@@ -804,20 +1243,28 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
 		ApproximateKeys: 300,
 		Interval:        interval,
@@ -830,7 +1277,7 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
 		return region != nil && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval)
 	})
 
@@ -877,9 +1324,13 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1020,9 +1471,13 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1120,6 +1575,7 @@ func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions,
 
 func (suite *serverTestSuite) TestForwardSplitRegion() {
 	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -1145,9 +1601,13 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	}
 
 	// Create a region via region heartbeat
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
@@ -1232,4 +1692,56 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	re.Equal(uint64(100), splitResp.GetFinishedPercentage())
 	// Should have regions IDs for the split operation
 	re.Equal([]uint64{101}, splitResp.GetRegionsId())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+}
+
+func (suite *serverTestSuite) TestRegionBucketsStoreNotFound() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	addr := strings.TrimPrefix(tc.GetPrimaryServer().GetAddr(), "http://")
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+	defer conn.Close()
+
+	schedulingClient := schedulingpb.NewSchedulingClient(conn)
+	stream, err := schedulingClient.RegionBuckets(suite.ctx)
+	re.NoError(err)
+
+	// Create buckets for a region that doesn't exist in the cluster
+	// This will trigger the store == nil condition because GetLeaderStoreByRegionID returns nil
+	buckets := &metapb.Buckets{
+		RegionId:   999, // Non-existent region ID
+		Version:    1,
+		Keys:       [][]byte{[]byte("key1"), []byte("key2")},
+		PeriodInMs: 1000,
+	}
+
+	bucketsReq := &schedulingpb.RegionBucketsRequest{
+		Header:  &schedulingpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+		Buckets: buckets,
+	}
+
+	// This should not return an error - the server will log a warning and continue
+	err = stream.Send(bucketsReq)
+	re.NoError(err)
+
+	// Send another valid request to ensure the stream is still working after the store == nil case
+	validBuckets := &metapb.Buckets{
+		RegionId:   1000, // Another non-existent region
+		Version:    1,
+		Keys:       [][]byte{[]byte("key3"), []byte("key4")},
+		PeriodInMs: 1000,
+	}
+
+	validReq := &schedulingpb.RegionBucketsRequest{
+		Header:  &schedulingpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+		Buckets: validBuckets,
+	}
+
+	err = stream.Send(validReq)
+	re.NoError(err)
 }

@@ -46,9 +46,9 @@ import (
 )
 
 const (
-	// componentSignatureKey is used for http request header key to identify component signature.
 	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
 	// This is kept for backward compatibility.
+	// componentSignatureKey is used for http request header key to identify component signature.
 	componentSignatureKey = "component"
 	// anonymousValue identifies anonymous request source
 	anonymousValue = "anonymous"
@@ -65,6 +65,8 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
+	// XPDHandleHeader is used to mark whether this request is handled by the PD.
+	XPDHandleHeader = "X-PD-Handle-By"
 	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
 	XForbiddenForwardToMicroserviceHeader = "X-Forbidden-Forward-To-Microservice"
 	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
@@ -236,12 +238,32 @@ func GetJSON(client *http.Client, url string, data []byte) (*http.Response, erro
 	return client.Do(req)
 }
 
+// GetJSONWithoutBody is used to do get request without body
+func GetJSONWithoutBody(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
 // PatchJSON is used to do patch request
 func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	return client.Do(req)
+}
+
+// PutJSON is used to do put request
+func PutJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return client.Do(req)
 }
 

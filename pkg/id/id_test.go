@@ -23,12 +23,11 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
-	"github.com/pingcap/failpoint"
-
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
@@ -45,7 +44,7 @@ const (
 // share rootPath and member val update their ids concurrently.
 func TestMultipleAllocator(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Put memberValue to leaderPath to simulate an election success.
@@ -88,16 +87,15 @@ func testAllocator(re *require.Assertions, allocator Allocator) {
 // TestIDAllocationEndValue tests if keyspace allocator hits ErrIDExhausted when trying to allocate into reserved range.
 func TestIDAllocationEndValue(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
-	checkIDAllocationEndValue(t, client, uint64(constant.MaxValidKeyspaceID))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
-	}()
-	checkIDAllocationEndValue(t, client, constant.ReservedKeyspaceIDStart-1)
+	if kerneltype.IsNextGen() {
+		checkIDAllocationEndValue(t, client, constant.ReservedKeyspaceIDStart-1)
+	} else {
+		checkIDAllocationEndValue(t, client, uint64(constant.MaxValidKeyspaceID))
+	}
 }
 
 func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint64) {

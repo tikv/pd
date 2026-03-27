@@ -115,9 +115,9 @@ func PauseLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
 		switch d {
 		case constant.In:
-			store.pauseLeaderTransferIn = true
+			store.pauseLeaderTransferIn.Add(1)
 		case constant.Out:
-			store.pauseLeaderTransferOut = true
+			store.pauseLeaderTransferOut.Add(1)
 		}
 	}
 }
@@ -127,9 +127,9 @@ func ResumeLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
 		switch d {
 		case constant.In:
-			store.pauseLeaderTransferIn = false
+			store.pauseLeaderTransferIn.Add(-1)
 		case constant.Out:
-			store.pauseLeaderTransferOut = false
+			store.pauseLeaderTransferOut.Add(-1)
 		}
 	}
 }
@@ -138,7 +138,15 @@ func ResumeLeaderTransfer(d constant.Direction) StoreCreateOption {
 // leader to the store
 func SlowStoreEvicted() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowStoreEvicted = true
+		store.slowStoreEvicted.Add(1)
+	}
+}
+
+// StoppingStoreEvicted marks a store as a stopping store and prevents transferring
+// leader to the store
+func StoppingStoreEvicted() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.stoppingStoreEvicted.Add(1)
 	}
 }
 
@@ -146,21 +154,28 @@ func SlowStoreEvicted() StoreCreateOption {
 // leader to the store
 func SlowTrendEvicted() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowTrendEvicted = true
+		store.slowTrendEvicted.Add(1)
 	}
 }
 
 // SlowTrendRecovered cleans the evicted by slow trend state of a store.
 func SlowTrendRecovered() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowTrendEvicted = false
+		store.slowTrendEvicted.Add(-1)
 	}
 }
 
 // SlowStoreRecovered cleans the evicted state of a store.
 func SlowStoreRecovered() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowStoreEvicted = false
+		store.slowStoreEvicted.Add(-1)
+	}
+}
+
+// StoppingStoreRecovered cleans the evicted state of a store.
+func StoppingStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.stoppingStoreEvicted.Add(-1)
 	}
 }
 
@@ -292,6 +307,13 @@ func SetStoreLimit(limit storelimit.StoreLimit) StoreCreateOption {
 func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.lastAwakenTime = lastAwaken
+	}
+}
+
+// SetNetworkSlowTriggers sets triggered network slow evict count for the store.
+func SetNetworkSlowTriggers(networkSlowTriggers uint64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.networkSlowTriggers = networkSlowTriggers
 	}
 }
 

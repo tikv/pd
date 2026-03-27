@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"os"
 	"sort"
 	"strconv"
@@ -34,6 +35,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -53,15 +55,17 @@ import (
 	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -406,10 +410,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		var lastTS uint64
 		for range tsoRequestRound {
-			var physical, logical int64
-			var ts uint64
-			physical, logical, err = cli.GetTS(context.Background())
-			ts = tsoutil.ComposeTS(physical, logical)
+			physical, logical, err := cli.GetTS(context.Background())
+			ts := tsoutil.ComposeTS(physical, logical)
 			if err != nil {
 				maxUnavailableTime = time.Now()
 				continue
@@ -426,7 +428,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
-		err = leader.Stop()
+		err := leader.Stop()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
@@ -444,7 +446,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetLeaderServer()
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
-		err = leader.Stop()
+		err := leader.Stop()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/unreachableNetwork"))
@@ -499,11 +501,17 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	suite.endpoints = runServer(re, cluster)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	defer conn.Close()
 	suite.regionID = regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(suite.ctx)
-		re.NoError(err)
+		stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+		if err != nil {
+			return false
+		}
+		defer func() {
+			_ = stream.CloseSend()
+		}()
 		region := &metapb.Region{
 			Id: suite.regionID,
 			RegionEpoch: &metapb.RegionEpoch{
@@ -517,9 +525,9 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 			Region: region,
 			Leader: peers[0],
 		}
-		err = regionHeartbeat.Send(req)
+		err = stream.Send(req)
 		re.NoError(err)
-		_, err = regionHeartbeat.Recv()
+		_, err = stream.Recv()
 		return err == nil
 	})
 }
@@ -534,7 +542,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
@@ -554,7 +562,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/unreachableNetwork", "return(true)"))
@@ -626,7 +634,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true), opt.WithEnableRouterClient(false))
 	defer cli.Close()
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
@@ -696,7 +704,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(ctx, re, suite.endpoints)
+	// TODO: enable router client after fixing the issue that router client
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	err := cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
@@ -917,7 +926,9 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leader := cluster.GetServer(cluster.WaitLeader())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := cluster.GetServer(leaderName)
 	re.NoError(leader.BootstrapCluster())
 	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
@@ -936,23 +947,34 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
 	resp.Body.Close()
 	re.NoError(err)
-	time.Sleep(2 * time.Second)
-	re.NoError(leader.Destroy())
-	time.Sleep(2 * time.Second)
-	leader = cluster.GetServer(cluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		return options != nil &&
+			options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled()
+	})
+	re.NoError(cluster.GetServer(leaderName).ResignLeader())
+	newLeaderName := cluster.WaitLeader()
+	re.NotEmpty(newLeaderName)
+	re.NotEqual(leaderName, newLeaderName)
+	leader = cluster.GetServer(newLeaderName)
 	re.NotNil(leader)
-	options := leader.GetPersistOptions()
-	re.NotNil(options)
-	re.Equal(uint64(999), options.GetMaxSnapshotCount())
-	re.False(options.IsLocationReplacementEnabled())
-	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
-	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
-	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
-	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
-	re.Equal(uint64(999), options.GetRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
-	re.Equal(uint64(999), options.GetMergeScheduleLimit())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		if options == nil {
+			return false
+		}
+		return options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled() &&
+			options.GetMaxMergeRegionSize() == 999 &&
+			options.GetMaxMergeRegionKeys() == 999 &&
+			options.GetSchedulerMaxWaitingOperator() == 999 &&
+			options.GetLeaderScheduleLimit() == 999 &&
+			options.GetRegionScheduleLimit() == 999 &&
+			options.GetHotRegionScheduleLimit() == 999 &&
+			options.GetReplicaScheduleLimit() == 999 &&
+			options.GetMergeScheduleLimit() == 999
+	})
 }
 
 func TestCloseClient(t *testing.T) {
@@ -1028,13 +1050,14 @@ var (
 
 type clientTestSuiteImpl struct {
 	suite.Suite
-	cleanup         testutil.CleanupFunc
 	ctx             context.Context
 	clean           context.CancelFunc
+	cluster         *tests.TestCluster
 	srv             *server.Server
 	grpcSvr         *server.GrpcServer
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
+	conn            *grpc.ClientConn
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 	reportBucket    pdpb.PD_ReportBucketsClient
 }
@@ -1042,15 +1065,23 @@ type clientTestSuiteImpl struct {
 func (suite *clientTestSuiteImpl) setup() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
+	suite.ctx, suite.clean = context.WithCancel(context.Background())
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	suite.srv = suite.cluster.GetLeaderServer().GetServer()
+	suite.grpcPDClient, suite.conn = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	tests.MustWaitLeader(re, []*server.Server{suite.srv})
 	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
-	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	suite.client = setupCli(suite.ctx, re, suite.srv.GetEndpoints())
 
 	suite.regionHeartbeat, err = suite.grpcPDClient.RegionHeartbeat(suite.ctx)
@@ -1086,9 +1117,16 @@ func (suite *clientTestSuiteImpl) setup() {
 }
 
 func (suite *clientTestSuiteImpl) tearDown() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.client.Close()
+	_ = suite.regionHeartbeat.CloseSend()
+	_ = suite.reportBucket.CloseSend()
+	if suite.conn != nil {
+		_ = suite.conn.Close()
+	}
 	suite.clean()
-	suite.cleanup()
+	suite.cluster.Destroy()
 }
 func newHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
@@ -1163,6 +1201,16 @@ func (suite *clientStatelessTestSuite) TestScanRegions() {
 	}
 
 	// Wait for region heartbeats.
+	testutil.Eventually(re, func() bool {
+		region1 := suite.srv.GetRaftCluster().GetRegion(regions[0].GetId())
+		if region1 != nil {
+			digit := suite.srv.GetPDServerConfig().FlowRoundByDigit
+			re.NotEqual(digit, region1.GetFlowRoundDivisor())
+			re.Equal(core.GetFlowRoundDivisorByDigit(digit), region1.GetFlowRoundDivisor())
+			return true
+		}
+		return false
+	})
 	testutil.Eventually(re, func() bool {
 		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
 		return err == nil && len(scanRegions) == 10
@@ -1770,7 +1818,8 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	bo.SetRetryableChecker(needRetry, true)
 
 	// Initialize the client with context and backoff
-	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
+	// Router client doesn't support the rateLimit failpoint injection yet, so disable it for this test
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{}, opt.WithEnableRouterClient(false))
 	re.NoError(err)
 	defer client.Close()
 
@@ -1819,7 +1868,8 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1874,7 +1924,8 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -1922,8 +1973,8 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-
-	cli := setupCli(ctx, re, endpoints)
+	// Router client doesn't support circuit breaker yet, so disable it for this test
+	cli := setupCli(ctx, re, endpoints, opt.WithEnableRouterClient(false))
 	defer cli.Close()
 
 	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
@@ -2039,6 +2090,32 @@ func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspac
 	}
 	if expectedBarrierTS != 0 && !found {
 		re.Failf("GC barrier expected to exist but not found", "barrierID: %s, GC state: %+v", barrierID, gcState)
+	}
+}
+
+// checkGlobalGCBarrier checks whether the specified global GC barrier has the specified barrier TS.
+// This function assumes the barrier TS is never 0, and passing 0 means asserting the GC barrier does not exist.
+func (s *clientStatefulTestSuite) checkGlobalGCBarrier(re *require.Assertions, barrierID string, expectedBarrierTS uint64) {
+	gcStates, err := s.client.GetGCStatesClient(constants.NullKeyspaceID).GetAllKeyspacesGCStates(context.Background())
+	re.NoError(err)
+	found := false
+	for _, b := range gcStates.GlobalGCBarriers {
+		if b.BarrierID == barrierID {
+			if found {
+				re.Failf("duplicated barrier ID found in the global GC barriers", "barrierID: %s", barrierID)
+				return
+			}
+			if expectedBarrierTS != 0 {
+				re.Equal(expectedBarrierTS, b.BarrierTS)
+			} else {
+				re.Failf("expected global GC barrier not exist but found", "barrierID: %s", barrierID)
+				return
+			}
+			found = true
+		}
+	}
+	if expectedBarrierTS != 0 && !found {
+		re.Failf("global GC barrier expected to exist but not found", "barrierID: %s", barrierID)
 	}
 }
 
@@ -2349,7 +2426,7 @@ func (s *clientStatefulTestSuite) TestAdvanceGCSafePoint() {
 		res, err = c.AdvanceGCSafePoint(ctx, 11)
 		re.Error(err)
 		re.Contains(err.Error(), "ErrGCSafePointExceedsTxnSafePoint")
-		// Do not chagne the current value in this case.
+		// Do not change the current value in this case.
 		s.checkGCSafePoint(re, keyspaceID, 5)
 
 		// Allows advancing exactly to the txn safe point.
@@ -2473,6 +2550,203 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 	}
 }
 
+func (s *clientStatefulTestSuite) TestGlobalGCBarriers() {
+	s.prepareKeyspacesForGCTest()
+	re := s.Require()
+	ctx := context.Background()
+
+	var clients []gc.GCStatesClient
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		cli := s.client.GetGCStatesClient(keyspaceID)
+		s.checkGlobalGCBarrier(re, "b1", 0)
+		clients = append(clients, cli)
+	}
+	// It doesn't matter what keyspace SetGlobalGCBarrier API is called on.
+	getCli := func() gc.GCStatesClient {
+		return clients[rand.IntN(len(clients))]
+	}
+
+	b, err := getCli().SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
+	re.NoError(err)
+	re.Equal("b1", b.BarrierID)
+	re.Equal(uint64(10), b.BarrierTS)
+	re.Equal(int64(math.MaxInt64), int64(b.TTL))
+	s.checkGlobalGCBarrier(re, "b1", 10)
+
+	// Allows advancing to a value below the global GC barrier.
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 5)
+		re.NoError(err)
+		re.Equal(uint64(5), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		s.checkTxnSafePoint(re, keyspaceID, 5)
+
+		// Blocks on the global GC barrier when trying to advance over it.
+		res, err = c.AdvanceTxnSafePoint(ctx, 11)
+		re.NoError(err)
+		re.Equal(uint64(5), res.OldTxnSafePoint)
+		re.Equal(uint64(11), res.Target)
+		re.Equal(uint64(10), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "b1")
+		s.checkTxnSafePoint(re, keyspaceID, 10)
+	}
+
+	// After deleting the GC barrier, the txn safe point can be resumed to going forward.
+	b, err = getCli().DeleteGlobalGCBarrier(ctx, "b1")
+	re.NoError(err)
+	re.Equal("b1", b.BarrierID)
+	re.Equal(uint64(10), b.BarrierTS)
+	re.Equal(int64(math.MaxInt64), int64(b.TTL))
+	s.checkGlobalGCBarrier(re, "b1", 0)
+
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 11)
+		re.NoError(err)
+		re.Equal(uint64(11), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		s.checkTxnSafePoint(re, keyspaceID, 11)
+	}
+
+	b, err = getCli().SetGlobalGCBarrier(ctx, "b1", 15, math.MaxInt64)
+	re.NoError(err)
+	re.Equal("b1", b.BarrierID)
+	re.Equal(uint64(15), b.BarrierTS)
+	re.Equal(int64(math.MaxInt64), int64(b.TTL))
+
+	// Allows advancing to exactly the same value as the global GC barrier, without reporting the blocker.
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 15)
+		re.NoError(err)
+		re.Equal(uint64(15), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		s.checkTxnSafePoint(re, keyspaceID, 15)
+	}
+
+	// When multiple GC barrier exists, it blocks on the minimum one.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", 22, math.MaxInt64)
+	re.NoError(err)
+	s.checkGlobalGCBarrier(re, "b1", 22)
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, math.MaxInt64)
+	re.NoError(err)
+	s.checkGlobalGCBarrier(re, "b2", 20)
+
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 25)
+		re.NoError(err)
+		re.Equal(uint64(15), res.OldTxnSafePoint)
+		re.Equal(uint64(25), res.Target)
+		re.Equal(uint64(20), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "b2")
+		s.checkTxnSafePoint(re, keyspaceID, 20)
+	}
+
+	// Test expiring GC barrier.
+	b, err = getCli().SetGlobalGCBarrier(ctx, "b2", 20, time.Second)
+	s.checkGlobalGCBarrier(re, "b2", 20)
+	re.NoError(err)
+	re.False(b.IsExpired())
+	// Considering the rounding-up behaviors, the actual TTL might be slightly greater.
+	re.GreaterOrEqual(b.TTL, time.Second)
+	re.LessOrEqual(b.TTL, 3*time.Second)
+	testutil.Eventually(re, b.IsExpired,
+		testutil.WithWaitFor(b.TTL+time.Second),
+		testutil.WithTickInterval(50*time.Millisecond))
+
+	// After the returned GlobalGCBarrierInfo is expired, the server might be still keeping it due to its rounding
+	// behavior. Wait another 1 second.
+	time.Sleep(time.Second)
+
+	for _, keyspaceID := range []uint32{constants.NullKeyspaceID, 1, 2} {
+		c := s.client.GetGCInternalController(keyspaceID)
+		res, err := c.AdvanceTxnSafePoint(ctx, 25)
+		re.NoError(err)
+		re.Equal(uint64(20), res.OldTxnSafePoint)
+		re.Equal(uint64(25), res.Target)
+		re.Equal(uint64(22), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "b1")
+		s.checkTxnSafePoint(re, keyspaceID, 22)
+	}
+
+	s.checkGlobalGCBarrier(re, "b2", 0)
+
+	// Unable to set global GC barrier to earlier ts than txn safe point.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b2", 21, math.MaxInt64)
+	re.Error(err)
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+	s.checkGlobalGCBarrier(re, "b2", 0)
+
+	// Unable to modify an existing GC barrier to earlier ts than txn safe point.
+	_, err = getCli().SetGlobalGCBarrier(ctx, "b1", 21, math.MaxInt64)
+	re.Error(err)
+	re.Contains(err.Error(), "ErrGlobalGCBarrierTSBehindTxnSafePoint")
+
+	// The existing global GC barrier remains unchanged.
+	s.checkGlobalGCBarrier(re, "b1", 22)
+}
+
+func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
+	re := s.Require()
+	ctx := context.Background()
+	s.prepareKeyspacesForGCTest()
+	ks3, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks3",
+		Config:     map[string]string{keyspace.GCManagementType: keyspace.UnifiedGC},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.Equal(uint32(3), ks3.Id)
+
+	// Modify some GC states and verify TestGetAllKeyspaceGCStates gets the correct result.
+	cli := s.client.GetGCStatesClient(constants.NullKeyspaceID)
+	_, err = cli.SetGlobalGCBarrier(ctx, "b1", 10, math.MaxInt64)
+	re.NoError(err)
+	res, err := cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	re.Len(res.GlobalGCBarriers, 1)
+	re.Equal("b1", res.GlobalGCBarriers[0].BarrierID)
+	re.Equal(uint64(10), res.GlobalGCBarriers[0].BarrierTS)
+	re.Equal(time.Duration(math.MaxInt64), res.GlobalGCBarriers[0].TTL)
+
+	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, 2*time.Second)
+	re.NoError(err)
+	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	re.Len(res.GlobalGCBarriers, 2)
+	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
+	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
+	// Returned TTL is rounded to seconds, so it can be exactly 1s here.
+	re.GreaterOrEqual(res.GlobalGCBarriers[1].TTL, time.Second)
+	re.LessOrEqual(res.GlobalGCBarriers[1].TTL, 2*time.Second)
+
+	cli1 := s.client.GetGCStatesClient(1)
+	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
+	re.NoError(err)
+	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	state, ok := res.GCStates[1]
+	re.True(ok)
+	re.Equal("b3", state.GCBarriers[0].BarrierID)
+	re.Equal(uint64(13), state.GCBarriers[0].BarrierTS)
+	re.Equal(time.Duration(math.MaxInt64), state.GCBarriers[0].TTL)
+
+	cli2 := s.client.GetGCStatesClient(2)
+	_, err = cli2.SetGCBarrier(ctx, "b4", 14, 3*time.Second)
+	re.NoError(err)
+	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	re.NoError(err)
+	state, ok = res.GCStates[2]
+	re.True(ok)
+	re.Equal("b4", state.GCBarriers[0].BarrierID)
+	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
+	// Returned TTL is rounded to seconds, so it can be exactly 2s here.
+	re.GreaterOrEqual(state.GCBarriers[0].TTL, 2*time.Second)
+	re.LessOrEqual(state.GCBarriers[0].TTL, 3*time.Second)
+}
+
 func TestDecodeHttpKeyRange(t *testing.T) {
 	re := require.New(t)
 	input := make(map[string]any)
@@ -2491,4 +2765,81 @@ func TestDecodeHttpKeyRange(t *testing.T) {
 	ret, err := keyutil.DecodeHTTPKeyRanges(input)
 	re.NoError(err)
 	re.Equal([]string{"100", "200", "300", "400"}, ret)
+}
+func TestCreateClientWithKeyspaceCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	defer tc.Destroy()
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	leaderName := tc.WaitLeader()
+	pdLeaderServer := tc.GetServer(leaderName)
+	re.NoError(pdLeaderServer.BootstrapCluster())
+
+	// Case 1 :There is no region split for the system keyspace yet, so the client creation should fail.
+	pdAddr := pdLeaderServer.GetAddr()
+	apiCtx := pd.NewAPIContextV2(constant.SystemKeyspaceName)
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
+		caller.TestComponent,
+		[]string{pdAddr}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.Error(err)
+	re.ErrorContains(err, errs.ErrKeyspaceNotFound.Error())
+	re.Nil(cli)
+
+	// Case 2: After manually inserting region splits for the system keyspace, the client creation should succeed.
+	// System keyspace is created automatically in the next gen, so we need to skip that step.
+	id := constant.SystemKeyspaceID
+	if !kerneltype.IsNextGen() {
+		req := &keyspace.CreateKeyspaceRequest{
+			Name:       constant.SystemKeyspaceName,
+			CreateTime: time.Now().Unix(),
+		}
+		meta, err := pdLeaderServer.GetKeyspaceManager().CreateKeyspace(req)
+		re.NoError(err)
+		id = meta.GetId()
+	}
+
+	regionBound := keyspace.MakeRegionBound(id)
+	heartbeatRequests := []*pdpb.RegionHeartbeatRequest{
+		createHeartbeatRequest(regionBound.RawLeftBound, regionBound.RawRightBound),
+		createHeartbeatRequest(regionBound.RawRightBound, regionBound.TxnLeftBound),
+		createHeartbeatRequest(regionBound.TxnLeftBound, regionBound.TxnRightBound),
+		createHeartbeatRequest(regionBound.TxnRightBound, []byte{}),
+	}
+	raftCluster := pdLeaderServer.GetRaftCluster()
+	re.NotNil(raftCluster)
+	for _, req := range heartbeatRequests {
+		regionInfo := core.RegionFromHeartbeat(req, 1)
+		err := raftCluster.HandleRegionHeartbeat(regionInfo)
+		re.NoError(err)
+	}
+	re.Len(raftCluster.GetRegions(), 4)
+
+	cli, err = pd.NewClientWithAPIContext(ctx, apiCtx,
+		caller.TestComponent,
+		[]string{pdAddr}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	re.NotNil(cli)
+	cli.Close()
+}
+
+func createHeartbeatRequest(startKey []byte, endKey []byte) *pdpb.RegionHeartbeatRequest {
+	regionID := regionIDAllocator.alloc()
+	region := &metapb.Region{
+		Id:          regionID,
+		StartKey:    startKey,
+		EndKey:      endKey,
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers:       peers,
+	}
+	return &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(),
+		Region: region,
+		Leader: peers[0],
+	}
 }

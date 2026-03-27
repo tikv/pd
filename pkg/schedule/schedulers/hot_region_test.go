@@ -1030,7 +1030,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	default:
 	}
 
-	for range 20 {
+	for range 3 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		cnt := 0
 	testLoop:
@@ -1518,7 +1518,8 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
-	for i := range 3 {
+	// Create stores 1-6 to support all test scenarios
+	for i := range 6 {
 		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
 	}
 

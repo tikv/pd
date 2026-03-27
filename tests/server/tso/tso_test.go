@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -82,12 +81,12 @@ func (s *tsoTestSuite) checkRequestFollower(cluster *tests.TestCluster) {
 	}
 	re.NotNil(followerServer)
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
+	defer conn.Close()
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
@@ -128,12 +127,12 @@ func (s *tsoTestSuite) checkDelaySyncTimestamp(cluster *tests.TestCluster) {
 	}
 	re.NotNil(nextLeaderServer)
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		Count:      1,
-		DcLocation: tso.GlobalDCLocation,
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
 	}
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
@@ -177,7 +176,8 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
 	clusterID := leaderServer.GetClusterID()
 
 	tsoClient, err := grpcPDClient.Tso(ctx)
@@ -197,9 +197,8 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	for range 20 {
 		begin := time.Now()
 		req := &pdpb.TsoRequest{
-			Header:     testutil.NewRequestHeader(clusterID),
-			Count:      uint32(count),
-			DcLocation: tso.GlobalDCLocation,
+			Header: testutil.NewRequestHeader(clusterID),
+			Count:  uint32(count),
 		}
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()

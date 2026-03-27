@@ -21,9 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/tests"
@@ -166,8 +164,17 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 // A PD joins itself.
 func TestPDJoinsItself(t *testing.T) {
 	re := require.New(t)
-	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
-	defer testutil.CleanServer(cfg.DataDir)
-	cfg.Join = cfg.AdvertiseClientUrls
-	re.Error(join.PrepareJoinCluster(cfg))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	// Get a server config and modify it to join itself
+	cfg := cluster.GetConfig().InitialServers[0]
+	serverCfg, err := cfg.Generate()
+	re.NoError(err)
+	serverCfg.Join = serverCfg.AdvertiseClientUrls
+	re.Error(join.PrepareJoinCluster(serverCfg))
 }

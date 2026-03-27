@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestValidateID(t *testing.T) {
@@ -35,11 +36,26 @@ func TestValidateID(t *testing.T) {
 		hasErr bool
 	}{
 		{100, false},
-		{constant.MaxValidKeyspaceID - 1, false},
 		{constant.MaxValidKeyspaceID, false},
 		{constant.MaxValidKeyspaceID + 1, true},
 		{math.MaxUint32, true},
 	}
+
+	// Add kernel-specific test case for MaxValidKeyspaceID - 1
+	if kerneltype.IsNextGen() {
+		// In NextGen mode, MaxValidKeyspaceID - 1 is SystemKeyspaceID, which is protected
+		testCases = append(testCases, struct {
+			id     uint32
+			hasErr bool
+		}{constant.MaxValidKeyspaceID - 1, true})
+	} else {
+		// In Classic mode, MaxValidKeyspaceID - 1 is not protected
+		testCases = append(testCases, struct {
+			id     uint32
+			hasErr bool
+		}{constant.MaxValidKeyspaceID - 1, false})
+	}
+
 	for _, testCase := range testCases {
 		re.Equal(testCase.hasErr, validateID(testCase.id) != nil)
 	}
@@ -62,6 +78,8 @@ func TestValidateName(t *testing.T) {
 		{"keyspace%1", true},
 		{"789z-_", false},
 		{"789z-_)", true},
+		{"18446744073709551615", false}, // max uint64
+		{"18446744073709551615a", true},
 		{"78912345678982u7389217897238917389127893781278937128973812728397281378932179837", true},
 		{"scope1", false},
 		{"-----", false},
@@ -131,15 +149,15 @@ func TestMakeLabelRule(t *testing.T) {
 		{
 			id: 0,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    "keyspaces/0",
+				ID:    getRegionLabelID(0),
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   "id",
+						Key:   regionLabelKey,
 						Value: "0",
 					},
 				},
-				RuleType: "key-range",
+				RuleType: labeler.KeyRange,
 				Data: []any{
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 0})),
@@ -155,15 +173,15 @@ func TestMakeLabelRule(t *testing.T) {
 		{
 			id: 4242,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    "keyspaces/4242",
+				ID:    getRegionLabelID(4242),
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   "id",
+						Key:   regionLabelKey,
 						Value: "4242",
 					},
 				},
-				RuleType: "key-range",
+				RuleType: labeler.KeyRange,
 				Data: []any{
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
@@ -179,5 +197,100 @@ func TestMakeLabelRule(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id))
+	}
+}
+
+func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		labelRule  *labeler.LabelRule
+		expectedID uint32
+		expectedOK bool
+	}{
+		// Valid keyspace label rule.
+		{
+			labelRule:  MakeLabelRule(1),
+			expectedID: 1,
+			expectedOK: true,
+		},
+		// Invalid keyspace label ID - unmatched prefix.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    "not-keyspaces/1",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   regionLabelKey,
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - invalid keyspace ID.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    "keyspaces/id1",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   regionLabelKey,
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    "keyspaces/1id",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   regionLabelKey,
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - invalid keyspace ID label rule.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    getRegionLabelID(1),
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "not-id",
+						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - unmatched keyspace ID with label rule.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:    getRegionLabelID(1),
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "2",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+	}
+	for _, testCase := range testCases {
+		id, ok := ParseKeyspaceIDFromLabelRule(testCase.labelRule)
+		re.Equal(testCase.expectedID, id)
+		re.Equal(testCase.expectedOK, ok)
 	}
 }

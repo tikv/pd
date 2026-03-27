@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -32,7 +33,22 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
+
+var errSaveKeyspaceGroup = errors.New("save keyspace group error")
+
+type errorKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	failOnSaveID uint32
+}
+
+func (s *errorKeyspaceGroupStorage) SaveKeyspaceGroup(txn kv.Txn, kg *endpoint.KeyspaceGroup) error {
+	if s.failOnSaveID != 0 && kg.ID == s.failOnSaveID {
+		return errSaveKeyspaceGroup
+	}
+	return s.StorageEndpoint.SaveKeyspaceGroup(txn, kg)
+}
 
 type keyspaceGroupTestSuite struct {
 	suite.Suite
@@ -238,6 +254,50 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
 	re.Len(kg3.Keyspaces, 1)
 }
 
+func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackOnSaveError() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	errorStore := &errorKeyspaceGroupStorage{StorageEndpoint: store}
+	kgm := NewKeyspaceGroupManager(ctx, errorStore, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+
+	keyspaceID := uint32(111)
+	keyspaceGroups := []*endpoint.KeyspaceGroup{
+		{
+			ID:        uint32(1),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{keyspaceID},
+		},
+		{
+			ID:        uint32(2),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{222},
+		},
+	}
+	re.NoError(kgm.CreateKeyspaceGroups(keyspaceGroups))
+
+	errorStore.failOnSaveID = 2
+	err := kgm.UpdateKeyspaceGroup("1", "2", endpoint.Standard, endpoint.Standard, keyspaceID)
+	re.ErrorIs(err, errSaveKeyspaceGroup)
+
+	oldKG := kgm.groups[endpoint.Standard].Get(1)
+	newKG := kgm.groups[endpoint.Standard].Get(2)
+	re.NotNil(oldKG)
+	re.NotNil(newKG)
+	re.Equal([]uint32{keyspaceID}, oldKG.Keyspaces)
+	re.Equal([]uint32{222}, newKG.Keyspaces)
+
+	storedOld, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Equal([]uint32{keyspaceID}, storedOld.Keyspaces)
+	storedNew, err := kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal([]uint32{222}, storedNew.Keyspaces)
+}
+
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re := suite.Require()
 
@@ -256,9 +316,10 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.NoError(err)
-	// split the default keyspace
-	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{constant.DefaultKeyspaceID})
-	re.ErrorIs(err, errs.ErrModifyDefaultKeyspace)
+	// split the bootstrap keyspace
+	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
+	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{bootstrapKeyspaceID})
+	re.ErrorIs(err, newModifyProtectedKeyspaceError())
 	// split the keyspace group 1 to 4
 	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{444})
 	re.ErrorIs(err, errs.ErrKeyspaceGroupNotEnoughReplicas)
@@ -560,8 +621,27 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			re.ErrorIs(testCase.err, err, "test case %d", idx)
 		} else {
 			re.NoError(err, "test case %d", idx)
-			re.Equal(testCase.expectedOld, old, "test case %d", idx)
-			re.Equal(testCase.expectedNew, new, "test case %d", idx)
+
+			// Special handling for test case 5 which involves keyspace 0 protection
+			expectedOld := testCase.expectedOld
+			expectedNew := testCase.expectedNew
+			if idx == 5 {
+				// Test case 5: old=[0,1,2,3,4,5], start=0, end=4
+				// In Classic mode: keyspace 0 is protected, so it stays in old group
+				// In NextGen mode: keyspace 0 can move, so it goes to new group
+				if kerneltype.IsNextGen() {
+					// NextGen: keyspace 0 can move to new group
+					expectedOld = []uint32{5}
+					expectedNew = []uint32{0, 1, 2, 3, 4}
+				} else {
+					// Classic: keyspace 0 is protected, stays in old group
+					expectedOld = []uint32{0, 5}
+					expectedNew = []uint32{1, 2, 3, 4}
+				}
+			}
+
+			re.Equal(expectedOld, old, "test case %d", idx)
+			re.Equal(expectedNew, new, "test case %d", idx)
 		}
 	}
 }

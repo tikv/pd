@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 const mockStreamURL = "mock:///"
@@ -356,10 +357,11 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
 	// new request anymore.
-	err := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {
-		panic("unreachable")
+	testutil.Eventually(s.re, func() bool {
+		return s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
+			s.re.Error(err)
+		}) != nil
 	})
-	s.re.Error(err)
 }
 
 func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests int) {

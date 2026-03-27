@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,23 +45,29 @@ import (
 const regionScatterName = "region-scatter"
 
 var (
-	gcInterval = time.Minute
-	gcTTL      = time.Minute * 3
+	gcInterval            = time.Minute
+	gcTTL                 = time.Minute * 3
+	operatorPriorityLevel = constant.High
+
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	scatterSkipEmptyRegionCounter   = scatterCounter.WithLabelValues("skip", "empty-region")
 	scatterSkipNoRegionCounter      = scatterCounter.WithLabelValues("skip", "no-region")
 	scatterSkipNoLeaderCounter      = scatterCounter.WithLabelValues("skip", "no-leader")
 	scatterSkipHotRegionCounter     = scatterCounter.WithLabelValues("skip", "hot")
 	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
+	scatterSkipAffinityCounter      = scatterCounter.WithLabelValues("skip", "affinity")
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
+	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
 )
 
 const (
 	maxSleepDuration     = time.Minute
 	initialSleepDuration = 100 * time.Millisecond
 	maxRetryLimit        = 30
+	scatterOperatorDesc  = "scatter-region"
 )
 
 type selectedStores struct {
@@ -126,6 +133,7 @@ type RegionScatterer struct {
 	specialEngines    sync.Map
 	opController      *operator.Controller
 	addSuspectRegions func(bool, ...uint64)
+	affinityFilter    filter.RegionFilter
 }
 
 // NewRegionScatterer creates a region scatterer.
@@ -137,6 +145,7 @@ func NewRegionScatterer(ctx context.Context, cluster sche.SharedCluster, opContr
 		cluster:           cluster,
 		opController:      opController,
 		addSuspectRegions: addSuspectRegions,
+		affinityFilter:    filter.NewAffinityFilter(cluster),
 		ordinaryEngine: newEngineContext(ctx, func() filter.Filter {
 			return filter.NewEngineFilter(regionScatterName, filter.NotSpecialEngines)
 		}),
@@ -153,7 +162,7 @@ type engineContext struct {
 
 func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineContext {
 	filterFuncs = append(filterFuncs, func() filter.Filter {
-		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true, OperatorLevel: constant.High}
+		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true, OperatorLevel: operatorPriorityLevel}
 	})
 	return engineContext{
 		filterFuncs:    filterFuncs,
@@ -233,6 +242,9 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 	if retryLimit > maxRetryLimit {
 		retryLimit = maxRetryLimit
 	}
+	// opsCount represents the number of regions successfully processed (not necessarily
+	// with operators created). This includes regions skipped due to affinity or already
+	// in ideal distribution.
 	opsCount := 0
 	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
@@ -281,10 +293,45 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 
+	// Check if there is any existing operator for the region.
+	// if the exist operator level is higher than scatter operator level, give up to create new scatter operator new.
+	// otherwise, create new scatter operator to replace the existing one.
+	if op := r.opController.GetOperator(region.GetID()); op != nil && op.GetPriorityLevel() >= operatorPriorityLevel {
+		val, exist := op.GetAdditionalInfo("group")
+		// If the existing operator is created by the same group scatterer, just skip creating a new one.
+		if strings.Contains(op.Desc(), scatterOperatorDesc) && exist && val == group {
+			scatterOperatorRunningCounter.Inc()
+			log.Debug("scatter operator is already running",
+				zap.Uint64("region-id", region.GetID()))
+			return nil, nil
+		}
+		scatterOperatorExistedCounter.Inc()
+		log.Debug("the operator exist, but it does not meet requirement",
+			zap.Uint64("region-id", region.GetID()),
+			zap.String("additional-info-group", val),
+			zap.String("operator-des", op.Desc()),
+			zap.Bool("group-exist", exist),
+		)
+		return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
+	}
+
 	if region.GetLeader() == nil {
 		scatterSkipNoLeaderCounter.Inc()
 		log.Warn("region no leader during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
+	}
+
+	// Check if region is in an affinity group that doesn't allow regular scheduling.
+	// Unlike hot regions or regions without leaders (which are temporary states),
+	// affinity is a configured persistent state. Returning nil error prevents the
+	// client from retrying, as retrying won't change the affinity configuration.
+	// Note: Returning (nil, nil) means:
+	//   - The region will not be retried in scatterRegions loop
+	//   - opsCount will still increment (representing "successfully processed", not "operator created")
+	//   - The region won't appear in the failures map (client considers it successful)
+	if !r.affinityFilter.Select(region).IsOK() {
+		scatterSkipAffinityCounter.Inc()
+		return nil, nil
 	}
 
 	if r.cluster.IsRegionHot(region) {
@@ -386,7 +433,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		return nil, nil
 	}
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
+	op, err := operator.CreateScatterRegionOperator(scatterOperatorDesc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		for _, peer := range region.GetPeers() {
@@ -401,7 +448,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		op.SetAdditionalInfo("group", group)
 		op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
-		op.SetPriorityLevel(constant.High)
+		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
 }

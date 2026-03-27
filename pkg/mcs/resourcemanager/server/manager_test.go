@@ -16,10 +16,16 @@ package server
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
@@ -28,8 +34,11 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcsserver "github.com/tikv/pd/pkg/mcs/server"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -41,15 +50,274 @@ type mockConfigProvider struct{ bs.Server }
 
 func (*mockConfigProvider) GetControllerConfig() *ControllerConfig { return &ControllerConfig{} }
 
+func (*mockConfigProvider) GetMeteringWriter() *metering.Writer { return nil }
+
+func (*mockConfigProvider) GetResourceGroupWriteRole() ResourceGroupWriteRole {
+	return ResourceGroupWriteRoleLegacyAll
+}
+
 func (*mockConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
+
+type mockRoleConfigProvider struct {
+	bs.Server
+	role ResourceGroupWriteRole
+}
+
+func (*mockRoleConfigProvider) GetControllerConfig() *ControllerConfig { return &ControllerConfig{} }
+
+func (*mockRoleConfigProvider) GetMeteringWriter() *metering.Writer { return nil }
+
+func (m *mockRoleConfigProvider) GetResourceGroupWriteRole() ResourceGroupWriteRole { return m.role }
+
+func (*mockRoleConfigProvider) AddStartCallback(...func()) {}
+
+func (*mockRoleConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
+
+type testBasicServer struct{}
+
+func (*testBasicServer) Name() string { return "test-rm" }
+
+func (*testBasicServer) GetAddr() string { return "" }
+
+func (*testBasicServer) Context() context.Context { return context.Background() }
+
+func (*testBasicServer) Run() error { return nil }
+
+func (*testBasicServer) Close() {}
+
+func (*testBasicServer) GetServingUrls() []string { return nil }
+
+func (*testBasicServer) GetClient() *clientv3.Client { return nil }
+
+func (*testBasicServer) GetHTTPClient() *http.Client { return nil }
+
+func (*testBasicServer) AddStartCallback(...func()) {}
+
+func (*testBasicServer) IsServing() bool { return true }
+
+func (*testBasicServer) AddServiceReadyCallback(...func(context.Context) error) {}
+
+type fakeMetadataLoopWatcher struct {
+	startWatchLoopFn func()
+	waitLoadFn       func() error
+}
+
+func (w *fakeMetadataLoopWatcher) StartWatchLoop() {
+	if w.startWatchLoopFn != nil {
+		w.startWatchLoopFn()
+	}
+}
+
+func (w *fakeMetadataLoopWatcher) WaitLoad() error {
+	if w.waitLoadFn != nil {
+		return w.waitLoadFn()
+	}
+	return nil
+}
+
+type failingControllerConfigStorage struct {
+	storage.Storage
+	err error
+}
+
+func (s failingControllerConfigStorage) SaveControllerConfig(any) error {
+	return s.err
+}
+
+type testMetadataLoopWatcherFactory func(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	preEventsFn func([]*clientv3.Event) error,
+	putFn, deleteFn func(*mvccpb.KeyValue) error,
+	postEventsFn func([]*clientv3.Event) error,
+	isWithPrefix bool,
+) metadataLoopWatcher
 
 func prepareManager() *Manager {
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 	return m
+}
+
+func prepareMetadataWatcherManager() *Manager {
+	m := prepareManager()
+	m.enableMetadataWatcher = true
+	m.srv = &testBasicServer{}
+	return m
+}
+
+func withMetadataLoopWatcherFactory(t *testing.T, factory testMetadataLoopWatcherFactory) {
+	t.Helper()
+	originalFactory := newMetadataLoopWatcher
+	newMetadataLoopWatcher = factory
+	t.Cleanup(func() {
+		newMetadataLoopWatcher = originalFactory
+	})
+}
+
+func TestManagerMetadataWatcherLifecycle(t *testing.T) {
+	t.Run("enables_metadata_watcher_for_rm_service_server", func(t *testing.T) {
+		re := require.New(t)
+		m := NewManager[*Server](&Server{
+			BaseServer: &mcsserver.BaseServer{},
+			cfg:        &Config{},
+		})
+		re.True(m.enableMetadataWatcher)
+	})
+
+	t.Run("cancels_metadata_watcher_context_on_init_error", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareMetadataWatcherManager()
+
+		parentCtx, parentCancel := context.WithCancel(context.Background())
+		defer parentCancel()
+
+		watcherErr := errors.New("watcher load failed")
+		var capturedCtx context.Context
+		withMetadataLoopWatcherFactory(t, func(
+			ctx context.Context,
+			_ *sync.WaitGroup,
+			_ *clientv3.Client,
+			_, _ string,
+			_ func([]*clientv3.Event) error,
+			_, _ func(*mvccpb.KeyValue) error,
+			_ func([]*clientv3.Event) error,
+			_ bool,
+		) metadataLoopWatcher {
+			capturedCtx = ctx
+			return &fakeMetadataLoopWatcher{
+				waitLoadFn: func() error { return watcherErr },
+			}
+		})
+
+		err := m.Init(parentCtx)
+		re.ErrorIs(err, watcherErr)
+		re.NotNil(m.cancel)
+		re.NotNil(capturedCtx)
+		re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+		re.NoError(parentCtx.Err())
+		re.ErrorIs(capturedCtx.Err(), context.Canceled)
+	})
+
+	t.Run("cancels_metadata_watcher_context_on_close", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareMetadataWatcherManager()
+
+		parentCtx, parentCancel := context.WithCancel(context.Background())
+		defer parentCancel()
+
+		var capturedCtx context.Context
+		withMetadataLoopWatcherFactory(t, func(
+			ctx context.Context,
+			_ *sync.WaitGroup,
+			_ *clientv3.Client,
+			_, _ string,
+			_ func([]*clientv3.Event) error,
+			_, _ func(*mvccpb.KeyValue) error,
+			_ func([]*clientv3.Event) error,
+			_ bool,
+		) metadataLoopWatcher {
+			capturedCtx = ctx
+			return &fakeMetadataLoopWatcher{}
+		})
+
+		re.NoError(m.Init(parentCtx))
+		re.NotNil(capturedCtx)
+		re.NotEqual(parentCtx.Done(), capturedCtx.Done())
+		re.NoError(capturedCtx.Err())
+
+		m.close()
+
+		re.ErrorIs(capturedCtx.Err(), context.Canceled)
+	})
+}
+
+func TestLoadKeyspaceResourceGroupsRejectsMismatchedPayloadName(t *testing.T) {
+	re := require.New(t)
+
+	memStorage := storage.NewStorageWithMemoryBackend()
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = memStorage
+
+	group := &rmpb.ResourceGroup{
+		Name: "payload-group",
+		Mode: rmpb.GroupMode_RUMode,
+		KeyspaceId: &rmpb.KeyspaceIDValue{
+			Value: 42,
+		},
+	}
+	rawGroup, err := proto.Marshal(group)
+	re.NoError(err)
+	re.NoError(memStorage.Save(keypath.KeyspaceResourceGroupSettingPath(42, "key-group"), string(rawGroup)))
+
+	re.NoError(m.loadKeyspaceResourceGroups())
+	krgm := m.getKeyspaceResourceGroupManager(42)
+	re.NotNil(krgm)
+	re.Nil(krgm.getResourceGroup("payload-group", false))
+	re.Nil(krgm.getResourceGroup("key-group", false))
+	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+}
+
+func TestManagerControllerConfigSnapshots(t *testing.T) {
+	t.Run("returns_snapshot", func(t *testing.T) {
+		re := require.New(t)
+
+		m := prepareManager()
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
+
+		snapshot := m.GetControllerConfig()
+		snapshot.RequestUnit.ReadBaseCost = 1.5
+
+		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
+
+	t.Run("publishes_new_snapshot_after_successful_update", func(t *testing.T) {
+		re := require.New(t)
+
+		m := prepareManager()
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
+
+		previous := m.controllerConfig
+		re.NoError(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5))
+		re.NotSame(previous, m.controllerConfig)
+		re.InDelta(0.5, previous.RequestUnit.ReadBaseCost, 0.00001)
+		re.InDelta(1.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
+
+	t.Run("does_not_publish_unsaved_snapshot", func(t *testing.T) {
+		re := require.New(t)
+
+		expectedErr := errors.New("save controller config failed")
+		m := prepareManager()
+		m.storage = failingControllerConfigStorage{
+			Storage: storage.NewStorageWithMemoryBackend(),
+			err:     expectedErr,
+		}
+		m.controllerConfig = &ControllerConfig{
+			RequestUnit: RequestUnitConfig{
+				ReadBaseCost: 0.5,
+			},
+		}
+
+		previous := m.controllerConfig
+		err := m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
+		re.ErrorIs(err, expectedErr)
+		re.Same(previous, m.controllerConfig)
+		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+	})
 }
 
 func TestInitManager(t *testing.T) {
@@ -313,14 +581,14 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	re.Equal(0.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
 	// Test set the service limit of the keyspace.
-	m.SetKeyspaceServiceLimit(1, 100.0)
+	re.NoError(m.SetKeyspaceServiceLimit(1, 100.0))
 	limiter = m.GetKeyspaceServiceLimiter(1)
 	re.Equal(100.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens) // When setting from 0 to positive, available tokens remain 0
 	// Test set the service limit of the non-existing keyspace.
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Nil(limiter)
-	m.SetKeyspaceServiceLimit(2, 100.0)
+	re.NoError(m.SetKeyspaceServiceLimit(2, 100.0))
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Equal(100.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
@@ -390,7 +658,7 @@ func TestResourceGroupPersistence(t *testing.T) {
 	err := m.AddResourceGroup(group)
 	re.NoError(err)
 	keyspaceID := ExtractKeyspaceID(group.KeyspaceId)
-	m.SetKeyspaceServiceLimit(keyspaceID, 100.0)
+	re.NoError(m.SetKeyspaceServiceLimit(keyspaceID, 100.0))
 
 	// Use the same storage to rebuild a manager.
 	storage := m.storage
@@ -419,4 +687,89 @@ func TestResourceGroupPersistence(t *testing.T) {
 	// Non-existing keyspace should have a nil limiter.
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Nil(limiter)
+}
+
+func TestManagerMetadataWriteRoleGates(t *testing.T) {
+	re := require.New(t)
+	m := NewManager[*mockRoleConfigProvider](&mockRoleConfigProvider{
+		role: ResourceGroupWriteRoleRMTokenOnly,
+	})
+	m.storage = storage.NewStorageWithMemoryBackend()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(m.Init(ctx))
+	re.Equal(ResourceGroupWriteRoleRMTokenOnly, m.GetWriteRole())
+
+	group := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
+		},
+	}
+	re.ErrorIs(m.AddResourceGroup(group), errMetadataWriteDisabled)
+	re.ErrorIs(m.ModifyResourceGroup(group), errMetadataWriteDisabled)
+	re.ErrorIs(m.DeleteResourceGroup(constant.NullKeyspaceID, group.Name), errMetadataWriteDisabled)
+	re.ErrorIs(m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.0), errMetadataWriteDisabled)
+	re.ErrorIs(m.SetKeyspaceServiceLimit(constant.NullKeyspaceID, 1.0), errMetadataWriteDisabled)
+}
+
+func TestKeyspaceResourceGroupManagerWriteRoleGates(t *testing.T) {
+	re := require.New(t)
+	memStorage := storage.NewStorageWithMemoryBackend()
+	group := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
+		},
+	}
+
+	tokenOnlyKRGM := newKeyspaceResourceGroupManager(1, memStorage, ResourceGroupWriteRoleRMTokenOnly)
+	re.NoError(tokenOnlyKRGM.addResourceGroup(group))
+	modifiedGroup := &rmpb.ResourceGroup{
+		Name: "test_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 200}},
+		},
+	}
+	re.ErrorIs(tokenOnlyKRGM.modifyResourceGroup(modifiedGroup), errMetadataWriteDisabled)
+	re.Equal(float64(100), tokenOnlyKRGM.getResourceGroup(group.GetName(), false).getFillRate())
+	re.ErrorIs(tokenOnlyKRGM.deleteResourceGroup(group.GetName()), errMetadataWriteDisabled)
+	re.NotNil(tokenOnlyKRGM.getResourceGroup(group.GetName(), false))
+
+	var tokenOnlySettingsCount int
+	re.NoError(memStorage.LoadResourceGroupSettings(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == tokenOnlyKRGM.keyspaceID && name == group.GetName() {
+			tokenOnlySettingsCount++
+		}
+	}))
+	var tokenOnlyStatesCount int
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == tokenOnlyKRGM.keyspaceID && name == group.GetName() {
+			tokenOnlyStatesCount++
+		}
+	}))
+	re.Equal(0, tokenOnlySettingsCount)
+	re.Equal(1, tokenOnlyStatesCount)
+
+	metaOnlyKRGM := newKeyspaceResourceGroupManager(2, memStorage, ResourceGroupWriteRolePDMetaOnly)
+	re.NoError(metaOnlyKRGM.addResourceGroup(group))
+	metaOnlyKRGM.persistResourceGroupRunningState()
+
+	var metaOnlySettingsCount int
+	re.NoError(memStorage.LoadResourceGroupSettings(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == metaOnlyKRGM.keyspaceID && name == group.GetName() {
+			metaOnlySettingsCount++
+		}
+	}))
+	var metaOnlyStatesCount int
+	re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+		if keyspaceID == metaOnlyKRGM.keyspaceID && name == group.GetName() {
+			metaOnlyStatesCount++
+		}
+	}))
+	re.Equal(1, metaOnlySettingsCount)
+	re.Equal(0, metaOnlyStatesCount)
 }

@@ -34,12 +34,12 @@ type RequestUnit float64
 type AccessLocationType byte
 
 const (
-	// AccessUnknown means the access type is unknown because there is not "zone" lables in either
+	// AccessUnknown means the access type is unknown because there is not "zone" labels in either
 	// the source or target instance, it is likely the cluster is not cross AZ deployed.
 	AccessUnknown AccessLocationType = iota
 	// AccessLocalZone means the source and target instance are in the same zone.
 	AccessLocalZone
-	// AccessCrossZone means the source and target instance are in differne zones.
+	// AccessCrossZone means the source and target instance are in different zones.
 	AccessCrossZone
 )
 
@@ -214,54 +214,11 @@ func (*SQLCalculator) BeforeKVRequest(*rmpb.Consumption, RequestInfo) {
 func (*SQLCalculator) AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInfo) {
 }
 
-func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
+func getRUValueFromConsumption(custom *rmpb.Consumption) float64 {
 	if custom == nil {
 		return 0
 	}
-	if typ == rmpb.RequestUnitType_RU {
-		return custom.RRU + custom.WRU
-	}
-	return 0
-}
-
-func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType) *rmpb.TokenBucket {
-	if group == nil {
-		return nil
-	}
-	if typ == rmpb.RequestUnitType_RU {
-		return group.RUSettings.RU
-	}
-	return nil
-}
-
-func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
-	if custom == nil {
-		return 0
-	}
-	switch typ {
-	case rmpb.RawResourceType_CPU:
-		return custom.TotalCpuTimeMs
-	case rmpb.RawResourceType_IOReadFlow:
-		return custom.ReadBytes
-	case rmpb.RawResourceType_IOWriteFlow:
-		return custom.WriteBytes
-	}
-	return 0
-}
-
-func getRawResourceTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RawResourceType) *rmpb.TokenBucket {
-	if group == nil {
-		return nil
-	}
-	switch typ {
-	case rmpb.RawResourceType_CPU:
-		return group.RawResourceSettings.Cpu
-	case rmpb.RawResourceType_IOReadFlow:
-		return group.RawResourceSettings.IoRead
-	case rmpb.RawResourceType_IOWriteFlow:
-		return group.RawResourceSettings.IoWrite
-	}
-	return nil
+	return custom.RRU + custom.WRU
 }
 
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
@@ -278,6 +235,9 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes += custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes += custom2.WriteCrossAzTrafficBytes
+	custom1.TikvRUV2 += custom2.TikvRUV2
+	custom1.TidbRUV2 += custom2.TidbRUV2
+	custom1.TiflashRUV2 += custom2.TiflashRUV2
 }
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
@@ -322,6 +282,18 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes - last.WriteCrossAzTrafficBytes
 		last.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes
 	}
+	if now.TikvRUV2 > last.TikvRUV2 {
+		delta.TikvRUV2 = now.TikvRUV2 - last.TikvRUV2
+		last.TikvRUV2 = now.TikvRUV2
+	}
+	if now.TidbRUV2 > last.TidbRUV2 {
+		delta.TidbRUV2 = now.TidbRUV2 - last.TidbRUV2
+		last.TidbRUV2 = now.TidbRUV2
+	}
+	if now.TiflashRUV2 > last.TiflashRUV2 {
+		delta.TiflashRUV2 = now.TiflashRUV2 - last.TiflashRUV2
+		last.TiflashRUV2 = now.TiflashRUV2
+	}
 	return delta
 }
 
@@ -339,10 +311,17 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 	custom1.ReadCrossAzTrafficBytes -= custom2.ReadCrossAzTrafficBytes
 	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
+	custom1.TikvRUV2 -= custom2.TikvRUV2
+	custom1.TidbRUV2 -= custom2.TidbRUV2
+	custom1.TiflashRUV2 -= custom2.TiflashRUV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
-	return custom1.RRU == custom2.RRU && custom1.WRU == custom2.WRU
+	return custom1.RRU == custom2.RRU &&
+		custom1.WRU == custom2.WRU &&
+		custom1.TikvRUV2 == custom2.TikvRUV2 &&
+		custom1.TidbRUV2 == custom2.TidbRUV2 &&
+		custom1.TiflashRUV2 == custom2.TiflashRUV2
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.

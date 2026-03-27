@@ -40,7 +40,7 @@ func RuleGroupIDPath(groupID string) string {
 
 // RegionLabelKeyPath returns the path to save the region label with the given rule key.
 func RegionLabelKeyPath(ruleKey string) string {
-	return fmt.Sprintf(regionLablePathFormat, ClusterID(), ruleKey)
+	return fmt.Sprintf(regionLabelPathFormat, ClusterID(), ruleKey)
 }
 
 // RuleGroupPathPrefix returns the path prefix to save the placement rule groups.

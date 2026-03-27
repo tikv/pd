@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -57,6 +56,8 @@ func (suite *hotTestSuite) SetupSuite() {
 		func(conf *config.Config, _ string) {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
 			conf.Schedule.HotRegionCacheHitsThreshold = 0
+			conf.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
+			conf.Schedule.HotRegionsReservedDays = 1
 		},
 	)
 }
@@ -382,25 +383,14 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) 
 	}
 }
 
-func TestHistoryHotRegions(t *testing.T) {
+func (suite *hotTestSuite) TestHistoryHotRegions() {
 	// TODO: support history hotspot in scheduling server with stateless in the future.
 	// Ref: https://github.com/tikv/pd/pull/7183
-	re := require.New(t)
-	statistics.DisableDenoising()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1,
-		func(cfg *config.Config, _ string) {
-			cfg.Schedule.HotRegionCacheHitsThreshold = 0
-			cfg.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
-			cfg.Schedule.HotRegionsReservedDays = 1
-		},
-	)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkHistoryHotRegions)
+}
+
+func (suite *hotTestSuite) checkHistoryHotRegions(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -418,13 +408,10 @@ func TestHistoryHotRegions(t *testing.T) {
 			State: metapb.StoreState_Up,
 		},
 	}
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store)
 	}
-	defer cluster.Destroy()
+	leaderServer := cluster.GetLeaderServer()
 	startTime := time.Now().Unix()
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
@@ -503,18 +490,13 @@ func TestHistoryHotRegions(t *testing.T) {
 	re.Error(json.Unmarshal(output, &hotRegions))
 }
 
-func TestBuckets(t *testing.T) {
+func (suite *hotTestSuite) TestBuckets() {
 	// TODO: support forward bucket request in scheduling server in the future.
-	re := require.New(t)
-	statistics.DisableDenoising()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkBuckets)
+}
+
+func (suite *hotTestSuite) checkBuckets(cluster *pdTests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -528,13 +510,9 @@ func TestBuckets(t *testing.T) {
 			State: metapb.StoreState_Up,
 		},
 	}
-
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store)
 	}
-	defer cluster.Destroy()
 
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	pdTests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))

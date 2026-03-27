@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -41,7 +41,7 @@ import (
 )
 
 func newEtcdStorageEndpoint(t *testing.T) (se *StorageEndpoint, clean func()) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	kvBase := kv.NewEtcdKVBase(client)
 
 	s := NewStorageEndpoint(kvBase, nil)
@@ -268,8 +268,8 @@ func TestGCStateTransactionACID(t *testing.T) {
 				return nil
 			default:
 			}
-			from := rand.Intn(len(allKeys))
-			to := rand.Intn(len(allKeys) - 1)
+			from := rand.IntN(len(allKeys))
+			to := rand.IntN(len(allKeys) - 1)
 			if to >= from {
 				to++
 			}

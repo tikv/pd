@@ -15,7 +15,7 @@
 package syncutil
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"testing"
 

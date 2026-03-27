@@ -26,112 +26,24 @@ func TestGetRUValueFromConsumption(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
 	custom := &rmpb.Consumption{RRU: 2.5, WRU: 3.5}
-	typ := rmpb.RequestUnitType_RU
 	expected := float64(6)
 
-	result := getRUValueFromConsumption(custom, typ)
+	result := getRUValueFromConsumption(custom)
 	re.Equal(expected, result)
 
 	// When custom is nil
 	custom = nil
 	expected = float64(0)
 
-	result = getRUValueFromConsumption(custom, typ)
+	result = getRUValueFromConsumption(custom)
 	re.Equal(expected, result)
-}
-
-func TestGetRUTokenBucketSetting(t *testing.T) {
-	// Positive test case
-	re := require.New(t)
-	group := &rmpb.ResourceGroup{
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
-		},
-	}
-	typ := rmpb.RequestUnitType_RU
-	expected := &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}}
-
-	result := getRUTokenBucketSetting(group, typ)
-	re.Equal(expected.GetSettings().GetFillRate(), result.GetSettings().GetFillRate())
-
-	// When group is nil
-	group = nil
-	expected = nil
-
-	result = getRUTokenBucketSetting(group, typ)
-	if result != expected {
-		t.Errorf("Expected nil but got %v", result)
-	}
-}
-
-func TestGetRawResourceValueFromConsumption(t *testing.T) {
-	// Positive test case
-	re := require.New(t)
-	custom := &rmpb.Consumption{TotalCpuTimeMs: 50}
-	typ := rmpb.RawResourceType_CPU
-	expected := float64(50)
-
-	result := getRawResourceValueFromConsumption(custom, typ)
-	re.Equal(expected, result)
-
-	// When custom is nil
-	custom = nil
-	expected = float64(0)
-
-	result = getRawResourceValueFromConsumption(custom, typ)
-	re.Equal(expected, result)
-
-	// When typ is IOReadFlow
-	custom = &rmpb.Consumption{ReadBytes: 200}
-	typ = rmpb.RawResourceType_IOReadFlow
-	expected = float64(200)
-
-	result = getRawResourceValueFromConsumption(custom, typ)
-	re.Equal(expected, result)
-}
-
-func TestGetRawResourceTokenBucketSetting(t *testing.T) {
-	// Positive test case
-	re := require.New(t)
-	group := &rmpb.ResourceGroup{
-		RawResourceSettings: &rmpb.GroupRawResourceSettings{
-			Cpu: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
-		},
-	}
-	typ := rmpb.RawResourceType_CPU
-	expected := &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}}
-
-	result := getRawResourceTokenBucketSetting(group, typ)
-
-	re.Equal(expected.GetSettings().GetFillRate(), result.GetSettings().GetFillRate())
-
-	// When group is nil
-	group = nil
-	expected = nil
-
-	result = getRawResourceTokenBucketSetting(group, typ)
-	if result != expected {
-		t.Errorf("Expected nil but got %v", result)
-	}
-
-	// When typ is IOReadFlow
-	group = &rmpb.ResourceGroup{
-		RawResourceSettings: &rmpb.GroupRawResourceSettings{
-			IoRead: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 200}},
-		},
-	}
-	typ = rmpb.RawResourceType_IOReadFlow
-	expected = &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 200}}
-
-	result = getRawResourceTokenBucketSetting(group, typ)
-	re.Equal(expected.GetSettings().GetFillRate(), result.GetSettings().GetFillRate())
 }
 
 func TestAdd(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 10, WriteCrossAzTrafficBytes: 20}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 30, WriteCrossAzTrafficBytes: 40}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 10, WriteCrossAzTrafficBytes: 20, TikvRUV2: 1, TidbRUV2: 2, TiflashRUV2: 3}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 30, WriteCrossAzTrafficBytes: 40, TikvRUV2: 3, TidbRUV2: 4, TiflashRUV2: 5}
 	expected := &rmpb.Consumption{
 		RRU:                      4,
 		WRU:                      6,
@@ -143,6 +55,9 @@ func TestAdd(t *testing.T) {
 		KvWriteRpcCount:          0,
 		ReadCrossAzTrafficBytes:  40,
 		WriteCrossAzTrafficBytes: 60,
+		TikvRUV2:                 4,
+		TidbRUV2:                 6,
+		TiflashRUV2:              8,
 	}
 
 	add(custom1, custom2)
@@ -168,8 +83,8 @@ func TestAdd(t *testing.T) {
 func TestSub(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 5, WriteCrossAzTrafficBytes: 10}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 1, WriteCrossAzTrafficBytes: 2}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 5, WriteCrossAzTrafficBytes: 10, TikvRUV2: 7, TidbRUV2: 9, TiflashRUV2: 11}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 1, WriteCrossAzTrafficBytes: 2, TikvRUV2: 3, TidbRUV2: 4, TiflashRUV2: 5}
 	expected := &rmpb.Consumption{
 		RRU:                      1,
 		WRU:                      1,
@@ -181,6 +96,9 @@ func TestSub(t *testing.T) {
 		KvWriteRpcCount:          0,
 		ReadCrossAzTrafficBytes:  4,
 		WriteCrossAzTrafficBytes: 8,
+		TikvRUV2:                 4,
+		TidbRUV2:                 5,
+		TiflashRUV2:              6,
 	}
 
 	sub(custom1, custom2)
@@ -200,4 +118,34 @@ func TestSub(t *testing.T) {
 
 	sub(custom1, custom2)
 	re.Equal(expected, custom1)
+}
+
+func TestUpdateDeltaConsumption(t *testing.T) {
+	re := require.New(t)
+	last := &rmpb.Consumption{TikvRUV2: 2, TidbRUV2: 3, TiflashRUV2: 5}
+	now := &rmpb.Consumption{TikvRUV2: 5, TidbRUV2: 11, TiflashRUV2: 18}
+
+	delta := updateDeltaConsumption(last, now)
+
+	re.Equal(&rmpb.Consumption{TikvRUV2: 3, TidbRUV2: 8, TiflashRUV2: 13}, delta)
+	re.Equal(now.TikvRUV2, last.TikvRUV2)
+	re.Equal(now.TidbRUV2, last.TidbRUV2)
+	re.Equal(now.TiflashRUV2, last.TiflashRUV2)
+}
+
+func TestEqualRU(t *testing.T) {
+	re := require.New(t)
+
+	re.True(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 5, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 6},
+	))
 }
