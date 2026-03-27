@@ -237,8 +237,10 @@ func TestQPS(t *testing.T) {
 
 func TestReconfiguredCh(t *testing.T) {
 	re := require.New(t)
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 1, 0, 0, nc)
 
-	var lim Limiter
+	// The channel should block initially.
 	ch := lim.GetReconfiguredCh()
 	select {
 	case <-ch:
@@ -246,6 +248,7 @@ func TestReconfiguredCh(t *testing.T) {
 	default:
 	}
 
+	// After Reconfigure the old channel must be closed.
 	args := tokenBucketReconfigureArgs{NewTokens: 10, NewRate: 1}
 	lim.Reconfigure(t1, args)
 	select {
@@ -254,6 +257,7 @@ func TestReconfiguredCh(t *testing.T) {
 		t.Fatal("reconfiguredCh should be closed after Reconfigure")
 	}
 
+	// A new channel is created; it should block again.
 	ch2 := lim.GetReconfiguredCh()
 	re.NotEqual(fmt.Sprintf("%p", ch), fmt.Sprintf("%p", ch2))
 	select {
@@ -262,6 +266,7 @@ func TestReconfiguredCh(t *testing.T) {
 	default:
 	}
 
+	// Successive Reconfigure calls each close the current channel.
 	lim.Reconfigure(t2, args)
 	select {
 	case <-ch2:
