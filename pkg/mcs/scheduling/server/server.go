@@ -577,6 +577,9 @@ func (s *Server) stopWatcher() {
 	if s.configWatcher != nil {
 		s.configWatcher.Close()
 	}
+	if s.keyspaceWatcher != nil {
+		s.keyspaceWatcher.Close()
+	}
 }
 
 // GetPersistConfig returns the persist config.
