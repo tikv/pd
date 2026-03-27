@@ -877,7 +877,7 @@ func TestStoreVersionChange(t *testing.T) {
 	re.NoError(err)
 	store := newMetaStore(storeID, "mock://tikv-1:1", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 	var wg sync.WaitGroup
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/versionChangeConcurrency", `return(true)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/versionChangeConcurrency", func() { time.Sleep(500 * time.Millisecond) }))
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

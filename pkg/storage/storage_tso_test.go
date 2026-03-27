@@ -47,7 +47,7 @@ func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.
 
 func TestSaveTimestampWithTimeout(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/slowTxn", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/storage/kv/slowTxn", func() { time.Sleep(10 * time.Second) }))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/slowTxn"))
 	}()

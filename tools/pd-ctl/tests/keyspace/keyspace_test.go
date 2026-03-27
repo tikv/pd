@@ -52,7 +52,7 @@ func TestKeyspace(t *testing.T) {
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServerLoop", func() { time.Sleep(2 * time.Second) }))
 	keyspaces := make([]string, 0)
 	for i := 1; i < 10; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
@@ -134,7 +134,7 @@ func TestKeyspaceTestsuite(t *testing.T) {
 func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServerLoop", func() { time.Sleep(2 * time.Second) }))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)

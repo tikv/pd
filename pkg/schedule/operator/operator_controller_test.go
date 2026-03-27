@@ -315,7 +315,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	re.True(op1.Start())
 	oc.SetOperator(op1)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", func() { time.Sleep(500 * time.Millisecond) }))
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {

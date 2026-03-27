@@ -134,7 +134,7 @@ func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map
 
 func TestTSOServerStartFirst(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServerLoop", func() { time.Sleep(2 * time.Second) }))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

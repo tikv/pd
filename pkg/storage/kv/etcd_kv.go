@@ -282,9 +282,7 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
-	failpoint.Inject("slowTxn", func() {
-		time.Sleep(10 * time.Second)
-	})
+	failpoint.InjectCall("slowTxn")
 	// Using slowLogTxn to commit transaction.
 	slowLogTxn := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client)
 	slowLogTxn.If(txn.conditions...)

@@ -469,7 +469,7 @@ func TestCustomTimeout(t *testing.T) {
 	defer cli.Close()
 
 	start := time.Now()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/customTimeout", func() { time.Sleep(5 * time.Second) }))
 	_, err = cli.GetAllStores(context.TODO())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/customTimeout"))
 	re.Error(err)

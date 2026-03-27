@@ -567,9 +567,7 @@ func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 		return true, c.ctx.Err()
 	default:
 		// This failpoint will increase the possibility that the request is sent to a closed dispatcher.
-		failpoint.Inject("delayDispatchTSORequest", func() {
-			time.Sleep(time.Second)
-		})
+		failpoint.InjectCall("delayDispatchTSORequest")
 		c.getDispatcher().push(request)
 	}
 	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.

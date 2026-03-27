@@ -1257,7 +1257,7 @@ func TestConcurrentReportBucket(t *testing.T) {
 	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", func() { time.Sleep(500 * time.Millisecond) }))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionBuckets(bucket1)
@@ -1296,7 +1296,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", "return(true)"))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", func() { time.Sleep(500 * time.Millisecond) }))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionHeartbeat(core.ContextTODO(), source)

@@ -720,7 +720,7 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 	m.Lock()
 	defer m.Unlock()
 
-	failpoint.Inject("pauseFinishSplitBeforeTxn", nil)
+	failpoint.InjectCall("pauseFinishSplitBeforeTxn")
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
 		// Load the split target keyspace group first.

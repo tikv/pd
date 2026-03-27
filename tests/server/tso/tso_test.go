@@ -135,7 +135,7 @@ func (s *tsoTestSuite) checkDelaySyncTimestamp(cluster *tests.TestCluster) {
 		Count:  1,
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", func() { time.Sleep(time.Second) }))
 
 	// Make the old leader resign and wait for the new leader to get a lease
 	err := leaderServer.ResignLeaderWithRetry()

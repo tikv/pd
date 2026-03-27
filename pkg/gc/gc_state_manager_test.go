@@ -2021,7 +2021,8 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 
 	var executionCount atomic.Int64
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish", "pause"))
+	fpCh := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish", func() { <-fpCh }))
 	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
 		executionCount.Add(1)
 	}))
@@ -2066,6 +2067,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	}
 
 	// Resume execution
+	close(fpCh)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish"))
 	// The first call finishes with the old result
 	var res result
