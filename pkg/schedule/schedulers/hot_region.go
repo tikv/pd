@@ -1326,19 +1326,21 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 }
 
 // bucketFirstStat returns the first priority statistics of the bucket.
-// If the first priority is a dimension that buckets do not report yet, it
-// falls back to the second priority.
+// If the first priority is a dimension that buckets do not report, it falls
+// back to another bucket-supported priority.
 func (bs *balanceSolver) bucketFirstStat() utils.RegionStatKind {
-	base := utils.RegionReadBytes
-	if bs.rwTy == utils.Write {
-		base = utils.RegionWriteBytes
+	dim := bs.firstPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = bs.secondPriority
 	}
-	offset := bs.firstPriority
-	// TODO: remove it if buckets report these dimensions.
-	if bs.firstPriority == utils.QueryDim || bs.firstPriority == utils.CPUDim {
-		offset = bs.secondPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = utils.ByteDim
 	}
-	return base + utils.RegionStatKind(offset)
+	return bs.rwTy.RegionStats()[dim]
+}
+
+func isBucketLoadDimSupported(dim int) bool {
+	return dim == utils.ByteDim || dim == utils.KeyDim || dim == utils.QueryDim
 }
 
 func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {

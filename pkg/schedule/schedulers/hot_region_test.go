@@ -370,6 +370,9 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	// Explicitly use byte/key here so this test only verifies split-key selection
+	// instead of depending on the cluster-version-specific default priorities.
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
 	solve.cur = &solution{}
 	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
@@ -3053,7 +3056,7 @@ func TestBucketFirstStat(t *testing.T) {
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
 			rwTy:           utils.Write,
-			expect:         utils.RegionWriteBytes,
+			expect:         utils.RegionWriteQueryNum,
 		},
 		{
 			firstPriority:  utils.KeyDim,
@@ -3064,6 +3067,18 @@ func TestBucketFirstStat(t *testing.T) {
 		{
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadQueryNum,
+		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.QueryDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadQueryNum,
+		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.CPUDim,
 			rwTy:           utils.Read,
 			expect:         utils.RegionReadBytes,
 		},

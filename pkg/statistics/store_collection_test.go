@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"math"
 	"strconv"
 	"testing"
 	"time"
@@ -143,5 +144,44 @@ func TestSummaryStoreInfos(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestSummaryStoresLoadByEngineZeroCPUStddev(t *testing.T) {
+	re := require.New(t)
+	rw := utils.Read
+	kind := constant.LeaderKind
+	collector := newTikvCollector()
+
+	storeInfos := map[uint64]*StoreSummaryInfo{}
+	storeLoads := map[uint64][]float64{}
+	storeHotPeers := map[uint64][]*HotPeerStat{}
+	for _, storeID := range []uint64{1, 2} {
+		storeInfos[storeID] = &StoreSummaryInfo{
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{Id: storeID, Address: "mock://tikv" + strconv.FormatUint(storeID, 10)},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
+		}
+		storeLoads[storeID] = make([]float64, utils.StoreStatCount)
+		storeLoads[storeID][utils.StoreReadBytes] = 100 * float64(storeID)
+		storeLoads[storeID][utils.StoreReadKeys] = 10 * float64(storeID)
+		storeLoads[storeID][utils.StoreReadQuery] = 5 * float64(storeID)
+		storeHotPeers[storeID] = []*HotPeerStat{{
+			StoreID:  storeID,
+			RegionID: storeID,
+			Loads:    []float64{1, 1, 1, 0},
+			isLeader: true,
+		}}
+	}
+
+	details := summaryStoresLoadByEngine(storeInfos, storeLoads, nil, storeHotPeers, rw, kind, collector)
+	re.Len(details, 2)
+	for _, detail := range details {
+		cpuStddev := detail.LoadPred.Stddev.Loads[utils.CPUDim]
+		re.False(math.IsNaN(cpuStddev))
+		re.False(math.IsInf(cpuStddev, 0))
+		re.Zero(cpuStddev)
+		re.True(detail.IsUniform(utils.CPUDim, 0.1))
 	}
 }
