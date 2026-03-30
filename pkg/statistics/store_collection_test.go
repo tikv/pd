@@ -94,7 +94,11 @@ func TestSummaryStoreInfos(t *testing.T) {
 			isTiFlash: false,
 			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
 		}
-		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
+		storeLoads[uint64(storeID)] = make([]float64, utils.StoreStatCount)
+		storeLoads[uint64(storeID)][utils.StoreReadBytes] = 1
+		storeLoads[uint64(storeID)][utils.StoreReadKeys] = 2
+		storeLoads[uint64(storeID)][utils.StoreReadQuery] = 5
+		storeLoads[uint64(storeID)][utils.StoreReadCPU] = 0
 		for i, v := range storeLoads[uint64(storeID)] {
 			storeLoads[uint64(storeID)][i] = v * float64(storeID)
 		}
@@ -105,7 +109,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	re.Len(details, 2)
 	re.Empty(details[0].LoadPred.Current.HistoryLoads)
 	re.Empty(details[1].LoadPred.Current.HistoryLoads)
-	expectHistoryLoads := []float64{1, 2, 5}
+	expectHistoryLoads := []float64{1, 2, 5, 0}
 	for _, storeID := range []uint64{1, 3} {
 		loads := storeHistoryLoad.Get(storeID, rw, kind)
 		for i := range loads {
@@ -121,7 +125,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	storeHistoryLoad.sampleDuration = 0
 	for i := 1; i < 10; i++ {
 		details = summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
-		expect := []float64{2, 4, 10}
+		expect := []float64{2, 4, 10, 0}
 		for _, detail := range details {
 			loads := detail.LoadPred.Current.HistoryLoads
 			re.Len(loads, len(expectHistoryLoads))

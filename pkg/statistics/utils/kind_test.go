@@ -42,7 +42,8 @@ func TestGetLoads(t *testing.T) {
 		core.SetReadKeys(2),
 		core.SetWrittenBytes(3),
 		core.SetWrittenKeys(4),
-		core.SetQueryStats(queryStats))
+		core.SetQueryStats(queryStats),
+		core.SetCPUUsage(12))
 	loads := regionA.GetLoads()
 	re.Len(loads, int(RegionStatCount))
 	re.Equal(float64(regionA.GetBytesRead()), loads[RegionReadBytes])
@@ -53,6 +54,7 @@ func TestGetLoads(t *testing.T) {
 	re.Equal(float64(regionA.GetBytesWritten()), loads[RegionWriteBytes])
 	re.Equal(float64(regionA.GetKeysWritten()), loads[RegionWriteKeys])
 	re.Equal(float64(regionA.GetWriteQueryNum()), loads[RegionWriteQueryNum])
+	re.Equal(float64(regionA.GetCPUUsage()), loads[RegionReadCPU])
 	writeQuery := float64(queryStats.Put + queryStats.Delete + queryStats.DeleteRange + queryStats.AcquirePessimisticLock + queryStats.Rollback + queryStats.Prewrite + queryStats.Commit)
 	re.Equal(float64(regionA.GetWriteQueryNum()), writeQuery)
 
@@ -64,4 +66,5 @@ func TestGetLoads(t *testing.T) {
 	re.Equal(float64(regionA.GetBytesWritten()), loads[RegionWriteBytes])
 	re.Equal(float64(regionA.GetKeysWritten()), loads[RegionWriteKeys])
 	re.Equal(float64(regionA.GetWriteQueryNum()), loads[RegionWriteQueryNum])
+	re.Equal(0.0, loads[RegionReadCPU])
 }
