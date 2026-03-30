@@ -92,4 +92,3 @@ func getGaugeValue(re *require.Assertions, metricName string, labels map[string]
 	}
 	return 0, false
 }
-
