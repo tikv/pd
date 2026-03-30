@@ -243,15 +243,24 @@ type pendingInfluence struct {
 	to                uint64
 	origin            statistics.Influence
 	maxZombieDuration time.Duration
+	scope             hotScheduleScopeKey
 }
 
-func newPendingInfluence(op *operator.Operator, froms []uint64, to uint64, infl statistics.Influence, maxZombieDur time.Duration) *pendingInfluence {
+func newPendingInfluence(
+	op *operator.Operator,
+	froms []uint64,
+	to uint64,
+	infl statistics.Influence,
+	maxZombieDur time.Duration,
+	scope hotScheduleScopeKey,
+) *pendingInfluence {
 	return &pendingInfluence{
 		op:                op,
 		froms:             froms,
 		to:                to,
 		origin:            infl,
 		maxZombieDuration: maxZombieDur,
+		scope:             scope,
 	}
 }
 

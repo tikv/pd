@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"strconv"
@@ -58,6 +59,13 @@ var (
 	// statisticsInterval is the interval to update statistics information.
 	statisticsInterval = time.Second
 )
+
+type hotScheduleScopeKey struct {
+	rwTy           utils.RWType
+	resourceTy     resourceType
+	firstPriority  int
+	secondPriority int
+}
 
 type baseHotScheduler struct {
 	*BaseScheduler
@@ -177,6 +185,10 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 	}
 }
 
+func normalizeHotLoadSignature(load float64) float64 {
+	return math.Round(load*1000) / 1000
+}
+
 func (s *baseHotScheduler) randomType() resourceType {
 	return s.types[rand.Int()%len(s.types)]
 }
@@ -219,11 +231,13 @@ func (s *hotScheduler) ReloadConfig() error {
 	s.conf.MinHotByteRate = newCfg.MinHotByteRate
 	s.conf.MinHotKeyRate = newCfg.MinHotKeyRate
 	s.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	s.conf.MinHotCPURate = newCfg.MinHotCPURate
 	s.conf.MaxZombieRounds = newCfg.MaxZombieRounds
 	s.conf.MaxPeerNum = newCfg.MaxPeerNum
 	s.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
 	s.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
 	s.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	s.conf.CPURateRankStepRatio = newCfg.CPURateRankStepRatio
 	s.conf.CountRankStepRatio = newCfg.CountRankStepRatio
 	s.conf.GreatDecRatio = newCfg.GreatDecRatio
 	s.conf.MinorDecRatio = newCfg.MinorDecRatio
@@ -302,7 +316,14 @@ func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster)
 	return ops
 }
 
-func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []uint64, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
+func (s *hotScheduler) tryAddPendingInfluence(
+	op *operator.Operator,
+	srcStore []uint64,
+	dstStore uint64,
+	infl statistics.Influence,
+	maxZombieDur time.Duration,
+	scope hotScheduleScopeKey,
+) bool {
 	regionID := op.RegionID()
 	_, ok := s.regionPendings[regionID]
 	if ok {
@@ -310,7 +331,7 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 		return false
 	}
 
-	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur)
+	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur, scope)
 	s.regionPendings[regionID] = influence
 
 	utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {

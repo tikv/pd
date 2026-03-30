@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 func TestSplitBucketsBySize(t *testing.T) {
@@ -163,24 +164,28 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.conf.ReadPriorities = []string{utils.QueryPriority, utils.BytePriority}
 	leaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
 			utils.QueryDim: 10,
 			utils.ByteDim:  1,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
 			utils.QueryDim: 1,
 			utils.ByteDim:  10,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
 			utils.QueryDim: 5,
 			utils.ByteDim:  6,
+			utils.CPUDim:   0,
 		},
 	}}
 
@@ -194,6 +199,94 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	leaderSolver.maxPeerNum = 2
 	u = leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1, 2}, u)
+
+	// Verify the CPU-first priority path can pick by CPU dim.
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
+	cpuHotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			utils.QueryDim: 1,
+			utils.ByteDim:  1,
+			utils.CPUDim:   30,
+		},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			utils.QueryDim: 100,
+			utils.ByteDim:  1,
+			utils.CPUDim:   5,
+		},
+	}}
+	st.HotPeers = cpuHotPeers
+	cpuLeaderSolver.maxPeerNum = 1
+	u = cpuLeaderSolver.filterHotPeers(st)
+	checkSortResult(re, []uint64{1}, u)
+}
+
+func TestFilterHotPeersWithDecisions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
+	cpuLeaderSolver.maxPeerNum = 1
+	hb.regionPendings[1] = &pendingInfluence{}
+
+	hotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			utils.QueryDim: 1,
+			utils.ByteDim:  1,
+			utils.CPUDim:   30,
+		},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			utils.QueryDim: 100,
+			utils.ByteDim:  1,
+			utils.CPUDim:   5,
+		},
+	}}
+
+	filtered, decisions := cpuLeaderSolver.filterHotPeersWithDecisions(&statistics.StoreLoadDetail{HotPeers: hotPeers})
+	re.Empty(filtered)
+	re.Len(decisions, 2)
+
+	reasons := make(map[uint64]hotPeerFilterReason, len(decisions))
+	for _, decision := range decisions {
+		reasons[decision.peer.RegionID] = decision.reason
+	}
+	re.Equal(hotPeerFilterPending, reasons[1])
+	re.Equal(hotPeerFilterTopN, reasons[2])
+}
+
+func TestSelectRejectedHotPeerFilterDecisions(t *testing.T) {
+	re := require.New(t)
+	decisions := []hotPeerFilterDecision{
+		{peer: &statistics.HotPeerStat{RegionID: 1}, reason: hotPeerFilterKept},
+		{peer: &statistics.HotPeerStat{RegionID: 2}, reason: hotPeerFilterPending},
+		{peer: &statistics.HotPeerStat{RegionID: 3}, reason: hotPeerFilterPending},
+		{peer: &statistics.HotPeerStat{RegionID: 4}, reason: hotPeerFilterCooldown},
+		{peer: &statistics.HotPeerStat{RegionID: 5}, reason: hotPeerFilterCooldown},
+		{peer: &statistics.HotPeerStat{RegionID: 6}, reason: hotPeerFilterTopN},
+		{peer: &statistics.HotPeerStat{RegionID: 7}, reason: hotPeerFilterTopN},
+	}
+
+	selected := selectRejectedHotPeerFilterDecisions(decisions, 1)
+	re.Len(selected, 3)
+
+	got := make([]uint64, 0, len(selected))
+	for _, decision := range selected {
+		got = append(got, decision.peer.RegionID)
+		re.NotEqual(hotPeerFilterKept, decision.reason)
+	}
+	re.Equal([]uint64{2, 4, 6}, got)
 }
 
 func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
@@ -211,10 +304,11 @@ func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*stati
 }
 
 type maxZombieDurTestCase struct {
-	typ           resourceType
-	isTiFlash     bool
-	firstPriority int
-	maxZombieDur  int
+	typ            resourceType
+	isTiFlash      bool
+	firstPriority  int
+	secondPriority int
+	maxZombieDur   int
 }
 
 func TestMaxZombieDuration(t *testing.T) {
@@ -232,6 +326,12 @@ func TestMaxZombieDuration(t *testing.T) {
 		{
 			typ:          readLeader,
 			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:            readLeader,
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.ByteDim,
+			maxZombieDur:   2 * maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 		{
 			typ:          writePeer,
@@ -268,12 +368,88 @@ func TestMaxZombieDuration(t *testing.T) {
 			}
 		}
 		bs := &balanceSolver{
-			sche:          hb.(*hotScheduler),
-			resourceTy:    testCase.typ,
-			firstPriority: testCase.firstPriority,
-			best:          &solution{srcStore: src},
+			sche:           hb.(*hotScheduler),
+			resourceTy:     testCase.typ,
+			firstPriority:  testCase.firstPriority,
+			secondPriority: testCase.secondPriority,
+			best:           &solution{srcStore: src},
 		}
 		re.Equal(time.Duration(testCase.maxZombieDur)*time.Second, bs.calcMaxZombieDur())
+	}
+}
+
+func TestReadCPUTransferLeaderCooldownHits(t *testing.T) {
+	re := require.New(t)
+	bs := &balanceSolver{
+		rwTy:           utils.Read,
+		resourceTy:     readLeader,
+		firstPriority:  utils.CPUDim,
+		secondPriority: utils.ByteDim,
+		minHotDegree:   3,
+	}
+	re.Equal(readCPUByteTransferLeaderCooldownHits, bs.transferLeaderCooldownHits())
+
+	other := &balanceSolver{
+		rwTy:           utils.Read,
+		resourceTy:     readLeader,
+		firstPriority:  utils.QueryDim,
+		secondPriority: utils.ByteDim,
+		minHotDegree:   3,
+	}
+	re.Equal(3, other.transferLeaderCooldownHits())
+}
+
+func TestReadCPUDstPrefilter(t *testing.T) {
+	re := require.New(t)
+
+	newDetail := func(id uint64, current, future, expect statistics.Loads) *statistics.StoreLoadDetail {
+		return &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{})},
+			LoadPred: &statistics.StoreLoadPred{
+				Current: statistics.StoreLoad{Loads: current},
+				Future:  statistics.StoreLoad{Loads: future},
+				Expect:  statistics.StoreLoad{Loads: expect},
+			},
+		}
+	}
+
+	candidate := newDetail(
+		2,
+		statistics.Loads{10, 10, 10, 90},
+		statistics.Loads{10, 10, 10, 100},
+		statistics.Loads{100, 100, 100, 100},
+	)
+
+	testCases := []struct {
+		name           string
+		firstPriority  int
+		secondPriority int
+		expectPicked   bool
+	}{
+		{
+			name:           "read cpu-byte rejects dst when future cpu reaches expect",
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.ByteDim,
+			expectPicked:   false,
+		},
+		{
+			name:           "non cpu-byte path keeps existing anyof dst admission",
+			firstPriority:  utils.QueryDim,
+			secondPriority: utils.ByteDim,
+			expectPicked:   true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		bs := &balanceSolver{
+			rwTy:           utils.Read,
+			resourceTy:     readPeer,
+			firstPriority:  testCase.firstPriority,
+			secondPriority: testCase.secondPriority,
+		}
+		bs.rank = initRankV2(bs)
+		re.True(bs.checkDstByPriorityAndTolerance(candidate.LoadPred.Max(), &candidate.LoadPred.Expect, 1.0), testCase.name)
+		re.Equal(testCase.expectPicked, !bs.shouldRejectReadCPUDst(candidate), testCase.name)
 	}
 }
 
@@ -612,6 +788,12 @@ func TestBucketFirstStat(t *testing.T) {
 		},
 		{
 			firstPriority:  utils.QueryDim,
+			secondPriority: utils.ByteDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadBytes,
+		},
+		{
+			firstPriority:  utils.CPUDim,
 			secondPriority: utils.ByteDim,
 			rwTy:           utils.Read,
 			expect:         utils.RegionReadBytes,
