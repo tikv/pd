@@ -33,14 +33,6 @@ var (
 			Help:      "Counter of the region event",
 		}, []string{"event"})
 
-	bucketEventCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "cluster",
-			Name:      "bucket_event",
-			Help:      "Counter of the bucket event",
-		}, []string{"event"})
-
 	updateStoreStatsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -86,7 +78,6 @@ func init() {
 	prometheus.MustRegister(healthStatusGauge)
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
-	prometheus.MustRegister(bucketEventCounter)
 	prometheus.MustRegister(storeSyncConfigEvent)
 	prometheus.MustRegister(updateStoreStatsGauge)
 	prometheus.MustRegister(storeTriggerNetworkSlowEvict)

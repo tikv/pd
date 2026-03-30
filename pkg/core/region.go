@@ -86,9 +86,9 @@ type RegionInfo struct {
 	replicationStatus         *replication_modepb.RegionReplicationStatus
 	queryStats                *pdpb.QueryStats
 	flowRoundDivisor          uint64
-	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
+	// reportBuckets is not thread unsafe, it should be accessed by the request `report reportBuckets` with greater version.
 	// todo: keep it compatible with previous design, we can remove it later.
-	buckets unsafe.Pointer
+	reportBuckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
@@ -304,10 +304,9 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	// skip bucket meta update if tikv has report bucket meta.
-	if bucket := r.GetBuckets(); bucketEnable && bucket == nil && origin != nil {
-		inherited := atomic.LoadPointer(&origin.buckets)
-		atomic.StorePointer(&r.buckets, inherited)
+	if bucketEnable && origin != nil && atomic.LoadPointer(&r.reportBuckets) == nil {
+		inherited := atomic.LoadPointer(&origin.reportBuckets)
+		atomic.StorePointer(&r.reportBuckets, inherited)
 	}
 }
 
@@ -339,7 +338,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateKeys:           r.approximateKeys,
 		interval:                  typeutil.DeepClone(r.interval, TimeIntervalFactory),
 		replicationStatus:         r.replicationStatus,
-		buckets:                   r.buckets,
+		reportBuckets:             atomic.LoadPointer(&r.reportBuckets),
 		queryStats:                typeutil.DeepClone(r.queryStats, QueryStatsFactory),
 		bucketMeta:                r.bucketMeta,
 	}
@@ -633,18 +632,10 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 	}
 }
 
-// SetBucketMeta sets the bucket meta of the region, used by region sync.
-func (r *RegionInfo) SetBucketMeta(buckets *metapb.Buckets) {
-	r.bucketMeta = &metapb.BucketMeta{
-		Version: buckets.GetVersion(),
-		Keys:    buckets.GetKeys(),
-	}
-}
-
-// UpdateBuckets sets the buckets of the region, used by bucket report.
+// UpdateBuckets sets the buckets of the region, only use by tests.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 	if buckets == nil {
-		atomic.StorePointer(&r.buckets, nil)
+		atomic.StorePointer(&r.reportBuckets, nil)
 		return true
 	}
 	// only need to update bucket keys, versions.
@@ -653,7 +644,32 @@ func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 		Version:  buckets.GetVersion(),
 		Keys:     buckets.GetKeys(),
 	}
-	return atomic.CompareAndSwapPointer(&r.buckets, unsafe.Pointer(old), unsafe.Pointer(newBuckets))
+	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(newBuckets))
+}
+
+// GetReportBuckets returns the buckets of the region, only use by tests.
+func (r *RegionInfo) GetReportBuckets() *metapb.Buckets {
+	return (*metapb.Buckets)(atomic.LoadPointer(&r.reportBuckets))
+}
+
+// CompareAndSetReportBuckets compares and sets the report buckets of the region.
+func (r *RegionInfo) CompareAndSetReportBuckets(buckets *metapb.Buckets) bool {
+	old := (*metapb.Buckets)(atomic.LoadPointer(&r.reportBuckets))
+	// region should not update if the version of the buckets is less than the old one.
+	if old != nil {
+		reportVersion := buckets.GetVersion()
+		if reportVersion < old.GetVersion() {
+			versionStaleCounter.Inc()
+			return true
+		} else if reportVersion == old.GetVersion() {
+			versionNotChangeCounter.Inc()
+			return true
+		}
+	}
+	failpoint.Inject("concurrentBucketHeartbeat", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
+	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
 // GetBuckets returns the buckets of the region.
@@ -668,7 +684,7 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 			Keys:     meta.GetKeys(),
 		}
 	}
-	buckets := atomic.LoadPointer(&r.buckets)
+	buckets := atomic.LoadPointer(&r.reportBuckets)
 	return (*metapb.Buckets)(buckets)
 }
 
