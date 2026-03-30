@@ -41,7 +41,7 @@ func (s *resourceGroupProxyServer) getResourceManagerDelegateClient(ctx context.
 	if s.isLocalRequest(forwardedHost) {
 		return nil, status.Errorf(codes.Unavailable, "Microservice mode should not support resource manager requests")
 	}
-	client, err := s.getDelegateClient(ctx, forwardedHost)
+	client, err := s.getDelegateClient(forwardedHost)
 	if err != nil {
 		return nil, err
 	}

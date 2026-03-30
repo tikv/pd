@@ -1195,7 +1195,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 					cancel()
 				}
 
-				client, err := s.getDelegateClient(s.ctx, forwardedSchedulingHost)
+				client, err := s.getDelegateClient(forwardedSchedulingHost)
 				if err != nil {
 					log.Error("failed to get client", zap.Error(err))
 					continue
