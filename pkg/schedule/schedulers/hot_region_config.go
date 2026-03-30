@@ -42,13 +42,6 @@ const (
 )
 
 var defaultPrioritiesConfig = prioritiesConfig{
-	read:        []string{utils.CPUPriority, utils.BytePriority},
-	writeLeader: []string{utils.QueryPriority, utils.BytePriority},
-	writePeer:   []string{utils.BytePriority, utils.KeyPriority},
-}
-
-// because tikv <= 8.5.6 and < 9.0.0-beta.1 does not report cpu information, we will use query and byte as the read priorities
-var queryPrioritiesConfig = prioritiesConfig{
 	read:        []string{utils.QueryPriority, utils.BytePriority},
 	writeLeader: []string{utils.QueryPriority, utils.BytePriority},
 	writePeer:   []string{utils.BytePriority, utils.KeyPriority},
@@ -111,9 +104,9 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerParam {
 		MinorDecRatio:          conf.MinorDecRatio,
 		SrcToleranceRatio:      conf.SrcToleranceRatio,
 		DstToleranceRatio:      conf.DstToleranceRatio,
-		ReadPriorities:         adjustPrioritiesConfig(conf.lastQuerySupported, conf.lastCPUSupported, conf.ReadPriorities, getReadPriorities),
-		WriteLeaderPriorities:  adjustPrioritiesConfig(conf.lastQuerySupported, conf.lastCPUSupported, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
-		WritePeerPriorities:    adjustPrioritiesConfig(conf.lastQuerySupported, conf.lastCPUSupported, conf.WritePeerPriorities, getWritePeerPriorities),
+		ReadPriorities:         adjustPrioritiesConfig(conf.lastQuerySupported, conf.ReadPriorities, getReadPriorities),
+		WriteLeaderPriorities:  adjustPrioritiesConfig(conf.lastQuerySupported, conf.WriteLeaderPriorities, getWriteLeaderPriorities),
+		WritePeerPriorities:    adjustPrioritiesConfig(conf.lastQuerySupported, conf.WritePeerPriorities, getWritePeerPriorities),
 		StrictPickingStore:     conf.StrictPickingStore,
 		EnableForTiFlash:       conf.EnableForTiFlash,
 		RankFormulaVersion:     conf.getRankFormulaVersionLocked(),
@@ -172,7 +165,6 @@ type hotRegionSchedulerConfig struct {
 	hotRegionSchedulerParam
 
 	lastQuerySupported bool
-	lastCPUSupported   bool
 }
 
 func (conf *hotRegionSchedulerConfig) encodeConfig() ([]byte, error) {
@@ -530,22 +522,6 @@ func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCl
 	return querySupport
 }
 
-func (conf *hotRegionSchedulerConfig) checkCPUSupport(cluster sche.SchedulerCluster) bool {
-	version := cluster.GetSchedulerConfig().GetClusterVersion()
-	cpuSupport := versioninfo.IsHotScheduleWithCPUSupported(version)
-	conf.Lock()
-	defer conf.Unlock()
-	if cpuSupport != conf.lastCPUSupported {
-		log.Info("cpu supported changed",
-			zap.Bool("last-cpu-support", conf.lastCPUSupported),
-			zap.String("cluster-version", version.String()),
-			zap.Reflect("config", conf),
-			zap.Reflect("valid-config", conf.getValidConf()))
-		conf.lastCPUSupported = cpuSupport
-	}
-	return cpuSupport
-}
-
 type prioritiesConfig struct {
 	read        []string
 	writeLeader []string
@@ -572,8 +548,7 @@ func getWritePeerPriorities(c *prioritiesConfig) []string {
 
 // adjustPrioritiesConfig will adjust config for cluster with low version tikv.
 // because tikv below 5.2.0 does not report query information, we will use byte and key as the scheduling dimensions.
-// because tikv <= 8.5.6 and < 9.0.0-beta.1 does not report cpu information, we will use query and byte as the read priorities.
-func adjustPrioritiesConfig(querySupport, cpuSupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
+func adjustPrioritiesConfig(querySupport bool, origins []string, getPriorities func(*prioritiesConfig) []string) []string {
 	withQuery := slice.AnyOf(origins, func(i int) bool {
 		return origins[i] == utils.QueryPriority
 	})
@@ -585,17 +560,7 @@ func adjustPrioritiesConfig(querySupport, cpuSupport bool, origins []string, get
 		return compatibles
 	}
 
-	cpuFallback := getPriorities(&queryPrioritiesConfig)
-	if !cpuSupport && withCPU {
-		return cpuFallback
-	}
-
 	defaults := getPriorities(&defaultPrioritiesConfig)
-	// When CPU is unavailable, malformed or legacy configs should fall back to the
-	// query-based read defaults instead of silently selecting CPU-first priorities.
-	if !cpuSupport {
-		defaults = cpuFallback
-	}
 	isLegal := slice.AllOf(origins, func(i int) bool {
 		return origins[i] == utils.BytePriority || origins[i] == utils.KeyPriority || origins[i] == utils.QueryPriority || origins[i] == utils.CPUPriority
 	})

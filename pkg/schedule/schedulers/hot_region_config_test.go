@@ -22,54 +22,48 @@ import (
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
-func TestAdjustPrioritiesConfigCPUFallback(t *testing.T) {
+func TestAdjustPrioritiesConfigManualCPUOptIn(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {
 		name         string
 		querySupport bool
-		cpuSupport   bool
 		origins      []string
 		expect       []string
 	}{
 		{
-			name:         "cpu-supported-keep-origins",
+			name:         "query-supported-keeps-manual-cpu-priority",
 			querySupport: true,
-			cpuSupport:   true,
 			origins:      []string{utils.CPUPriority, utils.BytePriority},
-			expect:       getReadPriorities(&defaultPrioritiesConfig),
+			expect:       []string{utils.CPUPriority, utils.BytePriority},
 		},
 		{
-			name:         "cpu-unsupported-fallback-to-query",
+			name:         "query-supported-keeps-default-query-priority",
 			querySupport: true,
-			cpuSupport:   false,
-			origins:      []string{utils.CPUPriority, utils.BytePriority},
-			expect:       getReadPriorities(&queryPrioritiesConfig),
-		},
-		{
-			name:         "cpu-unsupported-keep-query-origins",
-			querySupport: true,
-			cpuSupport:   false,
 			origins:      []string{utils.QueryPriority, utils.BytePriority},
 			expect:       []string{utils.QueryPriority, utils.BytePriority},
 		},
 		{
-			name:         "query-unsupported-fallback-to-compatible",
+			name:         "query-unsupported-falls-back-from-manual-cpu-priority",
 			querySupport: false,
-			cpuSupport:   true,
 			origins:      []string{utils.CPUPriority, utils.BytePriority},
 			expect:       getReadPriorities(&compatiblePrioritiesConfig),
 		},
 		{
 			name:         "query-unsupported-with-query-origins",
 			querySupport: false,
-			cpuSupport:   false,
 			origins:      []string{utils.QueryPriority, utils.BytePriority},
 			expect:       getReadPriorities(&compatiblePrioritiesConfig),
+		},
+		{
+			name:         "query-supported-malformed-priority-uses-defaults",
+			querySupport: true,
+			origins:      []string{"bad", "byte"},
+			expect:       getReadPriorities(&defaultPrioritiesConfig),
 		},
 	}
 
 	for _, test := range tests {
-		got := adjustPrioritiesConfig(test.querySupport, test.cpuSupport, test.origins, getReadPriorities)
+		got := adjustPrioritiesConfig(test.querySupport, test.origins, getReadPriorities)
 		re.Equal(test.expect, got, test.name)
 	}
 }

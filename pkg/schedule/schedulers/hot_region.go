@@ -556,16 +556,15 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 
 func (bs *balanceSolver) getPriorities() []string {
 	querySupport := bs.sche.conf.checkQuerySupport(bs.SchedulerCluster)
-	cpuSupport := bs.sche.conf.checkCPUSupport(bs.SchedulerCluster)
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.resourceTy {
 	case readLeader, readPeer:
-		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getReadPriorities(), getReadPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getReadPriorities(), getReadPriorities)
 	case writeLeader:
-		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getWriteLeaderPriorities(), getWriteLeaderPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getWriteLeaderPriorities(), getWriteLeaderPriorities)
 	case writePeer:
-		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getWritePeerPriorities(), getWritePeerPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getWritePeerPriorities(), getWritePeerPriorities)
 	}
 	log.Error("illegal type or illegal operator while getting the priority", zap.String("type", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
 	return []string{}
