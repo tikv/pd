@@ -68,7 +68,10 @@ type RegionInfo struct {
 	downPeers         []*pdpb.PeerStats
 	pendingPeers      []*metapb.Peer
 	term              uint64
+	// cpuUsage is deprecated and will be removed in the future.
+	// We should use `cpuStats` instead.
 	cpuUsage          uint64
+	cpuStats          *pdpb.CPUStats
 	writtenBytes      uint64
 	writtenKeys       uint64
 	readBytes         uint64
@@ -245,7 +248,12 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
-		region.cpuUsage = h.GetCpuUsage()
+		region.cpuStats = h.GetCpuStats()
+		if region.cpuStats != nil {
+			region.cpuUsage = region.cpuStats.GetUnifiedRead()
+		} else {
+			region.cpuUsage = h.CpuUsage
+		}
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -311,6 +319,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		downPeers:         downPeers,
 		pendingPeers:      pendingPeers,
 		cpuUsage:          r.cpuUsage,
+		cpuStats:          typeutil.DeepClone(r.cpuStats, CPUStatsFactory),
 		writtenBytes:      r.writtenBytes,
 		writtenKeys:       r.writtenKeys,
 		readBytes:         r.readBytes,
@@ -1787,6 +1796,8 @@ func (r *RegionInfo) GetLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		float64(r.GetCPUUsage()),
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 
@@ -1799,6 +1810,8 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		0,
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 
