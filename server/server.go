@@ -122,10 +122,6 @@ var (
 	etcdTermGauge           = etcdStateGauge.WithLabelValues("term")
 	etcdAppliedIndexGauge   = etcdStateGauge.WithLabelValues("appliedIndex")
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
-
-	// memberLeaderPriorityMetricMemberIDs keeps track of already-exported member IDs
-	// so we can delete stale label values when members leave the cluster.
-	memberLeaderPriorityMetricMemberIDs sync.Map
 )
 
 type streamWrapper struct {
@@ -725,7 +721,6 @@ func (s *Server) serverMetricsLoop() {
 		select {
 		case <-ticker.C:
 			s.collectEtcdStateMetrics()
-			s.collectMemberLeaderPriorityMetrics()
 		case <-ctx.Done():
 			log.Info("server is closed, exit metrics loop")
 			return
@@ -748,45 +743,6 @@ func (s *Server) collectEtcdStateMetrics() {
 	etcdTermGauge.Set(float64(s.member.Etcd().Server.Term()))
 	etcdAppliedIndexGauge.Set(float64(s.member.Etcd().Server.AppliedIndex()))
 	etcdCommittedIndexGauge.Set(float64(s.member.Etcd().Server.CommittedIndex()))
-}
-
-// CollectMemberLeaderPriorityMetrics collects the etcd leader priority metrics for
-// all PD members in the cluster.
-func (s *Server) CollectMemberLeaderPriorityMetrics() {
-	s.collectMemberLeaderPriorityMetrics()
-}
-
-func (s *Server) collectMemberLeaderPriorityMetrics() {
-	members, err := s.GetMembers()
-	if err != nil {
-		log.Warn("failed to collect member leader priority metrics", errs.ZapError(err))
-		return
-	}
-
-	currentMemberIDs := make(map[string]struct{}, len(members))
-	for _, m := range members {
-		memberID := strconv.FormatUint(m.GetMemberId(), 10)
-		currentMemberIDs[memberID] = struct{}{}
-		priority, err := s.member.GetMemberLeaderPriority(m.GetMemberId())
-		if err != nil {
-			log.Warn("failed to collect member leader priority",
-				zap.Uint64("member-id", m.GetMemberId()),
-				errs.ZapError(err))
-			continue
-		}
-		memberLeaderPriorityGauge.WithLabelValues(memberID).Set(float64(priority))
-		memberLeaderPriorityMetricMemberIDs.Store(memberID, struct{}{})
-	}
-
-	memberLeaderPriorityMetricMemberIDs.Range(func(key, _ any) bool {
-		memberID := key.(string)
-		if _, ok := currentMemberIDs[memberID]; ok {
-			return true
-		}
-		memberLeaderPriorityGauge.DeleteLabelValues(memberID)
-		memberLeaderPriorityMetricMemberIDs.Delete(memberID)
-		return true
-	})
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {

@@ -69,13 +69,6 @@ var (
 			Name:      "etcd_state",
 			Help:      "Etcd raft states.",
 		}, []string{"type"})
-	memberLeaderPriorityGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "member_leader_priority",
-			Help:      "Etcd leader priority of PD members.",
-		}, []string{"member_id"})
 
 	tsoProxyHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -225,7 +218,6 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
-	prometheus.MustRegister(memberLeaderPriorityGauge)
 	prometheus.MustRegister(tsoProxyHandleDuration)
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)

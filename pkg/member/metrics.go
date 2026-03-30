@@ -25,8 +25,17 @@ var (
 			Name:      "role",
 			Help:      "The leader/primary of services",
 		}, []string{"service"})
+
+	memberLeaderPriorityGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "member_leader_priority",
+			Help:      "Etcd leader priority of this PD instance.",
+		}, []string{"instance"})
 )
 
 func init() {
 	prometheus.MustRegister(ServiceMemberGauge)
+	prometheus.MustRegister(memberLeaderPriorityGauge)
 }

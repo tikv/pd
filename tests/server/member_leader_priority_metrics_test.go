@@ -16,7 +16,6 @@ package server_test
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -41,20 +40,20 @@ func TestMemberLeaderPriorityMetrics(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	s := leaderServer.GetServer()
-	memberID := strconv.FormatUint(s.GetMemberInfo().GetMemberId(), 10)
+	instance := s.GetMemberInfo().GetName()
 
-	s.CollectMemberLeaderPriorityMetrics()
+	s.GetMember().CheckPriority(ctx)
 	val, ok := getGaugeValue(re, "pd_server_member_leader_priority", map[string]string{
-		"member_id": memberID,
+		"instance": instance,
 	})
 	re.True(ok)
 	re.Equal(0.0, val)
 
 	re.NoError(s.GetMember().SetMemberLeaderPriority(s.GetMemberInfo().GetMemberId(), 42))
-	s.CollectMemberLeaderPriorityMetrics()
+	s.GetMember().CheckPriority(ctx)
 
 	val, ok = getGaugeValue(re, "pd_server_member_leader_priority", map[string]string{
-		"member_id": memberID,
+		"instance": instance,
 	})
 	re.True(ok)
 	re.Equal(42.0, val)
