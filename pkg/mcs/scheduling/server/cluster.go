@@ -144,6 +144,7 @@ func NewCluster(
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
+		keyspaceCache:     keyspace.NewCache(),
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
