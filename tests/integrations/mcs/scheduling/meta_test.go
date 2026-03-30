@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -55,7 +56,9 @@ func (suite *metaTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
+	})
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -135,8 +138,10 @@ func (suite *metaTestSuite) getRaftCluster() *cluster.RaftCluster {
 func (suite *metaTestSuite) TestKeyspaceMetaWatch() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/rule/skipRuleCommit", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/rule/skipRuleCommit"))
 	}()
 
 	now := time.Now().Unix()
