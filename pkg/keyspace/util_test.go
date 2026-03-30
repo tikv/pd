@@ -681,7 +681,22 @@ func TestGetKeyspaceSplitKeys(t *testing.T) {
 	}
 }
 
-func TestKeyspaceCache(t *testing.T) {
+func TestKeyspaceExists(t *testing.T) {
+	re := require.New(t)
+	cache := NewCache()
+
+	cache.Save(100, "ks-100", keyspacepb.KeyspaceState_ENABLED)
+	cache.Save(101, "ks-101", keyspacepb.KeyspaceState_ARCHIVED)
+	cache.Save(102, "ks-102", keyspacepb.KeyspaceState_DISABLED)
+	cache.Save(103, "ks-103", keyspacepb.KeyspaceState_TOMBSTONE)
+
+	re.True(cache.KeyspaceExist(100))
+	re.True(cache.KeyspaceExist(101))
+	re.True(cache.KeyspaceExist(102))
+	re.False(cache.KeyspaceExist(103))
+}
+
+func TestGetKeyspaceIDInRange(t *testing.T) {
 	re := require.New(t)
 	cache := NewCache()
 
@@ -709,6 +724,7 @@ func TestKeyspaceCache(t *testing.T) {
 	}
 	re.Equal([]uint32{100, 101, 102, 103}, all())
 
+	// 103 is tombstone, so it should not be returned.
 	ids, ok := cache.GetKeyspaceIDInRange(100, 103, 1)
 	re.True(ok)
 	re.Equal([]uint32{102}, ids)
@@ -717,15 +733,18 @@ func TestKeyspaceCache(t *testing.T) {
 	re.True(ok)
 	re.Equal([]uint32{102}, ids)
 
+	// 102 is tombstone, so it returns nothings.
 	ids, ok = cache.GetKeyspaceIDInRange(103, 104, 1)
 	re.False(ok)
 	re.Empty(ids)
 
+	// Delete 101 and check the cache again.
 	cache.DeleteKeyspace(101)
 	_, ok = cache.getKeyspaceByID(101)
 	re.False(ok)
 	re.Equal([]uint32{100, 102, 103}, all())
 
+	// the order of returned keyspace IDs should be descending.
 	ids, ok = cache.GetKeyspaceIDInRange(100, 103, 5)
 	re.True(ok)
 	re.Len(ids, 2)
