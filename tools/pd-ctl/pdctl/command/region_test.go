@@ -17,14 +17,27 @@
 package command
 
 import (
+	"bytes"
 	"encoding/hex"
+	"io"
+	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/tools/pd-ctl/helper/mok"
+	"github.com/tikv/pd/tools/pd-ctl/helper/tidb/codec"
 )
+
+type captureRoundTripper struct {
+	roundTrip func(*http.Request) (*http.Response, error)
+}
+
+func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return c.roundTrip(req)
+}
 
 func TestCheckKey(t *testing.T) {
 	re := require.New(t)
@@ -110,4 +123,98 @@ func TestExpandStackOverflowFromLogKey(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Test timed out after 5 seconds - possible infinite recursion")
 	}
+}
+
+func TestShowRegionsByKeyspaceTableIDCommandFuncWithKeyspaceID(t *testing.T) {
+	re := require.New(t)
+	var requestURL *url.URL
+	resp := `{"regions":[]}`
+	oldClient := dialClient
+	dialClient = &http.Client{
+		Transport: &captureRoundTripper{
+			roundTrip: func(req *http.Request) (*http.Response, error) {
+				requestURL = req.URL
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewBufferString(resp)),
+				}, nil
+			},
+		},
+	}
+	defer func() { dialClient = oldClient }()
+
+	cmd := NewRegionsByKeyspaceTableIDCommand()
+	cmd.Flags().String("pd", "http://mock-pd:2379", "")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"17"})
+	re.NoError(cmd.Execute())
+
+	re.NotNil(requestURL)
+	re.Equal("/pd/api/v1/regions/key", requestURL.Path)
+	expectedStartKey := codec.EncodeBytes(nil, []byte{'x', 0, 0, 17})
+	expectedEndKey := codec.EncodeBytes(nil, []byte{'x', 0, 0, 18})
+	re.Equal(string(expectedStartKey), mustQueryUnescape(t, requestURL.Query().Get("key")))
+	re.Equal(string(expectedEndKey), mustQueryUnescape(t, requestURL.Query().Get("end_key")))
+	re.Equal(resp+"\n", out.String())
+}
+
+func TestShowRegionsByKeyspaceTableIDCommandFuncWithTableIDAndLimit(t *testing.T) {
+	re := require.New(t)
+	var requestURL *url.URL
+	resp := `{"regions":[{"id":1}]}`
+	oldClient := dialClient
+	dialClient = &http.Client{
+		Transport: &captureRoundTripper{
+			roundTrip: func(req *http.Request) (*http.Response, error) {
+				requestURL = req.URL
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewBufferString(resp)),
+				}, nil
+			},
+		},
+	}
+	defer func() { dialClient = oldClient }()
+
+	cmd := NewRegionsByKeyspaceTableIDCommand()
+	cmd.Flags().String("pd", "http://mock-pd:2379", "")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"17", "table-id", "45", "3"})
+	re.NoError(cmd.Execute())
+
+	re.NotNil(requestURL)
+	re.Equal("/pd/api/v1/regions/key", requestURL.Path)
+	startKey := []byte{'x', 0, 0, 17, 't'}
+	startKey = codec.EncodeInt(startKey, 45)
+	endKey := append(startKey, 't')
+	endKey = codec.EncodeInt(endKey, 46)
+	re.Equal(string(codec.EncodeBytes(nil, startKey)), mustQueryUnescape(t, requestURL.Query().Get("key")))
+	re.Equal(string(codec.EncodeBytes(nil, endKey)), mustQueryUnescape(t, requestURL.Query().Get("end_key")))
+	re.Equal("3", requestURL.Query().Get("limit"))
+	re.Equal(resp+"\n", out.String())
+}
+
+func TestShowRegionsByKeyspaceTableIDCommandFuncWithInvalidTableIDKeyword(t *testing.T) {
+	re := require.New(t)
+
+	cmd := NewRegionsByKeyspaceTableIDCommand()
+	cmd.Flags().String("pd", "http://mock-pd:2379", "")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"17", "table", "45"})
+	re.NoError(cmd.Execute())
+
+	re.Contains(out.String(), "table-id is required")
+}
+
+func mustQueryUnescape(t *testing.T, value string) string {
+	t.Helper()
+	unescaped, err := url.QueryUnescape(value)
+	require.NoError(t, err)
+	return unescaped
 }
