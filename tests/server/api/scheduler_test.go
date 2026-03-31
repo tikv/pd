@@ -251,6 +251,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"min-hot-query-rate":         10.0,
 					"min-hot-cpu-rate":           10.0,
 					"max-zombie-rounds":          3.0,
+					"pending-weight":             1.0,
 					"max-peer-number":            1000.0,
 					"byte-rate-rank-step-ratio":  0.05,
 					"key-rate-rank-step-ratio":   0.05,
