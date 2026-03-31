@@ -462,8 +462,8 @@ func showRegionsByKeyspaceTableIDCommandFunc(cmd *cobra.Command, args []string) 
 		endKey = codec.EncodeInt(endKey, nextTableID)
 	}
 
-	encodedStartKey := codec.EncodeBytes(startKey)
-	encodedEndKey := codec.EncodeBytes(endKey)
+	encodedStartKey := codec.EncodeBytes(nil, startKey)
+	encodedEndKey := codec.EncodeBytes(nil, endKey)
 	prefix := regionsKeyPrefix + "?key=" + url.QueryEscape(string(encodedStartKey)) + "&end_key=" + url.QueryEscape(string(encodedEndKey))
 	if len(args) == 2 || len(args) == 4 {
 		limit, err := strconv.Atoi(args[len(args)-1])
