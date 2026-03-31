@@ -64,6 +64,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 			MinHotQueryRate:        10,
 			MinHotCPURate:          10,
 			MaxZombieRounds:        3,
+			PendingWeight:          1,
 			MaxPeerNum:             1000,
 			ByteRateRankStepRatio:  0.05,
 			KeyRateRankStepRatio:   0.05,
@@ -94,6 +95,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerParam {
 		MinHotQueryRate:        conf.MinHotQueryRate,
 		MinHotCPURate:          conf.MinHotCPURate,
 		MaxZombieRounds:        conf.MaxZombieRounds,
+		PendingWeight:          conf.PendingWeight,
 		MaxPeerNum:             conf.MaxPeerNum,
 		ByteRateRankStepRatio:  conf.ByteRateRankStepRatio,
 		KeyRateRankStepRatio:   conf.KeyRateRankStepRatio,
@@ -123,6 +125,7 @@ type hotRegionSchedulerParam struct {
 	MinHotQueryRate float64 `json:"min-hot-query-rate"`
 	MinHotCPURate   float64 `json:"min-hot-cpu-rate"`
 	MaxZombieRounds int     `json:"max-zombie-rounds"`
+	PendingWeight   float64 `json:"pending-weight"`
 	MaxPeerNum      int     `json:"max-peer-number"`
 
 	// rank step ratio decide the step when calculate rank
@@ -177,6 +180,12 @@ func (conf *hotRegionSchedulerConfig) getStoreStatZombieDuration() time.Duration
 	conf.RLock()
 	defer conf.RUnlock()
 	return time.Duration(conf.MaxZombieRounds*utils.StoreHeartBeatReportInterval) * time.Second
+}
+
+func (conf *hotRegionSchedulerConfig) getPendingWeight() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.PendingWeight
 }
 
 func (conf *hotRegionSchedulerConfig) getRegionsStatZombieDuration() time.Duration {
@@ -447,6 +456,9 @@ func (conf *hotRegionSchedulerParam) validateLocked() error {
 	if conf.ForbidRWType != utils.Read.String() && conf.ForbidRWType != utils.Write.String() &&
 		conf.ForbidRWType != "none" && conf.ForbidRWType != "" {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid forbid-rw-type")
+	}
+	if conf.PendingWeight < defaultPendingWeight {
+		return errs.ErrSchedulerConfig.FastGenByArgs("invalid pending-weight, should be at least 1")
 	}
 	if conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.01, 1.0]")
