@@ -17,7 +17,7 @@ The triage script does not generate these snippets. The agent must extract them 
 3. Treat `--- FAIL:` suite summaries as navigation only.
 4. Locate the strongest failure block in the raw log.
 5. Classify the block by excerpt shape, not by signature alone.
-6. If no strong block exists, emit the item to `unknown[]` and do not draft an issue.
+6. If no strong block exists, keep the item as `UNKNOWN_FAILURE` in `/tmp/failure_items.json` and do not draft an issue.
 
 ## Failure Families
 
@@ -133,7 +133,7 @@ This is not an excerpt family. It is a stop condition.
 If only suite summary lines are available:
 - use them to locate the failing subtest
 - search the raw log again with the exact test name
-- if no stronger block exists, emit to `unknown[]`
+- if no stronger block exists, keep the item as `UNKNOWN_FAILURE` in `/tmp/failure_items.json`
 
 Never:
 - create a GitHub issue action from an unknown case
@@ -160,12 +160,12 @@ When multiple candidate windows exist, prefer the window that maximizes:
 3. actionable trace depth
 4. lowest surrounding noise
 
-## Validation Contract
+## Excerpt Checklist
 
-The validator enforces:
+Before using an excerpt in issue text, confirm:
 
-- code block exists and is non-empty
-- test or package clue exists
+- the code block is non-empty
+- a test or package clue exists
 - at least one error anchor exists
 - summary-template lines are rejected
-- line budget matches the selected failure family
+- the line budget roughly matches the selected failure family
