@@ -188,14 +188,27 @@ func TestShowRegionsByKeyspaceTableIDCommandFuncWithTableIDAndLimit(t *testing.T
 
 	re.NotNil(requestURL)
 	re.Equal("/pd/api/v1/regions/key", requestURL.Path)
-	startKey := []byte{'x', 0, 0, 17, 't'}
-	startKey = codec.EncodeInt(startKey, 45)
-	endKey := append(startKey, 't')
-	endKey = codec.EncodeInt(endKey, 46)
+	tablePrefix := []byte{'x', 0, 0, 17, 't'}
+	startKey := codec.EncodeInt(append([]byte{}, tablePrefix...), 45)
+	endKey := codec.EncodeInt(append([]byte{}, tablePrefix...), 46)
 	re.Equal(string(codec.EncodeBytes(nil, startKey)), mustQueryUnescape(t, requestURL.Query().Get("key")))
 	re.Equal(string(codec.EncodeBytes(nil, endKey)), mustQueryUnescape(t, requestURL.Query().Get("end_key")))
 	re.Equal("3", requestURL.Query().Get("limit"))
 	re.Equal(resp+"\n", out.String())
+}
+
+func TestShowRegionsByKeyspaceTableIDCommandFuncWithInvalidKeyspaceIDRange(t *testing.T) {
+	re := require.New(t)
+
+	cmd := NewRegionsByKeyspaceTableIDCommand()
+	cmd.Flags().String("pd", "http://mock-pd:2379", "")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"16777216"})
+	re.NoError(cmd.Execute())
+
+	re.Contains(out.String(), "keyspace-id should be a number between 0 and 16777215")
 }
 
 func TestShowRegionsByKeyspaceTableIDCommandFuncWithInvalidTableIDKeyword(t *testing.T) {

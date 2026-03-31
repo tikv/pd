@@ -437,9 +437,9 @@ func showRegionsByKeyspaceTableIDCommandFunc(cmd *cobra.Command, args []string) 
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	keyspaceID, err := strconv.ParseInt(args[0], 10, 32)
+	keyspaceID, err := strconv.ParseUint(args[0], 10, 24)
 	if err != nil {
-		cmd.Println("Error: ", "keyspace-id should be a number")
+		cmd.Println("Error: ", "keyspace-id should be a number between 0 and 16777215")
 		return
 	}
 	startKey := []byte{'x', byte(keyspaceID >> 16), byte(keyspaceID >> 8), byte(keyspaceID)}
@@ -456,10 +456,9 @@ func showRegionsByKeyspaceTableIDCommandFunc(cmd *cobra.Command, args []string) 
 			return
 		}
 		nextTableID := tableID + 1
-		startKey = append(startKey, 't')
-		startKey = codec.EncodeInt(startKey, tableID)
-		endKey = append(startKey, 't')
-		endKey = codec.EncodeInt(endKey, nextTableID)
+		tablePrefix := []byte{'x', byte(keyspaceID >> 16), byte(keyspaceID >> 8), byte(keyspaceID), 't'}
+		startKey = codec.EncodeInt(append([]byte{}, tablePrefix...), tableID)
+		endKey = codec.EncodeInt(append([]byte{}, tablePrefix...), nextTableID)
 	}
 
 	encodedStartKey := codec.EncodeBytes(nil, startKey)
