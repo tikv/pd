@@ -166,9 +166,11 @@ type HotPeersStat struct {
 	StoreByteRate  float64           `json:"store_bytes"`
 	StoreKeyRate   float64           `json:"store_keys"`
 	StoreQueryRate float64           `json:"store_query"`
+	StoreCPURate   float64           `json:"store_cpu"`
 	TotalBytesRate float64           `json:"total_flow_bytes"`
 	TotalKeysRate  float64           `json:"total_flow_keys"`
 	TotalQueryRate float64           `json:"total_flow_query"`
+	TotalCPURate   float64           `json:"total_flow_cpu"`
 	Count          int               `json:"regions_count"`
 	Stats          []HotPeerStatShow `json:"statistics"`
 }
@@ -184,6 +186,7 @@ type HotPeerStatShow struct {
 	ByteRate       float64   `json:"flow_bytes"`
 	KeyRate        float64   `json:"flow_keys"`
 	QueryRate      float64   `json:"flow_query"`
+	CPURate        float64   `json:"flow_cpu"`
 	AntiCount      int       `json:"anti_count"`
 	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
 }
@@ -217,6 +220,7 @@ type HistoryHotRegion struct {
 	HotRegionType string  `json:"hot_region_type"`
 	HotDegree     int64   `json:"hot_degree"`
 	FlowBytes     float64 `json:"flow_bytes"`
+	FlowCPU       float64 `json:"flow_cpu"`
 	KeyRate       float64 `json:"key_rate"`
 	QueryRate     float64 `json:"query_rate"`
 	StartKey      string  `json:"start_key"`

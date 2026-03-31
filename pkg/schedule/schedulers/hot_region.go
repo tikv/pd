@@ -50,6 +50,7 @@ const (
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
 	maxHotScheduleInterval  = 20 * time.Second
+	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1
 	defaultTopnPosition     = 10
@@ -153,10 +154,25 @@ func (s *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterva
 	s.stHistoryLoads = s.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
 }
 
+func (s *baseHotScheduler) getEffectivePendingWeight() float64 {
+	if conf, ok := s.conf.(*hotRegionSchedulerConfig); ok {
+		pendingWeight := conf.getPendingWeight()
+		if pendingWeight < defaultPendingWeight {
+			log.Warn("pending-weight is less than default, fallback to default",
+				zap.Float64("pendingWeight", pendingWeight),
+				zap.Float64("defaultPendingWeight", defaultPendingWeight))
+			return defaultPendingWeight
+		}
+		return pendingWeight
+	}
+	return defaultPendingWeight
+}
+
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
 func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+	pendingWeight := s.getEffectivePendingWeight()
 	for id, p := range s.regionPendings {
 		for _, from := range p.froms {
 			from := storeInfos[from]
@@ -169,6 +185,7 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 				continue
 			}
 
+			weight *= pendingWeight
 			if from != nil && weight > 0 {
 				from.AddInfluence(&p.origin, -weight)
 			}
@@ -223,18 +240,29 @@ func (s *hotScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &hotRegionSchedulerConfig{}
+	newCfg := &hotRegionSchedulerConfig{
+		hotRegionSchedulerParam: s.conf.hotRegionSchedulerParam,
+	}
+	newCfg.ReadPriorities = append([]string(nil), s.conf.ReadPriorities...)
+	newCfg.WriteLeaderPriorities = append([]string(nil), s.conf.WriteLeaderPriorities...)
+	newCfg.WritePeerPriorities = append([]string(nil), s.conf.WritePeerPriorities...)
 	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+	if err := newCfg.hotRegionSchedulerParam.validateLocked(); err != nil {
 		return err
 	}
 	s.conf.MinHotByteRate = newCfg.MinHotByteRate
 	s.conf.MinHotKeyRate = newCfg.MinHotKeyRate
 	s.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	s.conf.MinHotCPURate = newCfg.MinHotCPURate
 	s.conf.MaxZombieRounds = newCfg.MaxZombieRounds
+	s.conf.PendingWeight = newCfg.PendingWeight
 	s.conf.MaxPeerNum = newCfg.MaxPeerNum
 	s.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
 	s.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
 	s.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	s.conf.CPURateRankStepRatio = newCfg.CPURateRankStepRatio
 	s.conf.CountRankStepRatio = newCfg.CountRankStepRatio
 	s.conf.GreatDecRatio = newCfg.GreatDecRatio
 	s.conf.MinorDecRatio = newCfg.MinorDecRatio
@@ -535,7 +563,9 @@ func (bs *balanceSolver) init() {
 	rankStepRatios := []float64{
 		utils.ByteDim:  bs.sche.conf.getByteRankStepRatio(),
 		utils.KeyDim:   bs.sche.conf.getKeyRankStepRatio(),
-		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio()}
+		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio(),
+		utils.CPUDim:   bs.sche.conf.getCPURateRankStepRatio(),
+	}
 	stepLoads := make([]float64, utils.DimLen)
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
@@ -687,6 +717,8 @@ func (bs *balanceSolver) skipCounter(label string) prometheus.Counter {
 			return readSkipKeyDimUniformStoreCounter
 		case "query":
 			return readSkipQueryDimUniformStoreCounter
+		case "cpu":
+			return readSkipCPUDimUniformStoreCounter
 		default:
 			return readSkipAllDimUniformStoreCounter
 		}
@@ -1156,6 +1188,8 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 		return bs.sche.conf.getMinHotByteRate()
 	case utils.QueryDim:
 		return bs.sche.conf.getMinHotQueryRate()
+	case utils.CPUDim:
+		return bs.sche.conf.getMinHotCPURate()
 	}
 	return -1
 }
@@ -1164,6 +1198,7 @@ var dimToStep = [utils.DimLen]float64{
 	utils.ByteDim:  100,
 	utils.KeyDim:   10,
 	utils.QueryDim: 10,
+	utils.CPUDim:   10,
 }
 
 // compareSrcStore compares the source store of detail1, detail2, the result is:
@@ -1317,18 +1352,21 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 }
 
 // bucketFirstStat returns the first priority statistics of the bucket.
-// if the first priority is query rate, it will return the second priority .
+// If the first priority is a dimension that buckets do not report, it falls
+// back to another bucket-supported priority.
 func (bs *balanceSolver) bucketFirstStat() utils.RegionStatKind {
-	base := utils.RegionReadBytes
-	if bs.rwTy == utils.Write {
-		base = utils.RegionWriteBytes
+	dim := bs.firstPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = bs.secondPriority
 	}
-	offset := bs.firstPriority
-	// todo: remove it if bucket's qps has been supported.
-	if bs.firstPriority == utils.QueryDim {
-		offset = bs.secondPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = utils.ByteDim
 	}
-	return base + utils.RegionStatKind(offset)
+	return bs.rwTy.RegionStats()[dim]
+}
+
+func isBucketLoadDimSupported(dim int) bool {
+	return dim == utils.ByteDim || dim == utils.KeyDim || dim == utils.QueryDim
 }
 
 func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {

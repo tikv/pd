@@ -54,7 +54,7 @@ type thresholds struct {
 	updatedTime time.Time
 	rates       []float64
 	topNLen     int
-	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for total length.
+	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for cpu, 4 is for total length.
 }
 
 // HotPeerCache saves the hot peer's statistics.
@@ -287,6 +287,7 @@ func (f *HotPeerCache) collectMetrics() {
 		thresholds.metrics[utils.ByteDim].Set(thresholds.rates[utils.ByteDim])
 		thresholds.metrics[utils.KeyDim].Set(thresholds.rates[utils.KeyDim])
 		thresholds.metrics[utils.QueryDim].Set(thresholds.rates[utils.QueryDim])
+		thresholds.metrics[utils.CPUDim].Set(thresholds.rates[utils.CPUDim])
 		thresholds.metrics[utils.DimLen].Set(float64(thresholds.topNLen))
 	}
 }
@@ -316,6 +317,7 @@ func (f *HotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 				utils.ByteDim:  hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, kind),
 				utils.KeyDim:   hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, kind),
 				utils.QueryDim: hotCacheStatusGauge.WithLabelValues("query-rate-threshold", store, kind),
+				utils.CPUDim:   hotCacheStatusGauge.WithLabelValues("cpu-rate-threshold", store, kind),
 				utils.DimLen:   hotCacheStatusGauge.WithLabelValues("total_length", store, kind),
 			},
 		}
@@ -443,7 +445,11 @@ func (f *HotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {
-			newItem.rollingLoads = append(newItem.rollingLoads, dim.clone())
+			if dim != nil {
+				newItem.rollingLoads = append(newItem.rollingLoads, dim.clone())
+			} else {
+				newItem.rollingLoads = append(newItem.rollingLoads, nil)
+			}
 		}
 		newItem.allowInherited = false
 	} else {
@@ -506,7 +512,7 @@ func (f *HotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		initItem(newItem, f.kind.DefaultAntiCount())
 	}
 	newItem.actionType = utils.Add
-	newItem.rollingLoads = make([]*dimStat, len(regionStats))
+	newItem.rollingLoads = make([]*dimStat, utils.DimLen)
 	for i, k := range regionStats {
 		ds := newDimStat(f.interval())
 		ds.add(deltaLoads[k], interval)
