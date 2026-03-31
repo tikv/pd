@@ -67,17 +67,20 @@ ifeq ($(RUN_CI), 1)
 	RELEASE_VERSION := None
 endif
 
+GITHASH := $(shell git rev-parse HEAD)
+GITBRANCH := $(shell git rev-parse --abbrev-ref HEAD)
+
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(RELEASE_VERSION)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
-LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
-LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
+LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(GITHASH)"
+LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitBranch=$(GITBRANCH)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDEdition=$(PD_EDITION)"
 
 ifneq ($(DASHBOARD), 0)
 	# Note: LDFLAGS must be evaluated lazily for these scripts to work correctly
 	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.InternalVersion=$(shell scripts/describe-dashboard.sh internal-version)"
 	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.Standalone=No"
-	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.PDVersion=$(shell git describe --tags --dirty --always)"
+	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.PDVersion=$(RELEASE_VERSION)"
 	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.BuildGitHash=$(shell scripts/describe-dashboard.sh git-hash)"
 endif
