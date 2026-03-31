@@ -287,7 +287,7 @@ func (m *Member) CheckPriority(ctx context.Context) {
 		return
 	}
 	// Record leader priority for current instance.
-	memberLeaderPriorityGauge.WithLabelValues(m.Name()).Set(float64(myPriority))
+	memberLeaderPriorityGauge.WithLabelValues().Set(float64(myPriority))
 
 	etcdLeader := m.GetEtcdLeader()
 	if etcdLeader == m.ID() || etcdLeader == 0 {

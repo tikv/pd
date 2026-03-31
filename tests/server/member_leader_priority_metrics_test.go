@@ -40,21 +40,16 @@ func TestMemberLeaderPriorityMetrics(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	s := leaderServer.GetServer()
-	instance := s.GetMemberInfo().GetName()
 
 	s.GetMember().CheckPriority(ctx)
-	val, ok := getGaugeValue(re, "pd_server_member_leader_priority", map[string]string{
-		"instance": instance,
-	})
+	val, ok := getGaugeValue(re, "pd_server_member_leader_priority", nil)
 	re.True(ok)
 	re.Equal(0.0, val)
 
 	re.NoError(s.GetMember().SetMemberLeaderPriority(s.GetMemberInfo().GetMemberId(), 42))
 	s.GetMember().CheckPriority(ctx)
 
-	val, ok = getGaugeValue(re, "pd_server_member_leader_priority", map[string]string{
-		"instance": instance,
-	})
+	val, ok = getGaugeValue(re, "pd_server_member_leader_priority", nil)
 	re.True(ok)
 	re.Equal(42.0, val)
 }

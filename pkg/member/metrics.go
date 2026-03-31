@@ -32,7 +32,7 @@ var (
 			Subsystem: "server",
 			Name:      "member_leader_priority",
 			Help:      "Etcd leader priority of this PD instance.",
-		}, []string{"instance"})
+		}, []string{})
 )
 
 func init() {
