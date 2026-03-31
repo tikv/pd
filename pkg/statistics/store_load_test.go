@@ -26,7 +26,7 @@ import (
 func TestHistoryLoads(t *testing.T) {
 	re := require.New(t)
 	historyLoads := NewStoreHistoryLoads(utils.DimLen, DefaultHistorySampleDuration, 0)
-	loads := []float64{1.0, 2.0, 3.0}
+	loads := []float64{1.0, 2.0, 3.0, 0.0}
 	rwTp := utils.Read
 	kind := constant.LeaderKind
 	historyLoads.Add(1, rwTp, kind, loads)

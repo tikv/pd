@@ -310,6 +310,48 @@ func (suite *regionTestSuite) TestTop() {
 	checkTopRegions(re, fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
 }
 
+func TestRegionCPUUsageCompatibility(t *testing.T) {
+	re := require.New(t)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+	mustBootstrapCluster(re, svr)
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", svr.GetAddr(), apiPrefix)
+
+	newHeartbeatRegion := func(id, cpuUsage, readCPU uint64) *core.RegionInfo {
+		peer := &metapb.Peer{Id: id*10 + 1, StoreId: 1}
+		return core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+			Region: &metapb.Region{
+				Id:       id,
+				Peers:    []*metapb.Peer{peer},
+				StartKey: []byte(fmt.Sprintf("cpu-%d-a", id)),
+				EndKey:   []byte(fmt.Sprintf("cpu-%d-b", id)),
+				RegionEpoch: &metapb.RegionEpoch{
+					ConfVer: 1,
+					Version: 1,
+				},
+			},
+			Leader:   peer,
+			CpuUsage: cpuUsage,
+			CpuStats: &pdpb.CPUStats{
+				UnifiedRead: readCPU,
+			},
+		}, 0)
+	}
+
+	r1 := newHeartbeatRegion(10001, 2000, 4000)
+	r2 := newHeartbeatRegion(10002, 3000, 1000)
+	mustRegionHeartbeat(re, svr, r1)
+	mustRegionHeartbeat(re, svr, r2)
+
+	checkTopRegions(re, fmt.Sprintf("%s/regions/cpu?limit=2", urlPrefix), []uint64{10002, 10001})
+
+	got := &response.RegionInfo{}
+	url := fmt.Sprintf("%s/region/id/%d", urlPrefix, r1.GetID())
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, got))
+	re.Equal(uint64(2000), got.CPUUsage)
+}
+
 func checkTopRegions(re *require.Assertions, url string, regionIDs []uint64) {
 	regions := &response.RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, regions)
