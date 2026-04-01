@@ -291,7 +291,7 @@ func schedulersRegister() {
 				return nil, err
 			}
 		}
-		if err := conf.hotRegionSchedulerParam.validateLocked(); err != nil {
+		if err := conf.validateLocked(); err != nil {
 			return nil, err
 		}
 		sche := newHotScheduler(opController, conf)

@@ -238,7 +238,7 @@ func (s *hotScheduler) ReloadConfig() error {
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
-	if err := newCfg.hotRegionSchedulerParam.validateLocked(); err != nil {
+	if err := newCfg.validateLocked(); err != nil {
 		return err
 	}
 	s.conf.MinHotByteRate = newCfg.MinHotByteRate
