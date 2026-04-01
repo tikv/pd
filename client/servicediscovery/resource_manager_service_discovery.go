@@ -263,7 +263,7 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 				}
 			}
 			lastUpdateTime = time.Now()
-			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
+			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.GetServiceURL()))
 			discoverAndUpdate()
 		}
 	}
