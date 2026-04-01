@@ -71,6 +71,12 @@ func (c *countingMetaStorageClient) snapshotCallTimes() []time.Time {
 var _ metastorage.Client = (*countingMetaStorageClient)(nil)
 
 func TestResourceManagerServiceURLUpdateBackoff(t *testing.T) {
+	oldRetryInterval := serviceURLRetryInterval
+	serviceURLRetryInterval = 50 * time.Millisecond
+	defer func() {
+		serviceURLRetryInterval = oldRetryInterval
+	}()
+
 	participant := &rmpb.Participant{ListenUrls: []string{"http://127.0.0.1:1234"}}
 	value, err := proto.Marshal(participant)
 	require.NoError(t, err)
@@ -96,11 +102,11 @@ func TestResourceManagerServiceURLUpdateBackoff(t *testing.T) {
 	discovery.ScheduleUpdateServiceURL()
 	require.Eventually(t, func() bool {
 		return len(metaCli.snapshotCallTimes()) >= 2
-	}, serviceURLRetryInterval+time.Second, 10*time.Millisecond)
+	}, time.Second, 5*time.Millisecond)
 
 	callTimes := metaCli.snapshotCallTimes()
 	require.Len(t, callTimes, 2)
-	require.GreaterOrEqual(t, callTimes[1].Sub(callTimes[0]), serviceURLRetryInterval-200*time.Millisecond)
+	require.GreaterOrEqual(t, callTimes[1].Sub(callTimes[0]), serviceURLRetryInterval-10*time.Millisecond)
 
 	cancel()
 	select {

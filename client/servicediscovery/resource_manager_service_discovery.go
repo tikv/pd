@@ -42,8 +42,9 @@ const (
 	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/primary".
 	resourceManagerSvcDiscoveryFormat = "/ms/%d/" + resourceManagerServiceName + "/primary"
 	resourceManagerInitRetryTime      = 3
-	serviceURLRetryInterval           = 3 * time.Second
 )
+
+var serviceURLRetryInterval = 3 * time.Second
 
 // ResourceManagerDiscovery is used to discover the resource manager service.
 type ResourceManagerDiscovery struct {
