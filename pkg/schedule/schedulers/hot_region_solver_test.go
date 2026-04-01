@@ -105,6 +105,9 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	// Explicitly use byte/key here so this test only verifies split-key selection
+	// instead of depending on the cluster-version-specific default priorities.
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
 	solve.cur = &solution{}
 	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
@@ -155,6 +158,46 @@ func TestSplitBucketsByLoad(t *testing.T) {
 		re.NoError(err)
 		re.Equal(expectOp.Brief(), op.Brief())
 	}
+}
+
+func TestSplitBucketsByLoadWithCPUFallback(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetRegionBucketEnabled(true)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	defer cancel()
+	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
+	solve.cur = &solution{}
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+
+	b := &metapb.Buckets{
+		RegionId:   1,
+		PeriodInMs: 1000,
+		Keys:       [][]byte{[]byte(""), []byte("b"), []byte("d"), []byte("")},
+		Stats: &metapb.BucketStats{
+			ReadBytes:  []uint64{2 * units.MiB, 2 * units.MiB, 20 * units.MiB},
+			ReadKeys:   []uint64{256, 256, 256},
+			ReadQps:    []uint64{1000, 1, 1},
+			WriteBytes: []uint64{0, 0, 0},
+			WriteQps:   []uint64{0, 0, 0},
+			WriteKeys:  []uint64{0, 0, 0},
+		},
+	}
+	task := buckets.NewCheckPeerTask(b)
+	re.True(tc.CheckAsync(task))
+	time.Sleep(time.Millisecond * 10)
+
+	ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
+	re.Len(ops, 1)
+	op := ops[0]
+	re.Equal(splitHotReadBuckets, op.Desc())
+
+	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, [][]byte{[]byte("d")})
+	re.NoError(err)
+	re.Equal(expectOp.Brief(), op.Brief())
 }
 
 func TestHotCacheSortHotPeer(t *testing.T) {
