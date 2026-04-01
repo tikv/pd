@@ -41,6 +41,7 @@ const (
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
 	maxHotScheduleInterval  = 20 * time.Second
+	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1
 	defaultTopnPosition     = 10
@@ -142,10 +143,25 @@ func (s *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterva
 	s.stHistoryLoads = s.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
 }
 
+func (s *baseHotScheduler) getEffectivePendingWeight() float64 {
+	if conf, ok := s.conf.(*hotRegionSchedulerConfig); ok {
+		pendingWeight := conf.getPendingWeight()
+		if pendingWeight < defaultPendingWeight {
+			log.Warn("pending-weight is less than default, fallback to default",
+				zap.Float64("pendingWeight", pendingWeight),
+				zap.Float64("defaultPendingWeight", defaultPendingWeight))
+			return defaultPendingWeight
+		}
+		return pendingWeight
+	}
+	return defaultPendingWeight
+}
+
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
 func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+	pendingWeight := s.getEffectivePendingWeight()
 	for id, p := range s.regionPendings {
 		for _, from := range p.froms {
 			from := storeInfos[from]
@@ -158,6 +174,7 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 				continue
 			}
 
+			weight *= pendingWeight
 			if from != nil && weight > 0 {
 				from.AddInfluence(&p.origin, -weight)
 			}
@@ -212,18 +229,29 @@ func (s *hotScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &hotRegionSchedulerConfig{}
+	newCfg := &hotRegionSchedulerConfig{
+		hotRegionSchedulerParam: s.conf.hotRegionSchedulerParam,
+	}
+	newCfg.ReadPriorities = append([]string(nil), s.conf.ReadPriorities...)
+	newCfg.WriteLeaderPriorities = append([]string(nil), s.conf.WriteLeaderPriorities...)
+	newCfg.WritePeerPriorities = append([]string(nil), s.conf.WritePeerPriorities...)
 	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+	if err := newCfg.validateLocked(); err != nil {
 		return err
 	}
 	s.conf.MinHotByteRate = newCfg.MinHotByteRate
 	s.conf.MinHotKeyRate = newCfg.MinHotKeyRate
 	s.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	s.conf.MinHotCPURate = newCfg.MinHotCPURate
 	s.conf.MaxZombieRounds = newCfg.MaxZombieRounds
+	s.conf.PendingWeight = newCfg.PendingWeight
 	s.conf.MaxPeerNum = newCfg.MaxPeerNum
 	s.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
 	s.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
 	s.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	s.conf.CPURateRankStepRatio = newCfg.CPURateRankStepRatio
 	s.conf.CountRankStepRatio = newCfg.CountRankStepRatio
 	s.conf.GreatDecRatio = newCfg.GreatDecRatio
 	s.conf.MinorDecRatio = newCfg.MinorDecRatio
