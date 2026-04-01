@@ -551,7 +551,7 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges for the keyspace
-	keyRanges := keyspace.MakeKeyRanges(keyspaceID32, false)
+	keyRanges := keyspace.MakeKeyRanges(keyspaceID32)
 
 	// Create placement rule bundle
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
