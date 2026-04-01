@@ -33,9 +33,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+<<<<<<< HEAD
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+=======
+	statutils "github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/testutil"
+>>>>>>> 3aee2efeb5 (pd: report hot read cpu in heartbeat (#10178))
 )
 
 type regionTestSuite struct {
@@ -342,6 +347,7 @@ func (suite *regionTestSuite) TestTopN() {
 	}
 }
 
+<<<<<<< HEAD
 func TestRegionsWithKillRequest(t *testing.T) {
 	re := require.New(t)
 	svr, cleanup := mustNewServer(re)
@@ -573,6 +579,42 @@ func (suite *getRegionRangeHolesTestSuite) TestRegionRangeHoles() {
 		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},
 		{core.HexRegionKeyStr(r6.GetEndKey()), ""},
 	}, *rangeHoles)
+=======
+func TestRegionCPUUsageCompatibility(t *testing.T) {
+	re := require.New(t)
+
+	newHeartbeatRegion := func(id, cpuUsage, readCPU uint64) *core.RegionInfo {
+		peer := &metapb.Peer{Id: id*10 + 1, StoreId: 1}
+		return core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+			Region: &metapb.Region{
+				Id:    id,
+				Peers: []*metapb.Peer{peer},
+			},
+			Leader:   peer,
+			CpuUsage: cpuUsage,
+			CpuStats: &pdpb.CPUStats{
+				UnifiedRead: readCPU,
+			},
+		}, 0)
+	}
+
+	r1 := newHeartbeatRegion(10001, 2000, 4000)
+	r2 := newHeartbeatRegion(10002, 3000, 1000)
+
+	topRegions := TopNRegions([]*core.RegionInfo{r1, r2}, func(a, b *core.RegionInfo) bool {
+		return a.GetCPUUsage() < b.GetCPUUsage()
+	}, 2)
+	re.Len(topRegions, 2)
+	re.Equal(uint64(10002), topRegions[0].GetID())
+	re.Equal(uint64(10001), topRegions[1].GetID())
+
+	re.Equal(uint64(2000), r1.GetCPUUsage())
+	re.Equal(uint64(4000), r1.GetReadCPUUsage())
+	re.Equal(float64(4000), r1.GetLoads()[statutils.RegionReadCPU])
+
+	got := response.NewAPIRegionInfo(r1)
+	re.Equal(uint64(2000), got.CPUUsage)
+>>>>>>> 3aee2efeb5 (pd: report hot read cpu in heartbeat (#10178))
 }
 
 func TestRegionsInfoMarshal(t *testing.T) {

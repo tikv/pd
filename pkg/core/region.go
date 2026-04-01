@@ -60,6 +60,7 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
+<<<<<<< HEAD
 	meta              *metapb.Region
 	learners          []*metapb.Peer
 	witnesses         []*metapb.Peer
@@ -82,6 +83,35 @@ type RegionInfo struct {
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
 	buckets unsafe.Pointer
+=======
+	meta         *metapb.Region
+	learners     []*metapb.Peer
+	witnesses    []*metapb.Peer
+	voters       []*metapb.Peer
+	leader       *metapb.Peer
+	downPeers    []*pdpb.PeerStats
+	pendingPeers []*metapb.Peer
+	term         uint64
+	// cpuUsage is deprecated and will be removed in the future.
+	// We should use `cpuStats` instead.
+	cpuUsage                  uint64
+	cpuStats                  *pdpb.CPUStats
+	writtenBytes              uint64
+	writtenKeys               uint64
+	readBytes                 uint64
+	readKeys                  uint64
+	approximateSize           int64
+	approximateKvSize         int64 // Unit: MiB
+	approximateColumnarKvSize int64 // Unit: MiB
+	approximateKeys           int64
+	interval                  *pdpb.TimeInterval
+	replicationStatus         *replication_modepb.RegionReplicationStatus
+	queryStats                *pdpb.QueryStats
+	flowRoundDivisor          uint64
+	// reportBuckets is not thread unsafe, it should be accessed by the request `report reportBuckets` with greater version.
+	// todo: keep it compatible with previous design, we can remove it later.
+	reportBuckets unsafe.Pointer
+>>>>>>> 3aee2efeb5 (pd: report hot read cpu in heartbeat (#10178))
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
@@ -245,7 +275,12 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
+<<<<<<< HEAD
 		region.cpuUsage = h.GetCpuUsage()
+=======
+		region.cpuStats = h.GetCpuStats()
+		region.cpuUsage = h.CpuUsage
+>>>>>>> 3aee2efeb5 (pd: report hot read cpu in heartbeat (#10178))
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -305,6 +340,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 
 	region := &RegionInfo{
+<<<<<<< HEAD
 		term:              r.term,
 		meta:              typeutil.DeepClone(r.meta, RegionFactory),
 		leader:            typeutil.DeepClone(r.leader, RegionPeerFactory),
@@ -322,6 +358,28 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		replicationStatus: r.replicationStatus,
 		buckets:           r.buckets,
 		queryStats:        typeutil.DeepClone(r.queryStats, QueryStatsFactory),
+=======
+		term:                      r.term,
+		meta:                      typeutil.DeepClone(r.meta, RegionFactory),
+		leader:                    typeutil.DeepClone(r.leader, RegionPeerFactory),
+		downPeers:                 downPeers,
+		pendingPeers:              pendingPeers,
+		cpuUsage:                  r.cpuUsage,
+		cpuStats:                  typeutil.DeepClone(r.cpuStats, CPUStatsFactory),
+		writtenBytes:              r.writtenBytes,
+		writtenKeys:               r.writtenKeys,
+		readBytes:                 r.readBytes,
+		readKeys:                  r.readKeys,
+		approximateSize:           r.approximateSize,
+		approximateKvSize:         r.approximateKvSize,
+		approximateColumnarKvSize: r.approximateColumnarKvSize,
+		approximateKeys:           r.approximateKeys,
+		interval:                  typeutil.DeepClone(r.interval, TimeIntervalFactory),
+		replicationStatus:         r.replicationStatus,
+		reportBuckets:             atomic.LoadPointer(&r.reportBuckets),
+		queryStats:                typeutil.DeepClone(r.queryStats, QueryStatsFactory),
+		bucketMeta:                r.bucketMeta,
+>>>>>>> 3aee2efeb5 (pd: report hot read cpu in heartbeat (#10178))
 	}
 
 	for _, opt := range opts {
@@ -634,11 +692,17 @@ func (r *RegionInfo) GetPendingPeers() []*metapb.Peer {
 
 // GetCPUUsage returns the CPU usage of the region since the last heartbeat.
 // The number range is [0, N * 100], where N is the number of CPU cores.
-// However, since the TiKV basically only meters the CPU usage inside the
-// Unified Read Pool, it should be considered as an indicator of Region read
-// CPU overhead for now.
+// This is kept for compatibility with the legacy region heartbeat cpu_usage field.
 func (r *RegionInfo) GetCPUUsage() uint64 {
 	return r.cpuUsage
+}
+
+// GetReadCPUUsage returns the region-level unified-read CPU usage reported in cpu_stats.
+func (r *RegionInfo) GetReadCPUUsage() uint64 {
+	if r.cpuStats == nil {
+		return 0
+	}
+	return r.cpuStats.GetUnifiedRead()
 }
 
 // GetBytesRead returns the read bytes of the region.
@@ -1787,6 +1851,8 @@ func (r *RegionInfo) GetLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		float64(r.GetReadCPUUsage()),
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 
@@ -1799,6 +1865,8 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		0,
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 
