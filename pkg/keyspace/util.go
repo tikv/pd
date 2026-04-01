@@ -126,8 +126,8 @@ func MakeRegionBound(id uint32) *RegionBound {
 	}
 }
 
-// makeKeyRanges encodes keyspace ID to correct LabelRule data.
-func makeKeyRanges(id uint32, skipRaw bool) any {
+// MakeKeyRanges encodes keyspace ID to the correct LabelRule data.
+func MakeKeyRanges(id uint32, skipRaw bool) []any {
 	regionBound := MakeRegionBound(id)
 	if skipRaw {
 		return []any{
@@ -166,7 +166,7 @@ func makeLabelRule(id uint32, skipRaw bool) *labeler.LabelRule {
 			},
 		},
 		RuleType: labeler.KeyRange,
-		Data:     makeKeyRanges(id, skipRaw),
+		Data:     MakeKeyRanges(id, skipRaw),
 	}
 }
 

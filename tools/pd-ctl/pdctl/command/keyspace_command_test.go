@@ -39,7 +39,7 @@ func TestMakeKeyRanges(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		ranges := keyspace.MakeKeyRanges(tc.keyspaceID)
+		ranges := keyspace.MakeKeyRanges(tc.keyspaceID, false)
 		re.Len(ranges, 2, "should have 2 ranges (raw and txn)")
 
 		// Verify raw key range
