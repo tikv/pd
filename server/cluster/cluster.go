@@ -340,15 +340,15 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
-	log.Info("[leader-ready] start to init cluster")
+	log.Info("[leader-ready] start to initialize cluster")
 	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
-		log.Error("[leader-ready] failed to init cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
+		log.Error("[leader-ready] failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
 	}
 	initClusterDuration := time.Since(initClusterStart)
-	log.Info("[leader-ready] init cluster completed", zap.Duration("cost", initClusterDuration))
+	log.Info("[leader-ready] initialize cluster completed", zap.Duration("cost", initClusterDuration))
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
