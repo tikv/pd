@@ -42,6 +42,7 @@ const (
 	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/primary".
 	resourceManagerSvcDiscoveryFormat = "/ms/%d/" + resourceManagerServiceName + "/primary"
 	resourceManagerInitRetryTime      = 3
+	serviceURLRetryInterval           = 3 * time.Second
 )
 
 // ResourceManagerDiscovery is used to discover the resource manager service.
@@ -217,6 +218,7 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 	// This enables runtime switching between deployment modes.
 	ticker := time.NewTicker(initRetryInterval)
 	defer ticker.Stop()
+	var lastUpdateTime time.Time
 
 	discoverAndUpdate := func() {
 		url, newRevision, err := r.discoverServiceURL()
@@ -242,6 +244,24 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 			}
 			discoverAndUpdate()
 		case <-r.updateServiceURLCh:
+			if !lastUpdateTime.IsZero() {
+				since := time.Since(lastUpdateTime)
+				if since < serviceURLRetryInterval {
+					wait := serviceURLRetryInterval - since
+					log.Info("[resource-manager] delay updating service URL due to backoff",
+						zap.Duration("since", since),
+						zap.Duration("wait", wait))
+					timer := time.NewTimer(wait)
+					select {
+					case <-r.ctx.Done():
+						timer.Stop()
+						log.Info("[resource-manager] exit update service URL loop due to context canceled")
+						return
+					case <-timer.C:
+					}
+				}
+			}
+			lastUpdateTime = time.Now()
 			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
 			discoverAndUpdate()
 		}
