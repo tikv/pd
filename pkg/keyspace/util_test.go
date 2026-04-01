@@ -241,7 +241,7 @@ func TestMakeLabelRule(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		re.Equal(testCase.expectedLabelRule, makeLabelRule(testCase.id, testCase.skipRaw))
+		re.Equal(testCase.expectedLabelRule, buildLabelRule(testCase.id, testCase.skipRaw))
 	}
 }
 
@@ -254,7 +254,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 	}{
 		// Valid keyspace label rule.
 		{
-			labelRule:  makeLabelRule(1, false),
+			labelRule:  MakeLabelRule(1),
 			expectedID: 1,
 			expectedOK: true,
 		},
