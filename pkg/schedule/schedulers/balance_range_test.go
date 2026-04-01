@@ -533,6 +533,24 @@ func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
 		config: conf,
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
+	count := 0
+	checkFn := func(data []byte, pass bool) {
+		req := httptest.NewRequest(http.MethodPut, "/job", bytes.NewReader(data))
+		resp := httptest.NewRecorder()
+		re.NotPanics(func() {
+			handler.addJob(resp, req)
+		})
+		if pass {
+			re.Equal(http.StatusOK, resp.Code)
+			count++
+			re.Len(conf.jobs, count)
+		} else {
+			re.Equal(http.StatusBadRequest, resp.Code)
+		}
+		re.Len(conf.jobs, count)
+	}
+
+	// invalid engine type
 	body, err := json.Marshal(map[string]any{
 		"alias":     "a",
 		"engine":    1,
@@ -541,11 +559,41 @@ func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
 		"end-key":   "200",
 	})
 	re.NoError(err)
-	req := httptest.NewRequest(http.MethodPut, "/job", bytes.NewReader(body))
-	resp := httptest.NewRecorder()
-	re.NotPanics(func() {
-		handler.addJob(resp, req)
+	checkFn(body, false)
+
+	// invalid timeout type
+	body, err = json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"timeout":   "123",
 	})
-	re.Equal(http.StatusBadRequest, resp.Code)
-	re.Empty(conf.jobs)
+	re.NoError(err)
+	checkFn(body, false)
+
+	// normal case
+	body, err = json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"timeout":   "123s",
+	})
+	re.NoError(err)
+	checkFn(body, true)
+
+	// invalidate case
+	body, err = json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"timeout":   "0s",
+	})
+	re.NoError(err)
+	checkFn(body, false)
 }

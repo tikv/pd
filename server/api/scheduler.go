@@ -249,7 +249,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
