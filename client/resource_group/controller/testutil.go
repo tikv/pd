@@ -70,6 +70,11 @@ func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 	return tri.accessType
 }
 
+// PagingSizeBytes implements the RequestInfo interface.
+func (*TestRequestInfo) PagingSizeBytes() uint64 {
+	return 0
+}
+
 // TestResponseInfo is used to test the response info interface.
 type TestResponseInfo struct {
 	readBytes uint64
