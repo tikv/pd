@@ -879,7 +879,7 @@ type KeyspaceConfig struct {
 	// WaitRegionSplitTimeout indicates the max duration to wait region split.
 	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
 	// DisableRawKVRegionSplit indicates whether to skip raw kv region split.
-	DisableRawKVRegionSplit bool `toml:"disable-raw-kv-region-split" json:"disable-raw-kv-region-split,string"`
+	DisableRawKVRegionSplit bool `toml:"disable-raw-kv-region-split" json:"disable-raw-kv-region-split"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
 }
