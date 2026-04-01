@@ -261,11 +261,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
 		region.cpuStats = h.GetCpuStats()
-		if region.cpuStats != nil {
-			region.cpuUsage = region.cpuStats.GetUnifiedRead()
-		} else {
-			region.cpuUsage = h.CpuUsage
-		}
+		region.cpuUsage = h.CpuUsage
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -732,11 +728,17 @@ func (r *RegionInfo) GetPendingPeers() []*metapb.Peer {
 
 // GetCPUUsage returns the CPU usage of the region since the last heartbeat.
 // The number range is [0, N * 100], where N is the number of CPU cores.
-// However, since the TiKV basically only meters the CPU usage inside the
-// Unified Read Pool, it should be considered as an indicator of Region read
-// CPU overhead for now.
+// This is kept for compatibility with the legacy region heartbeat cpu_usage field.
 func (r *RegionInfo) GetCPUUsage() uint64 {
 	return r.cpuUsage
+}
+
+// GetReadCPUUsage returns the region-level unified-read CPU usage reported in cpu_stats.
+func (r *RegionInfo) GetReadCPUUsage() uint64 {
+	if r.cpuStats == nil {
+		return 0
+	}
+	return r.cpuStats.GetUnifiedRead()
 }
 
 // GetBytesRead returns the read bytes of the region.
@@ -2024,7 +2026,7 @@ func (r *RegionInfo) GetLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
-		float64(r.GetCPUUsage()),
+		float64(r.GetReadCPUUsage()),
 		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }

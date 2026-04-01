@@ -631,7 +631,7 @@ func TestBucketFirstStat(t *testing.T) {
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
 			rwTy:           utils.Write,
-			expect:         utils.RegionWriteBytes,
+			expect:         utils.RegionWriteQueryNum,
 		},
 		{
 			firstPriority:  utils.KeyDim,
@@ -643,11 +643,17 @@ func TestBucketFirstStat(t *testing.T) {
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
 			rwTy:           utils.Read,
-			expect:         utils.RegionReadBytes,
+			expect:         utils.RegionReadQueryNum,
 		},
 		{
 			firstPriority:  utils.CPUDim,
-			secondPriority: utils.ByteDim,
+			secondPriority: utils.QueryDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadQueryNum,
+		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.CPUDim,
 			rwTy:           utils.Read,
 			expect:         utils.RegionReadBytes,
 		},

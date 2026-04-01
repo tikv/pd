@@ -247,7 +247,12 @@ func summaryStoresLoadByEngine(
 			}
 		}
 		for i := range stddevLoads {
-			stddevLoads[i] = math.Sqrt(stddevLoads[i]/float64(allStoreCount)) / expectLoads[i]
+			stddevLoads[i] = math.Sqrt(stddevLoads[i] / float64(allStoreCount))
+			if expectLoads[i] == 0 {
+				stddevLoads[i] = 0
+				continue
+			}
+			stddevLoads[i] /= expectLoads[i]
 		}
 	}
 
