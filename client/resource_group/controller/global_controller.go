@@ -357,9 +357,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 			case <-watchRetryTimer.C:
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
-					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
+					watchMetaChannel, err = c.reloadResourceGroupMetaWatch(ctx)
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -489,6 +487,57 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func (c *ResourceGroupsController) reloadResourceGroupMetaWatch(
+	ctx context.Context,
+) (chan []*meta_storagepb.Event, error) {
+	groups, revision, err := c.provider.LoadResourceGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.syncResourceGroupSnapshot(groups)
+	// Start from the next revision after the freshly loaded snapshot so reconnects
+	// keep the cache in sync without replaying the snapshot itself as watch events.
+	return c.provider.Watch(
+		ctx,
+		pd.GroupSettingsPathPrefixBytes(c.keyspaceID),
+		opt.WithRev(revision+1),
+		opt.WithPrefix(),
+		opt.WithPrevKV(),
+	)
+}
+
+func (c *ResourceGroupsController) syncResourceGroupSnapshot(groups []*rmpb.ResourceGroup) {
+	groupMap := make(map[string]*rmpb.ResourceGroup, len(groups))
+	for _, group := range groups {
+		groupMap[group.GetName()] = group
+	}
+
+	c.groupsController.Range(func(key, value any) bool {
+		name := key.(string)
+		group, exists := groupMap[name]
+		if !exists {
+			c.tombstoneGroupCostController(name)
+			return true
+		}
+		gc := value.(*groupCostController)
+		if !gc.tombstone.Load() {
+			gc.modifyMeta(group)
+			return true
+		}
+		newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+		if err != nil {
+			log.Warn("[resource group controller] re-create resource group cost controller from snapshot failed",
+				zap.String("name", name), zap.Error(err))
+			return true
+		}
+		if c.groupsController.CompareAndSwap(name, gc, newGC) {
+			log.Info("[resource group controller] re-create resource group cost controller from snapshot",
+				zap.String("name", name))
+		}
+		return true
+	})
 }
 
 // Stop stops ResourceGroupController service.
