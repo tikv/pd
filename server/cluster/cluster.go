@@ -379,17 +379,21 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Error("[leader-ready] failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
 		return err
 	}
-	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
 	if cluster == nil {
+		loadClusterInfoDuration := time.Since(loadClusterInfoStart)
 		log.Warn("[leader-ready] cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
 		return nil
 	}
 	if c.opt.IsPlacementRulesEnabled() {
+		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
+			log.Error("[leader-ready] failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
 			return err
 		}
+		log.Info("[leader-ready] initialize placement rules completed", zap.Duration("cost", time.Since(ruleInitStart)))
 	}
+	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
 	log.Info("[leader-ready] load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
 
 	log.Info("[leader-ready] creating region labeler")

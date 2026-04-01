@@ -1832,6 +1832,8 @@ func (s *Server) campaignLeader() {
 	enableLeaderDuration := time.Since(enableLeaderStart)
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
 	log.Info("[leader-ready] promote leader completed", zap.Duration("cost", enableLeaderDuration))
+	totalDuration := time.Since(leaderReadyStart)
+	log.Info("[leader-ready] PD leader is ready to serve", zap.String("leader-name", s.Name()), zap.Duration("total-cost", totalDuration))
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
@@ -1845,8 +1847,6 @@ func (s *Server) campaignLeader() {
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 	versionCheckDuration := time.Since(versionCheckStart)
 	log.Info("[leader-ready] check PD version with cluster version completed", zap.Duration("cost", versionCheckDuration))
-	totalDuration := time.Since(leaderReadyStart)
-	log.Info("[leader-ready] PD leader is ready to serve", zap.String("leader-name", s.Name()), zap.Duration("total-cost", totalDuration))
 
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
