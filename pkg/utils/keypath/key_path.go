@@ -70,6 +70,9 @@ const (
 	// TimestampKey is the key of timestamp oracle used for the suffix.
 	TimestampKey = "timestamp"
 
+	// Maintenance task path format
+	maintenanceTaskPathFormat = "maintenance" // "/pd/{cluster_id}/maintenance/{task_type}"
+
 	tsoKeyspaceGroupPrefix      = tsoServiceKey + "/" + constant.KeyspaceGroupsKey
 	keyspaceGroupsMembershipKey = "membership"
 	keyspaceGroupsElectionKey   = "election"
