@@ -98,6 +98,8 @@ type Manager struct {
 	// cached keyspace meta info for each keyspace ID.
 	keyspaceNameLookup  sync.Map // store as ID(uint32) -> name(string)
 	keyspaceStateLookup sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
+	// txnLock is used to serialize create keyspace in different keyspace groups, avoid to etcd put conflicts.
+	txnLock *syncutil.LockGroup
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -146,6 +148,7 @@ func NewKeyspaceManager(
 		config:            config,
 		kgm:               kgm,
 		nextPatrolStartID: constant.StartKeyspaceID,
+		txnLock:           syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
 	}
 }
 
@@ -176,6 +179,7 @@ func (manager *Manager) Bootstrap() error {
 				// Ignore the keyspaceExists error for the same reason as saving default keyspace.
 				if err != nil && err != errs.ErrKeyspaceExists {
 					log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+					time.Sleep(time.Second)
 					continue
 				}
 				return
@@ -325,17 +329,11 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		return nil, err
 	}
 	addTxn(op, cb)
-	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		for _, op := range txnOps {
-			if op == nil {
-				continue
-			}
-			if err := op(txn); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	groupID, err := strconv.ParseUint(config[TSOKeyspaceGroupIDKey], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	err = manager.RunTxn(uint32(groupID), txnOps)
 	for _, cb := range txnCbs {
 		if cb != nil {
 			cb(err)
@@ -372,6 +370,24 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		zap.String("keyspace-name", keyspace.GetName()),
 	)
 	return keyspace, nil
+}
+
+// RunTxn runs the given operations in a transaction.
+// It will serialize the transactions of different keyspaces to avoid deadlock.
+func (manager *Manager) RunTxn(groupID uint32, ops []txnOp) error {
+	manager.txnLock.Lock(groupID)
+	defer manager.txnLock.Unlock(groupID)
+	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		for _, op := range ops {
+			if op == nil {
+				continue
+			}
+			if err := op(txn); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // CreateKeyspaceByID create a keyspace meta with given config and save it to storage.
