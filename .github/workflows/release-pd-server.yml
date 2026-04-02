@@ -24,7 +24,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build pd-server
-        run: make pd-server DASHBOARD=0
+        run: make pd-server DASHBOARD=0 RELEASE_VERSION=v8.5.2
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
