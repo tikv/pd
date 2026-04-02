@@ -33,11 +33,14 @@ jobs:
         id: tag
         run: echo "tag=${GITHUB_REF_NAME}-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Rename binary with arch suffix
+        run: mv bin/pd-server bin/pd-server-linux-${{ matrix.goarch }}
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
-          files: bin/pd-server
+          files: bin/pd-server-linux-${{ matrix.goarch }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
