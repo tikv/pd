@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	scheconfig "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -2012,9 +2013,9 @@ func TestAffinityCheckerGroupScheduleDisallowed(t *testing.T) {
 	re.Nil(ops, "Affinity scheduling should be blocked when group is not allowed")
 }
 
-// TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch verifies that when the affinity group peers
-// don't satisfy placement rules, the group will be expired and scheduling is disabled.
-func TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch(t *testing.T) {
+// TestAffinityCheckerNormalizeGroupWhenPlacementRuleMismatch verifies that when the affinity group peers
+// don't satisfy placement rules, the checker keeps the group schedulable by normalizing it to the valid Region peers.
+func TestAffinityCheckerNormalizeGroupWhenPlacementRuleMismatch(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2035,8 +2036,8 @@ func TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch(t *testing.T) {
 	affinityManager := tc.GetAffinityManager()
 	checker := newTestAffinityChecker(ctx, tc, opt)
 
-	// Affinity group expects 4 voters while placement rules (and the region) only allow 3,
-	// so isGroupReplicated should be false and the group should be expired/refreshed.
+	// Affinity group expects 4 voters while placement rules (and the region) only allow 3.
+	// The checker should normalize the group to the valid Region peers and keep it schedulable.
 	group := &affinity.Group{
 		ID:            "test_group",
 		LeaderStoreID: 1,
@@ -2050,9 +2051,9 @@ func TestAffinityCheckerExpireGroupWhenPlacementRuleMismatch(t *testing.T) {
 
 	groupState := affinityManager.GetAffinityGroupState("test_group")
 	re.NotNil(groupState)
-	re.False(groupState.AffinitySchedulingAllowed, "Group should be expired when peer count violates placement rules")
-	re.Equal(affinity.PhasePending, groupState.Phase)
-	re.Equal([]uint64{1, 2, 3, 4}, groupState.VoterStoreIDs, "Peers remain as configured until a valid available region is observed")
+	re.True(groupState.AffinitySchedulingAllowed)
+	re.Equal(affinity.PhaseStable, groupState.Phase)
+	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
 }
 
 // TestAffinityCheckerTargetStoreEvictLeader tests that operator is not created when target store has evict-leader.
@@ -2120,6 +2121,108 @@ func TestAffinityCheckerTargetStoreRejectLeader(t *testing.T) {
 	// Check should return nil because target store has reject-leader label
 	ops := checker.Check(tc.GetRegion(1))
 	re.Nil(ops, "Should not create operator when target store has reject-leader label")
+}
+
+// TestAffinityCheckerRegionHasBetterLocation tests how the checker handles a Region where isRegionPlacementRuleSatisfiedWithBestLocation returns false.
+func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := newAffinityTestOptions()
+	opt.SetLocationLabels([]string{"region", "zone", "host"})
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	tc.AddLabelsStore(1, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(3, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"region": "r1", "zone": "z2", "host": "h1"})
+	tc.AddLabelsStore(5, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h1"})
+	tc.AddLabelsStore(6, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h2"})
+
+	affinityManager := tc.GetAffinityManager()
+	checker := newTestAffinityChecker(ctx, tc, opt)
+
+	// Create affinity group without best location
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 2,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+	err := createAffinityGroupForTest(affinityManager, group, []byte(""), []byte(""))
+	re.NoError(err)
+
+	// No scheduling is generated because the source Region is not at the best location.
+	tc.AddLeaderRegion(100, 1, 3, 4)
+	region := tc.GetRegion(100)
+	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+	ops := checker.Check(region)
+	re.Nil(ops)
+	groupState := affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(groupState)
+	re.Equal([]uint64{1, 2, 3}, groupState.VoterStoreIDs)
+
+	// Because the Group’s currently specified Peers are not at the best location,
+	// they are cleared and replaced with the source Region’s Peers.
+	// In this case, no scheduling is generated, but the Peers are updated.
+	tc.AddLeaderRegion(200, 1, 4, 5)
+	region = tc.GetRegion(200)
+	re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, false))
+	ops = checker.Check(region)
+	re.Nil(ops)
+	groupState = affinityManager.GetAffinityGroupState("test_group")
+	re.NotNil(groupState)
+	re.Equal([]uint64{1, 4, 5}, groupState.VoterStoreIDs)
+
+	// When both the source Region and the target Region are at the best location, scheduling is generated.
+	tc.AddLeaderRegion(300, 1, 4, 6)
+	region = tc.GetRegion(300)
+	re.True(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+	ops = checker.Check(region)
+	re.NotNil(ops)
+	re.Len(ops, 1)
+
+	// No scheduling is generated when Placement Rules are disabled.
+	tc.SetEnablePlacementRules(false)
+	ops = checker.Check(region)
+	re.Nil(ops)
+
+	// If an IsolationLevel is configured, no scheduling is generated when the required isolation level cannot be met.
+	tc.SetEnablePlacementRules(true)
+	rule := tc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NotNil(rule)
+	rule.IsolationLevel = "region"
+	re.NoError(tc.GetRuleManager().SetRule(rule))
+	ops = checker.Check(region)
+	re.Nil(ops)
+}
+
+// TestAffinityStrictCheckDivergesFromIsRegionReplicated documents the intended
+// semantic split: affinity scheduling may reject a region that is already
+// placement-rule replicated when a strictly better location still exists.
+func TestAffinityStrictCheckDivergesFromIsRegionReplicated(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	opt.SetLocationLabels([]string{"zone", "host"})
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetEnablePlacementRules(true)
+	tc.SetMaxReplicas(3)
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h3"})
+
+	checker := newTestAffinityChecker(ctx, tc, opt)
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	re.True(filter.IsRegionReplicated(tc, region))
+	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
 }
 
 // TestAffinityMergeCheckPeerStoreMismatch tests that merge is rejected when peer stores don't match.
