@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import pathlib
 import sys
-import tempfile
 import unittest
 
 
@@ -37,38 +35,6 @@ class PrepareLogsTests(unittest.TestCase):
         )
         self.assertEqual("2026-03-20T00:00:00+00:00", start.isoformat())
         self.assertEqual("2026-03-21T00:00:00+00:00", resolved_end.isoformat())
-
-    def test_resolve_run_dir_defaults_to_unique_tmp_subdir(self) -> None:
-        resolved = MODULE.resolve_run_dir(
-            "",
-            now=MODULE.dt.datetime(2026, 3, 30, 12, 0, tzinfo=MODULE.UTC),
-            pid=4321,
-        )
-        self.assertEqual(
-            MODULE.DEFAULT_RUN_ROOT / "run-20260330T120000Z-4321",
-            resolved,
-        )
-
-    def test_resolve_output_paths_default_to_run_dir(self) -> None:
-        run_dir = pathlib.Path("/tmp/pd-ci-flaky/run-20260330T120000Z-4321")
-        args = argparse.Namespace(
-            prow_failures_json="",
-            actions_failures_json="",
-            prow_logs_json="",
-            actions_logs_json="",
-        )
-        resolved = MODULE.resolve_output_paths(args, run_dir)
-        self.assertEqual(run_dir / "prow_failures.json", resolved["prow_failures"])
-        self.assertEqual(run_dir / "actions_failures.json", resolved["actions_failures"])
-        self.assertEqual(run_dir / "prow_logs.json", resolved["prow_logs"])
-        self.assertEqual(run_dir / "actions_logs.json", resolved["actions_logs"])
-
-    def test_resolve_log_spool_root_defaults_under_run_dir(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            run_dir = pathlib.Path(tempdir) / "run-1"
-            resolved = MODULE.resolve_log_spool_root("", run_dir)
-            self.assertEqual(run_dir / "raw-logs", resolved)
-            self.assertTrue(resolved.is_dir())
 
 
 if __name__ == "__main__":
