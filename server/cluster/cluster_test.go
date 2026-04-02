@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -44,6 +45,8 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -62,6 +65,8 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -74,6 +79,100 @@ import (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+var errBootstrapKeyspaceGroup = stderrors.New("bootstrap keyspace group error")
+
+type failingBootstrapKeyspaceGroupStorage struct {
+	*endpoint.StorageEndpoint
+}
+
+func (*failingBootstrapKeyspaceGroupStorage) SaveKeyspaceGroup(kv.Txn, *endpoint.KeyspaceGroup) error {
+	return errBootstrapKeyspaceGroup
+}
+
+type startFailureTestServer struct {
+	allocator            id.Allocator
+	cfg                  *config.Config
+	persistOptions       *config.PersistOptions
+	storage              storage.Storage
+	hbStreams            *hbstream.HeartbeatStreams
+	raftCluster          *RaftCluster
+	keyspaceGroupManager *keyspace.GroupManager
+	keyspaceEnabled      bool
+}
+
+func (s *startFailureTestServer) GetAllocator() id.Allocator { return s.allocator }
+
+func (s *startFailureTestServer) GetConfig() *config.Config { return s.cfg }
+
+func (s *startFailureTestServer) GetPersistOptions() *config.PersistOptions { return s.persistOptions }
+
+func (s *startFailureTestServer) GetStorage() storage.Storage { return s.storage }
+
+func (s *startFailureTestServer) GetHBStreams() *hbstream.HeartbeatStreams { return s.hbStreams }
+
+func (s *startFailureTestServer) GetRaftCluster() *RaftCluster { return s.raftCluster }
+
+func (s *startFailureTestServer) GetBasicCluster() *core.BasicCluster {
+	return s.raftCluster.BasicCluster
+}
+
+func (*startFailureTestServer) GetMembers() ([]*pdpb.Member, error) { return nil, nil }
+
+func (*startFailureTestServer) ReplicateFileToMember(context.Context, *pdpb.Member, string, []byte) error {
+	return nil
+}
+
+func (*startFailureTestServer) GetKeyspaceManager() *keyspace.Manager { return nil }
+
+func (s *startFailureTestServer) GetKeyspaceGroupManager() *keyspace.GroupManager {
+	return s.keyspaceGroupManager
+}
+
+func (s *startFailureTestServer) IsKeyspaceGroupEnabled() bool { return s.keyspaceEnabled }
+
+func (*startFailureTestServer) GetMeteringWriter() *metering.Writer { return nil }
+
+func TestStartCancelsContextOnBootstrapFailure(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	store := storage.NewStorageWithMemoryBackend()
+	re.NoError(store.SaveMeta(&metapb.Cluster{Id: 1, MaxPeerCount: 1}))
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	rc := &RaftCluster{
+		serverCtx:      ctx,
+		BasicCluster:   core.NewBasicCluster(),
+		storage:        store,
+		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
+	}
+
+	keyspaceStore := &failingBootstrapKeyspaceGroupStorage{StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)}
+	keyspaceGroupManager := keyspace.NewKeyspaceGroupManager(ctx, keyspaceStore, nil)
+	t.Cleanup(func() {
+		keyspaceGroupManager.Close()
+	})
+
+	server := &startFailureTestServer{
+		allocator:            mockid.NewIDAllocator(),
+		cfg:                  config.NewConfig(),
+		persistOptions:       opt,
+		storage:              store,
+		raftCluster:          rc,
+		keyspaceGroupManager: keyspaceGroupManager,
+		keyspaceEnabled:      true,
+	}
+
+	err = rc.Start(server, true)
+	re.ErrorIs(err, errBootstrapKeyspaceGroup)
+	re.NotNil(rc.regionLabeler)
+	re.NotNil(rc.affinityManager)
+	re.False(rc.IsRunning())
+	re.NotNil(rc.ctx)
+	re.ErrorIs(rc.ctx.Err(), context.Canceled)
 }
 
 func TestStoreHeartbeat(t *testing.T) {
