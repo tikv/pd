@@ -28,6 +28,7 @@ jobs:
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
 
       - name: Compute release tag
         id: tag
