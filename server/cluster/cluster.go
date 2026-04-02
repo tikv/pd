@@ -86,11 +86,6 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
-	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
-	versionStaleCounter           = bucketEventCounter.WithLabelValues("version_stale")
-	versionNotChangeCounter       = bucketEventCounter.WithLabelValues("version_no_change")
-	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
-	updateSuccessCounter          = bucketEventCounter.WithLabelValues("update_success")
 )
 
 const (
@@ -1129,6 +1124,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				continue
 			}
 			readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
+			regionReadCPU := statistics.RegionReadCPUUsage(peerStat)
 			loads := []float64{
 				utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
 				utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),
@@ -1136,6 +1132,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionWriteBytes:    0,
 				utils.RegionWriteKeys:     0,
 				utils.RegionWriteQueryNum: 0,
+				utils.RegionReadCPU:       regionReadCPU * float64(interval),
+				utils.RegionWriteCPU:      0,
 			}
 			checkReadPeerTask := func(cache *statistics.HotPeerCache) {
 				stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
@@ -1182,7 +1180,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
-		regionCacheMissCounter.Inc()
+		core.RegionCacheMissCounter.Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
 	// use CAS to update the bucket information.
@@ -1190,27 +1188,12 @@ func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
-		old := region.GetBuckets()
-		// region should not update if the version of the buckets is less than the old one.
-		if old != nil {
-			reportVersion := buckets.GetVersion()
-			if reportVersion < old.GetVersion() {
-				versionStaleCounter.Inc()
-				return nil
-			} else if reportVersion == old.GetVersion() {
-				versionNotChangeCounter.Inc()
-				return nil
-			}
-		}
-		failpoint.Inject("concurrentBucketHeartbeat", func() {
-			time.Sleep(500 * time.Millisecond)
-		})
-		if ok := region.UpdateBuckets(buckets, old); ok {
-			updateSuccessCounter.Inc()
+		if success := region.CompareAndSetReportBuckets(buckets); success {
+			core.UpdateSuccessCounter.Inc()
 			return nil
 		}
 	}
-	updateFailedCounter.Inc()
+	core.UpdateFailedCounter.Inc()
 	return nil
 }
 

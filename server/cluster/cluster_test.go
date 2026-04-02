@@ -742,6 +742,24 @@ func TestBucketCompatibility(t *testing.T) {
 	region3 := region2.Clone(core.WithIncVersion())
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region3))
 	re.Equal(bucket2, cluster.GetRegion(1).GetBuckets())
+
+	// tikv upgrade, send region heartbeat with bucket meta and report bucket stream enabled
+	bucket3 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  4,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	region4 := region3.Clone(core.WithIncVersion(), core.SetBuckets(bucket3))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region4))
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	bucket4 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  5,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	re.NoError(cluster.processRegionBuckets(bucket4))
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	re.Equal(bucket4, cluster.GetRegion(1).GetReportBuckets())
 }
 
 func TestStaleBucketMeta(t *testing.T) {
@@ -777,7 +795,7 @@ func TestStaleBucketMeta(t *testing.T) {
 	bucket2 := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
-		Keys:     [][]byte{{'a'}, {'d'}},
+		Keys:     [][]byte{{'c'}, {'d'}},
 	}
 	region2 := newRegion.Clone(core.WithIncVersion(), core.SetBuckets(bucket2))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
@@ -1257,14 +1275,14 @@ func TestConcurrentReportBucket(t *testing.T) {
 	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionBuckets(bucket1)
 		re.NoError(err)
 	}()
 	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
 	re.NoError(cluster.processRegionBuckets(bucket2))
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
@@ -2754,7 +2772,7 @@ func TestCollectMetrics(t *testing.T) {
 			item := &statistics.HotPeerStat{
 				StoreID:   uint64(i % 5),
 				RegionID:  uint64(i*1000 + k),
-				Loads:     []float64{10, 20, 30},
+				Loads:     []float64{10, 20, 30, 0},
 				HotDegree: 10,
 				AntiCount: utils.HotRegionAntiCount, // for write
 			}
