@@ -72,14 +72,14 @@ var (
 			Help:      "The count of store trigger network slow evict",
 		}, []string{"store"})
 
-	raftClusterStartDuration = prometheus.NewHistogram(
+	raftClusterStartDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "cluster",
 			Name:      "raftcluster_start_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of raft cluster start.",
 			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 13), // 1ms ~ 4s
-		})
+		}, []string{"type"})
 )
 
 func init() {
