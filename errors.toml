@@ -56,11 +56,6 @@ error = '''
 the option %s does not exist
 '''
 
-["PD:apiutil:ErrOptionTypeNotMatch"]
-error = '''
-the option type %s does not match
-'''
-
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
