@@ -335,11 +335,16 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 
 // CollectStringOption is used to collect string using from input map for given option
 func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
-	if v, ok := input[option].(string); ok {
-		for _, c := range collectors {
-			c(v)
+	v, exist := input[option]
+	if exist {
+		if str, ok := v.(string); ok {
+			for _, c := range collectors {
+				c(str)
+			}
+			return nil
+		} else {
+			return errs.ErrOptionTypeNotMatch.FastGenByArgs(fmt.Sprintf("%s must be string", option))
 		}
-		return nil
 	}
 	return errs.ErrOptionNotExist.FastGenByArgs(option)
 }

@@ -129,11 +129,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if err := apiutil.CollectStringOption("rule", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := apiutil.CollectStringOption("engine", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -142,13 +142,13 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			if errors.ErrorEqual(err, errs.ErrOptionNotExist) {
 				collector(defaultTimeout)
 			} else {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				h.r.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
 
 		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
