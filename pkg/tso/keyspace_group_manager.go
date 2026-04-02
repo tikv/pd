@@ -926,7 +926,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldGroup != nil {
 		// SplitTarget -> !Splitting
 		if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
-			kgm.allocators[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
+			if allocator := kgm.allocators[groupID]; allocator != nil {
+				allocator.GetMember().(*member.Participant).SetCampaignChecker(nil)
+			}
 			splitTime := kgm.splittingGroups[groupID]
 			delete(kgm.splittingGroups, groupID)
 			kgm.metrics.splitTargetGauge.Dec()
@@ -1052,7 +1054,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
 		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
-		return nil, nil, curKeyspaceGroupID, modRevision, err
+		return nil, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err
 	}
 	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
 }
