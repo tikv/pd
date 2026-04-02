@@ -789,11 +789,20 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					groupName := group.Name
 					// Record the sum of RRU and WRU every second.
 					m.metrics.getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, groupName).flushMetrics()
-					metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
-					metrics.setGroup(group, keyspaceName)
+					gaugeM := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
+					gaugeM.setGroup(group, keyspaceName)
 					// Record the tracked RU per second.
 					if grt := krgm.getGroupRUTracker(groupName); grt != nil {
-						metrics.setSampledRUPerSec(grt.getRUPerSec())
+						gaugeM.setSampledRUPerSec(grt.getRUPerSec())
+					}
+					// Record slot metrics (active count, loan, events).
+					sm := group.GetSlotMetrics()
+					gaugeM.activeSlotCountGauge.Set(float64(sm.SlotCount))
+					gaugeM.tokenLoanGauge.Set(sm.TokenLoan)
+					if created, deleted, expired := group.DrainSlotEvents(); created+deleted+expired > 0 {
+						gaugeM.slotCreatedCounter.Add(float64(created))
+						gaugeM.slotDeletedCounter.Add(float64(deleted))
+						gaugeM.slotExpiredCounter.Add(float64(expired))
 					}
 				}
 			}
