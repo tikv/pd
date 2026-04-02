@@ -17,6 +17,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -536,7 +537,7 @@ func NewRegionWithKeyspaceCommand() *cobra.Command {
 		Short: "show region information of the given keyspace",
 	}
 	r.AddCommand(&cobra.Command{
-		Use:   "id <keyspace_id> <limit>",
+		Use:   "id <keyspace_id> [table-id <table_id>] [<limit>]",
 		Short: "show region information for the given keyspace id",
 		Run:   showRegionWithKeyspaceCommandFunc,
 	})
@@ -544,26 +545,64 @@ func NewRegionWithKeyspaceCommand() *cobra.Command {
 }
 
 func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 1 || len(args) > 2 {
+	if len(args) < 1 || len(args) > 4 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 
-	keyspaceID := args[0]
-	prefix := regionsKeyspacePrefix + "/id/" + keyspaceID
+	if _, err := strconv.ParseUint(args[0], 10, 32); err != nil {
+		cmd.Println("keyspace_id should be a number")
+		return
+	}
+
+	prefix := regionsKeyspacePrefix + "/id/" + args[0]
 	if len(args) == 2 {
 		if _, err := strconv.Atoi(args[1]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
 		prefix += "?limit=" + args[1]
+	} else if len(args) >= 3 {
+		if args[1] != "table-id" {
+			cmd.Println("the second argument should be table-id")
+			return
+		}
+		tableID, err := strconv.ParseInt(args[2], 10, 64)
+		if err != nil {
+			cmd.Println("table-id should be a number")
+			return
+		}
+		query := make(url.Values)
+		startKey, endKey := makeTableRangeInKeyspace(args[0], tableID)
+		query.Set("key", url.QueryEscape(string(startKey)))
+		query.Set("end_key", url.QueryEscape(string(endKey)))
+		if len(args) == 4 {
+			if _, err := strconv.Atoi(args[3]); err != nil {
+				cmd.Println("limit should be a number")
+				return
+			}
+			query.Set("limit", args[3])
+		}
+		prefix = regionsKeyPrefix + "?" + query.Encode()
 	}
+
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given keyspace: %s\n", err)
 		return
 	}
 	cmd.Println(r)
+}
+
+func makeTableRangeInKeyspace(keyspaceID string, tableID int64) ([]byte, []byte) {
+	keyspaceIDUint64, _ := strconv.ParseUint(keyspaceID, 10, 32)
+	keyspaceIDBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(keyspaceIDBytes, uint32(keyspaceIDUint64))
+
+	keyPrefix := append([]byte{'x'}, keyspaceIDBytes[1:]...)
+	startKey := codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID)...)...))
+	endKey := codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID+1)...)...))
+	return startKey, endKey
 }
 
 const (
