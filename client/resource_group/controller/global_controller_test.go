@@ -381,6 +381,79 @@ func TestGetResourceGroup(t *testing.T) {
 	re.Nil(gc02)
 }
 
+func TestReloadResourceGroupMetaWatch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+
+	defaultGroup := &rmpb.ResourceGroup{
+		Name:       defaultResourceGroupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}},
+	}
+	staleGroup := &rmpb.ResourceGroup{
+		Name:       "stale-group",
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}}},
+	}
+	newGroup := &rmpb.ResourceGroup{
+		Name:       "new-group",
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 300}}},
+	}
+	updatedDefaultGroup := &rmpb.ResourceGroup{
+		Name:       defaultResourceGroupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 2000}}},
+	}
+
+	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultGroup, nil)
+	mockProvider.On("GetResourceGroup", mock.Anything, "stale-group", mock.Anything).Return(staleGroup, nil)
+
+	defaultGC, err := controller.tryGetResourceGroupController(ctx, defaultResourceGroupName, false)
+	re.NoError(err)
+	re.NotNil(defaultGC)
+
+	staleGC, err := controller.tryGetResourceGroupController(ctx, "stale-group", false)
+	re.NoError(err)
+	re.NotNil(staleGC)
+	re.False(staleGC.tombstone.Load())
+
+	watchCh := make(chan []*meta_storagepb.Event)
+	mockProvider.On("LoadResourceGroups", mock.Anything).
+		Return([]*rmpb.ResourceGroup{updatedDefaultGroup, newGroup}, int64(88), nil).
+		Once()
+	mockProvider.On("Watch", mock.Anything, pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID), mock.Anything).
+		Run(func(args mock.Arguments) {
+			opts := args.Get(2).([]opt.MetaStorageOption)
+			metaOp := &opt.MetaStorageOp{}
+			for _, apply := range opts {
+				apply(metaOp)
+			}
+			re.Equal(int64(89), metaOp.Revision)
+			re.True(metaOp.IsOptsWithPrefix)
+			re.True(metaOp.PrevKv)
+		}).
+		Return(watchCh, nil).
+		Once()
+
+	reloadedWatchCh, err := controller.reloadResourceGroupMetaWatch(ctx)
+	re.NoError(err)
+	re.Equal(watchCh, reloadedWatchCh)
+	re.Equal(updatedDefaultGroup, defaultGC.getMeta())
+	staleGC, err = controller.tryGetResourceGroupController(ctx, "stale-group", true)
+	re.NoError(err)
+	re.True(staleGC.tombstone.Load())
+	newGC, ok := controller.loadGroupController("new-group")
+	re.True(ok)
+	re.Equal(newGroup, newGC.getMeta())
+}
+
 func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

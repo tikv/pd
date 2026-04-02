@@ -322,10 +322,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
-		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
-		}
 		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
@@ -335,7 +331,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
@@ -361,9 +357,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 			case <-watchRetryTimer.C:
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
-					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+					watchMetaChannel, err = c.reloadResourceGroupMetaWatch(ctx)
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -417,7 +411,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					continue
 				}
 				for _, item := range resp {
-					metaRevision = item.Kv.ModRevision
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
@@ -496,6 +489,72 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 	}()
 }
 
+func (c *ResourceGroupsController) reloadResourceGroupMetaWatch(
+	ctx context.Context,
+) (chan []*meta_storagepb.Event, error) {
+	groups, revision, err := c.provider.LoadResourceGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.syncResourceGroupSnapshot(groups)
+	// Start from the next revision after the freshly loaded snapshot so reconnects
+	// keep the cache in sync without replaying the snapshot itself as watch events.
+	return c.provider.Watch(
+		ctx,
+		pd.GroupSettingsPathPrefixBytes(c.keyspaceID),
+		opt.WithRev(revision+1),
+		opt.WithPrefix(),
+		opt.WithPrevKV(),
+	)
+}
+
+func (c *ResourceGroupsController) syncResourceGroupSnapshot(groups []*rmpb.ResourceGroup) {
+	groupMap := make(map[string]*rmpb.ResourceGroup, len(groups))
+	for _, group := range groups {
+		groupMap[group.GetName()] = group
+	}
+
+	c.groupsController.Range(func(key, value any) bool {
+		name := key.(string)
+		group, exists := groupMap[name]
+		if !exists {
+			c.tombstoneGroupCostController(name)
+			return true
+		}
+		delete(groupMap, name)
+		gc := value.(*groupCostController)
+		if !gc.tombstone.Load() {
+			gc.modifyMeta(group)
+			return true
+		}
+		newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+		if err != nil {
+			log.Warn("[resource group controller] re-create resource group cost controller from snapshot failed",
+				zap.String("name", name), zap.Error(err))
+			return true
+		}
+		if c.groupsController.CompareAndSwap(name, gc, newGC) {
+			log.Info("[resource group controller] re-create resource group cost controller from snapshot",
+				zap.String("name", name))
+		}
+		return true
+	})
+
+	for name, group := range groupMap {
+		gc, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+		if err != nil {
+			log.Warn("[resource group controller] create resource group cost controller from snapshot failed",
+				zap.String("name", name), zap.Error(err))
+			continue
+		}
+		if loaded := c.loadOrStoreGroupController(name, gc); !loaded {
+			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
+			log.Info("[resource group controller] create resource group cost controller from snapshot",
+				zap.String("name", name))
+		}
+	}
+}
+
 // Stop stops ResourceGroupController service.
 func (c *ResourceGroupsController) Stop() error {
 	if c.loopCancel == nil {
@@ -516,9 +575,9 @@ func (c *ResourceGroupsController) loadGroupController(name string) (*groupCostC
 }
 
 // loadOrStoreGroupController just wraps the `LoadOrStore` method of `sync.Map`.
-func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *groupCostController) (*groupCostController, bool) {
-	tmp, loaded := c.groupsController.LoadOrStore(name, gc)
-	return tmp.(*groupCostController), loaded
+func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *groupCostController) bool {
+	_, loaded := c.groupsController.LoadOrStore(name, gc)
+	return loaded
 }
 
 // NewResourceGroupNotExistErr returns a new error that indicates the resource group does not exist.
@@ -576,8 +635,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	}
 	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
-		_, loaded := c.loadOrStoreGroupController(name, gc)
-		if !loaded {
+		if loaded := c.loadOrStoreGroupController(name, gc); !loaded {
 			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
 		}
