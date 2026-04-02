@@ -17,6 +17,7 @@ package tsoutil
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"time"
 
@@ -177,13 +178,17 @@ func (s *TSODispatcher) dispatch(
 
 func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
 	// Merge the requests
-	count := uint32(0)
+	totalCount := uint64(0)
 	for _, request := range requests {
-		count += request.getCount()
+		totalCount += uint64(request.getCount())
 	}
+	if totalCount > math.MaxUint32 {
+		return errs.ErrGenerateTimestamp.FastGenByArgs("merged tso request count overflow")
+	}
+	count := uint32(totalCount)
 
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count)
+	resp, err := requests[0].process(forwardStream, count) // #nosec G602 -- requests is guaranteed non-empty by caller loop guard
 	if err != nil {
 		return err
 	}
