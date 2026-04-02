@@ -329,7 +329,11 @@ func (c *RaftCluster) InitCluster(
 func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	start := time.Now()
 	defer func() {
-		raftClusterStartDuration.Observe(time.Since(start).Seconds())
+		startType := "non-bootstrap"
+		if bootstrap {
+			startType = "bootstrap"
+		}
+		raftClusterStartDuration.WithLabelValues(startType).Observe(time.Since(start).Seconds())
 	}()
 
 	c.Lock()
@@ -344,7 +348,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
-		log.Error("[leader-ready] failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
+		log.Warn("[leader-ready] failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
 	}
 	initClusterDuration := time.Since(initClusterStart)
@@ -376,7 +380,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
-		log.Error("[leader-ready] failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
+		log.Warn("[leader-ready] failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
 		return err
 	}
 	if cluster == nil {
@@ -388,7 +392,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
-			log.Error("[leader-ready] failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
+			log.Warn("[leader-ready] failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
 			return err
 		}
 		log.Info("[leader-ready] initialize placement rules completed", zap.Duration("cost", time.Since(ruleInitStart)))
@@ -401,7 +405,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	labelerDuration := time.Since(labelerStart)
 	if err != nil {
-		log.Error("[leader-ready] region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
+		log.Warn("[leader-ready] region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
 		return err
 	}
 	log.Info("[leader-ready] region labeler created", zap.Duration("cost", labelerDuration))
@@ -426,7 +430,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	replicationModeStart := time.Now()
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
-		log.Error("[leader-ready] failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
+		log.Warn("[leader-ready] failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
 		return err
 	}
 	replicationModeDuration := time.Since(replicationModeStart)
@@ -447,7 +451,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		bootstrapKeyspaceStart := time.Now()
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
-			log.Error("[leader-ready] failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
+			log.Warn("[leader-ready] failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
 		bootstrapKeyspaceDuration := time.Since(bootstrapKeyspaceStart)

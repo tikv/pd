@@ -1773,7 +1773,7 @@ func (s *Server) campaignLeader() {
 
 	reloadConfigStart := time.Now()
 	if err := s.reloadConfigFromKV(); err != nil {
-		log.Error("[leader-ready] failed to reload configuration", errs.ZapError(err), zap.Duration("cost", time.Since(reloadConfigStart)))
+		log.Warn("[leader-ready] failed to reload configuration", errs.ZapError(err), zap.Duration("cost", time.Since(reloadConfigStart)))
 		return
 	}
 	reloadConfigDuration := time.Since(reloadConfigStart)
@@ -1781,7 +1781,7 @@ func (s *Server) campaignLeader() {
 
 	loadTTLStart := time.Now()
 	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
-		log.Error("[leader-ready] failed to load persistOptions from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(loadTTLStart)))
+		log.Warn("[leader-ready] failed to load persistOptions from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(loadTTLStart)))
 		return
 	}
 	loadTTLDuration := time.Since(loadTTLStart)
@@ -1789,7 +1789,7 @@ func (s *Server) campaignLeader() {
 
 	encryptionStart := time.Now()
 	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
-		log.Error("[leader-ready] failed to initialize encryption", errs.ZapError(err), zap.Duration("cost", time.Since(encryptionStart)))
+		log.Warn("[leader-ready] failed to initialize encryption", errs.ZapError(err), zap.Duration("cost", time.Since(encryptionStart)))
 		return
 	}
 	encryptionDuration := time.Since(encryptionStart)
@@ -1799,7 +1799,7 @@ func (s *Server) campaignLeader() {
 	log.Info("[leader-ready] triggering the leader callback functions")
 	for _, cb := range s.leaderCallbacks {
 		if err := cb(ctx); err != nil {
-			log.Error("[leader-ready] failed to execute leader callback function", errs.ZapError(err), zap.Duration("cost", time.Since(callbacksStart)))
+			log.Warn("[leader-ready] failed to execute leader callback function", errs.ZapError(err), zap.Duration("cost", time.Since(callbacksStart)))
 			return
 		}
 	}
@@ -1809,7 +1809,7 @@ func (s *Server) campaignLeader() {
 	// Try to create raft cluster.
 	createRaftClusterStart := time.Now()
 	if err := s.createRaftCluster(); err != nil {
-		log.Error("[leader-ready] failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
+		log.Warn("[leader-ready] failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
 		return
 	}
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
@@ -1820,7 +1820,7 @@ func (s *Server) campaignLeader() {
 	})
 	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
-		log.Error("[leader-ready] failed to sync id from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(rebaseStart)))
+		log.Warn("[leader-ready] failed to sync id from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(rebaseStart)))
 		return
 	}
 	rebaseDuration := time.Since(rebaseStart)
