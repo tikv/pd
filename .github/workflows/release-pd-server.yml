@@ -1,0 +1,43 @@
+name: Release pd-server binary
+
+on:
+  push:
+    branches:
+      - 'release-*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            goarch: amd64
+          - os: ubuntu-22.04-arm
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build pd-server
+        run: make pd-server
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+
+      - name: Compute release tag
+        id: tag
+        run: echo "tag=${GITHUB_REF_NAME}-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          files: bin/pd-server
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
