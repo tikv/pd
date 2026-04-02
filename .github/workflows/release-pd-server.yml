@@ -24,11 +24,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Build pd-server
-        run: make pd-server
+        run: make pd-server DASHBOARD=0
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
 
       - name: Compute release tag
         id: tag
