@@ -24,6 +24,7 @@ sys.modules[LEGACY_SPEC.name] = LEGACY
 LEGACY_SPEC.loader.exec_module(LEGACY)
 
 UTC = dt.timezone.utc
+DEFAULT_RUN_ROOT = Path("/tmp/pd-ci-flaky")
 
 
 def write_json(path: str | Path, payload: object) -> None:
@@ -57,6 +58,42 @@ def resolve_window(*, end: dt.datetime, days: int, start_from: str) -> tuple[dt.
         start = parse_start_from(start_from)
         return start, start + dt.timedelta(days=days)
     return end - dt.timedelta(days=days), end
+
+
+def build_default_run_dir(
+    *,
+    base_dir: str | Path = DEFAULT_RUN_ROOT,
+    now: dt.datetime | None = None,
+    pid: int | None = None,
+) -> Path:
+    timestamp = (now or dt.datetime.now(tz=UTC)).strftime("%Y%m%dT%H%M%SZ")
+    return Path(base_dir) / f"run-{timestamp}-{pid or os.getpid()}"
+
+
+def resolve_run_dir(
+    run_dir: str,
+    *,
+    now: dt.datetime | None = None,
+    pid: int | None = None,
+) -> Path:
+    target = Path(run_dir) if run_dir else build_default_run_dir(now=now, pid=pid)
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def resolve_output_paths(args: argparse.Namespace, run_dir: Path) -> dict[str, Path]:
+    return {
+        "prow_failures": Path(args.prow_failures_json) if args.prow_failures_json else run_dir / "prow_failures.json",
+        "actions_failures": Path(args.actions_failures_json) if args.actions_failures_json else run_dir / "actions_failures.json",
+        "prow_logs": Path(args.prow_logs_json) if args.prow_logs_json else run_dir / "prow_logs.json",
+        "actions_logs": Path(args.actions_logs_json) if args.actions_logs_json else run_dir / "actions_logs.json",
+    }
+
+
+def resolve_log_spool_root(log_spool_dir: str, run_dir: Path) -> Path:
+    target = Path(log_spool_dir) if log_spool_dir else run_dir / "raw-logs"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def split_actions_ci_name(ci_name: str) -> tuple[str, str]:
@@ -132,10 +169,9 @@ def deserialize_failure_item(item: dict[str, Any]) -> Any:
     raise ValueError(f"unsupported failure source: {source}")
 
 
-def _prepare_log_root(source: str, base_dir: str | None) -> Path:
-    root = Path(base_dir) if base_dir else Path("/tmp/pd-ci-flaky-stages")
-    now = dt.datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
-    target = root / f"{source}-logs-{now}-{os.getpid()}"
+def _prepare_log_root(source: str, base_dir: str | Path | None) -> Path:
+    root = Path(base_dir) if base_dir else build_default_run_dir()
+    target = root / source
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -236,11 +272,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-action-runs", type=int, default=500)
     parser.add_argument("--retry-count", type=int, default=3)
     parser.add_argument("--download-workers", type=int, default=8)
+    parser.add_argument(
+        "--run-dir",
+        default="",
+        help="directory for this run's JSON artifacts; defaults to a fresh /tmp/pd-ci-flaky/run-<timestamp>-<pid> directory",
+    )
     parser.add_argument("--log-spool-dir", default="")
-    parser.add_argument("--prow-failures-json", default="/tmp/prow_failures.json")
-    parser.add_argument("--actions-failures-json", default="/tmp/actions_failures.json")
-    parser.add_argument("--prow-logs-json", default="/tmp/prow_logs.json")
-    parser.add_argument("--actions-logs-json", default="/tmp/actions_logs.json")
+    parser.add_argument("--prow-failures-json", default="")
+    parser.add_argument("--actions-failures-json", default="")
+    parser.add_argument("--prow-logs-json", default="")
+    parser.add_argument("--actions-logs-json", default="")
     return parser.parse_args()
 
 
@@ -317,6 +358,9 @@ def main() -> int:
     args = parse_args()
     end = LEGACY.now_utc()
     start, end = resolve_window(end=end, days=args.days, start_from=args.start_from)
+    run_dir = resolve_run_dir(args.run_dir)
+    artifact_paths = resolve_output_paths(args, run_dir)
+    log_spool_root = resolve_log_spool_root(args.log_spool_dir, run_dir)
     auth_summary = LEGACY.RunSummary(
         scanned_window_start=start.isoformat(),
         scanned_window_end=end.isoformat(),
@@ -338,14 +382,16 @@ def main() -> int:
         max_runs=args.max_action_runs,
         retries=args.retry_count,
     )
-    write_json(args.prow_failures_json, prow_failures_payload)
-    write_json(args.actions_failures_json, actions_failures_payload)
+    prow_failures_payload["run_dir"] = str(run_dir)
+    actions_failures_payload["run_dir"] = str(run_dir)
+    write_json(artifact_paths["prow_failures"], prow_failures_payload)
+    write_json(artifact_paths["actions_failures"], actions_failures_payload)
 
     common_fetch_kwargs = {
         "repo": args.repo,
         "retries": args.retry_count,
         "download_workers": args.download_workers,
-        "log_spool_dir": args.log_spool_dir or None,
+        "log_spool_dir": str(log_spool_root),
     }
     prow_logs_payload = fetch_logs_for_failures(
         failures_payload=prow_failures_payload,
@@ -355,14 +401,17 @@ def main() -> int:
         failures_payload=actions_failures_payload,
         **common_fetch_kwargs,
     )
-    write_json(args.prow_logs_json, prow_logs_payload)
-    write_json(args.actions_logs_json, actions_logs_payload)
+    prow_logs_payload["run_dir"] = str(run_dir)
+    actions_logs_payload["run_dir"] = str(run_dir)
+    write_json(artifact_paths["prow_logs"], prow_logs_payload)
+    write_json(artifact_paths["actions_logs"], actions_logs_payload)
+    print(f"RUN_DIR={run_dir}")
     print(
         "wrote "
-        f"{prow_failures_payload['counts']['failures']} prow failures to {args.prow_failures_json}, "
-        f"{actions_failures_payload['counts']['failures']} actions failures to {args.actions_failures_json}, "
-        f"{prow_logs_payload['counts']['logs']} prow logs to {args.prow_logs_json}, and "
-        f"{actions_logs_payload['counts']['logs']} actions logs to {args.actions_logs_json}"
+        f"{prow_failures_payload['counts']['failures']} prow failures to {artifact_paths['prow_failures']}, "
+        f"{actions_failures_payload['counts']['failures']} actions failures to {artifact_paths['actions_failures']}, "
+        f"{prow_logs_payload['counts']['logs']} prow logs to {artifact_paths['prow_logs']}, and "
+        f"{actions_logs_payload['counts']['logs']} actions logs to {artifact_paths['actions_logs']}"
     )
     return 0
 
