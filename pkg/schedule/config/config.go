@@ -119,6 +119,11 @@ const (
 	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	EnableLocationReplacement      = "schedule.enable-location-replacement"
 
+	defaultServerMemoryLimit          = 0
+	defaultServerMemoryLimitGCTrigger = 0.7
+	defaultEnableGOGCTuner            = true
+	defaultGCTunerThreshold           = 0.6
+
 	// EnableTiKVSplitRegion is the option to enable tikv split region.
 	// it's related to schedule, but it's not an explicit config
 	EnableTiKVSplitRegion = "schedule.enable-tikv-split-region"
@@ -668,6 +673,30 @@ type ReplicationConfig struct {
 	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
 }
 
+// ServerConfig is the server configuration.
+// pls keep consistent with PD code:
+// https://github.com/tikv/pd/blob/8139aa699ca114d62dea7d35beb881c4a934d38d/server/config/config.go#L110
+type ServerConfig struct {
+	// ServerMemoryLimit indicates the memory limit of current process.
+	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
+	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
+	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
+	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC.
+	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
+	// GCTunerThreshold is the threshold of GC tuner.
+	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+}
+
+// DefaultServerConfig returns the default server configuration.
+func DefaultServerConfig() ServerConfig {
+	return ServerConfig{
+		ServerMemoryLimit:          defaultServerMemoryLimit,
+		ServerMemoryLimitGCTrigger: defaultServerMemoryLimitGCTrigger,
+		EnableGOGCTuner:            defaultEnableGOGCTuner,
+		GCTunerThreshold:           defaultGCTunerThreshold,
+	}
+}
+
 // Clone makes a deep copy of the config.
 func (c *ReplicationConfig) Clone() *ReplicationConfig {
 	locationLabels := append(c.LocationLabels[:0:0], c.LocationLabels...)
@@ -708,4 +737,17 @@ func (c *ReplicationConfig) Adjust(meta *configutil.ConfigMetaData) error {
 		c.LocationLabels = defaultLocationLabels
 	}
 	return c.Validate()
+}
+
+// Clone makes a deep copy of the config.
+func (s *ServerConfig) Clone() ServerConfig {
+	if s == nil {
+		return ServerConfig{}
+	}
+	return ServerConfig{
+		ServerMemoryLimitGCTrigger: s.ServerMemoryLimitGCTrigger,
+		ServerMemoryLimit:          s.ServerMemoryLimit,
+		EnableGOGCTuner:            s.EnableGOGCTuner,
+		GCTunerThreshold:           s.GCTunerThreshold,
+	}
 }
