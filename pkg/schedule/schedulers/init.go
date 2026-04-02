@@ -596,6 +596,9 @@ func schedulersRegister() {
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
 			}
+			if duration <= 0 {
+				return errs.ErrURLParse.FastGenByArgs("timeout must be greater than 0")
+			}
 			alias, err := url.QueryUnescape(args[3])
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
