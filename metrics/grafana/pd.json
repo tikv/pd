@@ -3807,7 +3807,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 2,
-          "description": "The used capacity size of each TiKV instance",
+          "description": "Used storage size of each TiKV instance, calculated as capacity minus available",
           "fill": 0,
           "gridPos": {
             "h": 6,
@@ -3845,7 +3845,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_store_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_used\"}",
+              "expr": "pd_scheduler_store_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_capacity\"} - pd_scheduler_store_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"store_available\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
