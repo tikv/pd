@@ -538,7 +538,7 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 }
 
 func (c *RaftCluster) stopTSOJobsIfNeeded() {
-	if !c.tsoAllocator.IsInitialize() {
+	if c.tsoAllocator == nil || !c.tsoAllocator.IsInitialize() {
 		return
 	}
 	log.Info("closing the TSO allocator")
@@ -897,6 +897,15 @@ func (c *RaftCluster) runReplicationMode() {
 
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
+	var (
+		cancel             context.CancelFunc
+		stopSchedulingJobs bool
+		heartbeatRunner    ratelimit.Runner
+		miscRunner         ratelimit.Runner
+		logRunner          ratelimit.Runner
+		syncRegionRunner   ratelimit.Runner
+	)
+
 	c.Lock()
 	// We need to try to stop tso jobs whatever the cluster is running or not.
 	// Because we need to call checkTSOService as soon as possible while the cluster is starting,
@@ -910,15 +919,32 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
-	c.cancel()
-	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+	cancel = c.cancel
+	stopSchedulingJobs = !c.IsServiceIndependent(constant.SchedulingServiceName)
+	heartbeatRunner = c.heartbeatRunner
+	miscRunner = c.miscRunner
+	logRunner = c.logRunner
+	syncRegionRunner = c.syncRegionRunner
+	c.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if stopSchedulingJobs {
 		c.stopSchedulingJobs()
 	}
-	c.heartbeatRunner.Stop()
-	c.miscRunner.Stop()
-	c.logRunner.Stop()
-	c.syncRegionRunner.Stop()
-	c.Unlock()
+	if heartbeatRunner != nil {
+		heartbeatRunner.Stop()
+	}
+	if miscRunner != nil {
+		miscRunner.Stop()
+	}
+	if logRunner != nil {
+		logRunner.Stop()
+	}
+	if syncRegionRunner != nil {
+		syncRegionRunner.Stop()
+	}
 
 	c.wg.Wait()
 	log.Info("raft cluster is stopped")
