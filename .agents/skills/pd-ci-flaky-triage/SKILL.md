@@ -17,6 +17,7 @@ Workflow properties:
 1. `UNKNOWN_FAILURE` never becomes a GitHub action by itself.
 2. Environment-filtered cases must be written to `$RUN_DIR/env_filtered.json` only and must not become GitHub writes.
 3. If one issue action cannot be justified from stored failure items and GitHub search results, don't create the action.
+4. If a flaky test was fixed very recently, only failed CI whose branch already contains that fix commit can be used as valid evidence. Failures from before the fix must be dropped.
 
 ## Review File Contracts
 
@@ -166,11 +167,15 @@ Outputs:
 - If a test already has an open flaky test issue and the error message is nearly identical to the content in that issue, then it should be classified as a flaky test. In this specific scenario, there is no need to consider the number of times the error has occurred.
 - If a failed test appears multiple times within a single Pull Request and no errors occurred in other pull requests, it is likely caused by specific commits in that Pull Request rather than being a genuine flaky test. In such cases, do not identify it as a flaky test.
 - For each possible flaky test, assign one review subagent to inspect that test's failed CI links directly before keeping it.
+- During this review, check whether the flaky test was fixed very recently, for example within the past several hours. Look for a fixing Pull Request, merge commit, or explicit commit reference tied to that flaky test.
+- When a recent fix exists, compare the fix commit against each failed CI commit. The failed CI branch must already contain the fix commit. A deterministic way to verify this is to fetch both commits locally and use `git merge-base --is-ancestor <fix_commit> <failed_commit>`.
+- If the failed CI branch does not contain the fix commit, treat that failure as expected pre-fix noise and drop it from the candidate. Do not use that CI link to justify a flaky classification or any GitHub action.
+- If all CI links for a candidate are dropped by this recent-fix check, remove the candidate from `$RUN_DIR/flaky_tests.json`.
 - The review subagent should decide whether the candidate is truly flaky. If the subagent finds a concrete reason that the candidate should not be treated as flaky, mark it as `UNKNOWN_FAILURE` and record the reason in `unknown_failures[]`.
 - Only candidates that pass this review should remain in `flaky_tests[]`.
 
 Outputs:
-- `$RUN_DIR/flaky_tests.json`: reviewed flaky tests ready for GitHub handling, plus reviewed candidates rejected as `UNKNOWN_FAILURE`
+- `$RUN_DIR/flaky_tests.json`: reviewed flaky tests ready for GitHub handling, plus reviewed candidates rejected as `UNKNOWN_FAILURE`. `ci_links` must contain only the failed CI links that remain valid after the recent-fix commit check.
 
 5. Based on the identified flaky tests, search GitHub for an existing issue before writing anything.
 
@@ -223,6 +228,7 @@ Summary:
 - reviewed flaky tests: <number>
 - rejected as UNKNOWN_FAILURE: <number>
   - with reasons if possible
+- dropped as expected pre-fix failures: <number or short list>
 - log fetch failures: <number or short list>
 - command failures after retries: <number or short list>
 
