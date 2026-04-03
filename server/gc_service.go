@@ -585,16 +585,13 @@ func (s *GrpcServer) openGCStateWatch(
 	return ctx, cancel, gcStateCh, done, nil
 }
 
-func (s *GrpcServer) consumeGCStateWatch(
+func (*GrpcServer) consumeGCStateWatch(
 	ctx context.Context,
 	gcStateCh <-chan gc.GCState,
 	send func([]gc.GCState) error,
 ) error {
 	for {
-		gcStates, channelClosed, err := recvGCStateBatch(ctx, gcStateCh)
-		if err != nil {
-			return err
-		}
+		gcStates, channelClosed := recvGCStateBatch(ctx, gcStateCh)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -615,16 +612,16 @@ func (s *GrpcServer) consumeGCStateWatch(
 	}
 }
 
-func recvGCStateBatch(ctx context.Context, gcStateCh <-chan gc.GCState) ([]gc.GCState, bool, error) {
+func recvGCStateBatch(ctx context.Context, gcStateCh <-chan gc.GCState) ([]gc.GCState, bool) {
 	select {
 	case <-ctx.Done():
-		return nil, false, nil
+		return nil, false
 	case gcState, ok := <-gcStateCh:
 		if !ok {
 			if ctx.Err() != nil {
-				return nil, false, nil
+				return nil, false
 			}
-			return nil, true, nil
+			return nil, true
 		}
 
 		gcStates := make([]gc.GCState, 1, gcStateWatchReceiveBatchSize)
@@ -633,14 +630,14 @@ func recvGCStateBatch(ctx context.Context, gcStateCh <-chan gc.GCState) ([]gc.GC
 			select {
 			case gcState, ok := <-gcStateCh:
 				if !ok {
-					return gcStates, true, nil
+					return gcStates, true
 				}
 				gcStates = append(gcStates, gcState)
 			default:
-				return gcStates, false, nil
+				return gcStates, false
 			}
 		}
-		return gcStates, false, nil
+		return gcStates, false
 	}
 }
 
