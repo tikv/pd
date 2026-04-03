@@ -85,6 +85,7 @@ func (se *StorageEndpoint) SaveTimestamp(
 		zap.Time("ts", ts),
 		zap.String("leader-key", leadership.GetLeaderKey()),
 		zap.String("expected-leader-value", leadership.GetLeaderValue()),
+		zap.Bool("check-tso-primary", checkTSOPrimary),
 	}
 	log.Debug("saving timestamp to the storage", logFields...)
 	// The PD leadership or TSO primary will always be granted first before the TSO timestamp window is saved.
