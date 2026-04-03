@@ -2119,8 +2119,8 @@ func collectWatchedGCStates(re *require.Assertions, ch <-chan GCState, expectedC
 	return received
 }
 
-func assertNoGCStateReceived(re *require.Assertions, ch <-chan GCState, timeout time.Duration) {
-	gcState, ok, got := recvGCStateFromChannelWithTimeout(ch, timeout)
+func assertNoGCStateReceived(re *require.Assertions, ch <-chan GCState) {
+	gcState, ok, got := recvGCStateFromChannelWithTimeout(ch, 100*time.Millisecond)
 	if got {
 		re.FailNowf("received unexpected watched GC state", "ok=%v state=%+v", ok, gcState)
 	}
@@ -2136,16 +2136,14 @@ func assertGCStateChannelClosed(re *require.Assertions, ch <-chan GCState, timeo
 }
 
 func waitGCStateListenerCount(re *require.Assertions, m *GCStateManager, expected int) {
-	deadline := time.Now().Add(time.Second)
-	for {
-		if m.getGCStateListenerCount() == expected {
-			return
-		}
-		if time.Now().After(deadline) {
-			re.FailNowf("timed out waiting for GC state listener count", "expected=%d actual=%d", expected, m.getGCStateListenerCount())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	testutil.Eventually(
+		re,
+		func() bool {
+			return m.getGCStateListenerCount() == expected
+		},
+		testutil.WithWaitFor(time.Second),
+		testutil.WithTickInterval(10*time.Millisecond),
+	)
 }
 
 func assertNextWatchedGCStateEqualsCurrent(re *require.Assertions, m *GCStateManager, ch <-chan GCState, keyspaceID uint32, timeout time.Duration) GCState {
@@ -2314,47 +2312,47 @@ func TestWatchGCStatesWhenUnchanged(t *testing.T) {
 	re.NoError(err)
 	re.Equal(uint64(10), res.OldTxnSafePoint)
 	re.Equal(uint64(10), res.NewTxnSafePoint)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	res, err = manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
 	re.NoError(err)
 	re.Equal(uint64(10), res.OldTxnSafePoint)
 	re.Equal(uint64(10), res.NewTxnSafePoint)
 	re.NotEmpty(res.BlockerDescription)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	oldGCSafePoint, newGCSafePoint, err = manager.AdvanceGCSafePoint(keyspaceID, 8)
 	re.NoError(err)
 	re.Equal(uint64(8), oldGCSafePoint)
 	re.Equal(uint64(8), newGCSafePoint)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	oldGCSafePoint, newGCSafePoint, err = manager.CompatibleUpdateGCSafePoint(keyspaceID, 0)
 	re.NoError(err)
 	re.Equal(uint64(8), oldGCSafePoint)
 	re.Equal(uint64(8), newGCSafePoint)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	_, err = manager.SetGCBarrier(keyspaceID, "b1", 10, time.Hour, now)
 	re.NoError(err)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	deletedBarrier, err := manager.DeleteGCBarrier(keyspaceID, "missing")
 	re.NoError(err)
 	re.Nil(deletedBarrier)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	_, err = manager.AdvanceTxnSafePoint(keyspaceID, 9, now)
 	re.ErrorIs(err, errs.ErrDecreasingTxnSafePoint)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	_, _, err = manager.AdvanceGCSafePoint(keyspaceID, 11)
 	re.ErrorIs(err, errs.ErrGCSafePointExceedsTxnSafePoint)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	_, err = manager.SetGCBarrier(keyspaceID, "b2", 9, time.Hour, now)
 	re.ErrorIs(err, errs.ErrGCBarrierTSBehindTxnSafePoint)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	cancel()
 	assertGCStateChannelClosed(re, ch, time.Second)
@@ -2381,7 +2379,7 @@ func TestWatchGCStatesWithKeyspaceChanges(t *testing.T) {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	res, err := manager.AdvanceTxnSafePoint(newKeyspaceID, 10, time.Now())
 	re.NoError(err)
@@ -2390,11 +2388,11 @@ func TestWatchGCStatesWithKeyspaceChanges(t *testing.T) {
 
 	_, err = manager.keyspaceManager.UpdateKeyspaceStateByID(2, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
 	re.NoError(err)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	_, err = manager.keyspaceManager.UpdateKeyspaceStateByID(2, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
 	re.NoError(err)
-	assertNoGCStateReceived(re, ch, 200*time.Millisecond)
+	assertNoGCStateReceived(re, ch)
 
 	expected, err := manager.GetAllKeyspacesGCStates(context.Background())
 	re.NoError(err)
@@ -2441,7 +2439,7 @@ func TestWatchGCStatesLoadingInitial(t *testing.T) {
 	withoutInitialCh, err := manager.WatchGCStates(withoutInitialCtx, true, false)
 	re.NoError(err)
 
-	assertNoGCStateReceived(re, withoutInitialCh, 200*time.Millisecond)
+	assertNoGCStateReceived(re, withoutInitialCh)
 	initialReceived := collectWatchedGCStates(re, withInitialCh, len(expected), time.Second)
 	re.Equal(expected, initialReceived)
 
@@ -2504,13 +2502,13 @@ func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
 	re.Equal(uint64(40), res.NewTxnSafePoint)
 	includeGCBarriersState := assertNextWatchedGCStateEqualsCurrent(re, manager, includeGCBarriersCh, 2, time.Second)
 	re.Len(includeGCBarriersState.GCBarriers, 1)
-	assertNoGCStateReceived(re, excludeGCBarriersCh, 200*time.Millisecond)
+	assertNoGCStateReceived(re, excludeGCBarriersCh)
 
 	_, err = manager.SetGCBarrier(2, "b4", 60, time.Hour, now.Add(time.Second))
 	re.NoError(err)
 	includeGCBarriersState = assertNextWatchedGCStateEqualsCurrent(re, manager, includeGCBarriersCh, 2, time.Second)
 	re.Len(includeGCBarriersState.GCBarriers, 2)
-	assertNoGCStateReceived(re, excludeGCBarriersCh, 200*time.Millisecond)
+	assertNoGCStateReceived(re, excludeGCBarriersCh)
 
 	_, newGCSafePoint, err = manager.AdvanceGCSafePoint(2, 15)
 	re.NoError(err)
