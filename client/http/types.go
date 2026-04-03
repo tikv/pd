@@ -71,20 +71,21 @@ var NewKeyRange = pd.NewKeyRange
 
 // RegionInfo stores the information of one region.
 type RegionInfo struct {
-	ID              int64            `json:"id"`
-	StartKey        string           `json:"start_key"`
-	EndKey          string           `json:"end_key"`
-	Epoch           RegionEpoch      `json:"epoch"`
-	Peers           []RegionPeer     `json:"peers"`
-	Leader          RegionPeer       `json:"leader"`
-	DownPeers       []RegionPeerStat `json:"down_peers"`
-	PendingPeers    []RegionPeer     `json:"pending_peers"`
-	WrittenBytes    uint64           `json:"written_bytes"`
-	ReadBytes       uint64           `json:"read_bytes"`
-	WrittenKeys     uint64           `json:"written_keys"`
-	ReadKeys        uint64           `json:"read_keys"`
-	ApproximateSize int64            `json:"approximate_size"`
-	ApproximateKeys int64            `json:"approximate_keys"`
+	ID                int64            `json:"id"`
+	StartKey          string           `json:"start_key"`
+	EndKey            string           `json:"end_key"`
+	Epoch             RegionEpoch      `json:"epoch"`
+	Peers             []RegionPeer     `json:"peers"`
+	Leader            RegionPeer       `json:"leader"`
+	DownPeers         []RegionPeerStat `json:"down_peers"`
+	PendingPeers      []RegionPeer     `json:"pending_peers"`
+	WrittenBytes      uint64           `json:"written_bytes"`
+	ReadBytes         uint64           `json:"read_bytes"`
+	WrittenKeys       uint64           `json:"written_keys"`
+	ReadKeys          uint64           `json:"read_keys"`
+	ApproximateSize   int64            `json:"approximate_size"`
+	ApproximateKvSize int64            `json:"approximate_kv_size"`
+	ApproximateKeys   int64            `json:"approximate_keys"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }

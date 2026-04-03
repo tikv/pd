@@ -159,6 +159,24 @@ func TestMergeRegionsInfo(t *testing.T) {
 	}
 }
 
+func TestRegionInfoApproximateKvSizeDecode(t *testing.T) {
+	re := require.New(t)
+
+	var region RegionInfo
+	err := json.Unmarshal([]byte(`{"approximate_kv_size":123}`), &region)
+	re.NoError(err)
+	re.Equal(int64(123), region.ApproximateKvSize)
+}
+
+func TestRegionInfoApproximateKvSizeDefaultZero(t *testing.T) {
+	re := require.New(t)
+
+	var region RegionInfo
+	err := json.Unmarshal([]byte(`{}`), &region)
+	re.NoError(err)
+	re.Zero(region.ApproximateKvSize)
+}
+
 func TestRuleStartEndKey(t *testing.T) {
 	re := require.New(t)
 	// Empty start/end key and key hex.
