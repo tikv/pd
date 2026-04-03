@@ -523,7 +523,7 @@ func (s *Server) startCluster(context.Context) error {
 	s.configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	// Start the rule watcher after the cluster is created.
 	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
-		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), cluster.keyspaceCache)
 	if err != nil {
 		return err
 	}

@@ -17,9 +17,11 @@ package checker
 import (
 	"context"
 	"encoding/hex"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
@@ -27,6 +29,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -589,4 +592,182 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 		core.SetApproximateSize(size),
 		core.SetApproximateKeys(keys),
 	)
+}
+
+type mockKeyspaceManagerForMerge struct {
+	existing map[uint32]bool
+}
+
+func (m *mockKeyspaceManagerForMerge) KeyspaceExist(id uint32) bool {
+	if m.existing == nil {
+		return false
+	}
+	exist, ok := m.existing[id]
+	return ok && exist
+}
+
+func (m *mockKeyspaceManagerForMerge) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	if start >= end {
+		return nil, false
+	}
+	if m.existing == nil {
+		return nil, false
+	}
+	found := false
+	ret := make([]uint32, 0, limit)
+
+	for id, exists := range m.existing {
+		if exists && id >= start && id <= end {
+			ret = append(ret, id)
+			found = true
+			if limit > 0 && len(ret) >= limit {
+				break
+			}
+		}
+	}
+	slices.Sort(ret)
+	return ret, found
+}
+
+type mockClusterWithKeyspaceManager struct {
+	*mockcluster.Cluster
+	manager *mockKeyspaceManagerForMerge
+}
+
+func (c *mockClusterWithKeyspaceManager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	return c.manager.GetKeyspaceIDInRange(start, end, limit)
+}
+
+func (c *mockClusterWithKeyspaceManager) KeyspaceExist(id uint32) bool {
+	return c.manager.KeyspaceExist(id)
+}
+
+func TestNotMergeAfterSplit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := mockconfig.NewTestOptions()
+	cluster := &mockClusterWithKeyspaceManager{
+		Cluster: mockcluster.NewCluster(ctx, cfg),
+		manager: &mockKeyspaceManagerForMerge{},
+	}
+	cluster.manager.existing = map[uint32]bool{
+		100: true,
+		101: true,
+		102: true,
+	}
+	cluster.SetMaxMergeRegionSize(20)
+	cluster.SetMaxMergeRegionKeys(200000)
+	stores := map[uint64][]string{
+		1: {}, 2: {}, 3: {},
+	}
+	for storeID, labels := range stores {
+		cluster.PutStoreWithLabels(storeID, labels...)
+	}
+
+	testNoMerge(re, cluster, []byte(""), []byte(""))
+	bound100 := keyspace.MakeRegionBound(100)
+	bound102 := keyspace.MakeRegionBound(102)
+	testNoMerge(re, cluster, bound100.RawLeftBound, bound102.RawRightBound)
+	testNoMerge(re, cluster, bound100.TxnLeftBound, bound102.TxnRightBound)
+
+	testNoMerge(re, cluster, []byte{'t', 1, 2, 3}, bound102.TxnRightBound)
+	testNoMerge(re, cluster, bound100.RawLeftBound, []byte{'t', 1, 2, 3})
+}
+
+func testNoMerge(re *require.Assertions, cluster *mockClusterWithKeyspaceManager, startKey []byte, endKey []byte) {
+	keys := keyspace.GetKeyspaceSplitKeys(startKey, endKey, cluster)
+	re.NotEmpty(keys)
+	keys = append(keys, endKey)
+	preRegion := newRegionInfo(uint64(99), string(startKey), string(keys[0]), 1, 1, []uint64{1, 1}, []uint64{1, 1})
+	cluster.PutRegion(preRegion)
+	for i := range len(keys) - 1 {
+		region := newRegionInfo(uint64(100+i), string(keys[i]), string(keys[i+1]), 1, 1, []uint64{3, 1}, []uint64{3, 1})
+		cluster.PutRegion(region)
+		re.False(AllowMerge(cluster, preRegion, region), i)
+		preRegion = region
+	}
+
+	// clean all regions
+	emptyRegion := newRegionInfo(uint64(99), "", "", 1, 1, []uint64{1, 1}, []uint64{1, 1})
+	cluster.PutRegion(emptyRegion)
+}
+
+func TestKeyspaceMerge(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := mockconfig.NewTestOptions()
+	cluster := &mockClusterWithKeyspaceManager{
+		Cluster: mockcluster.NewCluster(ctx, cfg),
+		manager: &mockKeyspaceManagerForMerge{
+			existing: map[uint32]bool{
+				100: true,
+			},
+		},
+	}
+	cluster.SetMaxMergeRegionSize(20)
+	cluster.SetMaxMergeRegionKeys(200000)
+	stores := map[uint64][]string{
+		1: {}, 2: {}, 3: {},
+	}
+	for storeID, labels := range stores {
+		cluster.PutStoreWithLabels(storeID, labels...)
+	}
+
+	// Get keyspace boundaries
+	bound100 := keyspace.MakeRegionBound(100)
+	bound101 := keyspace.MakeRegionBound(101)
+	bound102 := keyspace.MakeRegionBound(102)
+
+	// Test 1: Two regions in the same keyspace should be mergeable
+	region1 := newRegionInfo(1, string(bound100.TxnLeftBound), string(bound100.TxnRightBound[:len(bound100.TxnRightBound)/2]), 1, 1, []uint64{1, 1}, []uint64{1, 1})
+	region2 := newRegionInfo(2, string(bound100.TxnRightBound[:len(bound100.TxnRightBound)/2]), string(bound100.TxnRightBound), 1, 1, []uint64{2, 1}, []uint64{2, 1})
+
+	cluster.PutRegion(region1)
+	cluster.PutRegion(region2)
+
+	// Regions within the same keyspace should allow merge
+	re.True(AllowMerge(cluster, region1, region2), "regions in the same keyspace should be mergeable")
+	re.True(AllowMerge(cluster, region2, region1), "regions in the same keyspace should be mergeable")
+
+	// Test 2: Two regions in different keyspaces should NOT be mergeable
+	region3 := newRegionInfo(3, string(bound100.TxnLeftBound), string(bound100.TxnRightBound), 1, 1, []uint64{3, 1}, []uint64{3, 1})
+	region4 := newRegionInfo(4, string(bound101.TxnLeftBound), string(bound101.TxnRightBound), 1, 1, []uint64{4, 1}, []uint64{4, 1})
+
+	cluster.PutRegion(region3)
+	cluster.PutRegion(region4)
+
+	// Regions from different keyspaces should not allow merge
+	re.False(AllowMerge(cluster, region3, region4), "regions from different keyspaces should not be mergeable")
+
+	// Test 3: Merging would create a region spanning multiple keyspaces - should not be allowed
+	region100 := newRegionInfo(100, string(bound100.TxnLeftBound), string(bound100.TxnRightBound), 1, 1, []uint64{5, 1}, []uint64{5, 1})
+	region101 := newRegionInfo(101, string(bound101.TxnLeftBound), string(bound101.TxnRightBound), 1, 1, []uint64{6, 1}, []uint64{6, 1})
+	region200 := newRegionInfo(200, string(bound102.TxnLeftBound), string([]byte{}), 1, 1, []uint64{6, 1}, []uint64{6, 1})
+
+	cluster.PutRegion(region100)
+	cluster.PutRegion(region101)
+	cluster.PutRegion(region200)
+
+	// Test 4: If an intermediate keyspace does not exist, keyspaceCheckerWrapperForMerge
+	// should skip keyspace boundary enforcement for that range.
+	cluster.manager.existing = map[uint32]bool{
+		100: true,
+	}
+	re.False(AllowMerge(cluster, region100, region101), "merge should be allowed when a spanned keyspace is missing")
+	re.False(AllowMerge(cluster, region101, region100), "merge should be allowed when a spanned keyspace is missing")
+	re.True(AllowMerge(cluster, region101, region200), "merging should be allowed when all spanned keyspaces exist")
+	re.True(AllowMerge(cluster, region200, region101), "merging should be allowed when all spanned keyspaces exist")
+
+	// Test 5: Restore existing keyspaces and merge should be blocked again.
+	cluster.manager.existing = map[uint32]bool{
+		100: true,
+		101: true,
+		102: true,
+	}
+	re.False(AllowMerge(cluster, region100, region101), "merging should be blocked when all spanned keyspaces exist")
+	re.False(AllowMerge(cluster, region101, region100), "merging should be blocked when all spanned keyspaces exist")
+	re.False(AllowMerge(cluster, region101, region200), "merging should be blocked when all spanned keyspaces exist")
+	re.False(AllowMerge(cluster, region200, region101), "merging should be blocked when all spanned keyspaces exist")
 }

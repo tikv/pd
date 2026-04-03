@@ -40,7 +40,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -461,73 +460,6 @@ func checkRuleFunc(
 	if exist {
 		re.Failf("Failed to check the rule", "rule %+v not found", rule)
 	}
-}
-
-func (suite *httpClientTestSuite) TestRegionLabel() {
-	re := suite.Require()
-	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
-	labelRules, err := client.GetAllRegionLabelRules(ctx)
-	re.NoError(err)
-	re.Len(labelRules, 1)
-
-	// In NextGen, the bootstrap keyspace is SYSTEM with ID 16777214, not DEFAULT with ID 0
-	expectedKeyspaceID := "keyspaces/0"
-	if kerneltype.IsNextGen() {
-		expectedKeyspaceID = "keyspaces/16777214"
-	}
-	re.Equal(expectedKeyspaceID, labelRules[0].ID)
-	// Set a new region label rule.
-	labelRule := &pd.LabelRule{
-		ID:       "rule1",
-		Labels:   []pd.RegionLabel{{Key: "k1", Value: "v1"}},
-		RuleType: "key-range",
-		Data:     labeler.MakeKeyRanges("1234", "5678"),
-	}
-	err = client.SetRegionLabelRule(ctx, labelRule)
-	re.NoError(err)
-	labelRules, err = client.GetAllRegionLabelRules(ctx)
-	re.NoError(err)
-	re.Len(labelRules, 2)
-	sort.Slice(labelRules, func(i, j int) bool {
-		return labelRules[i].ID < labelRules[j].ID
-	})
-	re.Equal(labelRule.ID, labelRules[1].ID)
-	re.Equal(labelRule.Labels, labelRules[1].Labels)
-	re.Equal(labelRule.RuleType, labelRules[1].RuleType)
-	// Patch the region label rule.
-	labelRule = &pd.LabelRule{
-		ID:       "rule2",
-		Labels:   []pd.RegionLabel{{Key: "k2", Value: "v2"}},
-		RuleType: "key-range",
-		Data:     labeler.MakeKeyRanges("ab12", "cd12"),
-	}
-	patch := &pd.LabelRulePatch{
-		SetRules:    []*pd.LabelRule{labelRule},
-		DeleteRules: []string{"rule1"},
-	}
-	err = client.PatchRegionLabelRules(ctx, patch)
-	re.NoError(err)
-	allLabelRules, err := client.GetAllRegionLabelRules(ctx)
-	re.NoError(err)
-	re.Len(labelRules, 2)
-	sort.Slice(allLabelRules, func(i, j int) bool {
-		return allLabelRules[i].ID < allLabelRules[j].ID
-	})
-	re.Equal(labelRule.ID, allLabelRules[1].ID)
-	re.Equal(labelRule.Labels, allLabelRules[1].Labels)
-	re.Equal(labelRule.RuleType, allLabelRules[1].RuleType)
-	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"rule2"})
-	re.NoError(err)
-	re.Len(labelRules, 1)
-	re.Equal(labelRule, labelRules[0])
-	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{expectedKeyspaceID, "rule2"})
-	re.NoError(err)
-	sort.Slice(labelRules, func(i, j int) bool {
-		return labelRules[i].ID < labelRules[j].ID
-	})
-	re.Equal(allLabelRules, labelRules)
 }
 
 func (suite *httpClientTestSuite) TestAccelerateSchedule() {
