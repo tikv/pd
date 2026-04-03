@@ -344,24 +344,24 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
-	log.Info("[leader-ready] start to initialize cluster")
+	log.Info("[raft-cluster-start] start to initialize cluster")
 	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
-		log.Warn("[leader-ready] failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
+		log.Warn("[raft-cluster-start] failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
 	}
 	initClusterDuration := time.Since(initClusterStart)
-	log.Info("[leader-ready] initialize cluster completed", zap.Duration("cost", initClusterDuration))
+	log.Info("[raft-cluster-start] initialize cluster completed", zap.Duration("cost", initClusterDuration))
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
 	if !bootstrap {
-		log.Info("[leader-ready] start to check TSO service")
+		log.Info("[raft-cluster-start] start to check TSO service")
 		checkTSOStart := time.Now()
 		c.checkTSOService()
 		checkTSODuration := time.Since(checkTSOStart)
-		log.Info("[leader-ready] check TSO service completed", zap.Duration("cost", checkTSODuration))
+		log.Info("[raft-cluster-start] check TSO service completed", zap.Duration("cost", checkTSODuration))
 	}
 	defer func() {
 		if !bootstrap && err != nil {
@@ -376,39 +376,39 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 		failpoint.Return(err)
 	})
-	log.Info("[leader-ready] start to load cluster info")
+	log.Info("[raft-cluster-start] start to load cluster info")
 	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
-		log.Warn("[leader-ready] failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
+		log.Warn("[raft-cluster-start] failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
 		return err
 	}
 	if cluster == nil {
 		loadClusterInfoDuration := time.Since(loadClusterInfoStart)
-		log.Warn("[leader-ready] cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
+		log.Warn("[raft-cluster-start] cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
 		return nil
 	}
 	if c.opt.IsPlacementRulesEnabled() {
 		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
-			log.Warn("[leader-ready] failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
+			log.Warn("[raft-cluster-start] failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
 			return err
 		}
-		log.Info("[leader-ready] initialize placement rules completed", zap.Duration("cost", time.Since(ruleInitStart)))
+		log.Info("[raft-cluster-start] initialize placement rules completed", zap.Duration("cost", time.Since(ruleInitStart)))
 	}
 	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
-	log.Info("[leader-ready] load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
+	log.Info("[raft-cluster-start] load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
 
-	log.Info("[leader-ready] creating region labeler")
+	log.Info("[raft-cluster-start] creating region labeler")
 	labelerStart := time.Now()
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	labelerDuration := time.Since(labelerStart)
 	if err != nil {
-		log.Warn("[leader-ready] region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
+		log.Warn("[raft-cluster-start] region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
 		return err
 	}
-	log.Info("[leader-ready] region labeler created", zap.Duration("cost", labelerDuration))
+	log.Info("[raft-cluster-start] region labeler created", zap.Duration("cost", labelerDuration))
 
 	// create affinity manager with region labeler for key range validation and rebuild
 	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
@@ -417,52 +417,52 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-		log.Info("[leader-ready] start to observe slow store status")
+		log.Info("[raft-cluster-start] start to observe slow store status")
 		observeSlowStoreStart := time.Now()
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
 		}
 		observeSlowStoreDuration := time.Since(observeSlowStoreStart)
-		log.Info("[leader-ready] observe slow store status completed", zap.Duration("cost", observeSlowStoreDuration))
+		log.Info("[raft-cluster-start] observe slow store status completed", zap.Duration("cost", observeSlowStoreDuration))
 	}
-	log.Info("[leader-ready] start to create replication mode manager")
+	log.Info("[raft-cluster-start] start to create replication mode manager")
 	replicationModeStart := time.Now()
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
-		log.Warn("[leader-ready] failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
+		log.Warn("[raft-cluster-start] failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
 		return err
 	}
 	replicationModeDuration := time.Since(replicationModeStart)
-	log.Info("[leader-ready] create replication mode manager completed", zap.Duration("cost", replicationModeDuration))
-	log.Info("[leader-ready] start to load external timestamp")
+	log.Info("[raft-cluster-start] create replication mode manager completed", zap.Duration("cost", replicationModeDuration))
+	log.Info("[raft-cluster-start] start to load external timestamp")
 	loadExternalTSStart := time.Now()
 	c.loadExternalTS()
-	log.Info("[leader-ready] load external timestamp completed", zap.Duration("cost", time.Since(loadExternalTSStart)))
-	log.Info("[leader-ready] start to load min resolved ts")
+	log.Info("[raft-cluster-start] load external timestamp completed", zap.Duration("cost", time.Since(loadExternalTSStart)))
+	log.Info("[raft-cluster-start] start to load min resolved ts")
 	loadMinResolvedTSStart := time.Now()
 	c.loadMinResolvedTS()
-	log.Info("[leader-ready] load min resolved ts completed", zap.Duration("cost", time.Since(loadMinResolvedTSStart)))
+	log.Info("[raft-cluster-start] load min resolved ts completed", zap.Duration("cost", time.Since(loadMinResolvedTSStart)))
 
 	if c.isKeyspaceGroupEnabled {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
-		log.Info("[leader-ready] start to bootstrap keyspace group manager")
+		log.Info("[raft-cluster-start] start to bootstrap keyspace group manager")
 		bootstrapKeyspaceStart := time.Now()
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
-			log.Warn("[leader-ready] failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
+			log.Warn("[raft-cluster-start] failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
 		bootstrapKeyspaceDuration := time.Since(bootstrapKeyspaceStart)
-		log.Info("[leader-ready] bootstrap keyspace group manager completed", zap.Duration("cost", bootstrapKeyspaceDuration))
+		log.Info("[raft-cluster-start] bootstrap keyspace group manager completed", zap.Duration("cost", bootstrapKeyspaceDuration))
 	}
-	log.Info("[leader-ready] start to check scheduling service")
+	log.Info("[raft-cluster-start] start to check scheduling service")
 	checkSchedulingStart := time.Now()
 	c.checkSchedulingService()
 	checkSchedulingDuration := time.Since(checkSchedulingStart)
-	log.Info("[leader-ready] check scheduling service completed", zap.Duration("cost", checkSchedulingDuration))
-	log.Info("[leader-ready] start to start background jobs")
+	log.Info("[raft-cluster-start] check scheduling service completed", zap.Duration("cost", checkSchedulingDuration))
+	log.Info("[raft-cluster-start] start to start background jobs")
 	backgroundJobsStart := time.Now()
 	c.wg.Add(11)
 	go c.runServiceCheckJob()
@@ -477,9 +477,9 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
 	backgroundJobsDuration := time.Since(backgroundJobsStart)
-	log.Info("[leader-ready] start background jobs completed", zap.Duration("cost", backgroundJobsDuration))
+	log.Info("[raft-cluster-start] start background jobs completed", zap.Duration("cost", backgroundJobsDuration))
 
-	log.Info("[leader-ready] start to start runners")
+	log.Info("[raft-cluster-start] start to start runners")
 	runnersStart := time.Now()
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -487,7 +487,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.logRunner.Start(c.ctx)
 	c.syncRegionRunner.Start(c.ctx)
 	runnersDuration := time.Since(runnersStart)
-	log.Info("[leader-ready] start runners completed", zap.Duration("cost", runnersDuration))
+	log.Info("[raft-cluster-start] start runners completed", zap.Duration("cost", runnersDuration))
 	return nil
 }
 
