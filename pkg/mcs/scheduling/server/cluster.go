@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/response"
@@ -77,6 +78,7 @@ type Cluster struct {
 	labelStats        *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
 	storage           storage.Storage
+	keyspaceCache     *keyspace.Cache
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -142,6 +144,7 @@ func NewCluster(
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
+		keyspaceCache:     keyspace.NewCache(),
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -214,6 +217,11 @@ func (c *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 // GetAffinityManager returns the affinity manager.
 func (c *Cluster) GetAffinityManager() *affinity.Manager {
 	return c.affinityManager
+}
+
+// GetKeyspaceCache returns the keyspace cache.
+func (c *Cluster) GetKeyspaceCache() *keyspace.Cache {
+	return c.keyspaceCache
 }
 
 // GetRegionSplitter returns the region splitter.
