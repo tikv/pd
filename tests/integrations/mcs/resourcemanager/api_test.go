@@ -336,6 +336,21 @@ func (suite *resourceManagerAPITestSuite) TestControllerConfigAPI() {
 	re.Equal(2.0, config.RequestUnit.WriteBaseCost)
 }
 
+func (suite *resourceManagerAPITestSuite) TestControllerConfigAPIAllOrNothing() {
+	re := suite.Require()
+
+	before := suite.mustGetControllerConfig(re)
+	resp, statusCode := tryToSetControllerConfig(re, suite.cluster.GetLeaderServer().GetAddr(), map[string]any{
+		"enable-controller-trace-log": "true",
+		"ltb-max-wait-duration":       "not-a-duration",
+	})
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Contains(resp, "time:")
+
+	after := suite.mustGetControllerConfig(re)
+	re.Equal(before, after)
+}
+
 func (suite *resourceManagerAPITestSuite) mustGetControllerConfig(re *require.Assertions) *server.ControllerConfig {
 	bodyBytes := suite.mustSendRequest(re, http.MethodGet, "/config/controller", nil)
 	config := &server.ControllerConfig{}
@@ -344,8 +359,14 @@ func (suite *resourceManagerAPITestSuite) mustGetControllerConfig(re *require.As
 }
 
 func (suite *resourceManagerAPITestSuite) mustSetControllerConfig(re *require.Assertions, config map[string]any) {
-	bodyBytes := suite.mustSendRequest(re, http.MethodPost, "/config/controller", config)
-	re.Equal("Success!", string(bodyBytes))
+	body, statusCode := tryToSetControllerConfig(re, suite.cluster.GetLeaderServer().GetAddr(), config)
+	re.Equal(http.StatusOK, statusCode, body)
+	re.Equal("Success!", body)
+}
+
+func tryToSetControllerConfig(re *require.Assertions, leaderAddr string, config map[string]any) (string, int) {
+	bodyBytes, statusCode := sendRequest(re, leaderAddr, http.MethodPost, "/config/controller", nil, config)
+	return string(bodyBytes), statusCode
 }
 
 func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {

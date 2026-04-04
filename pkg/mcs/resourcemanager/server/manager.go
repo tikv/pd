@@ -467,49 +467,46 @@ func (m *Manager) initReserved() {
 
 // UpdateControllerConfigItem updates the controller config item.
 func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
+	return m.UpdateControllerConfigItems(map[string]any{key: value})
+}
+
+// UpdateControllerConfigItems updates controller config items atomically.
+func (m *Manager) UpdateControllerConfigItems(items map[string]any) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	kp := strings.Split(key, ".")
-	if len(kp) == 0 {
-		return errors.Errorf("invalid key %s", key)
-	}
 	m.Lock()
 	controllerConfig := cloneControllerConfig(m.controllerConfig)
-	var config any
-	switch kp[0] {
-	case "request-unit":
-		config = &controllerConfig.RequestUnit
-	default:
-		config = controllerConfig
-	}
-	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
-	if err != nil {
-		m.Unlock()
-		return err
-	}
-
-	if !found {
-		m.Unlock()
-		return errors.Errorf("config item %s not found", key)
-	}
-	// Validate RUVersionPolicy after any update, regardless of the key path,
-	// since the default branch merges into the full ControllerConfig.
-	if err := controllerConfig.RUVersionPolicy.validate(); err != nil {
-		m.Unlock()
-		return err
-	}
-	if updated {
-		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+	updatedItems := make([]struct {
+		key   string
+		value any
+	}, 0, len(items))
+	for key, value := range items {
+		updated, err := applyControllerConfigItem(controllerConfig, key, value)
+		if err != nil {
 			m.Unlock()
-			log.Error("save controller config failed", zap.Error(err))
 			return err
 		}
-		m.controllerConfig = controllerConfig
+		if updated {
+			updatedItems = append(updatedItems, struct {
+				key   string
+				value any
+			}{key: key, value: value})
+		}
 	}
+	if len(updatedItems) == 0 {
+		m.Unlock()
+		return nil
+	}
+	if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+		m.Unlock()
+		log.Error("save controller config failed", zap.Error(err))
+		return err
+	}
+	m.controllerConfig = controllerConfig
 	m.Unlock()
-	if updated {
-		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
+	for _, item := range updatedItems {
+		log.Info("updated controller config item", zap.String("key", item.key), zap.Any("value", item.value))
 	}
 	return nil
 }
@@ -519,6 +516,33 @@ func (m *Manager) GetControllerConfig() *ControllerConfig {
 	m.RLock()
 	defer m.RUnlock()
 	return cloneControllerConfig(m.controllerConfig)
+}
+
+func applyControllerConfigItem(config *ControllerConfig, key string, value any) (bool, error) {
+	kp := strings.Split(key, ".")
+	if len(kp) == 0 {
+		return false, errors.Errorf("invalid key %s", key)
+	}
+	var target any
+	switch kp[0] {
+	case "request-unit":
+		target = &config.RequestUnit
+	default:
+		target = config
+	}
+	updated, found, err := jsonutil.AddKeyValue(target, kp[len(kp)-1], value)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, errors.Errorf("config item %s not found", key)
+	}
+	// Validate RUVersionPolicy after any update, regardless of the key path,
+	// since the default branch merges into the full ControllerConfig.
+	if err := config.RUVersionPolicy.validate(); err != nil {
+		return false, err
+	}
+	return updated, nil
 }
 
 // AddResourceGroup puts a resource group.
