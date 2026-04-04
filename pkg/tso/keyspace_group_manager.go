@@ -792,7 +792,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		})
 	}
 	// Initialize all kinds of maps.
-	allocator := NewAllocator(kgm.ctx, group.ID, participant, kgm.storage, kgm.cfg)
+	allocator := NewAllocator(kgm.ctx, group.ID, participant, kgm.storage, kgm.cfg, false)
 	allocator.startPrimaryElectionLoop()
 	log.Info("created tso allocator",
 		zap.Uint32("keyspace-group-id", group.ID))
