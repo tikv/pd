@@ -181,6 +181,12 @@ func (bo *Backoffer) resetBackoff() {
 	bo.nextLogTime = 0
 }
 
+// TotalTime returns the maximum total time duration for the backoff.
+// Returns 0 if infinite retry is enabled.
+func (bo *Backoffer) TotalTime() time.Duration {
+	return bo.total
+}
+
 // Only used for test.
 var testBackOffExecuteFlag atomic.Bool
 

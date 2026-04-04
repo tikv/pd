@@ -43,6 +43,7 @@ func TestMain(m *testing.M) {
 type mockTSOServiceProvider struct {
 	option       *opt.Option
 	createStream func(ctx context.Context) *tsoStream
+	updateConCtx func(ctx context.Context) bool
 	conCtxMgr    *cctx.Manager[*tsoStream]
 }
 
@@ -67,6 +68,9 @@ func (m *mockTSOServiceProvider) getConnectionCtxMgr() *cctx.Manager[*tsoStream]
 }
 
 func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool {
+	if m.updateConCtx != nil {
+		return m.updateConCtx(ctx)
+	}
 	if m.conCtxMgr.Exist(mockStreamURL) {
 		return true
 	}
@@ -79,6 +83,50 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool 
 	}
 	m.conCtxMgr.Store(cctx, cancel, mockStreamURL, stream)
 	return true
+}
+
+func TestTSODispatcherStreamLoopUsesTSOTimeout(t *testing.T) {
+	re := require.New(t)
+	option := opt.NewOption()
+	option.Timeout = 200 * time.Millisecond
+	option.TSOTimeout = 700 * time.Millisecond
+
+	provider := newMockTSOServiceProvider(option, nil)
+	provider.updateConCtx = func(context.Context) bool {
+		return false
+	}
+
+	dispatcher := newTSODispatcher(context.Background(), defaultMaxTSOBatchSize, provider)
+	var dispatcherWg sync.WaitGroup
+	dispatcherWg.Add(1)
+	go dispatcher.handleDispatcher(&dispatcherWg)
+	defer func() {
+		dispatcher.close()
+		dispatcherWg.Wait()
+	}()
+
+	reqPool := &sync.Pool{
+		New: func() any {
+			return &Request{
+				done: make(chan error, 1),
+			}
+		},
+	}
+	req := reqPool.Get().(*Request)
+	req.clientCtx = context.Background()
+	req.requestCtx = context.Background()
+	req.start = time.Now()
+	req.pool = reqPool
+	req.physical = 0
+	req.logical = 0
+
+	start := time.Now()
+	dispatcher.push(req)
+	_, _, err := req.waitTimeout(3 * time.Second)
+	elapsed := time.Since(start)
+
+	re.Error(err)
+	re.Greater(elapsed, option.Timeout+200*time.Millisecond)
 }
 
 type testTSODispatcherSuite struct {
@@ -98,6 +146,7 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	s.re = require.New(s.T())
 	s.option = opt.NewOption()
 	s.option.Timeout = time.Hour
+	s.option.TSOTimeout = time.Hour
 	// As the internal logic of the tsoDispatcher allows it to create streams multiple times, but our tests needs
 	// single stable access to the inner stream, we do not allow it to create it more than once in these tests.
 	// To avoid data race on reading `stream` and `streamInner` fields.
