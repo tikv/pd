@@ -208,6 +208,55 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify()
 }
 
+func TestPagingSizeBytesPreCharge(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+
+	// Phase 1: BeforeKVRequest with pagingSizeBytes should pre-charge
+	// baseCost + pagingSizeBytes * ReadBytesCost.
+	pagingSizeBytes := uint64(4 * 1024 * 1024) // 4 MB
+	req := &TestRequestInfo{
+		isWrite:         false,
+		pagingSizeBytes: pagingSizeBytes,
+	}
+	phase1 := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(phase1, req)
+
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*0.7
+	bytesCost := float64(cfg.ReadBytesCost) * float64(pagingSizeBytes)
+	re.InDelta(baseCost+bytesCost, phase1.RRU, 1e-6,
+		"Phase 1 should pre-charge baseCost + bytes RU")
+
+	// Phase 2: AfterKVRequest should subtract the pre-charged bytes RU.
+	resp := &TestResponseInfo{
+		readBytes: 2 * 1024 * 1024, // actual read 2 MB
+		kvCPU:     10 * time.Millisecond,
+		succeed:   true,
+	}
+	phase2 := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(phase2, req, resp)
+
+	actualReadCost := float64(cfg.ReadBytesCost) * float64(resp.readBytes)
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	expectedPhase2RRU := actualReadCost + cpuCost - bytesCost
+	re.InDelta(expectedPhase2RRU, phase2.RRU, 1e-6,
+		"Phase 2 should be actualCost - preCharged bytesCost")
+
+	// Net total should equal baseCost + actualCost (no double-counting).
+	totalRRU := phase1.RRU + phase2.RRU
+	expectedTotal := baseCost + actualReadCost + cpuCost
+	re.InDelta(expectedTotal, totalRRU, 1e-6,
+		"Total RRU across Phase 1+2 should equal baseCost + actualCost")
+
+	// Without pagingSizeBytes, Phase 1 should only charge baseCost.
+	reqNoPaging := &TestRequestInfo{isWrite: false}
+	noPaging := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(noPaging, reqNoPaging)
+	re.InDelta(baseCost, noPaging.RRU, 1e-6,
+		"Without paging, Phase 1 should only charge baseCost")
+}
+
 func TestResourceGroupThrottledError(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
