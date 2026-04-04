@@ -126,9 +126,21 @@ func MakeRegionBound(id uint32) *RegionBound {
 	}
 }
 
-// MakeKeyRanges encodes keyspace ID to correct LabelRule data.
+// MakeKeyRanges encodes keyspace ID to the correct LabelRule data.
 func MakeKeyRanges(id uint32) []any {
+	return buildKeyRanges(id, false)
+}
+
+func buildKeyRanges(id uint32, skipRaw bool) []any {
 	regionBound := MakeRegionBound(id)
+	if skipRaw {
+		return []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
+				"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
+			},
+		}
+	}
 	return []any{
 		map[string]any{
 			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
@@ -148,6 +160,10 @@ func getRegionLabelID(id uint32) string {
 
 // MakeLabelRule makes the label rule for the given keyspace id.
 func MakeLabelRule(id uint32) *labeler.LabelRule {
+	return buildLabelRule(id, false)
+}
+
+func buildLabelRule(id uint32, skipRaw bool) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,
@@ -158,7 +174,7 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 			},
 		},
 		RuleType: labeler.KeyRange,
-		Data:     MakeKeyRanges(id),
+		Data:     buildKeyRanges(id, skipRaw),
 	}
 }
 
