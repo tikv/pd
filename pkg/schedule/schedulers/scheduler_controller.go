@@ -258,6 +258,7 @@ func (c *Controller) RemoveScheduler(name string) error {
 	}
 
 	s.Stop()
+	s.Wait()
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
 	return nil
@@ -367,6 +368,7 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 
 func (c *Controller) runScheduler(s *ScheduleController) {
 	defer logutil.LogPanic()
+	defer close(s.stopped)
 	defer c.wg.Done()
 	defer s.CleanConfig(c.cluster)
 
@@ -459,6 +461,7 @@ type ScheduleController struct {
 	delayAt            int64
 	delayUntil         int64
 	diagnosticRecorder *DiagnosticRecorder
+	stopped            chan struct{}
 }
 
 // NewScheduleController creates a new ScheduleController.
@@ -472,6 +475,7 @@ func NewScheduleController(ctx context.Context, cluster sche.SchedulerCluster, o
 		ctx:                ctx,
 		cancel:             cancel,
 		diagnosticRecorder: NewDiagnosticRecorder(s.GetType(), cluster.GetSchedulerConfig()),
+		stopped:            make(chan struct{}),
 	}
 }
 
@@ -483,6 +487,11 @@ func (s *ScheduleController) Ctx() context.Context {
 // Stop stops the ScheduleController
 func (s *ScheduleController) Stop() {
 	s.cancel()
+}
+
+// Wait waits for the scheduler goroutine to exit and finish cleanup.
+func (s *ScheduleController) Wait() {
+	<-s.stopped
 }
 
 // Schedule tries to create some operators.
