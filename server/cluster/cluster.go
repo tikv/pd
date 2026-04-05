@@ -120,6 +120,12 @@ const (
 	syncRegionTaskRunner = "sync-region-async"
 )
 
+const (
+	tsoDynamicSwitchingStateUnknown int32 = iota
+	tsoDynamicSwitchingStateEnabled
+	tsoDynamicSwitchingStateDisabled
+)
+
 // Server is the interface for cluster.
 type Server interface {
 	GetAllocator() id.Allocator
@@ -161,6 +167,7 @@ type RaftCluster struct {
 
 	running                bool
 	isKeyspaceGroupEnabled bool
+	tsoDynamicSwitchingState atomic.Int32
 	meta                   *metapb.Cluster
 	storage                storage.Storage
 	minResolvedTS          atomic.Value // Store as uint64
@@ -457,6 +464,10 @@ func (c *RaftCluster) checkSchedulingService() {
 func (c *RaftCluster) checkTSOService() {
 	if c.isKeyspaceGroupEnabled {
 		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateEnabled)
+			if prev == tsoDynamicSwitchingStateDisabled {
+				log.Info("TSO dynamic switching is enabled, resuming TSO service checks")
+			}
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
 				if err := c.startTSOJobsIfNeeded(); err != nil {
@@ -473,6 +484,11 @@ func (c *RaftCluster) checkTSOService() {
 					log.Info("TSO is provided by TSO server")
 					c.SetServiceIndependent(constant.TSOServiceName)
 				}
+			}
+		} else {
+			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateDisabled)
+			if prev != tsoDynamicSwitchingStateDisabled {
+				log.Info("TSO dynamic switching is disabled by config, skipping TSO service checks")
 			}
 		}
 		return
@@ -541,7 +557,7 @@ func (c *RaftCluster) stopTSOJobsIfNeeded() {
 	if !c.tsoAllocator.IsInitialize() {
 		return
 	}
-	log.Info("closing the TSO allocator")
+	log.Info("closing the embedded TSO allocator")
 	c.tsoAllocator.Reset(false)
 	failpoint.Inject("updateAfterResetTSO", func() {
 		if err := c.tsoAllocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
