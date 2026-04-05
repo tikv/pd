@@ -336,11 +336,6 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 			log.Fatal("tsoStream.recvLoop exited without error info", zap.String("stream", s.streamID))
 		}
 
-		if hasReq {
-			// There's an unfinished request, cancel it, otherwise it will be blocked forever.
-			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, finishWithErr)
-		}
-
 		s.stoppedWithErr.Store(&finishWithErr)
 		s.cancel()
 		for !s.state.CompareAndSwap(streamStateIdle, streamStateClosing) {
@@ -354,6 +349,11 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 			default:
 				log.Fatal("unknown tsoStream state", zap.String("stream", s.streamID), zap.Int32("state", state))
 			}
+		}
+
+		if hasReq {
+			// Mark the stream as closing before invoking callbacks so new requests are rejected even if the callback is slow.
+			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, finishWithErr)
 		}
 
 		log.Info("tsoStream.recvLoop ended", zap.String("stream", s.streamID), zap.Error(finishWithErr))
