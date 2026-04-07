@@ -35,6 +35,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/client/constants"
 
 	"github.com/tikv/pd/client/clients/router"
 	pd "github.com/tikv/pd/client/http"
@@ -549,8 +550,15 @@ func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if _, err := strconv.ParseUint(args[0], 10, 32); err != nil {
+	keyspaceIDUint64, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
 		cmd.Println("keyspace_id should be a number")
+		return
+	}
+	keyspaceID := uint32(keyspaceIDUint64)
+	if keyspaceID < constants.DefaultKeyspaceID || keyspaceID > constants.MaxKeyspaceID {
+		cmd.Printf("invalid keyspace id %d. It must be in the range of [%d, %d]\n",
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
 		return
 	}
 
@@ -572,9 +580,9 @@ func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		query := make(url.Values)
-		startKey, endKey := makeTableRangeInKeyspace(args[0], tableID)
-		query.Set("key", url.QueryEscape(string(startKey)))
-		query.Set("end_key", url.QueryEscape(string(endKey)))
+		startKey, endKey := makeTableRangeInKeyspace(keyspaceID, tableID)
+		query.Set("key", string(startKey))
+		query.Set("end_key", string(endKey))
 		if len(args) == 4 {
 			if _, err := strconv.Atoi(args[3]); err != nil {
 				cmd.Println("limit should be a number")
@@ -593,10 +601,9 @@ func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func makeTableRangeInKeyspace(keyspaceID string, tableID int64) ([]byte, []byte) {
-	keyspaceIDUint64, _ := strconv.ParseUint(keyspaceID, 10, 32)
+func makeTableRangeInKeyspace(keyspaceID uint32, tableID int64) ([]byte, []byte) {
 	keyspaceIDBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(keyspaceIDBytes, uint32(keyspaceIDUint64))
+	binary.BigEndian.PutUint32(keyspaceIDBytes, keyspaceID)
 
 	keyPrefix := append([]byte{'x'}, keyspaceIDBytes[1:]...)
 	startKey := codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID)...)...))

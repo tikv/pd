@@ -76,8 +76,8 @@ func TestRegionKeyspaceIDTableIDPath(t *testing.T) {
 
 	startKey, endKey := expectedTableRangeInKeyspace(1, 100)
 	query := make(url.Values)
-	query.Set("key", url.QueryEscape(string(startKey)))
-	query.Set("end_key", url.QueryEscape(string(endKey)))
+	query.Set("key", string(startKey))
+	query.Set("end_key", string(endKey))
 
 	cmd := NewRegionWithKeyspaceCommand()
 	cmd.PersistentFlags().String("pd", "http://mock-pd:2379", "")
@@ -121,8 +121,8 @@ func TestRegionKeyspaceIDTableIDPathWithLimit(t *testing.T) {
 
 	startKey, endKey := expectedTableRangeInKeyspace(1, 100)
 	query := make(url.Values)
-	query.Set("key", url.QueryEscape(string(startKey)))
-	query.Set("end_key", url.QueryEscape(string(endKey)))
+	query.Set("key", string(startKey))
+	query.Set("end_key", string(endKey))
 	query.Set("limit", "16")
 
 	cmd := NewRegionWithKeyspaceCommand()
@@ -150,6 +150,20 @@ func TestRegionKeyspaceIDInvalidKeyspaceID(t *testing.T) {
 
 	re.NoError(cmd.Execute())
 	re.Contains(out.String(), "keyspace_id should be a number")
+}
+
+func TestRegionKeyspaceIDOutOfRangeKeyspaceID(t *testing.T) {
+	re := require.New(t)
+
+	cmd := NewRegionWithKeyspaceCommand()
+	cmd.PersistentFlags().String("pd", "http://mock-pd:2379", "")
+	cmd.SetArgs([]string{"id", "16777216"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	re.NoError(cmd.Execute())
+	re.Contains(out.String(), "invalid keyspace id 16777216. It must be in the range of [0, 16777215]")
 }
 
 func TestRegionKeyspaceIDInvalidTableID(t *testing.T) {
