@@ -35,9 +35,9 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/tikv/pd/client/constants"
 
 	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-ctl/helper/mok"
@@ -601,13 +601,13 @@ func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func makeTableRangeInKeyspace(keyspaceID uint32, tableID int64) ([]byte, []byte) {
+func makeTableRangeInKeyspace(keyspaceID uint32, tableID int64) (startKey, endKey []byte) {
 	keyspaceIDBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(keyspaceIDBytes, keyspaceID)
 
 	keyPrefix := append([]byte{'x'}, keyspaceIDBytes[1:]...)
-	startKey := codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID)...)...))
-	endKey := codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID+1)...)...))
+	startKey = codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID)...)...))
+	endKey = codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID+1)...)...))
 	return startKey, endKey
 }
 

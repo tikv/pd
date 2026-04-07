@@ -208,12 +208,12 @@ func TestRegionKeyspaceIDWrongTableIDLiteral(t *testing.T) {
 	re.Contains(out.String(), "the second argument should be table-id")
 }
 
-func expectedTableRangeInKeyspace(keyspaceID uint32, tableID int64) ([]byte, []byte) {
+func expectedTableRangeInKeyspace(keyspaceID uint32, tableID int64) (startKey, endKey []byte) {
 	keyspaceIDBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(keyspaceIDBytes, keyspaceID)
 
 	keyPrefix := append([]byte{'x'}, keyspaceIDBytes[1:]...)
-	startKey := codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID)...)...))
-	endKey := codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID+1)...)...))
+	startKey = codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID)...)...))
+	endKey = codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID+1)...)...))
 	return startKey, endKey
 }
