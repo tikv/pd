@@ -445,6 +445,12 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, keyspaceIDs []ui
 		if kg == nil {
 			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID)
 		}
+		if kg.IsSplitting() {
+			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(groupID)
+		}
+		if kg.IsMerging() {
+			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
+		}
 
 		// Build a set of keyspaces to remove (excluding default keyspace)
 		toRemove := make(map[uint32]struct{})

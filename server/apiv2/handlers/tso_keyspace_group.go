@@ -579,7 +579,7 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 	// Parse request body
 	var params RemoveKeyspacesFromGroupParams
 	if err := c.BindJSON(&params); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 
@@ -627,6 +627,10 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 		kg, err := groupManager.GetKeyspaceGroupByID(groupID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		if kg == nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID).Error())
 			return
 		}
 		c.IndentedJSON(http.StatusOK, kg)
