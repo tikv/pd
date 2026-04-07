@@ -274,9 +274,13 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupErrorMessage() {
 func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	defer re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+	}()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
-	defer re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
 
 	keyspaceManager := suite.server.GetKeyspaceManager()
 	re.NotNil(keyspaceManager)
