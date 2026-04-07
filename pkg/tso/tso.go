@@ -223,8 +223,7 @@ func (t *timestampOracle) syncTimestamp() error {
 	t.metrics.syncSaveDuration.Observe(time.Since(start).Seconds())
 
 	t.metrics.syncOKEvent.Inc()
-	log.Info("persisted tso window to etcd",
-		zap.String("reason", "sync"),
+	log.Info("persisted tso window to etcd (sync)",
 		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 		zap.String("member-name", t.member.Name()),
 		zap.Time("etcd-last-saved-time", last),
@@ -296,8 +295,7 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 		}
 		t.lastSavedTime.Store(save)
 		t.metrics.resetSaveDuration.Observe(time.Since(start).Seconds())
-		log.Info("persisted tso window to etcd",
-			zap.String("reason", "user-reset"),
+		log.Info("persisted tso window to etcd (user-reset)",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.String("member-name", t.member.Name()),
 			zap.Time("saved-time", save),
@@ -409,8 +407,7 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 		}
 		t.lastSavedTime.Store(save)
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
-		log.Debug("persisted tso window to etcd",
-			zap.String("reason", "update"),
+		log.Debug("persisted tso window to etcd (update)",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.String("member-name", t.member.Name()),
 			zap.Time("saved-time", save),
