@@ -401,11 +401,6 @@ func TestReloadResourceGroupMetaWatch(t *testing.T) {
 		Mode:       rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}}},
 	}
-	newGroup := &rmpb.ResourceGroup{
-		Name:       "new-group",
-		Mode:       rmpb.GroupMode_RUMode,
-		RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 300}}},
-	}
 	updatedDefaultGroup := &rmpb.ResourceGroup{
 		Name:       defaultResourceGroupName,
 		Mode:       rmpb.GroupMode_RUMode,
@@ -426,7 +421,7 @@ func TestReloadResourceGroupMetaWatch(t *testing.T) {
 
 	watchCh := make(chan []*meta_storagepb.Event)
 	mockProvider.On("LoadResourceGroups", mock.Anything).
-		Return([]*rmpb.ResourceGroup{updatedDefaultGroup, newGroup}, int64(88), nil).
+		Return([]*rmpb.ResourceGroup{updatedDefaultGroup}, int64(88), nil).
 		Once()
 	mockProvider.On("Watch", mock.Anything, pd.GroupSettingsPathPrefixBytes(constants.NullKeyspaceID), mock.Anything).
 		Run(func(args mock.Arguments) {
@@ -449,9 +444,6 @@ func TestReloadResourceGroupMetaWatch(t *testing.T) {
 	staleGC, err = controller.tryGetResourceGroupController(ctx, "stale-group", true)
 	re.NoError(err)
 	re.True(staleGC.tombstone.Load())
-	newGC, ok := controller.loadGroupController("new-group")
-	re.True(ok)
-	re.Equal(newGroup, newGC.getMeta())
 }
 
 func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {

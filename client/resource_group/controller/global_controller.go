@@ -521,7 +521,6 @@ func (c *ResourceGroupsController) syncResourceGroupSnapshot(groups []*rmpb.Reso
 			c.tombstoneGroupCostController(name)
 			return true
 		}
-		delete(groupMap, name)
 		gc := value.(*groupCostController)
 		if !gc.tombstone.Load() {
 			gc.modifyMeta(group)
@@ -539,20 +538,6 @@ func (c *ResourceGroupsController) syncResourceGroupSnapshot(groups []*rmpb.Reso
 		}
 		return true
 	})
-
-	for name, group := range groupMap {
-		gc, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
-		if err != nil {
-			log.Warn("[resource group controller] create resource group cost controller from snapshot failed",
-				zap.String("name", name), zap.Error(err))
-			continue
-		}
-		if loaded := c.loadOrStoreGroupController(name, gc); !loaded {
-			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
-			log.Info("[resource group controller] create resource group cost controller from snapshot",
-				zap.String("name", name))
-		}
-	}
 }
 
 // Stop stops ResourceGroupController service.
@@ -575,9 +560,9 @@ func (c *ResourceGroupsController) loadGroupController(name string) (*groupCostC
 }
 
 // loadOrStoreGroupController just wraps the `LoadOrStore` method of `sync.Map`.
-func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *groupCostController) bool {
-	_, loaded := c.groupsController.LoadOrStore(name, gc)
-	return loaded
+func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *groupCostController) (*groupCostController, bool) {
+	tmp, loaded := c.groupsController.LoadOrStore(name, gc)
+	return tmp.(*groupCostController), loaded
 }
 
 // NewResourceGroupNotExistErr returns a new error that indicates the resource group does not exist.
@@ -635,7 +620,8 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	}
 	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
-		if loaded := c.loadOrStoreGroupController(name, gc); !loaded {
+		_, loaded := c.loadOrStoreGroupController(name, gc)
+		if !loaded {
 			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
 		}
