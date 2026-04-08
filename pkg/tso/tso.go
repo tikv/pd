@@ -223,7 +223,6 @@ func (t *timestampOracle) syncTimestamp() error {
 	t.metrics.syncSaveDuration.Observe(time.Since(start).Seconds())
 
 	t.metrics.syncOKEvent.Inc()
-	// "persisted tso window to etcd (sync)"
 	// "last" is the etcd value, "last-saved" is the in-memory window, "save" is the
 	// newly persisted window, and "next" is the physical time loaded into memory
 	log.Info("sync and save timestamp",
