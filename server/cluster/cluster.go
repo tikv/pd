@@ -435,7 +435,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	replicationModeDuration := time.Since(replicationModeStart)
 	log.Info("create replication mode manager completed", zap.Duration("cost", replicationModeDuration))
-	log.Info("start to load external timestamp")
 	loadExternalTSStart := time.Now()
 	c.loadExternalTS()
 	log.Info("load external timestamp completed", zap.Duration("cost", time.Since(loadExternalTSStart)))

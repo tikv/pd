@@ -1768,8 +1768,7 @@ func (s *Server) campaignLeader() {
 	keepLeaderStart := time.Now()
 	s.member.GetLeadership().Keep(ctx)
 	keepLeaderDuration := time.Since(keepLeaderStart)
-	log.Info("keep leader lease completed", zap.Duration("cost", keepLeaderDuration))
-	log.Info("campaign PD leader ok", zap.String("campaign-leader-name", s.Name()))
+	log.Info("keep leader lease completed", zap.Duration("cost", keepLeaderDuration), zap.String("campaign-leader-name", s.Name()))
 
 	reloadConfigStart := time.Now()
 	if err := s.reloadConfigFromKV(); err != nil {
@@ -1826,14 +1825,12 @@ func (s *Server) campaignLeader() {
 	rebaseDuration := time.Since(rebaseStart)
 	log.Info("sync id from etcd completed", zap.Duration("cost", rebaseDuration))
 	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
-	log.Info("start to promote leader")
 	enableLeaderStart := time.Now()
 	s.member.PromoteSelf()
 	enableLeaderDuration := time.Since(enableLeaderStart)
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
-	log.Info("promote leader completed", zap.Duration("cost", enableLeaderDuration))
 	totalDuration := time.Since(leaderReadyStart)
-	log.Info("PD leader is ready to serve", zap.String("leader-name", s.Name()), zap.Duration("total-cost", totalDuration))
+	log.Info("PD leader is ready to serve", zap.String("leader-name", s.Name()), zap.Duration("total-cost", totalDuration), zap.Duration("cost", enableLeaderDuration))
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
@@ -1842,12 +1839,7 @@ func (s *Server) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	})
 
-	log.Info("start to check PD version with cluster version")
-	versionCheckStart := time.Now()
 	CheckPDVersionWithClusterVersion(s.persistOptions)
-	versionCheckDuration := time.Since(versionCheckStart)
-	log.Info("check PD version with cluster version completed", zap.Duration("cost", versionCheckDuration))
-
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
