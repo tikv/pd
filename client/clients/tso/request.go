@@ -119,7 +119,10 @@ func (req *Request) waitCtx(ctx context.Context) (physical int64, logical int64,
 
 // waitTimeout waits for the TSO result for limited time. Currently only for test purposes.
 func (req *Request) waitTimeout(timeout time.Duration) (physical int64, logical int64, err error) {
-	ctx, cancel := context.WithTimeout(req.requestCtx, timeout)
+	req.mu.RLock()
+	ctx := req.requestCtx
+	req.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return req.waitCtx(ctx)
 }
