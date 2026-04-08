@@ -68,6 +68,12 @@ type SharedCluster interface {
 	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
 	GetPrepareRegionCount() (int, error)
+	// GetKeyspaceIDInRange returns the keyspace IDs in [start, end].
+	// The second return value indicates whether the keyspace IDDs are valid.
+	GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool)
+
+	// ExistKeyspaceID returns whether the ID exists.
+	KeyspaceExist(id uint32) bool
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces

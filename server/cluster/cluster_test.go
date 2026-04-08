@@ -2348,7 +2348,7 @@ func newTestRaftCluster(
 		storage:        s,
 		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
 	}
-	err := rc.InitCluster(id, opt, nil, nil)
+	err := rc.InitCluster(id, opt, nil, nil, nil)
 	if err != nil {
 		panic(err)
 	}
