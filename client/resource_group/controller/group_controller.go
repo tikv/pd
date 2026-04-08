@@ -51,6 +51,9 @@ type groupCostController struct {
 		consumption   *rmpb.Consumption
 		storeCounter  map[uint64]*rmpb.Consumption
 		globalCounter *rmpb.Consumption
+		// demandRUTotal accumulates total demanded RU (pre-throttling).
+		// Unlike consumption, this is never subtracted on throttle failure.
+		demandRUTotal float64
 	}
 
 	// fast path to make once token limit with un-limit burst.
@@ -74,6 +77,9 @@ type groupCostController struct {
 		// targetPeriod stores the value of the TargetPeriodSetting setting at the
 		// last update.
 		targetPeriod time.Duration
+
+		// demandRUTotal is a snapshot of mu.demandRUTotal, copied in updateRunState.
+		demandRUTotal float64
 
 		// consumptions stores the last value of mu.consumption.
 		// requestUnitConsumptions []*rmpb.RequestUnitItem
@@ -106,6 +112,7 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
+	demandRUPerSecGauge               prometheus.Gauge
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -122,6 +129,7 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
+		demandRUPerSecGauge:               metrics.DemandRUPerSecGauge.WithLabelValues(name),
 	}
 }
 
@@ -135,6 +143,12 @@ type tokenCounter struct {
 	// lastSecRU is the consumption.RU value when avgRUPerSec was last updated.
 	avgRUPerSecLastRU float64
 	avgLastTime       time.Time
+
+	// avgDemandRUPerSec is an EMA of the demanded RU/s before throttling,
+	// reflecting the true workload demand regardless of token bucket limits.
+	avgDemandRUPerSec       float64
+	avgDemandRUPerSecLastRU float64
+	avgDemandLastTime       time.Time
 
 	notify struct {
 		mu                         sync.Mutex
@@ -220,10 +234,11 @@ func (gc *groupCostController) initRunState() {
 	defer gc.metaLock.RUnlock()
 	limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(gc.meta.RUSettings.RU), gc.lowRUNotifyChan)
 	counter := &tokenCounter{
-		limiter:     limiter,
-		avgRUPerSec: 0,
-		avgLastTime: now,
-		fillRate:    gc.meta.RUSettings.RU.Settings.FillRate,
+		limiter:           limiter,
+		avgRUPerSec:       0,
+		avgLastTime:       now,
+		avgDemandLastTime: now,
+		fillRate:          gc.meta.RUSettings.RU.Settings.FillRate,
 	}
 	gc.run.requestUnitTokens = counter
 	gc.burstable.Store(isBurstable)
@@ -257,6 +272,7 @@ func (gc *groupCostController) updateRunState() {
 		calc.Trickle(gc.mu.consumption)
 	}
 	*gc.run.consumption = *gc.mu.consumption
+	gc.run.demandRUTotal = gc.mu.demandRUTotal
 	gc.mu.Unlock()
 	logControllerTrace("[resource group controller] update run state", zap.String("name", gc.name), zap.Any("request-unit-consumption", gc.run.consumption), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.run.now = newTime
@@ -271,7 +287,9 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
 		return
 	}
-	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
+	gc.calcDemandAvg(counter, gc.run.demandRUTotal)
+	gc.metrics.demandRUPerSecGauge.Set(counter.avgDemandRUPerSec)
+	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Float64("avg-demand-ru-per-sec", counter.avgDemandRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.burstable.Store(isBurstable)
 }
 
@@ -317,6 +335,20 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	counter.avgLastTime = gc.run.now
 	counter.avgRUPerSecLastRU = new
 	return true
+}
+
+func (gc *groupCostController) calcDemandAvg(counter *tokenCounter, new float64) {
+	deltaDuration := gc.run.now.Sub(counter.avgDemandLastTime)
+	if deltaDuration <= 0 {
+		return
+	}
+	delta := (new - counter.avgDemandRUPerSecLastRU) / deltaDuration.Seconds()
+	counter.avgDemandRUPerSec = movingAvgFactor*counter.avgDemandRUPerSec + (1-movingAvgFactor)*delta
+	if counter.avgDemandRUPerSec < 0 {
+		counter.avgDemandRUPerSec = 0
+	}
+	counter.avgDemandLastTime = gc.run.now
+	counter.avgDemandRUPerSecLastRU = new
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {
@@ -554,6 +586,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
+	gc.mu.demandRUTotal += getRUValueFromConsumption(delta)
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
@@ -611,6 +644,8 @@ func (gc *groupCostController) onResponseImpl(
 	gc.mu.Lock()
 	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
+	// Record the response-phase demand as well (actual read bytes, CPU, etc.)
+	gc.mu.demandRUTotal += getRUValueFromConsumption(delta)
 	// Record the consumption of the request by store
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -652,6 +687,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Lock()
 	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
+	gc.mu.demandRUTotal += getRUValueFromConsumption(delta)
 	// Record the consumption of the request by store
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -669,6 +705,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
+	gc.mu.demandRUTotal += getRUValueFromConsumption(consumption)
 	gc.mu.Unlock()
 }
 

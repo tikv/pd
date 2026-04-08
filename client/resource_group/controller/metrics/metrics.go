@@ -31,6 +31,8 @@ const (
 var (
 	// ResourceGroupStatusGauge comments placeholder
 	ResourceGroupStatusGauge *prometheus.GaugeVec
+	// DemandRUPerSecGauge is the EMA of demanded RU/s before throttling per resource group.
+	DemandRUPerSecGauge *prometheus.GaugeVec
 	// SuccessfulRequestDuration comments placeholder
 	SuccessfulRequestDuration *prometheus.HistogramVec
 	// FailedLimitReserveDuration comments placeholder
@@ -68,6 +70,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Status of the resource group.",
 			ConstLabels: constLabels,
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+
+	DemandRUPerSecGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   "resource_group",
+			Name:        "demand_ru_per_sec",
+			Help:        "EMA of demanded RU/s before throttling for each resource group.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
 
 	SuccessfulRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -162,6 +173,7 @@ func initMetrics(constLabels prometheus.Labels) {
 func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	initMetrics(constLabels)
 	prometheus.MustRegister(ResourceGroupStatusGauge)
+	prometheus.MustRegister(DemandRUPerSecGauge)
 	prometheus.MustRegister(SuccessfulRequestDuration)
 	prometheus.MustRegister(FailedRequestCounter)
 	prometheus.MustRegister(FailedLimitReserveDuration)

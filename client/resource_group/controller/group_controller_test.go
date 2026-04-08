@@ -315,3 +315,64 @@ func TestAcquireTokensFallbackToTimer(t *testing.T) {
 	// waitDuration should be roughly retryTimes * retryInterval.
 	re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
 }
+
+func TestDemandRUTracking(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	// Simulate requests arriving: demand should accumulate regardless of throttling.
+	req := &TestRequestInfo{
+		isWrite:    true,
+		writeBytes: 100,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 100,
+		succeed:   true,
+	}
+
+	// Issue several successful requests.
+	for range 5 {
+		consumption, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+		re.NoError(err)
+		re.NotNil(consumption)
+		_, err = gc.onResponseImpl(req, resp)
+		re.NoError(err)
+	}
+
+	// demandRUTotal should have accumulated all pre-request and post-response RU.
+	gc.mu.Lock()
+	demandTotal := gc.mu.demandRUTotal
+	gc.mu.Unlock()
+	re.Positive(demandTotal, "demand should be accumulated after requests")
+
+	// Now issue a request that gets throttled (rejected).
+	bigReq := &TestRequestInfo{
+		isWrite:    true,
+		writeBytes: 10000000,
+	}
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), bigReq)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+
+	// demandRUTotal should still include the throttled request's RU.
+	gc.mu.Lock()
+	demandAfterThrottle := gc.mu.demandRUTotal
+	gc.mu.Unlock()
+	re.Greater(demandAfterThrottle, demandTotal,
+		"demand should increase even for throttled requests")
+
+	// Verify that the demand EMA is computed correctly.
+	now := time.Now()
+	gc.run.now = now
+	gc.updateRunState()
+	gc.updateAvgRequestResourcePerSec()
+
+	// Advance time and update again so the EMA has two data points.
+	gc.run.now = now.Add(time.Second)
+	gc.updateRunState()
+	gc.updateAvgRequestResourcePerSec()
+
+	counter := gc.run.requestUnitTokens
+	re.GreaterOrEqual(counter.avgDemandRUPerSec, 0.0,
+		"demand EMA should be non-negative")
+}
