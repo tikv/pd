@@ -28,6 +28,7 @@ const (
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
+	forceMergePath             = "force_merge"
 	ruleGroupPath              = "rule_group"
 	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
@@ -106,6 +107,10 @@ func RegionPath(regionID uint64) string {
 
 func ruleKeyPath(ruleKey string) string {
 	return path.Join(rulesPath, ruleKey)
+}
+
+func forceMergeRangePath(rangeKey string) string {
+	return path.Join(forceMergePath, rangeKey)
 }
 
 func ruleGroupIDPath(groupID string) string {

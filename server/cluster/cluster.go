@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/server/schedule/pkdbforcemerge"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -143,6 +144,7 @@ type RaftCluster struct {
 	hotStat                  *statistics.HotStat
 	hotBuckets               *buckets.HotBucketCache
 	ruleManager              *placement.RuleManager
+	forceMergeManager        *pkdbforcemerge.Manager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsafeRecoveryController
@@ -263,6 +265,10 @@ func (c *RaftCluster) Start(s Server) error {
 		if err != nil {
 			return err
 		}
+	}
+	c.forceMergeManager, err = pkdbforcemerge.NewManager(c.storage)
+	if err != nil {
+		return err
 	}
 
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
@@ -644,6 +650,11 @@ func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 // GetRuleManager returns the rule manager reference.
 func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
+}
+
+// GetForceMergeManager returns the force merge manager reference.
+func (c *RaftCluster) GetForceMergeManager() *pkdbforcemerge.Manager {
+	return c.forceMergeManager
 }
 
 // GetRegionLabeler returns the region labeler.

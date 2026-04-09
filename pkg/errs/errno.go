@@ -113,6 +113,12 @@ var (
 	ErrBuildRuleList = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
 )
 
+// force merge errors
+var (
+	ErrForceMergeRangeContent = errors.Normalize("invalid force merge range content, %s", errors.RFCCodeText("PD:forcemerge:ErrForceMergeRangeContent"))
+	ErrLoadForceMergeRange    = errors.Normalize("load force merge range failed", errors.RFCCodeText("PD:forcemerge:ErrLoadForceMergeRange"))
+)
+
 // region label errors
 var (
 	ErrRegionRuleContent  = errors.Normalize("invalid region rule content, %s", errors.RFCCodeText("PD:region:ErrRegionRuleContent"))

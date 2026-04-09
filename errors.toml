@@ -381,6 +381,16 @@ error = '''
 failed to convert a path to absolute path
 '''
 
+["PD:forcemerge:ErrForceMergeRangeContent"]
+error = '''
+invalid force merge range content, %s
+'''
+
+["PD:forcemerge:ErrLoadForceMergeRange"]
+error = '''
+load force merge range failed
+'''
+
 ["PD:gin:ErrBindJSON"]
 error = '''
 bind JSON error
