@@ -16,6 +16,7 @@ package apiutil
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -208,6 +209,104 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 		re.Equal(testCase.ip, ip, "case %d", idx)
 		re.Equal(testCase.port, port, "case %d", idx)
 	}
+}
+
+type errReader struct{ err error }
+
+func (e *errReader) Read(p []byte) (int, error) { return 0, e.err }
+func (*errReader) Close() error                 { return nil }
+
+type closeTracker struct {
+	io.Reader
+	closed bool
+}
+
+func (c *closeTracker) Close() error {
+	c.closed = true
+	return nil
+}
+
+func TestEnsureRewindableBody(t *testing.T) {
+	re := require.New(t)
+
+	t.Run("nil body is a no-op", func(t *testing.T) {
+		r := &http.Request{}
+		re.NoError(EnsureRewindableBody(r))
+		re.Nil(r.Body)
+		re.Nil(r.GetBody)
+	})
+
+	t.Run("http.NoBody is a no-op", func(t *testing.T) {
+		r := &http.Request{Body: http.NoBody}
+		re.NoError(EnsureRewindableBody(r))
+		re.Equal(http.NoBody, r.Body)
+		re.Nil(r.GetBody)
+	})
+
+	t.Run("existing GetBody is preserved", func(t *testing.T) {
+		orig := io.NopCloser(bytes.NewBufferString("payload"))
+		called := false
+		getBody := func() (io.ReadCloser, error) {
+			called = true
+			return io.NopCloser(bytes.NewBufferString("payload")), nil
+		}
+		r := &http.Request{Body: orig, GetBody: getBody}
+		re.NoError(EnsureRewindableBody(r))
+		// Body untouched, GetBody untouched (we only check it wasn't replaced
+		// by invoking it and confirming our own sentinel).
+		re.Equal(orig, r.Body)
+		_, err := r.GetBody()
+		re.NoError(err)
+		re.True(called)
+	})
+
+	t.Run("empty body is restored to NoBody", func(t *testing.T) {
+		tracker := &closeTracker{Reader: bytes.NewReader(nil)}
+		r := &http.Request{Body: tracker}
+		re.NoError(EnsureRewindableBody(r))
+		re.True(tracker.closed, "original body should be closed")
+		re.Equal(http.NoBody, r.Body)
+		re.EqualValues(0, r.ContentLength)
+		re.NotNil(r.GetBody)
+		rc, err := r.GetBody()
+		re.NoError(err)
+		re.Equal(http.NoBody, rc)
+	})
+
+	t.Run("non-empty body becomes rewindable", func(t *testing.T) {
+		payload := []byte(`{"hello":"world"}`)
+		tracker := &closeTracker{Reader: bytes.NewReader(payload)}
+		r := &http.Request{Body: tracker, ContentLength: -1}
+		re.NoError(EnsureRewindableBody(r))
+		re.True(tracker.closed, "original body should be closed")
+		re.EqualValues(len(payload), r.ContentLength)
+		re.NotNil(r.GetBody)
+
+		// Draining r.Body once should yield the payload.
+		got, err := io.ReadAll(r.Body)
+		re.NoError(err)
+		re.Equal(payload, got)
+		re.NoError(r.Body.Close())
+
+		// GetBody should be invokable multiple times and each returned
+		// ReadCloser should independently yield the same payload -- this is
+		// the actual rewindability guarantee we care about.
+		for i := 0; i < 3; i++ {
+			rc, err := r.GetBody()
+			re.NoError(err)
+			got, err := io.ReadAll(rc)
+			re.NoError(err)
+			re.Equal(payload, got)
+			re.NoError(rc.Close())
+		}
+	})
+
+	t.Run("read error is propagated", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		r := &http.Request{Body: &errReader{err: wantErr}}
+		err := EnsureRewindableBody(r)
+		re.ErrorIs(err, wantErr)
+	})
 }
 
 func TestParseHexKeys(t *testing.T) {

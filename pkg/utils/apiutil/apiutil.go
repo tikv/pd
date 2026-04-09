@@ -484,7 +484,50 @@ func NewCustomReverseProxies(dialClient *http.Client, urls []url.URL) http.Handl
 	return p
 }
 
+// EnsureRewindableBody makes r's body safe to be retried by net/http
+// Transport on connection loss. It is a no-op when the body is nil,
+// http.NoBody, or r.GetBody is already set. Otherwise it drains the body
+// into memory and wires up GetBody so the transport can rewind.
+//
+// Callers should ensure the body fits in memory; this helper buffers the
+// entire payload. It guards against the
+// "net/http: cannot rewind body after connection loss" error that can
+// occur when a server-side request (GetBody == nil) is forwarded via
+// http.Client.Do and the underlying keep-alive connection goes stale.
+func EnsureRewindableBody(r *http.Request) error {
+	if r.Body == nil || r.Body == http.NoBody || r.GetBody != nil {
+		return nil
+	}
+	buf, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if err != nil {
+		return err
+	}
+	// Restore NoBody semantics for empty payloads so that Transport's
+	// outgoingLength returns 0 and no body probing happens.
+	if len(buf) == 0 {
+		r.Body = http.NoBody
+		r.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
+		r.ContentLength = 0
+		return nil
+	}
+	r.Body = io.NopCloser(bytes.NewReader(buf))
+	r.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(buf)), nil
+	}
+	// We now know the exact length; set it so the transport can pick
+	// Content-Length framing over chunked encoding when forwarding.
+	r.ContentLength = int64(len(buf))
+	return nil
+}
+
 func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := EnsureRewindableBody(r); err != nil {
+		log.Error("failed to read request body", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	for _, url := range p.urls {
 		r.RequestURI = ""
 		r.URL.Host = url.Host
