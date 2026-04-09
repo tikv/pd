@@ -149,6 +149,7 @@ const (
 )
 
 // GCStateWatcher watches GC state updates from GCStateManager.
+// nolint:revive
 type GCStateWatcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -181,10 +182,7 @@ func (w *GCStateWatcher) Err() error {
 	if err != nil {
 		return err
 	}
-	if err := w.ctx.Err(); err != nil {
-		return err
-	}
-	return nil
+	return w.ctx.Err()
 }
 
 func (w *GCStateWatcher) setCloseErr(err error) {
