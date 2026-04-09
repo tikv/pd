@@ -497,6 +497,43 @@ func (suite *regionTestSuite) TestAddForceMergeRangesNonTableKeyType() {
 	suite.False(suite.svr.GetRaftCluster().GetForceMergeManager().SolveRegion(exactRegion))
 }
 
+func (suite *regionTestSuite) TestDeleteForceMergeRanges() {
+	re := suite.Require()
+	suite.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", []byte(`{"enable-cross-table-merge":"false"}`), tu.StatusOK(re)))
+	defer func() {
+		suite.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", []byte(`{"enable-cross-table-merge":"true"}`), tu.StatusOK(re)))
+	}()
+
+	startKey := []byte("force-merge/delete/x")
+	endKey := []byte("force-merge/delete/y")
+	body, err := json.Marshal(addForceMergeRangesRequest{
+		StartKeysHex: []string{hex.EncodeToString(startKey)},
+		EndKeysHex:   []string{hex.EncodeToString(endKey)},
+	})
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(
+		testDialClient,
+		fmt.Sprintf("%s/regions/force-merge", suite.urlPrefix),
+		body,
+		tu.StatusOK(re),
+	))
+
+	manager := suite.svr.GetRaftCluster().GetForceMergeManager()
+	exactRegion := core.NewRegionInfo(&metapb.Region{Id: 10006, StartKey: startKey, EndKey: endKey}, nil)
+	suite.True(manager.SolveRegion(exactRegion))
+
+	suite.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", []byte(`{"enable-cross-table-merge":"true"}`), tu.StatusOK(re)))
+
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/regions/force-merge", suite.urlPrefix), nil)
+	suite.NoError(err)
+	resp, err := testDialClient.Do(req)
+	suite.NoError(err)
+	defer resp.Body.Close()
+	suite.Equal(http.StatusOK, resp.StatusCode)
+
+	suite.False(manager.SolveRegion(exactRegion))
+}
+
 func (suite *regionTestSuite) TestScatterRegions() {
 	re := suite.Require()
 	r1 := newTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))

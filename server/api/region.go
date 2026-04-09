@@ -953,6 +953,26 @@ func (h *regionsHandler) AddForceMergeRanges(w http.ResponseWriter, r *http.Requ
 	h.rd.Text(w, http.StatusOK, "Add force merge ranges successfully.")
 }
 
+// @Tags     region
+// @Summary  Clear force merge ranges.
+// @Produce  plain
+// @Success  200  {string}  string  "Clear force merge ranges successfully."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/force-merge [delete]
+func (h *regionsHandler) DeleteForceMergeRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	manager := rc.GetForceMergeManager()
+	if manager == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, "force merge manager is not initialized")
+		return
+	}
+	if err := manager.ClearRanges(); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "Clear force merge ranges successfully.")
+}
+
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	rc := getCluster(r)
 	limit := defaultRegionLimit

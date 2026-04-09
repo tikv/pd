@@ -340,6 +340,29 @@ func (m *Manager) AddRanges(startKeysHex, endKeysHex []string) error {
 	return nil
 }
 
+// ClearRanges removes all managed force merge ranges.
+func (m *Manager) ClearRanges() error {
+	m.Lock()
+	defer m.Unlock()
+
+	items := make([]*RangeItem, 0, m.tree.Len())
+	m.tree.Ascend(func(item *RangeItem) bool {
+		items = append(items, item)
+		return true
+	})
+	for i, item := range items {
+		if err := m.removeRangeLocked(item); err != nil {
+			log.Error("failed to clear force merge range",
+				logutil.ZapRedactString("failed-start-key", item.StartKeyHex),
+				logutil.ZapRedactString("failed-end-key", item.EndKeyHex),
+				logutil.ZapRedactString("pending-ranges", rangeItemsLogString(items[i+1:])),
+				zap.Error(err))
+			return err
+		}
+	}
+	return nil
+}
+
 // SolveRegion checks whether the region should force merge and clears merged ranges.
 // Regions with empty end key are ignored so the internal range helpers can rely on non-empty endKey.
 // Exactly matched ranges are kept so the region can continue merging with its neighbors.

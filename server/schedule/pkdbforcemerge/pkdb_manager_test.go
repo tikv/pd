@@ -369,3 +369,33 @@ func TestAddRangesMergesAdjacentRangesInCheckPhase(t *testing.T) {
 		"0b": "07-0b",
 	}, collectStoredRanges(t, store))
 }
+
+func TestClearRanges(t *testing.T) {
+	re := require.New(t)
+	store, manager := newTestManager(t)
+	re.NoError(manager.AddRanges([]string{"01", "05"}, []string{"03", "07"}))
+
+	re.NoError(manager.ClearRanges())
+	re.NoError(manager.ClearRanges())
+
+	re.Empty(collectTreeRanges(manager))
+	re.Empty(collectStoredRanges(t, store))
+}
+
+func TestClearRangesStopsAfterPersistError(t *testing.T) {
+	re := require.New(t)
+	baseStore, manager := newTestManager(t)
+	re.NoError(manager.AddRanges([]string{"01", "05"}, []string{"03", "07"}))
+
+	failStore := &failingForceMergeStorage{
+		Storage:       baseStore,
+		failDeleteKey: "07",
+	}
+	manager.storage = failStore
+
+	err := manager.ClearRanges()
+	re.Error(err)
+	re.Equal(2, failStore.deleteCalls)
+	re.Equal([]string{"05-07"}, collectTreeRanges(manager))
+	re.Equal(map[string]string{"07": "05-07"}, collectStoredRanges(t, baseStore))
+}
