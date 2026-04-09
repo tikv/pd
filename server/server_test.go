@@ -26,10 +26,11 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-func newTestServer(t *testing.T, keyspaceGroupEnabled bool) *Server {
+func newTestServer(t *testing.T, keyspaceGroupEnabled, tsoDynamicSwitchingEnabled bool) *Server {
 	t.Helper()
 
 	cfg := config.NewConfig()
+	cfg.Microservice.EnableTSODynamicSwitching = tsoDynamicSwitchingEnabled
 	s := &Server{
 		ctx:                    context.Background(),
 		cfg:                    cfg,
@@ -44,19 +45,18 @@ func TestIsServiceIndependent(t *testing.T) {
 	re := require.New(t)
 
 	// Keyspace groups disabled: always false even if cluster says independent.
-	s := newTestServer(t, false)
+	s := newTestServer(t, false, false)
 	s.cluster = &servercluster.RaftCluster{}
 	s.cluster.SetServiceIndependent(constant.TSOServiceName)
 	re.False(s.IsServiceIndependent(constant.TSOServiceName))
 
 	// Keyspace groups enabled, dynamic switching disabled: TSO always independent
 	// (microservice is expected to be running).
-	s2 := newTestServer(t, true)
+	s2 := newTestServer(t, true, false)
 	re.True(s2.IsServiceIndependent(constant.TSOServiceName))
 
 	// Keyspace groups enabled, dynamic switching enabled: depends on cluster state.
-	s3 := newTestServer(t, true)
-	s3.cfg.Microservice.EnableTSODynamicSwitching = true
+	s3 := newTestServer(t, true, true)
 	s3.cluster = &servercluster.RaftCluster{}
 	re.False(s3.IsServiceIndependent(constant.TSOServiceName))
 
