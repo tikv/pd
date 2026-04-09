@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
@@ -413,7 +414,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	// TODO: Decide this parameter.
 	const watchGCSafePointV2SkipLoadingInitial = false
 
-	ctx, cancel, gcStateCh, done, err := s.openGCStateWatch(
+	watch, done, err := s.openGCStateWatch(
 		stream.Context(),
 		request.GetHeader(),
 		watchGCSafePointV2SkipLoadingInitial,
@@ -422,16 +423,15 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	if err != nil {
 		return err
 	}
-	// If leadership is lost, GCStateManager closes gcStateCh first. consumeGCStateWatch then returns,
-	// and this deferred cancel() wakes runGCStateWatch waiting on ctx.Done() so the manager-side
-	// goroutine can exit too.
-	defer cancel()
+	// GCStateManager cancels the watch itself on internal shutdown such as leadership loss. This deferred
+	// cancel remains as a fallback for stream-send failures or other early exits owned by the gRPC handler.
+	defer watch.Cancel()
 	if done != nil {
 		defer done()
 	}
 
 	lastSafePoints := make(map[uint32]uint64)
-	return s.consumeGCStateWatch(ctx, gcStateCh, func(gcStates []gc.GCState) error {
+	return s.consumeGCStateWatch(watch, func(gcStates []gc.GCState) error {
 		header := grpcutil.WrapHeader()
 		baseResponse := &pdpb.WatchGCSafePointV2Response{Header: header}
 		currentEvents := make([]*pdpb.SafePointEvent, 0, len(gcStates))
@@ -489,7 +489,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 
 // WatchGCStates watches GC state changes.
 func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
-	ctx, cancel, gcStateCh, done, err := s.openGCStateWatch(
+	watch, done, err := s.openGCStateWatch(
 		stream.Context(),
 		request.GetHeader(),
 		request.GetSkipLoadingInitial(),
@@ -498,15 +498,14 @@ func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pd
 	if err != nil {
 		return err
 	}
-	// The gRPC handler owns cancel() for both the consume loop and the manager-side watch goroutine.
-	// A closed gcStateCh causes consumeGCStateWatch to return; this deferred cancel() then releases
-	// runGCStateWatch from its ctx.Done() wait.
-	defer cancel()
+	// GCStateManager cancels the watch itself on internal shutdown such as leadership loss. This deferred
+	// cancel remains as a fallback for stream-send failures or other early exits owned by the gRPC handler.
+	defer watch.Cancel()
 	if done != nil {
 		defer done()
 	}
 
-	return s.consumeGCStateWatch(ctx, gcStateCh, func(gcStates []gc.GCState) error {
+	return s.consumeGCStateWatch(watch, func(gcStates []gc.GCState) error {
 		header := grpcutil.WrapHeader()
 		baseResponse := &pdpb.WatchGCStatesResponse{Header: header}
 		currentStates := make([]*pdpb.GCState, 0, len(gcStates))
@@ -555,90 +554,94 @@ func (s *GrpcServer) openGCStateWatch(
 	header *pdpb.RequestHeader,
 	skipLoadingInitial bool,
 	excludeGCBarriers bool,
-) (context.Context, context.CancelFunc, <-chan gc.GCState, ratelimit.DoneFunc, error) {
+) (*gc.GCStateWatcher, ratelimit.DoneFunc, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	if err := s.validateRequest(header); err != nil {
 		if done != nil {
 			done()
 		}
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	if s.GetRaftCluster() == nil {
 		if done != nil {
 			done()
 		}
-		return nil, nil, nil, nil, errs.ErrNotBootstrapped.FastGenByArgs()
+		return nil, nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 
-	ctx, cancel := context.WithCancel(streamCtx)
-	gcStateCh, err := s.gcStateManager.WatchGCStates(ctx, skipLoadingInitial, excludeGCBarriers)
+	watch, err := s.gcStateManager.WatchGCStates(streamCtx, skipLoadingInitial, excludeGCBarriers)
 	if err != nil {
-		cancel()
 		if done != nil {
 			done()
 		}
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
-	return ctx, cancel, gcStateCh, done, nil
+	return watch, done, nil
 }
 
 func (*GrpcServer) consumeGCStateWatch(
-	ctx context.Context,
-	gcStateCh <-chan gc.GCState,
+	watch *gc.GCStateWatcher,
 	send func([]gc.GCState) error,
 ) error {
 	for {
-		gcStates, channelClosed := recvGCStateBatch(ctx, gcStateCh)
-		if ctx.Err() != nil {
-			return nil
+		gcStates, err := recvGCStateBatch(watch)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
 		}
 		if len(gcStates) > 0 {
 			if err := send(gcStates); err != nil {
 				return err
 			}
 		}
-		if channelClosed {
-			// A closed watch channel means GCStateManager stopped the watch, typically because the PD node
-			// lost leadership or the watcher was too slow. Returning here lets the handler's deferred
-			// cancel() fire, which in turn wakes runGCStateWatch and completes the whole shutdown path.
-			if ctx.Err() != nil {
-				return nil
-			}
-			return status.Errorf(codes.Unavailable, "gc state watch closed")
-		}
 	}
 }
 
-func recvGCStateBatch(ctx context.Context, gcStateCh <-chan gc.GCState) ([]gc.GCState, bool) {
+func recvGCStateBatch(watch *gc.GCStateWatcher) ([]gc.GCState, error) {
+	if err := watch.Err(); err != nil {
+		return nil, err
+	}
+
 	select {
-	case <-ctx.Done():
-		return nil, false
-	case gcState, ok := <-gcStateCh:
+	case gcState, ok := <-watch.Chan():
 		if !ok {
-			if ctx.Err() != nil {
-				return nil, false
-			}
-			return nil, true
+			return nil, gcStateWatchClosedErr(watch)
 		}
 
 		gcStates := make([]gc.GCState, 1, gcStateWatchReceiveBatchSize)
 		gcStates[0] = gcState
 		for len(gcStates) < gcStateWatchReceiveBatchSize {
+			if watch.Err() != nil {
+				return gcStates, nil
+			}
 			select {
-			case gcState, ok := <-gcStateCh:
+			case gcState, ok := <-watch.Chan():
 				if !ok {
-					return gcStates, true
+					return gcStates, nil
 				}
 				gcStates = append(gcStates, gcState)
+			case <-watch.Done():
+				return gcStates, nil
 			default:
-				return gcStates, false
+				return gcStates, nil
 			}
 		}
-		return gcStates, false
+		return gcStates, nil
+	case <-watch.Done():
+		return nil, gcStateWatchClosedErr(watch)
 	}
+}
+
+func gcStateWatchClosedErr(watch *gc.GCStateWatcher) error {
+	if err := watch.Err(); err != nil {
+		return err
+	}
+	return status.Errorf(codes.Unavailable, "gc state watch closed")
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.

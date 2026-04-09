@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -146,8 +148,59 @@ const (
 	gcStateListenerExcludeGCBarriers gcStateListenerFlags = 1 << iota
 )
 
+// GCStateWatcher watches GC state updates from GCStateManager.
+type GCStateWatcher struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	ch     chan GCState
+
+	closeErrMu syncutil.RWMutex
+	closeErr   error
+}
+
+// Chan returns the channel that carries GC state updates.
+func (w *GCStateWatcher) Chan() <-chan GCState {
+	return w.ch
+}
+
+// Done returns a channel that is closed when the watch stops.
+func (w *GCStateWatcher) Done() <-chan struct{} {
+	return w.ctx.Done()
+}
+
+// Cancel stops the watch from the caller side.
+func (w *GCStateWatcher) Cancel() {
+	w.cancel()
+}
+
+// Err returns the reason why the watch stopped. It returns nil while the watch is still active.
+func (w *GCStateWatcher) Err() error {
+	w.closeErrMu.RLock()
+	err := w.closeErr
+	w.closeErrMu.RUnlock()
+	if err != nil {
+		return err
+	}
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *GCStateWatcher) setCloseErr(err error) {
+	if err == nil {
+		err = context.Canceled
+	}
+
+	w.closeErrMu.Lock()
+	defer w.closeErrMu.Unlock()
+	if w.closeErr == nil {
+		w.closeErr = err
+	}
+}
+
 type gcStateListener struct {
-	ch    chan GCState
+	watch *GCStateWatcher
 	flags gcStateListenerFlags
 }
 
@@ -192,9 +245,15 @@ func (m *GCStateManager) nodeIsLeader() bool {
 
 // WatchGCStates watches GC state updates. The returned channel is closed when the caller's context is done, the
 // current PD node loses leadership, or the watcher becomes too slow to consume updates.
-func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial bool, excludeGCBarriers bool) (<-chan GCState, error) {
+func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial bool, excludeGCBarriers bool) (*GCStateWatcher, error) {
+	watchCtx, watchCancel := context.WithCancel(ctx)
+	watch := &GCStateWatcher{
+		ctx:    watchCtx,
+		cancel: watchCancel,
+		ch:     make(chan GCState, gcStateListenerChannelSize),
+	}
 	listener := gcStateListener{
-		ch: make(chan GCState, gcStateListenerChannelSize),
+		watch: watch,
 	}
 	if excludeGCBarriers {
 		listener.flags |= gcStateListenerExcludeGCBarriers
@@ -203,33 +262,35 @@ func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial b
 	m.mu.Lock()
 	if !m.nodeIsLeader() {
 		m.mu.Unlock()
-		close(listener.ch)
+		watch.setCloseErr(errs.ErrNotLeader)
+		watchCancel()
+		close(watch.ch)
 		return nil, errs.ErrNotLeader
 	}
 	m.gcStateListeners = append(m.gcStateListeners, listener)
 	m.mu.Unlock()
 
-	go m.runGCStateWatch(ctx, listener, skipLoadingInitial)
-	return listener.ch, nil
+	go m.runGCStateWatch(listener, skipLoadingInitial)
+	return watch, nil
 }
 
-func (m *GCStateManager) runGCStateWatch(ctx context.Context, listener gcStateListener, skipLoadingInitial bool) {
-	defer m.deregisterGCStateListener(listener)
+func (m *GCStateManager) runGCStateWatch(listener gcStateListener, skipLoadingInitial bool) {
+	defer m.deregisterGCStateListener(listener, listener.watch.Err())
 
 	if !skipLoadingInitial {
-		m.sendInitialGCStates(ctx, listener)
+		m.sendInitialGCStates(listener)
 	}
 
-	// In the gRPC path, leadership loss closes listener.ch first. The consume loop then returns, the
-	// handler's deferred cancel() fires, and this wait is released so the watch goroutine can exit and
-	// run the deferred deregistration.
-	<-ctx.Done()
+	// The listener owns its own cancelable watch context. Manager-initiated shutdown paths such as
+	// leadership loss or slow-watcher eviction cancel it directly, so this goroutine no longer depends
+	// on the caller to cancel the parent context before it can exit.
+	<-listener.watch.Done()
 }
 
-func (m *GCStateManager) sendInitialGCStates(ctx context.Context, listener gcStateListener) {
-	gcStates, err := m.GetAllKeyspacesGCStates(ctx)
+func (m *GCStateManager) sendInitialGCStates(listener gcStateListener) {
+	gcStates, err := m.GetAllKeyspacesGCStates(listener.watch.ctx)
 	if err != nil {
-		if ctx.Err() == nil {
+		if listener.watch.ctx.Err() == nil {
 			log.Warn("failed to load initial GC states for watcher", zap.Error(err))
 		}
 		return
@@ -237,7 +298,7 @@ func (m *GCStateManager) sendInitialGCStates(ctx context.Context, listener gcSta
 
 	for _, gcState := range gcStates {
 		select {
-		case <-ctx.Done():
+		case <-listener.watch.Done():
 			return
 		default:
 		}
@@ -255,28 +316,30 @@ func (m *GCStateManager) sendInitialGCStates(ctx context.Context, listener gcSta
 	}
 }
 
-func (m *GCStateManager) deregisterGCStateListener(listener gcStateListener) {
+func (m *GCStateManager) deregisterGCStateListener(listener gcStateListener, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.removeGCStateListenerLocked(listener)
+	m.removeGCStateListenerLocked(listener, err)
 }
 
 func (m *GCStateManager) hasGCStateListenerLocked(listener gcStateListener) bool {
 	for _, current := range m.gcStateListeners {
-		if current.ch == listener.ch {
+		if current.watch == listener.watch {
 			return true
 		}
 	}
 	return false
 }
 
-func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener) {
+func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener, err error) {
 	for i, current := range m.gcStateListeners {
-		if current.ch != listener.ch {
+		if current.watch != listener.watch {
 			continue
 		}
-		close(current.ch)
+		current.watch.setCloseErr(err)
+		current.watch.cancel()
+		close(current.watch.ch)
 		m.gcStateListeners = slices.Delete(m.gcStateListeners, i, i+1)
 		return
 	}
@@ -284,7 +347,9 @@ func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener) {
 
 func (m *GCStateManager) cancelAllGCStateListenersLocked() {
 	for _, listener := range m.gcStateListeners {
-		close(listener.ch)
+		listener.watch.setCloseErr(errs.ErrNotLeader)
+		listener.watch.cancel()
+		close(listener.watch.ch)
 	}
 	m.gcStateListeners = nil
 }
@@ -293,6 +358,10 @@ func (m *GCStateManager) getGCStateListenerCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.gcStateListeners)
+}
+
+func errGCStateWatchClosed() error {
+	return status.Error(codes.Unavailable, "gc state watch closed")
 }
 
 func cloneGCBarrier(barrier *endpoint.GCBarrier) *endpoint.GCBarrier {
@@ -337,11 +406,11 @@ func (m *GCStateManager) sendGCStateToListenerLocked(listener gcStateListener, g
 	defer timer.Stop()
 
 	select {
-	case listener.ch <- cloneGCStateForListener(gcState, listener.flags):
+	case listener.watch.ch <- cloneGCStateForListener(gcState, listener.flags):
 		return true
 	case <-timer.C:
 		log.Warn("GC state watcher is too slow and will be closed")
-		m.removeGCStateListenerLocked(listener)
+		m.removeGCStateListenerLocked(listener, errGCStateWatchClosed())
 		return false
 	}
 }

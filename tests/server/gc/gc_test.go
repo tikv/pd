@@ -30,6 +30,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -863,10 +864,12 @@ func TestWatchGCStreamsCloseOnLeaderTransfer(t *testing.T) {
 	_, err = recvGCStateWithTimeout(re, gcStatesStream.Recv, 5*time.Second)
 	re.Error(err)
 	re.Equal(codes.Unavailable, status.Code(err))
+	re.ErrorContains(err, errs.ErrNotLeader.Error())
 
 	_, err = recvGCStateWithTimeout(re, gcSafePointStream.Recv, 5*time.Second)
 	re.Error(err)
 	re.Equal(codes.Unavailable, status.Code(err))
+	re.ErrorContains(err, errs.ErrNotLeader.Error())
 }
 
 func TestWatchGCStreamsCloseOnClientCancel(t *testing.T) {

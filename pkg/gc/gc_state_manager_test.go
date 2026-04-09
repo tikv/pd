@@ -2213,16 +2213,17 @@ func TestWatchGCStates(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			ch, err := manager.WatchGCStates(ctx, true, false)
+			watch, err := manager.WatchGCStates(ctx, true, false)
 			re.ErrorIs(err, errs.ErrNotLeader)
-			re.Nil(ch)
+			re.Nil(watch)
 			re.Equal(0, manager.getGCStateListenerCount())
 
 			manager.OnNodeBecomesLeader()
 
 			ctx, cancel = context.WithCancel(context.Background())
-			ch, err = manager.WatchGCStates(ctx, true, false)
+			watch, err = manager.WatchGCStates(ctx, true, false)
 			re.NoError(err)
+			ch := watch.Chan()
 			waitGCStateListenerCount(re, manager, 1)
 
 			now := time.Now()
@@ -2269,16 +2270,17 @@ func TestWatchGCStates(t *testing.T) {
 			cancel()
 			assertGCStateChannelClosed(re, ch)
 			waitGCStateListenerCount(re, manager, 0)
+			re.ErrorIs(watch.Err(), context.Canceled)
 
-			followerCtx, followerCancel := context.WithCancel(context.Background())
-			followerCh, err := manager.WatchGCStates(followerCtx, true, false)
+			followerWatch, err := manager.WatchGCStates(context.Background(), true, false)
 			re.NoError(err)
+			followerCh := followerWatch.Chan()
 			waitGCStateListenerCount(re, manager, 1)
 
 			manager.OnNodeBecomesFollower()
 			assertGCStateChannelClosed(re, followerCh)
 			waitGCStateListenerCount(re, manager, 0)
-			followerCancel()
+			re.ErrorIs(followerWatch.Err(), errs.ErrNotLeader)
 		})
 	}
 }
@@ -2304,8 +2306,9 @@ func TestWatchGCStatesWhenUnchanged(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch, err := manager.WatchGCStates(ctx, true, false)
+	watch, err := manager.WatchGCStates(ctx, true, false)
 	re.NoError(err)
+	ch := watch.Chan()
 	waitGCStateListenerCount(re, manager, 1)
 
 	res, err = manager.AdvanceTxnSafePoint(keyspaceID, 10, now)
@@ -2357,6 +2360,7 @@ func TestWatchGCStatesWhenUnchanged(t *testing.T) {
 	cancel()
 	assertGCStateChannelClosed(re, ch)
 	waitGCStateListenerCount(re, manager, 0)
+	re.ErrorIs(watch.Err(), context.Canceled)
 }
 
 func TestWatchGCStatesWithKeyspaceChanges(t *testing.T) {
@@ -2367,8 +2371,9 @@ func TestWatchGCStatesWithKeyspaceChanges(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch, err := manager.WatchGCStates(ctx, true, false)
+	watch, err := manager.WatchGCStates(ctx, true, false)
 	re.NoError(err)
+	ch := watch.Chan()
 	waitGCStateListenerCount(re, manager, 1)
 
 	newKeyspaceID := uint32(5)
@@ -2400,8 +2405,9 @@ func TestWatchGCStatesWithKeyspaceChanges(t *testing.T) {
 	re.NotContains(expected, uint32(2))
 
 	initialCtx, initialCancel := context.WithCancel(context.Background())
-	initialCh, err := manager.WatchGCStates(initialCtx, false, false)
+	initialWatch, err := manager.WatchGCStates(initialCtx, false, false)
 	re.NoError(err)
+	initialCh := initialWatch.Chan()
 	initialReceived := collectWatchedGCStates(re, initialCh, len(expected))
 	re.Equal(expected, initialReceived)
 
@@ -2431,13 +2437,15 @@ func TestWatchGCStatesLoadingInitial(t *testing.T) {
 
 	withInitialCtx, withInitialCancel := context.WithCancel(context.Background())
 	defer withInitialCancel()
-	withInitialCh, err := manager.WatchGCStates(withInitialCtx, false, false)
+	withInitialWatch, err := manager.WatchGCStates(withInitialCtx, false, false)
 	re.NoError(err)
+	withInitialCh := withInitialWatch.Chan()
 
 	withoutInitialCtx, withoutInitialCancel := context.WithCancel(context.Background())
 	defer withoutInitialCancel()
-	withoutInitialCh, err := manager.WatchGCStates(withoutInitialCtx, true, false)
+	withoutInitialWatch, err := manager.WatchGCStates(withoutInitialCtx, true, false)
 	re.NoError(err)
+	withoutInitialCh := withoutInitialWatch.Chan()
 
 	assertNoGCStateReceived(re, withoutInitialCh)
 	initialReceived := collectWatchedGCStates(re, withInitialCh, len(expected))
@@ -2483,13 +2491,15 @@ func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
 
 	includeGCBarriersCtx, includeGCBarriersCancel := context.WithCancel(context.Background())
 	defer includeGCBarriersCancel()
-	includeGCBarriersCh, err := manager.WatchGCStates(includeGCBarriersCtx, false, false)
+	includeGCBarriersWatch, err := manager.WatchGCStates(includeGCBarriersCtx, false, false)
 	re.NoError(err)
+	includeGCBarriersCh := includeGCBarriersWatch.Chan()
 
 	excludeGCBarriersCtx, excludeGCBarriersCancel := context.WithCancel(context.Background())
 	defer excludeGCBarriersCancel()
-	excludeGCBarriersCh, err := manager.WatchGCStates(excludeGCBarriersCtx, false, true)
+	excludeGCBarriersWatch, err := manager.WatchGCStates(excludeGCBarriersCtx, false, true)
 	re.NoError(err)
+	excludeGCBarriersCh := excludeGCBarriersWatch.Chan()
 
 	includeGCBarriersInitial := collectWatchedGCStates(re, includeGCBarriersCh, len(expected))
 	excludeGCBarriersInitial := collectWatchedGCStates(re, excludeGCBarriersCh, len(expected))
