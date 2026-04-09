@@ -344,7 +344,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
-	log.Info("start to initialize cluster")
 	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
@@ -357,7 +356,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
 	if !bootstrap {
-		log.Info("start to check TSO service")
 		checkTSOStart := time.Now()
 		c.checkTSOService()
 		checkTSODuration := time.Since(checkTSOStart)
@@ -376,7 +374,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 		failpoint.Return(err)
 	})
-	log.Info("start to load cluster info")
 	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
@@ -399,8 +396,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
 	log.Info("load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
-
-	log.Info("creating region labeler")
 	labelerStart := time.Now()
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	labelerDuration := time.Since(labelerStart)
@@ -417,16 +412,13 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-		log.Info("start to observe slow store status")
 		observeSlowStoreStart := time.Now()
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
 		}
-		observeSlowStoreDuration := time.Since(observeSlowStoreStart)
-		log.Info("observe slow store status completed", zap.Duration("cost", observeSlowStoreDuration))
+		log.Info("observe slow store status completed", zap.Duration("cost", time.Since(observeSlowStoreStart)))
 	}
-	log.Info("start to create replication mode manager")
 	replicationModeStart := time.Now()
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
@@ -438,7 +430,6 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	loadExternalTSStart := time.Now()
 	c.loadExternalTS()
 	log.Info("load external timestamp completed", zap.Duration("cost", time.Since(loadExternalTSStart)))
-	log.Info("start to load min resolved ts")
 	loadMinResolvedTSStart := time.Now()
 	c.loadMinResolvedTS()
 	log.Info("load min resolved ts completed", zap.Duration("cost", time.Since(loadMinResolvedTSStart)))
@@ -453,15 +444,12 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 			log.Warn("failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
-		bootstrapKeyspaceDuration := time.Since(bootstrapKeyspaceStart)
-		log.Info("bootstrap keyspace group manager completed", zap.Duration("cost", bootstrapKeyspaceDuration))
+		log.Info("bootstrap keyspace group manager completed", zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 	}
-	log.Info("start to check scheduling service")
 	checkSchedulingStart := time.Now()
 	c.checkSchedulingService()
 	checkSchedulingDuration := time.Since(checkSchedulingStart)
 	log.Info("check scheduling service completed", zap.Duration("cost", checkSchedulingDuration))
-	log.Info("start to start background jobs")
 	backgroundJobsStart := time.Now()
 	c.wg.Add(11)
 	go c.runServiceCheckJob()
@@ -475,18 +463,14 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
-	backgroundJobsDuration := time.Since(backgroundJobsStart)
-	log.Info("start background jobs completed", zap.Duration("cost", backgroundJobsDuration))
-
-	log.Info("start to start runners")
+	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)
 	c.syncRegionRunner.Start(c.ctx)
-	runnersDuration := time.Since(runnersStart)
-	log.Info("start runners completed", zap.Duration("cost", runnersDuration))
+	log.Info("start runners completed", zap.Duration("cost", time.Since(runnersStart)))
 	return nil
 }
 
