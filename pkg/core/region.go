@@ -65,15 +65,18 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
-	meta                      *metapb.Region
-	learners                  []*metapb.Peer
-	witnesses                 []*metapb.Peer
-	voters                    []*metapb.Peer
-	leader                    *metapb.Peer
-	downPeers                 []*pdpb.PeerStats
-	pendingPeers              []*metapb.Peer
-	term                      uint64
+	meta         *metapb.Region
+	learners     []*metapb.Peer
+	witnesses    []*metapb.Peer
+	voters       []*metapb.Peer
+	leader       *metapb.Peer
+	downPeers    []*pdpb.PeerStats
+	pendingPeers []*metapb.Peer
+	term         uint64
+	// cpuUsage is deprecated and will be removed in the future.
+	// We should use `cpuStats` instead.
 	cpuUsage                  uint64
+	cpuStats                  *pdpb.CPUStats
 	writtenBytes              uint64
 	writtenKeys               uint64
 	readBytes                 uint64
@@ -86,9 +89,9 @@ type RegionInfo struct {
 	replicationStatus         *replication_modepb.RegionReplicationStatus
 	queryStats                *pdpb.QueryStats
 	flowRoundDivisor          uint64
-	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
+	// reportBuckets is not thread unsafe, it should be accessed by the request `report reportBuckets` with greater version.
 	// todo: keep it compatible with previous design, we can remove it later.
-	buckets unsafe.Pointer
+	reportBuckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
@@ -257,11 +260,8 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
-		if cpuStats := h.GetCpuStats(); cpuStats != nil {
-			region.cpuUsage = cpuStats.GetUnifiedRead()
-		} else {
-			region.cpuUsage = h.CpuUsage
-		}
+		region.cpuStats = h.GetCpuStats()
+		region.cpuUsage = h.CpuUsage
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -304,10 +304,9 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	// skip bucket meta update if tikv has report bucket meta.
-	if bucket := r.GetBuckets(); bucketEnable && bucket == nil && origin != nil {
-		inherited := atomic.LoadPointer(&origin.buckets)
-		atomic.StorePointer(&r.buckets, inherited)
+	if bucketEnable && origin != nil && atomic.LoadPointer(&r.reportBuckets) == nil {
+		inherited := atomic.LoadPointer(&origin.reportBuckets)
+		atomic.StorePointer(&r.reportBuckets, inherited)
 	}
 }
 
@@ -329,6 +328,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		downPeers:                 downPeers,
 		pendingPeers:              pendingPeers,
 		cpuUsage:                  r.cpuUsage,
+		cpuStats:                  typeutil.DeepClone(r.cpuStats, CPUStatsFactory),
 		writtenBytes:              r.writtenBytes,
 		writtenKeys:               r.writtenKeys,
 		readBytes:                 r.readBytes,
@@ -339,7 +339,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateKeys:           r.approximateKeys,
 		interval:                  typeutil.DeepClone(r.interval, TimeIntervalFactory),
 		replicationStatus:         r.replicationStatus,
-		buckets:                   r.buckets,
+		reportBuckets:             atomic.LoadPointer(&r.reportBuckets),
 		queryStats:                typeutil.DeepClone(r.queryStats, QueryStatsFactory),
 		bucketMeta:                r.bucketMeta,
 	}
@@ -633,18 +633,10 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 	}
 }
 
-// SetBucketMeta sets the bucket meta of the region, used by region sync.
-func (r *RegionInfo) SetBucketMeta(buckets *metapb.Buckets) {
-	r.bucketMeta = &metapb.BucketMeta{
-		Version: buckets.GetVersion(),
-		Keys:    buckets.GetKeys(),
-	}
-}
-
-// UpdateBuckets sets the buckets of the region, used by bucket report.
+// UpdateBuckets sets the buckets of the region, only use by tests.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 	if buckets == nil {
-		atomic.StorePointer(&r.buckets, nil)
+		atomic.StorePointer(&r.reportBuckets, nil)
 		return true
 	}
 	// only need to update bucket keys, versions.
@@ -653,7 +645,32 @@ func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 		Version:  buckets.GetVersion(),
 		Keys:     buckets.GetKeys(),
 	}
-	return atomic.CompareAndSwapPointer(&r.buckets, unsafe.Pointer(old), unsafe.Pointer(newBuckets))
+	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(newBuckets))
+}
+
+// GetReportBuckets returns the buckets of the region, only use by tests.
+func (r *RegionInfo) GetReportBuckets() *metapb.Buckets {
+	return (*metapb.Buckets)(atomic.LoadPointer(&r.reportBuckets))
+}
+
+// CompareAndSetReportBuckets compares and sets the report buckets of the region.
+func (r *RegionInfo) CompareAndSetReportBuckets(buckets *metapb.Buckets) bool {
+	old := (*metapb.Buckets)(atomic.LoadPointer(&r.reportBuckets))
+	// region should not update if the version of the buckets is less than the old one.
+	if old != nil {
+		reportVersion := buckets.GetVersion()
+		if reportVersion < old.GetVersion() {
+			versionStaleCounter.Inc()
+			return true
+		} else if reportVersion == old.GetVersion() {
+			versionNotChangeCounter.Inc()
+			return true
+		}
+	}
+	failpoint.Inject("concurrentBucketHeartbeat", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
+	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
 // GetBuckets returns the buckets of the region.
@@ -668,7 +685,7 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 			Keys:     meta.GetKeys(),
 		}
 	}
-	buckets := atomic.LoadPointer(&r.buckets)
+	buckets := atomic.LoadPointer(&r.reportBuckets)
 	return (*metapb.Buckets)(buckets)
 }
 
@@ -727,11 +744,17 @@ func (r *RegionInfo) GetPendingPeers() []*metapb.Peer {
 
 // GetCPUUsage returns the CPU usage of the region since the last heartbeat.
 // The number range is [0, N * 100], where N is the number of CPU cores.
-// However, since the TiKV basically only meters the CPU usage inside the
-// Unified Read Pool, it should be considered as an indicator of Region read
-// CPU overhead for now.
+// This is kept for compatibility with the legacy region heartbeat cpu_usage field.
 func (r *RegionInfo) GetCPUUsage() uint64 {
 	return r.cpuUsage
+}
+
+// GetReadCPUUsage returns the region-level unified-read CPU usage reported in cpu_stats.
+func (r *RegionInfo) GetReadCPUUsage() uint64 {
+	if r.cpuStats == nil {
+		return 0
+	}
+	return r.cpuStats.GetUnifiedRead()
 }
 
 // GetBytesRead returns the read bytes of the region.
@@ -2019,6 +2042,8 @@ func (r *RegionInfo) GetLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		float64(r.GetReadCPUUsage()),
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 
@@ -2031,6 +2056,8 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 		float64(r.GetBytesWritten()),
 		float64(r.GetKeysWritten()),
 		float64(r.GetWriteQueryNum()),
+		0,
+		0, // RegionWriteCPU: reserved, not yet reported by TiKV
 	}
 }
 

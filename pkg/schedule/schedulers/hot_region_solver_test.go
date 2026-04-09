@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 func TestSplitBucketsBySize(t *testing.T) {
@@ -104,6 +105,9 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	// Explicitly use byte/key here so this test only verifies split-key selection
+	// instead of depending on the cluster-version-specific default priorities.
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
 	solve.cur = &solution{}
 	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
@@ -156,6 +160,46 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	}
 }
 
+func TestSplitBucketsByLoadWithCPUFallback(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetRegionBucketEnabled(true)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	defer cancel()
+	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
+	solve.cur = &solution{}
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+
+	b := &metapb.Buckets{
+		RegionId:   1,
+		PeriodInMs: 1000,
+		Keys:       [][]byte{[]byte(""), []byte("b"), []byte("d"), []byte("")},
+		Stats: &metapb.BucketStats{
+			ReadBytes:  []uint64{2 * units.MiB, 2 * units.MiB, 20 * units.MiB},
+			ReadKeys:   []uint64{256, 256, 256},
+			ReadQps:    []uint64{1000, 1, 1},
+			WriteBytes: []uint64{0, 0, 0},
+			WriteQps:   []uint64{0, 0, 0},
+			WriteKeys:  []uint64{0, 0, 0},
+		},
+	}
+	task := buckets.NewCheckPeerTask(b)
+	re.True(tc.CheckAsync(task))
+	time.Sleep(time.Millisecond * 10)
+
+	ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
+	re.Len(ops, 1)
+	op := ops[0]
+	re.Equal(splitHotReadBuckets, op.Desc())
+
+	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, [][]byte{[]byte("d")})
+	re.NoError(err)
+	re.Equal(expectOp.Brief(), op.Brief())
+}
+
 func TestHotCacheSortHotPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -163,24 +207,28 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.conf.ReadPriorities = []string{utils.QueryPriority, utils.BytePriority}
 	leaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
 			utils.QueryDim: 10,
 			utils.ByteDim:  1,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
 			utils.QueryDim: 1,
 			utils.ByteDim:  10,
+			utils.CPUDim:   0,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
 			utils.QueryDim: 5,
 			utils.ByteDim:  6,
+			utils.CPUDim:   0,
 		},
 	}}
 
@@ -194,6 +242,30 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	leaderSolver.maxPeerNum = 2
 	u = leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1, 2}, u)
+
+	// Verify the CPU-first priority path can pick by CPU dim.
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
+	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
+	cpuHotPeers := []*statistics.HotPeerStat{{
+		RegionID: 1,
+		Loads: []float64{
+			utils.QueryDim: 1,
+			utils.ByteDim:  1,
+			utils.CPUDim:   30,
+		},
+	}, {
+		RegionID: 2,
+		Loads: []float64{
+			utils.QueryDim: 100,
+			utils.ByteDim:  1,
+			utils.CPUDim:   5,
+		},
+	}}
+	st.HotPeers = cpuHotPeers
+	cpuLeaderSolver.maxPeerNum = 1
+	u = cpuLeaderSolver.filterHotPeers(st)
+	checkSortResult(re, []uint64{1}, u)
 }
 
 func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
@@ -602,7 +674,7 @@ func TestBucketFirstStat(t *testing.T) {
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
 			rwTy:           utils.Write,
-			expect:         utils.RegionWriteBytes,
+			expect:         utils.RegionWriteQueryNum,
 		},
 		{
 			firstPriority:  utils.KeyDim,
@@ -613,6 +685,18 @@ func TestBucketFirstStat(t *testing.T) {
 		{
 			firstPriority:  utils.QueryDim,
 			secondPriority: utils.ByteDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadQueryNum,
+		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.QueryDim,
+			rwTy:           utils.Read,
+			expect:         utils.RegionReadQueryNum,
+		},
+		{
+			firstPriority:  utils.CPUDim,
+			secondPriority: utils.CPUDim,
 			rwTy:           utils.Read,
 			expect:         utils.RegionReadBytes,
 		},

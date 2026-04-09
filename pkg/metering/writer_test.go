@@ -111,6 +111,31 @@ func TestConfigValidate(t *testing.T) {
 	}
 	err = validateMeteringConfig(c)
 	re.Error(err)
+
+	// Test Azure config - valid
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeAzure,
+		Region: "eastus",
+		Bucket: "metering-container",
+	}
+	err = validateMeteringConfig(c)
+	re.NoError(err)
+
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeAzure,
+		Bucket: "metering-container",
+	}
+	err = validateMeteringConfig(c)
+	re.NoError(err)
+
+	// Test Azure config without Bucket - should return error
+	c = &config.MeteringConfig{
+		Type:   storage.ProviderTypeAzure,
+		Region: "eastus",
+	}
+	err = validateMeteringConfig(c)
+	re.Error(err)
+	re.Contains(err.Error(), "bucket")
 }
 
 func TestRegisterCollector(t *testing.T) {

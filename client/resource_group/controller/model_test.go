@@ -42,8 +42,8 @@ func TestGetRUValueFromConsumption(t *testing.T) {
 func TestAdd(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 10, WriteCrossAzTrafficBytes: 20, TikvRUV2: 1, TidbRUV2: 2}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 30, WriteCrossAzTrafficBytes: 40, TikvRUV2: 3, TidbRUV2: 4}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 10, WriteCrossAzTrafficBytes: 20, TikvRUV2: 1, TidbRUV2: 2, TiflashRUV2: 3}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 30, WriteCrossAzTrafficBytes: 40, TikvRUV2: 3, TidbRUV2: 4, TiflashRUV2: 5}
 	expected := &rmpb.Consumption{
 		RRU:                      4,
 		WRU:                      6,
@@ -57,6 +57,7 @@ func TestAdd(t *testing.T) {
 		WriteCrossAzTrafficBytes: 60,
 		TikvRUV2:                 4,
 		TidbRUV2:                 6,
+		TiflashRUV2:              8,
 	}
 
 	add(custom1, custom2)
@@ -82,8 +83,8 @@ func TestAdd(t *testing.T) {
 func TestSub(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 5, WriteCrossAzTrafficBytes: 10, TikvRUV2: 7, TidbRUV2: 9}
-	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 1, WriteCrossAzTrafficBytes: 2, TikvRUV2: 3, TidbRUV2: 4}
+	custom1 := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, ReadCrossAzTrafficBytes: 5, WriteCrossAzTrafficBytes: 10, TikvRUV2: 7, TidbRUV2: 9, TiflashRUV2: 11}
+	custom2 := &rmpb.Consumption{RRU: 1.5, WRU: 2.5, ReadCrossAzTrafficBytes: 1, WriteCrossAzTrafficBytes: 2, TikvRUV2: 3, TidbRUV2: 4, TiflashRUV2: 5}
 	expected := &rmpb.Consumption{
 		RRU:                      1,
 		WRU:                      1,
@@ -97,6 +98,7 @@ func TestSub(t *testing.T) {
 		WriteCrossAzTrafficBytes: 8,
 		TikvRUV2:                 4,
 		TidbRUV2:                 5,
+		TiflashRUV2:              6,
 	}
 
 	sub(custom1, custom2)
@@ -120,12 +122,30 @@ func TestSub(t *testing.T) {
 
 func TestUpdateDeltaConsumption(t *testing.T) {
 	re := require.New(t)
-	last := &rmpb.Consumption{TikvRUV2: 2, TidbRUV2: 3}
-	now := &rmpb.Consumption{TikvRUV2: 5, TidbRUV2: 11}
+	last := &rmpb.Consumption{TikvRUV2: 2, TidbRUV2: 3, TiflashRUV2: 5}
+	now := &rmpb.Consumption{TikvRUV2: 5, TidbRUV2: 11, TiflashRUV2: 18}
 
 	delta := updateDeltaConsumption(last, now)
 
-	re.Equal(&rmpb.Consumption{TikvRUV2: 3, TidbRUV2: 8}, delta)
+	re.Equal(&rmpb.Consumption{TikvRUV2: 3, TidbRUV2: 8, TiflashRUV2: 13}, delta)
 	re.Equal(now.TikvRUV2, last.TikvRUV2)
 	re.Equal(now.TidbRUV2, last.TidbRUV2)
+	re.Equal(now.TiflashRUV2, last.TiflashRUV2)
+}
+
+func TestEqualRU(t *testing.T) {
+	re := require.New(t)
+
+	re.True(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 5, TidbRUV2: 4},
+	))
+	re.False(equalRU(
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 4},
+		rmpb.Consumption{RRU: 1, WRU: 2, TikvRUV2: 3, TidbRUV2: 6},
+	))
 }

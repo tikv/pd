@@ -56,6 +56,11 @@ error = '''
 the option %s does not exist
 '''
 
+["PD:apiutil:ErrOptionTypeInvalid"]
+error = '''
+the type of option %s is invalid
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -903,7 +908,7 @@ the %s resource group does not exist
 
 ["PD:resourcemanager:ErrInvalidGroup"]
 error = '''
-invalid group settings, please check the group name, priority and the number of resources
+invalid group settings, please check %s
 '''
 
 ["PD:resourcemanager:ErrKeyspaceNotExists"]
