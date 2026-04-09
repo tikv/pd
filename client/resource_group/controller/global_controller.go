@@ -337,6 +337,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			/* channels */
 			case <-c.loopCtx.Done():
 				metrics.ResourceGroupStatusGauge.Reset()
+				metrics.RequestSourceRUCounter.Reset()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode.Store(true)
@@ -583,6 +584,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
+				gc.metrics.cleanupRequestSourceMetrics(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true

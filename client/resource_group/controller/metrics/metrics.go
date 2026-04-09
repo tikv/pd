@@ -49,6 +49,8 @@ var (
 	LowTokenRequestNotifyCounter *prometheus.CounterVec
 	// TokenConsumedHistogram comments placeholder
 	TokenConsumedHistogram *prometheus.HistogramVec
+	// RequestSourceRUCounter comments placeholder
+	RequestSourceRUCounter *prometheus.CounterVec
 	// FailedTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration prometheus.Observer
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
@@ -153,6 +155,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
+	RequestSourceRUCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "ru_total",
+			Help:        "Counter of request RU consumption grouped by resource group and request source.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel, "request_source", errType})
+
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
 	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
@@ -171,4 +182,5 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
+	prometheus.MustRegister(RequestSourceRUCounter)
 }

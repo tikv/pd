@@ -106,6 +106,13 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
+	sourceMetricsMu                   sync.RWMutex
+	sourceMetrics                     map[string]*requestSourceMetrics
+}
+
+type requestSourceMetrics struct {
+	rru prometheus.Counter
+	wru prometheus.Counter
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -122,6 +129,52 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
+		sourceMetrics:                     make(map[string]*requestSourceMetrics),
+	}
+}
+
+func (mc *groupMetricsCollection) getOrCreateRequestSourceMetrics(resourceGroupName, requestSource string) *requestSourceMetrics {
+	mc.sourceMetricsMu.RLock()
+	sourceMetrics, ok := mc.sourceMetrics[requestSource]
+	mc.sourceMetricsMu.RUnlock()
+	if ok {
+		return sourceMetrics
+	}
+
+	mc.sourceMetricsMu.Lock()
+	defer mc.sourceMetricsMu.Unlock()
+	sourceMetrics, ok = mc.sourceMetrics[requestSource]
+	if ok {
+		return sourceMetrics
+	}
+	sourceMetrics = &requestSourceMetrics{
+		rru: metrics.RequestSourceRUCounter.WithLabelValues(resourceGroupName, requestSource, "rru"),
+		wru: metrics.RequestSourceRUCounter.WithLabelValues(resourceGroupName, requestSource, "wru"),
+	}
+	mc.sourceMetrics[requestSource] = sourceMetrics
+	return sourceMetrics
+}
+
+func (mc *groupMetricsCollection) addRequestSourceRU(resourceGroupName, requestSource string, consumption *rmpb.Consumption) {
+	if consumption == nil {
+		return
+	}
+	sourceMetrics := mc.getOrCreateRequestSourceMetrics(resourceGroupName, requestSource)
+	if consumption.RRU > 0 {
+		sourceMetrics.rru.Add(consumption.RRU)
+	}
+	if consumption.WRU > 0 {
+		sourceMetrics.wru.Add(consumption.WRU)
+	}
+}
+
+func (mc *groupMetricsCollection) cleanupRequestSourceMetrics(resourceGroupName string) {
+	mc.sourceMetricsMu.Lock()
+	defer mc.sourceMetricsMu.Unlock()
+	for requestSource := range mc.sourceMetrics {
+		metrics.RequestSourceRUCounter.DeleteLabelValues(resourceGroupName, requestSource, "rru")
+		metrics.RequestSourceRUCounter.DeleteLabelValues(resourceGroupName, requestSource, "wru")
+		delete(mc.sourceMetrics, requestSource)
 	}
 }
 
@@ -577,6 +630,8 @@ func (gc *groupCostController) onRequestWaitImpl(
 		waitDuration += d
 	}
 
+	gc.metrics.addRequestSourceRU(gc.name, info.RequestSource(), delta)
+
 	gc.mu.Lock()
 	// Calculate the penalty of the store
 	penalty = &rmpb.Consumption{}
@@ -622,6 +677,8 @@ func (gc *groupCostController) onResponseImpl(
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
+	gc.metrics.addRequestSourceRU(gc.name, req.RequestSource(), delta)
+
 	return delta, nil
 }
 
@@ -662,6 +719,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
+
+	gc.metrics.addRequestSourceRU(gc.name, req.RequestSource(), delta)
 
 	return delta, waitDuration, nil
 }
