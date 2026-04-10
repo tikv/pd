@@ -1748,6 +1748,9 @@ func (s *Server) campaignLeader() {
 		}
 		return
 	}
+	// Start timing from when leader is successfully elected
+	leaderReadyStart := time.Now()
+	log.Info("leader election succeeded, start leader ready process")
 
 	// Start keepalive the leadership and enable TSO service.
 	// TSO service is strictly enabled/disabled by PD leader lease for 2 reasons:
@@ -1761,48 +1764,72 @@ func (s *Server) campaignLeader() {
 	})
 
 	// maintain the PD leadership, after this, TSO can be service.
+	log.Info("start to keep leader lease")
+	keepLeaderStart := time.Now()
 	s.member.GetLeadership().Keep(ctx)
-	log.Info("campaign PD leader ok", zap.String("campaign-leader-name", s.Name()))
+	keepLeaderDuration := time.Since(keepLeaderStart)
+	log.Info("keep leader lease completed", zap.Duration("cost", keepLeaderDuration), zap.String("campaign-leader-name", s.Name()))
 
+	reloadConfigStart := time.Now()
 	if err := s.reloadConfigFromKV(); err != nil {
-		log.Error("failed to reload configuration", errs.ZapError(err))
+		log.Warn("failed to reload configuration", errs.ZapError(err), zap.Duration("cost", time.Since(reloadConfigStart)))
 		return
 	}
+	reloadConfigDuration := time.Since(reloadConfigStart)
+	log.Info("reload config from KV completed", zap.Duration("cost", reloadConfigDuration))
 
+	loadTTLStart := time.Now()
 	if err := s.persistOptions.LoadTTLFromEtcd(s.ctx, s.client); err != nil {
-		log.Error("failed to load persistOptions from etcd", errs.ZapError(err))
+		log.Warn("failed to load persistOptions from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(loadTTLStart)))
 		return
 	}
+	loadTTLDuration := time.Since(loadTTLStart)
+	log.Info("load persist options from etcd completed", zap.Duration("cost", loadTTLDuration))
 
+	encryptionStart := time.Now()
 	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
-		log.Error("failed to initialize encryption", errs.ZapError(err))
+		log.Warn("failed to initialize encryption", errs.ZapError(err), zap.Duration("cost", time.Since(encryptionStart)))
 		return
 	}
+	encryptionDuration := time.Since(encryptionStart)
+	log.Info("initialize encryption completed", zap.Duration("cost", encryptionDuration))
 
+	callbacksStart := time.Now()
 	log.Info("triggering the leader callback functions")
 	for _, cb := range s.leaderCallbacks {
 		if err := cb(ctx); err != nil {
-			log.Error("failed to execute leader callback function", errs.ZapError(err))
+			log.Warn("failed to execute leader callback function", errs.ZapError(err), zap.Duration("cost", time.Since(callbacksStart)))
 			return
 		}
 	}
+	callbacksDuration := time.Since(callbacksStart)
+	log.Info("trigger leader callback functions completed", zap.Duration("cost", callbacksDuration))
 
 	// Try to create raft cluster.
+	createRaftClusterStart := time.Now()
 	if err := s.createRaftCluster(); err != nil {
-		log.Error("failed to create raft cluster", errs.ZapError(err))
+		log.Warn("failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
 		return
 	}
+	createRaftClusterDuration := time.Since(createRaftClusterStart)
+	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
 	defer s.stopRaftCluster()
 	failpoint.Inject("rebaseErr", func() {
 		failpoint.Return()
 	})
+	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
-		log.Error("failed to sync id from etcd", errs.ZapError(err))
+		log.Warn("failed to sync id from etcd", errs.ZapError(err), zap.Duration("cost", time.Since(rebaseStart)))
 		return
 	}
+	rebaseDuration := time.Since(rebaseStart)
+	log.Info("sync id from etcd completed", zap.Duration("cost", rebaseDuration))
 	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
+	enableLeaderStart := time.Now()
 	s.member.PromoteSelf()
+	enableLeaderDuration := time.Since(enableLeaderStart)
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
+	totalDuration := time.Since(leaderReadyStart)
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
@@ -1812,8 +1839,10 @@ func (s *Server) campaignLeader() {
 	})
 
 	CheckPDVersionWithClusterVersion(s.persistOptions)
-	log.Info("PD leader is ready to serve", zap.String("leader-name", s.Name()))
-
+	log.Info("PD leader is ready to serve",
+		zap.String("leader-name", s.Name()),
+		zap.Duration("total-cost", totalDuration),
+		zap.Duration("cost", enableLeaderDuration))
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 

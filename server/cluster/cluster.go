@@ -334,6 +334,15 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
+	start := time.Now()
+	defer func() {
+		startType := "non-bootstrap"
+		if bootstrap {
+			startType = "bootstrap"
+		}
+		raftClusterStartDuration.WithLabelValues(startType).Observe(time.Since(start).Seconds())
+	}()
+
 	c.Lock()
 	defer c.Unlock()
 
@@ -342,15 +351,22 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
+	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
+		log.Warn("failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
 	}
+	initClusterDuration := time.Since(initClusterStart)
+	log.Info("initialize cluster completed", zap.Duration("cost", initClusterDuration))
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
 	if !bootstrap {
+		checkTSOStart := time.Now()
 		c.checkTSOService()
+		checkTSODuration := time.Since(checkTSOStart)
+		log.Info("check TSO service completed", zap.Duration("cost", checkTSODuration))
 	}
 	defer func() {
 		if !bootstrap && err != nil {
@@ -365,25 +381,36 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 		failpoint.Return(err)
 	})
+	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
+		log.Warn("failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
 		return err
 	}
 	if cluster == nil {
-		log.Warn("cluster is not bootstrapped")
+		loadClusterInfoDuration := time.Since(loadClusterInfoStart)
+		log.Warn("cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
 		return nil
 	}
 	if c.opt.IsPlacementRulesEnabled() {
+		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
+			log.Warn("failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
 			return err
 		}
+		log.Info("initialize placement rules completed", zap.Duration("cost", time.Since(ruleInitStart)))
 	}
-
+	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
+	log.Info("load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
+	labelerStart := time.Now()
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	labelerDuration := time.Since(labelerStart)
 	if err != nil {
+		log.Warn("region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
 		return err
 	}
+	log.Info("region labeler created", zap.Duration("cost", labelerDuration))
 
 	// create affinity manager with region labeler for key range validation and rebuild
 	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
@@ -392,27 +419,45 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		observeSlowStoreStart := time.Now()
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
 		}
+		log.Info("observe slow store status completed", zap.Duration("cost", time.Since(observeSlowStoreStart)))
 	}
+	replicationModeStart := time.Now()
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
+		log.Warn("failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
 		return err
 	}
+	replicationModeDuration := time.Since(replicationModeStart)
+	log.Info("create replication mode manager completed", zap.Duration("cost", replicationModeDuration))
+	loadExternalTSStart := time.Now()
 	c.loadExternalTS()
+	log.Info("load external timestamp completed", zap.Duration("cost", time.Since(loadExternalTSStart)))
+	loadMinResolvedTSStart := time.Now()
 	c.loadMinResolvedTS()
+	log.Info("load min resolved ts completed", zap.Duration("cost", time.Since(loadMinResolvedTSStart)))
 
 	if c.isKeyspaceGroupEnabled {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
+		log.Info("start to bootstrap keyspace group manager")
+		bootstrapKeyspaceStart := time.Now()
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
+			log.Warn("failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
+		log.Info("bootstrap keyspace group manager completed", zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 	}
+	checkSchedulingStart := time.Now()
 	c.checkSchedulingService()
+	checkSchedulingDuration := time.Since(checkSchedulingStart)
+	log.Info("check scheduling service completed", zap.Duration("cost", checkSchedulingDuration))
+	backgroundJobsStart := time.Now()
 	c.wg.Add(11)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
@@ -425,12 +470,14 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
-
+	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
+	runnersStart := time.Now()
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)
 	c.syncRegionRunner.Start(c.ctx)
+	log.Info("start runners completed", zap.Duration("cost", time.Since(runnersStart)))
 	return nil
 }
 
