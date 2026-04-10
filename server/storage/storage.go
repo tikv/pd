@@ -36,6 +36,7 @@ type Storage interface {
 	endpoint.ConfigStorage
 	endpoint.MetaStorage
 	endpoint.RuleStorage
+	endpoint.ForceMergeStorage
 	endpoint.ReplicationStatusStorage
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage

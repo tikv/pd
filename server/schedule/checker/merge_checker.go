@@ -262,14 +262,30 @@ func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) boo
 		if cluster.GetOpts().IsCrossTableMergeEnabled() {
 			return true
 		}
+		if allowByForceMerge(cluster, region, adjacent) {
+			return true
+		}
 		return isTableIDSame(region, adjacent)
 	case core.Raw:
 		return true
 	case core.Txn:
 		return true
 	default:
+		if allowByForceMerge(cluster, region, adjacent) {
+			return true
+		}
 		return isTableIDSame(region, adjacent)
 	}
+}
+
+func allowByForceMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
+	manager := cluster.GetForceMergeManager()
+	if manager == nil {
+		return false
+	}
+	regionNeedForceMerge := manager.SolveRegion(region)
+	adjacentNeedForceMerge := manager.SolveRegion(adjacent)
+	return regionNeedForceMerge || adjacentNeedForceMerge
 }
 
 func isTableIDSame(region, adjacent *core.RegionInfo) bool {

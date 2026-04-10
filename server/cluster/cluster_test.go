@@ -41,6 +41,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/server/schedule/pkdbforcemerge"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -1962,6 +1963,18 @@ type testCluster struct {
 	*RaftCluster
 }
 
+func TestGetForceMergeManager(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	re.NotNil(cluster.GetForceMergeManager())
+}
+
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
@@ -1997,6 +2010,11 @@ func newTestRaftCluster(
 			panic(err)
 		}
 	}
+	forceMergeManager, err := pkdbforcemerge.NewManager(s)
+	if err != nil {
+		panic(err)
+	}
+	rc.forceMergeManager = forceMergeManager
 	return rc
 }
 

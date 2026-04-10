@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
@@ -229,6 +230,11 @@ func (s *RegionsInfo) Adjust() {
 type regionHandler struct {
 	svr *server.Server
 	rd  *render.Render
+}
+
+type addForceMergeRangesRequest struct {
+	StartKeysHex []string `json:"start_keys"`
+	EndKeysHex   []string `json:"end_keys"`
 }
 
 func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
@@ -939,6 +945,66 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter
 		rc.AddSuspectRegions(regionsIDList...)
 	}
 	h.rd.Text(w, http.StatusOK, msgBuilder.String())
+}
+
+// @Tags     region
+// @Summary  Add force merge ranges.
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  plain
+// @Success  200  {string}  string  "Add force merge ranges successfully."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/force-merge [post]
+func (h *regionsHandler) AddForceMergeRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	var input addForceMergeRangesRequest
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	if rc.GetOpts().IsCrossTableMergeEnabled() {
+		h.rd.JSON(w, http.StatusBadRequest, "enable-cross-table-merge is true")
+		return
+	}
+	if keyType := rc.GetOpts().GetKeyType(); keyType != core.Table {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("key-type %s does not support force merge", keyType.String()))
+		return
+	}
+
+	manager := rc.GetForceMergeManager()
+	if manager == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, "force merge manager is not initialized")
+		return
+	}
+	if err := manager.AddRanges(input.StartKeysHex, input.EndKeysHex); err != nil {
+		if errs.ErrForceMergeRangeContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		} else {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "Add force merge ranges successfully.")
+}
+
+// @Tags     region
+// @Summary  Clear force merge ranges.
+// @Produce  plain
+// @Success  200  {string}  string  "Clear force merge ranges successfully."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/force-merge [delete]
+func (h *regionsHandler) DeleteForceMergeRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	manager := rc.GetForceMergeManager()
+	if manager == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, "force merge manager is not initialized")
+		return
+	}
+	if err := manager.ClearRanges(); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "Clear force merge ranges successfully.")
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {

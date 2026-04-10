@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/server/schedule/pkdbforcemerge"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/statistics/buckets"
@@ -49,6 +50,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	ForceMergeManager *pkdbforcemerge.Manager
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
@@ -61,6 +63,7 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
+	store := storage.NewStorageWithMemoryBackend()
 	clus := &Cluster{
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
@@ -76,7 +79,8 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	}
 	// It should be updated to the latest feature version.
 	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, storage.NewStorageWithMemoryBackend(), time.Second*5)
+	clus.ForceMergeManager, _ = pkdbforcemerge.NewManager(store)
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	return clus
 }
 
@@ -198,6 +202,11 @@ func (mc *Cluster) initRuleManager() {
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
+}
+
+// GetForceMergeManager returns the force merge manager of the cluster.
+func (mc *Cluster) GetForceMergeManager() *pkdbforcemerge.Manager {
+	return mc.ForceMergeManager
 }
 
 // GetRegionLabeler returns the region labeler of the cluster.
