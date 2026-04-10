@@ -213,7 +213,7 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 
 type errReader struct{ err error }
 
-func (e *errReader) Read(p []byte) (int, error) { return 0, e.err }
+func (e *errReader) Read(_ []byte) (int, error) { return 0, e.err }
 func (*errReader) Close() error                 { return nil }
 
 type closeTracker struct {
@@ -227,9 +227,8 @@ func (c *closeTracker) Close() error {
 }
 
 func TestEnsureRewindableBody(t *testing.T) {
-	re := require.New(t)
-
 	t.Run("nil body is a no-op", func(t *testing.T) {
+		re := require.New(t)
 		r := &http.Request{}
 		re.NoError(EnsureRewindableBody(r))
 		re.Nil(r.Body)
@@ -237,6 +236,7 @@ func TestEnsureRewindableBody(t *testing.T) {
 	})
 
 	t.Run("http.NoBody is a no-op", func(t *testing.T) {
+		re := require.New(t)
 		r := &http.Request{Body: http.NoBody}
 		re.NoError(EnsureRewindableBody(r))
 		re.Equal(http.NoBody, r.Body)
@@ -244,6 +244,7 @@ func TestEnsureRewindableBody(t *testing.T) {
 	})
 
 	t.Run("existing GetBody is preserved", func(t *testing.T) {
+		re := require.New(t)
 		orig := io.NopCloser(bytes.NewBufferString("payload"))
 		called := false
 		getBody := func() (io.ReadCloser, error) {
@@ -261,6 +262,7 @@ func TestEnsureRewindableBody(t *testing.T) {
 	})
 
 	t.Run("empty body is restored to NoBody", func(t *testing.T) {
+		re := require.New(t)
 		tracker := &closeTracker{Reader: bytes.NewReader(nil)}
 		r := &http.Request{Body: tracker}
 		re.NoError(EnsureRewindableBody(r))
@@ -274,6 +276,7 @@ func TestEnsureRewindableBody(t *testing.T) {
 	})
 
 	t.Run("non-empty body becomes rewindable", func(t *testing.T) {
+		re := require.New(t)
 		payload := []byte(`{"hello":"world"}`)
 		tracker := &closeTracker{Reader: bytes.NewReader(payload)}
 		r := &http.Request{Body: tracker, ContentLength: -1}
@@ -291,7 +294,7 @@ func TestEnsureRewindableBody(t *testing.T) {
 		// GetBody should be invokable multiple times and each returned
 		// ReadCloser should independently yield the same payload -- this is
 		// the actual rewindability guarantee we care about.
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			rc, err := r.GetBody()
 			re.NoError(err)
 			got, err := io.ReadAll(rc)
@@ -302,6 +305,7 @@ func TestEnsureRewindableBody(t *testing.T) {
 	})
 
 	t.Run("read error is propagated", func(t *testing.T) {
+		re := require.New(t)
 		wantErr := errors.New("boom")
 		r := &http.Request{Body: &errReader{err: wantErr}}
 		err := EnsureRewindableBody(r)
