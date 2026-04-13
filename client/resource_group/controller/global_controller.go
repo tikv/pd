@@ -142,11 +142,12 @@ var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
 type ResourceGroupsController struct {
-	clientUniqueID   uint64
-	provider         ResourceGroupProvider
-	groupsController sync.Map
-	ruConfig         *RUConfig
-	keyspaceID       uint32
+	clientUniqueID      uint64
+	provider            ResourceGroupProvider
+	groupsController    sync.Map
+	requestSourceStates sync.Map
+	ruConfig            *RUConfig
+	keyspaceID          uint32
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -388,7 +389,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 							continue
 						}
 						// If the resource group is marked as tombstone before, re-create the resource group controller.
-						newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+						newGC, err := newGroupCostController(
+							group,
+							c.ruConfig,
+							c.lowTokenNotifyChan,
+							c.tokenBucketUpdateChan,
+							c.getOrCreateRequestSourceMetricsState(name),
+						)
 						if err != nil {
 							log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
 								zap.String("name", name), zap.Error(err))
@@ -473,6 +480,22 @@ func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *g
 	return tmp.(*groupCostController), loaded
 }
 
+func (c *ResourceGroupsController) getOrCreateRequestSourceMetricsState(name string) *requestSourceMetricsState {
+	if state, ok := c.requestSourceStates.Load(name); ok {
+		return state.(*requestSourceMetricsState)
+	}
+	state := newRequestSourceMetricsState(name)
+	actual, _ := c.requestSourceStates.LoadOrStore(name, state)
+	return actual.(*requestSourceMetricsState)
+}
+
+func (c *ResourceGroupsController) cleanupRequestSourceMetricsState(name string) {
+	if state, ok := c.requestSourceStates.Load(name); ok {
+		state.(*requestSourceMetricsState).cleanup()
+		c.requestSourceStates.Delete(name)
+	}
+}
+
 // NewResourceGroupNotExistErr returns a new error that indicates the resource group does not exist.
 // It's exported for testing.
 func NewResourceGroupNotExistErr(name string) error {
@@ -522,7 +545,13 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err = newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err = newGroupCostController(
+		group,
+		c.ruConfig,
+		c.lowTokenNotifyChan,
+		c.tokenBucketUpdateChan,
+		c.getOrCreateRequestSourceMetricsState(name),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -554,15 +583,23 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		log.Warn("[resource group controller] get default resource group meta for tombstone failed",
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group is not available.
+		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
 	// Create a default resource group controller for the tombstone resource group independently.
-	gc, err := newGroupCostController(defaultGC.getMeta(), c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(
+		defaultGC.getMeta(),
+		c.ruConfig,
+		c.lowTokenNotifyChan,
+		c.tokenBucketUpdateChan,
+		c.getOrCreateRequestSourceMetricsState(name),
+	)
 	if err != nil {
 		log.Warn("[resource group controller] create default resource group cost controller for tombstone failed",
 			zap.String("name", name), zap.Error(err))
 		// Directly delete the resource group controller if the default group controller cannot be created.
+		c.cleanupRequestSourceMetricsState(name)
 		c.groupsController.Delete(name)
 		return
 	}
@@ -584,8 +621,9 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
-				gc.metrics.cleanupRequestSourceMetrics(resourceGroupName)
+				gc.metrics.cleanupRequestSourceMetrics()
 				c.groupsController.Delete(resourceGroupName)
+				c.requestSourceStates.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true
 			}

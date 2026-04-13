@@ -106,8 +106,7 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
-	sourceMetricsMu                   sync.RWMutex
-	sourceMetrics                     map[string]*requestSourceMetrics
+	sourceState                       *requestSourceMetricsState
 }
 
 type requestSourceMetrics struct {
@@ -115,7 +114,35 @@ type requestSourceMetrics struct {
 	wru prometheus.Counter
 }
 
-func initMetrics(oldName, name string) *groupMetricsCollection {
+type requestSourceMetricsState struct {
+	resourceGroupName string
+	mu                sync.RWMutex
+	closed            bool
+	items             map[string]*requestSourceMetrics
+}
+
+func newRequestSourceMetricsState(resourceGroupName string) *requestSourceMetricsState {
+	return &requestSourceMetricsState{
+		resourceGroupName: resourceGroupName,
+		items:             make(map[string]*requestSourceMetrics),
+	}
+}
+
+func (s *requestSourceMetricsState) cleanup() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for requestSource := range s.items {
+		metrics.RequestSourceRUCounter.DeleteLabelValues(s.resourceGroupName, requestSource, "rru")
+		metrics.RequestSourceRUCounter.DeleteLabelValues(s.resourceGroupName, requestSource, "wru")
+		delete(s.items, requestSource)
+	}
+}
+
+func initMetrics(oldName, name string, sourceState *requestSourceMetricsState) *groupMetricsCollection {
 	const (
 		otherType     = "others"
 		throttledType = "throttled"
@@ -129,37 +156,50 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
-		sourceMetrics:                     make(map[string]*requestSourceMetrics),
+		sourceState:                       sourceState,
 	}
 }
 
-func (mc *groupMetricsCollection) getOrCreateRequestSourceMetrics(resourceGroupName, requestSource string) *requestSourceMetrics {
-	mc.sourceMetricsMu.RLock()
-	sourceMetrics, ok := mc.sourceMetrics[requestSource]
-	mc.sourceMetricsMu.RUnlock()
+func (mc *groupMetricsCollection) getOrCreateRequestSourceMetrics(requestSource string) *requestSourceMetrics {
+	if mc.sourceState == nil {
+		return nil
+	}
+	mc.sourceState.mu.RLock()
+	sourceMetrics, ok := mc.sourceState.items[requestSource]
+	closed := mc.sourceState.closed
+	mc.sourceState.mu.RUnlock()
 	if ok {
 		return sourceMetrics
 	}
+	if closed {
+		return nil
+	}
 
-	mc.sourceMetricsMu.Lock()
-	defer mc.sourceMetricsMu.Unlock()
-	sourceMetrics, ok = mc.sourceMetrics[requestSource]
+	mc.sourceState.mu.Lock()
+	defer mc.sourceState.mu.Unlock()
+	if mc.sourceState.closed {
+		return nil
+	}
+	sourceMetrics, ok = mc.sourceState.items[requestSource]
 	if ok {
 		return sourceMetrics
 	}
 	sourceMetrics = &requestSourceMetrics{
-		rru: metrics.RequestSourceRUCounter.WithLabelValues(resourceGroupName, requestSource, "rru"),
-		wru: metrics.RequestSourceRUCounter.WithLabelValues(resourceGroupName, requestSource, "wru"),
+		rru: metrics.RequestSourceRUCounter.WithLabelValues(mc.sourceState.resourceGroupName, requestSource, "rru"),
+		wru: metrics.RequestSourceRUCounter.WithLabelValues(mc.sourceState.resourceGroupName, requestSource, "wru"),
 	}
-	mc.sourceMetrics[requestSource] = sourceMetrics
+	mc.sourceState.items[requestSource] = sourceMetrics
 	return sourceMetrics
 }
 
-func (mc *groupMetricsCollection) addRequestSourceRU(resourceGroupName, requestSource string, consumption *rmpb.Consumption) {
+func (mc *groupMetricsCollection) addRequestSourceRU(requestSource string, consumption *rmpb.Consumption) {
 	if consumption == nil {
 		return
 	}
-	sourceMetrics := mc.getOrCreateRequestSourceMetrics(resourceGroupName, requestSource)
+	sourceMetrics := mc.getOrCreateRequestSourceMetrics(requestSource)
+	if sourceMetrics == nil {
+		return
+	}
 	if consumption.RRU > 0 {
 		sourceMetrics.rru.Add(consumption.RRU)
 	}
@@ -168,14 +208,8 @@ func (mc *groupMetricsCollection) addRequestSourceRU(resourceGroupName, requestS
 	}
 }
 
-func (mc *groupMetricsCollection) cleanupRequestSourceMetrics(resourceGroupName string) {
-	mc.sourceMetricsMu.Lock()
-	defer mc.sourceMetricsMu.Unlock()
-	for requestSource := range mc.sourceMetrics {
-		metrics.RequestSourceRUCounter.DeleteLabelValues(resourceGroupName, requestSource, "rru")
-		metrics.RequestSourceRUCounter.DeleteLabelValues(resourceGroupName, requestSource, "wru")
-		delete(mc.sourceMetrics, requestSource)
-	}
+func (mc *groupMetricsCollection) cleanupRequestSourceMetrics() {
+	mc.sourceState.cleanup()
 }
 
 type tokenCounter struct {
@@ -209,6 +243,7 @@ func newGroupCostController(
 	mainCfg *RUConfig,
 	lowRUNotifyChan chan notifyMsg,
 	tokenBucketUpdateChan chan *groupCostController,
+	sourceState *requestSourceMetricsState,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -218,7 +253,10 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
-	ms := initMetrics(group.Name, group.Name)
+	if sourceState == nil {
+		sourceState = newRequestSourceMetricsState(group.Name)
+	}
+	ms := initMetrics(group.Name, group.Name, sourceState)
 	gc := &groupCostController{
 		meta:    group,
 		name:    group.Name,
@@ -630,7 +668,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 		waitDuration += d
 	}
 
-	gc.metrics.addRequestSourceRU(gc.name, info.RequestSource(), delta)
+	gc.metrics.addRequestSourceRU(info.RequestSource(), delta)
 
 	gc.mu.Lock()
 	// Calculate the penalty of the store
@@ -677,7 +715,7 @@ func (gc *groupCostController) onResponseImpl(
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
-	gc.metrics.addRequestSourceRU(gc.name, req.RequestSource(), delta)
+	gc.metrics.addRequestSourceRU(req.RequestSource(), delta)
 
 	return delta, nil
 }
@@ -720,7 +758,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
-	gc.metrics.addRequestSourceRU(gc.name, req.RequestSource(), delta)
+	gc.metrics.addRequestSourceRU(req.RequestSource(), delta)
 
 	return delta, waitDuration, nil
 }

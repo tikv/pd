@@ -34,6 +34,16 @@ func collectorMetricCount(collector prometheus.Collector) int {
 	return count
 }
 
+func requestSourceStateSnapshot(t *testing.T, gc *groupCostController, requestSource string) (*requestSourceMetrics, int) {
+	t.Helper()
+	require.NotNil(t, gc.metrics.sourceState)
+
+	gc.metrics.sourceState.mu.RLock()
+	defer gc.metrics.sourceState.mu.RUnlock()
+
+	return gc.metrics.sourceState.items[requestSource], len(gc.metrics.sourceState.items)
+}
+
 func TestRequestSourceMetricsCachedByResourceGroup(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
@@ -59,10 +69,7 @@ func TestRequestSourceMetricsCachedByResourceGroup(t *testing.T) {
 	re.NotZero(reqConsumption.WRU)
 	re.NotZero(respConsumption.RRU)
 
-	gc.metrics.sourceMetricsMu.RLock()
-	sourceMetrics := gc.metrics.sourceMetrics[req.requestSource]
-	cacheSize := len(gc.metrics.sourceMetrics)
-	gc.metrics.sourceMetricsMu.RUnlock()
+	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
 
 	re.Equal(1, cacheSize)
 	re.NotNil(sourceMetrics)
@@ -72,10 +79,9 @@ func TestRequestSourceMetricsCachedByResourceGroup(t *testing.T) {
 
 	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
 	re.NoError(err)
-	gc.metrics.sourceMetricsMu.RLock()
-	re.Equal(1, len(gc.metrics.sourceMetrics))
-	re.Same(sourceMetrics, gc.metrics.sourceMetrics[req.requestSource])
-	gc.metrics.sourceMetricsMu.RUnlock()
+	cachedMetrics, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.Equal(1, cacheSize)
+	re.Same(sourceMetrics, cachedMetrics)
 
 	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "rru")
 	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "wru")
@@ -130,8 +136,263 @@ func TestCleanupResourceGroupRemovesRequestSourceMetrics(t *testing.T) {
 
 	_, ok := controller.loadGroupController(group.Name)
 	re.False(ok)
-	gc.metrics.sourceMetricsMu.RLock()
-	re.Empty(gc.metrics.sourceMetrics)
-	gc.metrics.sourceMetricsMu.RUnlock()
+	_, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.Zero(cacheSize)
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+}
+
+func TestCleanupDoesNotReexportExistingCachedHandle(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "request-source-cleanup-cached-handle",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    64,
+		numReplicas:   1,
+		storeID:       1,
+		requestSource: "internal_gc_cleanup_cached_handle",
+	}
+	resp := &TestResponseInfo{readBytes: 64, succeed: true}
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+
+	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.NotNil(sourceMetrics)
+	re.Equal(1, cacheSize)
+	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	gc.mu.Lock()
+	*gc.run.consumption = *gc.mu.consumption
+	gc.mu.Unlock()
+	gc.inactive = true
+
+	controller.cleanUpResourceGroup()
+
+	_, ok := controller.loadGroupController(group.Name)
+	re.False(ok)
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	sourceMetrics.rru.Add(1)
+	sourceMetrics.wru.Add(1)
+
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+}
+
+func TestCleanupPreventsRecreateRequestSourceMetrics(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "request-source-cleanup-prevent-recreate",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    64,
+		numReplicas:   1,
+		storeID:       1,
+		requestSource: "internal_gc_cleanup_prevent_recreate",
+	}
+	resp := &TestResponseInfo{readBytes: 64, succeed: true}
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	gc.mu.Lock()
+	*gc.run.consumption = *gc.mu.consumption
+	gc.mu.Unlock()
+	gc.inactive = true
+
+	controller.cleanUpResourceGroup()
+
+	_, ok := controller.loadGroupController(group.Name)
+	re.False(ok)
+	_, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.Zero(cacheSize)
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	gc.metrics.addRequestSourceRU(req.requestSource, &rmpb.Consumption{RRU: 1, WRU: 1})
+
+	_, cacheSize = requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.Zero(cacheSize)
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+}
+
+func TestTombstoneCleanupRemovesExistingRequestSourceMetrics(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "request-source-tombstone-cleanup",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	defaultGroup := &rmpb.ResourceGroup{
+		Name: defaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultGroup, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    64,
+		numReplicas:   1,
+		storeID:       1,
+		requestSource: "internal_gc_tombstone_cleanup",
+	}
+	resp := &TestResponseInfo{readBytes: 64, succeed: true}
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	controller.tombstoneGroupCostController(group.Name)
+	tombstoneGC, err := controller.tryGetResourceGroupController(ctx, group.Name, true)
+	re.NoError(err)
+	re.True(tombstoneGC.tombstone.Load())
+
+	controller.cleanUpResourceGroup()
+
+	_, ok := controller.loadGroupController(group.Name)
+	re.False(ok)
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+}
+
+func TestRevivedResourceGroupCleanupRemovesExistingRequestSourceMetrics(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "request-source-revive-cleanup",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	defaultGroup := &rmpb.ResourceGroup{
+		Name: defaultResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultGroup, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    64,
+		numReplicas:   1,
+		storeID:       1,
+		requestSource: "internal_gc_revive_cleanup",
+	}
+	resp := &TestResponseInfo{readBytes: 64, succeed: true}
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	controller.tombstoneGroupCostController(group.Name)
+	tombstoneGC, err := controller.tryGetResourceGroupController(ctx, group.Name, true)
+	re.NoError(err)
+	re.True(tombstoneGC.tombstone.Load())
+
+	revivedGC, err := newGroupCostController(
+		group,
+		controller.ruConfig,
+		controller.lowTokenNotifyChan,
+		controller.tokenBucketUpdateChan,
+		controller.getOrCreateRequestSourceMetricsState(group.Name),
+	)
+	re.NoError(err)
+	re.True(controller.groupsController.CompareAndSwap(group.Name, tombstoneGC, revivedGC))
+
+	revivedGC.mu.Lock()
+	*revivedGC.run.consumption = *revivedGC.mu.consumption
+	revivedGC.mu.Unlock()
+	revivedGC.inactive = true
+
+	controller.cleanUpResourceGroup()
+
+	_, ok := controller.loadGroupController(group.Name)
+	re.False(ok)
 	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 }
