@@ -31,7 +31,8 @@ const (
 var (
 	// ResourceGroupStatusGauge comments placeholder
 	ResourceGroupStatusGauge *prometheus.GaugeVec
-	// DemandRUPerSecGauge is the EMA of demanded RU/s before throttling per resource group.
+	// DemandRUPerSecGauge is the EMA of demanded RU/s per resource group, including
+	// requests rejected by the token bucket (pre-throttling demand).
 	DemandRUPerSecGauge *prometheus.GaugeVec
 	// SuccessfulRequestDuration comments placeholder
 	SuccessfulRequestDuration *prometheus.HistogramVec
@@ -76,7 +77,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   "resource_group",
 			Name:        "demand_ru_per_sec",
-			Help:        "EMA of demanded RU/s before throttling for each resource group.",
+			Help:        "EMA of demanded RU/s per resource group, including requests rejected by the token bucket (pre-throttling demand).",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
