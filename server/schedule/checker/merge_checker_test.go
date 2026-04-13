@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -510,6 +511,66 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 	}
 }
 
+func (suite *mergeCheckerTestSuite) TestAllowMergeByForceMerge() {
+	cfg := config.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, cfg)
+	scheduleCfg := tc.GetScheduleConfig().Clone()
+	scheduleCfg.EnableCrossTableMerge = false
+	tc.SetScheduleConfig(scheduleCfg)
+
+	startKey1 := []byte(codec.EncodeBytes(codec.GenerateTableKey(1)))
+	startKey2 := []byte(codec.EncodeBytes(codec.GenerateTableKey(2)))
+	startKey3 := []byte(codec.EncodeBytes(codec.GenerateTableKey(3)))
+	region := newRegionInfoWithKeys(1, startKey1, startKey2, 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2})
+	adjacent := newRegionInfoWithKeys(2, startKey2, startKey3, 1, 1, []uint64{103, 1}, []uint64{103, 1}, []uint64{104, 2})
+
+	suite.False(AllowMerge(tc, region, adjacent))
+
+	manager := tc.GetForceMergeManager()
+	suite.Require().NotNil(manager)
+
+	suite.NoError(manager.AddRanges(
+		[]string{hex.EncodeToString(region.GetStartKey())},
+		[]string{hex.EncodeToString(region.GetEndKey())},
+	))
+	suite.True(AllowMerge(tc, region, adjacent))
+	suite.True(manager.SolveRegion(region))
+
+	suite.NoError(manager.AddRanges(
+		[]string{hex.EncodeToString(adjacent.GetStartKey())},
+		[]string{hex.EncodeToString(adjacent.GetEndKey())},
+	))
+	suite.True(AllowMerge(tc, region, adjacent))
+	suite.True(manager.SolveRegion(adjacent))
+
+	cfg2 := config.NewTestOptions()
+	tc2 := mockcluster.NewCluster(suite.ctx, cfg2)
+	scheduleCfg2 := tc2.GetScheduleConfig().Clone()
+	scheduleCfg2.EnableCrossTableMerge = false
+	tc2.SetScheduleConfig(scheduleCfg2)
+
+	startKey4 := []byte(codec.EncodeBytes(codec.GenerateTableKey(4)))
+	startKey5 := []byte(codec.EncodeBytes(codec.GenerateTableKey(5)))
+	region2 := newRegionInfoWithKeys(3, startKey1, startKey2, 1, 1, []uint64{105, 1}, []uint64{105, 1}, []uint64{106, 2})
+	expandedAdjacent := newRegionInfoWithKeys(4, startKey2, startKey5, 1, 1, []uint64{107, 1}, []uint64{107, 1}, []uint64{108, 2})
+	coveredRange := newRegionInfoWithKeys(5, startKey3, startKey4, 1, 1, []uint64{109, 1}, []uint64{109, 1}, []uint64{110, 2})
+
+	manager2 := tc2.GetForceMergeManager()
+	suite.Require().NotNil(manager2)
+	suite.NoError(manager2.AddRanges(
+		[]string{
+			hex.EncodeToString(region2.GetStartKey()),
+			hex.EncodeToString(coveredRange.GetStartKey()),
+		},
+		[]string{
+			hex.EncodeToString(region2.GetEndKey()),
+			hex.EncodeToString(coveredRange.GetEndKey()),
+		},
+	))
+	suite.True(AllowMerge(tc2, region2, expandedAdjacent))
+	suite.False(manager2.SolveRegion(coveredRange))
+}
+
 func (suite *mergeCheckerTestSuite) TestCache() {
 	cfg := config.NewTestOptions()
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
@@ -551,6 +612,10 @@ func makeKeyRanges(keys ...string) []interface{} {
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
+	return newRegionInfoWithKeys(id, []byte(startKey), []byte(endKey), size, keys, leader, peers...)
+}
+
+func newRegionInfoWithKeys(id uint64, startKey, endKey []byte, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
 	prs := make([]*metapb.Peer, 0, len(peers))
 	for _, peer := range peers {
 		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
@@ -558,8 +623,8 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 	return core.NewRegionInfo(
 		&metapb.Region{
 			Id:       id,
-			StartKey: []byte(startKey),
-			EndKey:   []byte(endKey),
+			StartKey: startKey,
+			EndKey:   endKey,
 			Peers:    prs,
 		},
 		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
