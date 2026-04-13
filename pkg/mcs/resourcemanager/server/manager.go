@@ -472,6 +472,9 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 
 // UpdateControllerConfigItems updates controller config items atomically.
 func (m *Manager) UpdateControllerConfigItems(items map[string]any) error {
+	if len(items) == 0 {
+		return nil
+	}
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
@@ -485,7 +488,7 @@ func (m *Manager) UpdateControllerConfigItems(items map[string]any) error {
 		updated, err := applyControllerConfigItem(controllerConfig, key, value)
 		if err != nil {
 			m.Unlock()
-			return err
+			return wrapControllerConfigValidationError(err)
 		}
 		if updated {
 			updatedItems = append(updatedItems, struct {

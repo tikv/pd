@@ -620,6 +620,19 @@ func TestUpdateControllerConfigItemsAtomic(t *testing.T) {
 	re.Equal(before.EnableControllerTraceLog, after.EnableControllerTraceLog)
 }
 
+func TestUpdateControllerConfigValidationError(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(m.Init(ctx))
+
+	err := m.UpdateControllerConfigItem("ltb-max-wait-duration", "not-a-duration")
+	re.Error(err)
+	re.True(IsControllerConfigValidationError(err))
+}
+
 func TestKeyspaceNameLookup(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()

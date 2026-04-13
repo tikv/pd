@@ -340,15 +340,24 @@ func (suite *resourceManagerAPITestSuite) TestControllerConfigAPIAllOrNothing() 
 	re := suite.Require()
 
 	before := suite.mustGetControllerConfig(re)
-	resp, statusCode := tryToSetControllerConfig(re, suite.cluster.GetLeaderServer().GetAddr(), map[string]any{
-		"enable-controller-trace-log": "true",
-		"ltb-max-wait-duration":       "not-a-duration",
-	})
-	re.Equal(http.StatusBadRequest, statusCode)
-	re.Contains(resp, "time:")
+	payload := map[string]any{
+		"read-base-cost":           2.0,
+		"read-per-batch-base-cost": 3.0,
+		"read-cost-per-byte":       4.0,
+		"write-base-cost":          5.0,
+		"write-cost-per-byte":      6.0,
+		"ltb-max-wait-duration":    "not-a-duration",
+	}
+	for i := 0; i < 8; i++ {
+		// Old code updated fields one by one after decoding into a map, so repeating the
+		// same mixed payload makes a partial write overwhelmingly likely if batching is gone.
+		resp, statusCode := tryToSetControllerConfig(re, suite.cluster.GetLeaderServer().GetAddr(), payload)
+		re.Equal(http.StatusBadRequest, statusCode)
+		re.Contains(resp, "time:")
 
-	after := suite.mustGetControllerConfig(re)
-	re.Equal(before, after)
+		after := suite.mustGetControllerConfig(re)
+		re.Equal(before, after)
+	}
 }
 
 func (suite *resourceManagerAPITestSuite) mustGetControllerConfig(re *require.Assertions) *server.ControllerConfig {

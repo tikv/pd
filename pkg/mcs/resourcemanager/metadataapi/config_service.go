@@ -253,7 +253,11 @@ func (s *ConfigService) SetControllerConfig(c *gin.Context) {
 			c.String(http.StatusForbidden, err.Error())
 			return
 		}
-		c.String(http.StatusBadRequest, err.Error())
+		if rmserver.IsControllerConfigValidationError(err) {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.String(http.StatusOK, "Success!")
