@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/server/schedule/pkdbforcemerge"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/statistics/buckets"
@@ -49,6 +50,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	ForceMergeManager *pkdbforcemerge.Manager
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
@@ -61,6 +63,7 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
+	store := storage.NewStorageWithMemoryBackend()
 	clus := &Cluster{
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
@@ -76,7 +79,8 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	}
 	// It should be updated to the latest feature version.
 	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, storage.NewStorageWithMemoryBackend(), time.Second*5)
+	clus.ForceMergeManager, _ = pkdbforcemerge.NewManager(store)
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, store, time.Second*5)
 	return clus
 }
 
@@ -94,6 +98,9 @@ func (mc *Cluster) GetOpts() *config.PersistOptions {
 func (mc *Cluster) GetAllocator() id.Allocator {
 	return mc.IDAllocator
 }
+
+// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
+func (mc *Cluster) CheckSchedulingAllowance() (bool, error) { return true, nil }
 
 // ScanRegions scans region with start key, until number greater than limit.
 func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
@@ -188,13 +195,18 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
 		mc.RuleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), mc, mc.GetOpts())
-		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
+		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel)
 	}
 }
 
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
+}
+
+// GetForceMergeManager returns the force merge manager of the cluster.
+func (mc *Cluster) GetForceMergeManager() *pkdbforcemerge.Manager {
+	return mc.ForceMergeManager
 }
 
 // GetRegionLabeler returns the region labeler of the cluster.
@@ -334,6 +346,13 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+	mc.PutStore(store)
+}
+
+// AddLabersStoreWithLearnerCount adds store with specified count of region, learner and labels.
+func (mc *Cluster) AddLabersStoreWithLearnerCount(storeID uint64, regionCount int, learnerCount int, labels map[string]string) {
+	mc.AddLabelsStore(storeID, regionCount, labels)
+	store := mc.GetStore(storeID).Clone(core.SetLearnerCount(learnerCount))
 	mc.PutStore(store)
 }
 

@@ -38,6 +38,10 @@ ifeq ("$(WITH_RACE)", "1")
 	BUILD_CGO_ENABLED := 1
 endif
 
+ifeq ($(PLUGIN), 1)
+	BUILD_TAGS += with_plugin
+endif
+
 LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
 LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
@@ -148,7 +152,7 @@ static: install-tools
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
-	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES)
+	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ echo "revive ..."
 	@ revive -formatter friendly -config revive.toml $(PACKAGES)
 

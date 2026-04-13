@@ -85,13 +85,28 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 	}}
 }
 
-// NewStoreInfoWithAvailable is created with available and capacity
-func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
+// NewTestRegionInfoWithID creates a new RegionInfo for test purpose.
+func NewTestRegionInfoWithID(regionID, storeID uint64, start, end []byte, opts ...RegionCreateOption) *RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	return NewRegionInfo(metaRegion, leader, opts...)
+}
+
+// NewStoreInfoWithDisk is created with all disk infos.
+func NewStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = capacity
 	stats.Available = available
-	usedSize := capacity - available
-	regionSize := (float64(usedSize) * amp) / units.MiB
+	stats.UsedSize = used
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,
@@ -101,6 +116,13 @@ func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *Sto
 		SetRegionSize(int64(regionSize)),
 	)
 	return store
+}
+
+// NewStoreInfoWithAvailable is created with available and capacity
+func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
+	usedSize := capacity - available
+	regionSize := (float64(usedSize) * amp) / units.MiB
+	return NewStoreInfoWithDisk(id, usedSize, available, capacity, uint64(regionSize))
 }
 
 // NewStoreInfoWithLabel is create a store with specified labels.

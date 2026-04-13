@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build swagger_server
-// +build swagger_server
+//go:build !swagger_server
+// +build !swagger_server
 
 package swaggerserver
 
 import (
+	"context"
 	"net/http"
 
-	httpSwagger "github.com/swaggo/http-swagger"
-	_ "github.com/tikv/pd/docs/swagger"
+	"github.com/tikv/pd/server"
 )
 
-func handler() http.Handler {
-	return httpSwagger.Handler()
+// Enabled return false if swagger server is disabled.
+func Enabled() bool {
+	return false
+}
+
+// NewHandler creates a HTTP handler for Swagger.
+func NewHandler(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+	return nil, server.ServiceGroup{}, nil
 }

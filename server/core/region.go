@@ -22,11 +22,13 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -37,7 +39,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const randomRegionMaxRetry = 10
+const (
+	randomRegionMaxRetry = 10
+	scanRegionLimit      = 1000
+)
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
@@ -68,8 +73,26 @@ type RegionInfo struct {
 	queryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets       unsafe.Pointer
-	fromHeartbeat bool
+	buckets unsafe.Pointer
+	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
+	source RegionSource
+}
+
+// RegionSource is the source of region.
+type RegionSource uint32
+
+const (
+	// Storage means this region's meta info might be stale.
+	Storage RegionSource = iota
+	// Sync means this region's meta info is relatively fresher.
+	Sync
+	// Heartbeat means this region's meta info is relatively fresher.
+	Heartbeat
+)
+
+// LoadedFromStorage means this region's meta info loaded from storage.
+func (r *RegionInfo) LoadedFromStorage() bool {
+	return r.source == Storage
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -166,6 +189,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 		queryStats:        heartbeat.GetQueryStats(),
+		source:            Heartbeat,
 	}
 
 	for _, opt := range opts {
@@ -583,9 +607,9 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
-// IsFromHeartbeat returns whether the region info is from the region heartbeat.
-func (r *RegionInfo) IsFromHeartbeat() bool {
-	return r.fromHeartbeat
+// IsFlashbackChanged returns true if flashback changes.
+func (r *RegionInfo) IsFlashbackChanged(l *RegionInfo) bool {
+	return r.meta.IsInFlashback != l.meta.IsInFlashback
 }
 
 func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
@@ -690,7 +714,13 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
 			}
-			if !origin.IsFromHeartbeat() {
+			// Do not save to kv, because 1) flashback will be eventually set to
+			// false, 2) flashback changes almost all regions in a cluster.
+			// Saving kv may downgrade PD performance when there are many regions.
+			if region.IsFlashbackChanged(origin) {
+				saveCache = true
+			}
+			if origin.LoadedFromStorage() {
 				isNew = true
 			}
 		}
@@ -856,6 +886,11 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 
 // UpdateSubTree updates the subtree.
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*RegionInfo, rangeChanged bool) {
+	failpoint.Inject("UpdateSubTree", func() {
+		if origin == nil {
+			time.Sleep(time.Second)
+		}
+	})
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
@@ -864,8 +899,17 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*Regi
 			// TODO: Improve performance by deleting only the different peers.
 			r.removeRegionFromSubTreeLocked(origin)
 		} else {
-			r.updateSubTreeStat(origin, region)
-			r.subRegions[region.GetID()].RegionInfo = region
+			// The region tree and the subtree update is not atomic and the region tree is updated first.
+			// If there are two thread needs to update region tree,
+			// t1: thread-A  update region tree
+			// 										t2: thread-B: update region tree again
+			//										t3: thread-B: update subtree
+			// t4: thread-A: update region subtree
+			// to keep region tree consistent with subtree, we need to drop this update.
+			if tree, ok := r.subRegions[region.GetID()]; ok {
+				r.updateSubTreeStat(origin, region)
+				tree.RegionInfo = region
+			}
 			return
 		}
 	}
@@ -1159,6 +1203,13 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
+// GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
+func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	return r.tree.notFromStorageRegionsCnt
+}
+
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	r.t.RLock()
@@ -1171,11 +1222,11 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 }
 
 // GetStoreStats returns the store stats.
-func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, pending int, leaderSize, regionSize int64) {
+func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, learner, pending int, leaderSize, regionSize int64) {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.leaders[storeID].length(), r.getStoreRegionCountLocked(storeID), r.witnesses[storeID].length(),
-		r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
+		r.learners[storeID].length(), r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
 }
 
 // GetRegionCount gets the total count of RegionInfo of regionMap
@@ -1411,16 +1462,31 @@ func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(regio
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	r.t.RLock()
-	defer r.t.RUnlock()
 	var size int64
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
+	for {
+		r.t.RLock()
+		var cnt int
+		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if cnt >= scanRegionLimit {
+				return false
+			}
+			cnt++
+			startKey = region.GetEndKey()
+			size += region.GetApproximateSize()
+			return true
+		})
+		r.t.RUnlock()
+		if cnt == 0 {
+			break
 		}
-		size += region.GetApproximateSize()
-		return true
-	})
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
 	return size
 }
 

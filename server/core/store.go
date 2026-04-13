@@ -52,6 +52,7 @@ type StoreInfo struct {
 	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
 	leaderCount         int
 	regionCount         int
+	learnerCount        int
 	witnessCount        int
 	leaderSize          int64
 	regionSize          int64
@@ -221,6 +222,11 @@ func (s *StoreInfo) GetRegionCount() int {
 	return s.regionCount
 }
 
+// GetLearnerCount returns the learner count of the store.
+func (s *StoreInfo) GetLearnerCount() int {
+	return s.learnerCount
+}
+
 // GetWitnessCount returns the witness count of the store.
 func (s *StoreInfo) GetWitnessCount() int {
 	return s.witnessCount
@@ -346,15 +352,19 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	A := float64(s.GetAvgAvailable()) / units.GiB
 	C := float64(s.GetCapacity()) / units.GiB
+	// the used size always be accurate, it only statistics the raftDB|rocksDB|snap directory, so we use it directly.
+	U := float64(s.GetUsedSize()) / units.GiB
+	// the diff maybe not zero if the disk has other files.
+	diff := C - A - U
 	R := float64(s.GetRegionSize() + delta)
 	if R < 0 {
 		R = float64(s.GetRegionSize())
 	}
-	U := C - A
+
 	if s.GetRegionSize() != 0 {
 		U += U * (float64(delta)) / float64(s.GetRegionSize())
-		if U < C && U > 0 {
-			A = C - U
+		if A1 := C - U - diff; A1 > 0 && A1 < C {
+			A = A1
 		}
 	}
 	var (
@@ -705,11 +715,12 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, witnessCount int) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
 			SetWitnessCount(witnessCount),
+			SetLearnerCount(learnerCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))

@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"sync"
@@ -32,6 +33,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -325,12 +327,13 @@ type lastTSO struct {
 }
 
 const (
-	dialTimeout            = 3 * time.Second
-	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval  = time.Minute
-	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	retryInterval          = 500 * time.Millisecond
-	maxRetryTimes          = 6
+	dialTimeout                 = 3 * time.Second
+	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval       = time.Minute
+	defaultMaxTSOBatchSize      = 10000 // should be higher if client is sending requests in burst
+	retryInterval               = 500 * time.Millisecond
+	maxRetryTimes               = 6
+	updateMemberBackOffBaseTime = 100 * time.Millisecond
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -765,6 +768,7 @@ func (c *client) handleDispatcher(
 
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 tsoBatchLoop:
 	for {
 		select {
@@ -861,7 +865,7 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckLeader is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := c.updateMember(); err != nil {
+				if err := bo.Exec(dispatcherCtx, c.updateMember); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return
@@ -885,7 +889,7 @@ func (c *client) allowTSOFollowerProxy(dc string) bool {
 }
 
 // chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
-// connectionCtxs will only have only one stream to choose when the TSO Follower Proxy is off.
+// connectionCtxs will only have one stream to choose when the TSO Follower Proxy is off.
 func (c *client) chooseStream(connectionCtxs *sync.Map) (connectionCtx *connectionContext) {
 	idx := 0
 	connectionCtxs.Range(func(addr, cc interface{}) bool {
@@ -1087,14 +1091,22 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	}
 
 	if err := stream.Send(req); err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
 	tsoBatchSendLatency.Observe(float64(time.Since(tbc.batchStartTime)))
 	resp, err := stream.Recv()
 	if err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
@@ -1807,6 +1819,9 @@ func addrsToUrls(addrs []string) []string {
 
 // IsLeaderChange will determine whether there is a leader change.
 func IsLeaderChange(err error) bool {
+	if err == errs.ErrClientTSOStreamClosed {
+		return true
+	}
 	errMsg := err.Error()
 	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
 }

@@ -16,20 +16,24 @@ package api
 
 import (
 	"container/heap"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
+	jwriter "github.com/mailru/easyjson/jwriter"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
@@ -52,11 +56,32 @@ type MetaPeer struct {
 	IsLearner bool `json:"is_learner,omitempty"`
 }
 
+func (m *MetaPeer) setDefaultIfNil() {
+	if m.Peer == nil {
+		m.Peer = &metapb.Peer{
+			Id:        m.GetId(),
+			StoreId:   m.GetStoreId(),
+			Role:      m.GetRole(),
+			IsWitness: m.GetIsWitness(),
+		}
+	}
+}
+
 // PDPeerStats is api compatible with *pdpb.PeerStats.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDPeerStats struct {
 	*pdpb.PeerStats
 	Peer MetaPeer `json:"peer"`
+}
+
+func (s *PDPeerStats) setDefaultIfNil() {
+	if s.PeerStats == nil {
+		s.PeerStats = &pdpb.PeerStats{
+			Peer:        s.GetPeer(),
+			DownSeconds: s.GetDownSeconds(),
+		}
+	}
+	s.Peer.setDefaultIfNil()
 }
 
 func fromPeer(peer *metapb.Peer) MetaPeer {
@@ -101,6 +126,7 @@ func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 
 // RegionInfo records detail region info for api usage.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// easyjson:json
 type RegionInfo struct {
 	ID          uint64              `json:"id"`
 	StartKey    string              `json:"start_key"`
@@ -167,9 +193,9 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
+	s.Buckets = nil
 
 	keys := r.GetBuckets().GetKeys()
-
 	if len(keys) > 0 {
 		s.Buckets = make([]string, len(keys))
 		for i, key := range keys {
@@ -204,6 +230,11 @@ func (s *RegionsInfo) Adjust() {
 type regionHandler struct {
 	svr *server.Server
 	rd  *render.Render
+}
+
+type addForceMergeRangesRequest struct {
+	StartKeysHex []string `json:"start_keys"`
+	EndKeysHex   []string `json:"end_keys"`
 }
 
 func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
@@ -311,15 +342,48 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	}
 }
 
-func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
-	regionInfos := make([]RegionInfo, len(regions))
+// marshalRegionsInfoJSON marshals regions to bytes in `RegionsInfo`'s JSON format.
+// It is used to reduce the cost of JSON serialization.
+func marshalRegionsInfoJSON(ctx context.Context, regions []*core.RegionInfo) ([]byte, error) {
+	out := &jwriter.Writer{}
+	out.RawByte('{')
+
+	out.RawString("\"count\":")
+	out.Int(len(regions))
+
+	out.RawString(",\"regions\":")
+	out.RawByte('[')
+	region := &RegionInfo{}
 	for i, r := range regions {
-		InitRegion(r, &regionInfos[i])
+		select {
+		case <-ctx.Done():
+			// Return early, avoid the unnecessary computation.
+			// See more details in https://github.com/tikv/pd/issues/6835
+			return nil, ctx.Err()
+		default:
+		}
+		if i > 0 {
+			out.RawByte(',')
+		}
+		InitRegion(r, region)
+		// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
+		// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
+		region.Leader.setDefaultIfNil()
+		for i := range region.Peers {
+			region.Peers[i].setDefaultIfNil()
+		}
+		for i := range region.PendingPeers {
+			region.PendingPeers[i].setDefaultIfNil()
+		}
+		for i := range region.DownPeers {
+			region.DownPeers[i].setDefaultIfNil()
+		}
+		region.MarshalEasyJSON(out)
 	}
-	return &RegionsInfo{
-		Count:   len(regions),
-		Regions: regionInfos,
-	}
+	out.RawByte(']')
+
+	out.RawByte('}')
+	return out.Buffer.BuildBytes(), out.Error
 }
 
 // @Tags     region
@@ -330,8 +394,7 @@ func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	regions := rc.GetRegions()
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.returnWithRegions(w, r, regions)
 }
 
 // @Tags     region
@@ -361,8 +424,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 		limit = maxRegionLimit
 	}
 	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.returnWithRegions(w, r, regions)
 }
 
 // @Tags     region
@@ -393,8 +455,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	regions := rc.GetStoreRegions(uint64(id))
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.returnWithRegions(w, r, regions)
 }
 
 // @Tags     region
@@ -404,14 +465,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/miss-peer [get]
 func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.MissPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.MissPeer, r)
 }
 
 // @Tags     region
@@ -421,14 +475,7 @@ func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Reque
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/extra-peer [get]
 func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.ExtraPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.ExtraPeer, r)
 }
 
 // @Tags     region
@@ -438,14 +485,7 @@ func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Requ
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/pending-peer [get]
 func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.PendingPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.PendingPeer, r)
 }
 
 // @Tags     region
@@ -455,14 +495,7 @@ func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Re
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/down-peer [get]
 func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.DownPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.DownPeer, r)
 }
 
 // @Tags     region
@@ -472,14 +505,7 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/learner-peer [get]
 func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.LearnerPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.LearnerPeer, r)
 }
 
 // @Tags     region
@@ -489,14 +515,7 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/offline-peer [get]
 func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetOfflinePeer(statistics.OfflinePeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.OfflinePeer, r)
 }
 
 // @Tags     region
@@ -506,14 +525,7 @@ func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Re
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/oversized-region [get]
 func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.OversizedRegion)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.OversizedRegion, r)
 }
 
 // @Tags     region
@@ -523,14 +535,7 @@ func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Requ
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/undersized-region [get]
 func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.UndersizedRegion)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.getRegionsByType(w, statistics.UndersizedRegion, r)
 }
 
 // @Tags     region
@@ -540,14 +545,24 @@ func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Req
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/empty-region [get]
 func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.EmptyRegion)
+	h.getRegionsByType(w, statistics.EmptyRegion, r)
+}
+
+func (h *regionsHandler) getRegionsByType(w http.ResponseWriter, t statistics.RegionStatisticType, r *http.Request) {
+	regions, err := h.svr.GetHandler().GetRegionsByType(t)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	h.returnWithRegions(w, r, regions)
+}
+
+func (h *regionsHandler) returnWithRegions(w http.ResponseWriter, r *http.Request, regions []*core.RegionInfo) {
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	h.rd.Data(w, http.StatusOK, b)
 }
 
 type histItem struct {
@@ -687,8 +702,12 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 	}
 
 	left, right := rc.GetAdjacentRegions(region)
-	regionsInfo := convertToAPIRegions([]*core.RegionInfo{left, right})
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	b, err := marshalRegionsInfoJSON(r.Context(), []*core.RegionInfo{left, right})
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Data(w, http.StatusOK, b)
 }
 
 const (
@@ -836,6 +855,124 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
 }
 
+// @Tags     region
+// @Summary  Accelerate regions scheduling in given ranges, only receive hex format for keys
+// @Accept   json
+// @Param    body   body   object   true   "json params"
+// @Param    limit  query  integer  false  "Limit count"  default(256)
+// @Produce  json
+// @Success  200  {string}  string  "Accelerate regions scheduling in given ranges [startKey1, endKey1), [startKey2, endKey2), ..."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/accelerate-schedule/batch [post]
+func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	var input []map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	limit := 256
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	var msgBuilder strings.Builder
+	msgBuilder.Grow(128)
+	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
+	regionsIDSet := make(map[uint64]struct{})
+	for _, rg := range input {
+		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		endKey, rawEndKey, err := apiutil.ParseKey("end_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		regions := rc.ScanRegions(startKey, endKey, limit)
+		for _, region := range regions {
+			regionsIDSet[region.GetID()] = struct{}{}
+		}
+		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+	}
+	if len(regionsIDSet) > 0 {
+		regionsIDList := make([]uint64, 0, len(regionsIDSet))
+		for id := range regionsIDSet {
+			regionsIDList = append(regionsIDList, id)
+		}
+		rc.AddSuspectRegions(regionsIDList...)
+	}
+	h.rd.Text(w, http.StatusOK, msgBuilder.String())
+}
+
+// @Tags     region
+// @Summary  Add force merge ranges.
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  plain
+// @Success  200  {string}  string  "Add force merge ranges successfully."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/force-merge [post]
+func (h *regionsHandler) AddForceMergeRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	var input addForceMergeRangesRequest
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	if rc.GetOpts().IsCrossTableMergeEnabled() {
+		h.rd.JSON(w, http.StatusBadRequest, "enable-cross-table-merge is true")
+		return
+	}
+	if keyType := rc.GetOpts().GetKeyType(); keyType != core.Table {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("key-type %s does not support force merge", keyType.String()))
+		return
+	}
+
+	manager := rc.GetForceMergeManager()
+	if manager == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, "force merge manager is not initialized")
+		return
+	}
+	if err := manager.AddRanges(input.StartKeysHex, input.EndKeysHex); err != nil {
+		if errs.ErrForceMergeRangeContent.Equal(err) || errs.ErrHexDecodingString.Equal(err) {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		} else {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "Add force merge ranges successfully.")
+}
+
+// @Tags     region
+// @Summary  Clear force merge ranges.
+// @Produce  plain
+// @Success  200  {string}  string  "Clear force merge ranges successfully."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/force-merge [delete]
+func (h *regionsHandler) DeleteForceMergeRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	manager := rc.GetForceMergeManager()
+	if manager == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, "force merge manager is not initialized")
+		return
+	}
+	if err := manager.ClearRanges(); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "Clear force merge ranges successfully.")
+}
+
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	rc := getCluster(r)
 	limit := defaultRegionLimit
@@ -851,8 +988,12 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 		limit = maxRegionLimit
 	}
 	regions := TopNRegions(rc.GetRegions(), less, limit)
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Data(w, http.StatusOK, b)
 }
 
 // @Tags     region

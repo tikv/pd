@@ -59,6 +59,7 @@ import (
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
+	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -88,6 +89,9 @@ const (
 	idAllocLabel = "idalloc"
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
+
+	lostPDLeaderMaxTimeoutSecs   = 10
+	lostPDLeaderReElectionFactor = 10
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -121,6 +125,8 @@ type Server struct {
 	member *member.Member
 	// etcd client
 	client *clientv3.Client
+	// electionClient is used for leader election.
+	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
 	clusterID  uint64 // pd cluster id.
@@ -330,12 +336,18 @@ func (s *Server) startEtcd(ctx context.Context) error {
 
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
+	clientConfig := clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
 		TLS:         tlsConfig,
 		LogConfig:   &lgc,
-	})
+	}
+	client, err := clientv3.New(clientConfig)
+	if err != nil {
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+
+	s.electionClient, err = clientv3.New(clientConfig)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -357,17 +369,21 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		}
 	}
 	s.client = client
-	s.httpClient = &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
+	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
+	// which may take a significant amount of time. However, it might be necessary to
+	// define an appropriate timeout in the future.
+	httpCli := &http.Client{}
+	if tlsConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConfig
+		httpCli.Transport = transport
 	}
+	s.httpClient = httpCli
 
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
 	})
-	s.member = member.NewMember(etcd, client, etcdServerID)
+	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
 	return nil
 }
 
@@ -492,6 +508,11 @@ func (s *Server) Close() {
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+	if s.electionClient != nil {
+		if err := s.electionClient.Close(); err != nil {
+			log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
 
@@ -840,8 +861,7 @@ func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrServerNotStarted.FastGenByArgs()
 	}
-	members, err := cluster.GetMembers(s.GetClient())
-	return members, err
+	return cluster.GetMembers(s.GetClient())
 }
 
 // GetServiceMiddlewareConfig gets the service middleware config information.
@@ -930,18 +950,18 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	}
 	old := s.persistOptions.GetReplicationConfig()
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
-		raftCluster := s.GetRaftCluster()
-		if raftCluster == nil {
+		rc := s.GetRaftCluster()
+		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
-			if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel); err != nil {
 				return err
 			}
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
-			for _, s := range raftCluster.GetStores() {
+			for _, s := range rc.GetStores() {
 				if !s.IsRemoved() && s.IsTiFlash() {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
@@ -951,23 +971,27 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 
 	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			return errs.ErrNotBootstrapped.GenWithStackByArgs()
+		}
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		defaultRule := s.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
+		defaultRule := rc.GetRuleManager().GetRule("pd", "default")
 
 		CheckInDefaultRule := func() error {
-			// replication config  won't work when placement rule is enabled and exceeds one default rule
+			// replication config won't work when placement rule is enabled and exceeds one default rule
 			if !(defaultRule != nil &&
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
-				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
+				return errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) && defaultRule.IsolationLevel == old.IsolationLevel) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel) {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -978,7 +1002,12 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if rule != nil {
 		rule.Count = int(cfg.MaxReplicas)
 		rule.LocationLabels = cfg.LocationLabels
-		if err := s.GetRaftCluster().GetRuleManager().SetRule(rule); err != nil {
+		rule.IsolationLevel = cfg.IsolationLevel
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			return errs.ErrNotBootstrapped.GenWithStackByArgs()
+		}
+		if err := rc.GetRuleManager().SetRule(rule); err != nil {
 			log.Error("failed to update rule count",
 				errs.ZapError(err))
 			return err
@@ -990,7 +1019,11 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		s.persistOptions.SetReplicationConfig(old)
 		if rule != nil {
 			rule.Count = int(old.MaxReplicas)
-			if e := s.GetRaftCluster().GetRuleManager().SetRule(rule); e != nil {
+			rc := s.GetRaftCluster()
+			if rc == nil {
+				return errs.ErrNotBootstrapped.GenWithStackByArgs()
+			}
+			if e := rc.GetRuleManager().SetRule(rule); e != nil {
 				log.Error("failed to roll back count of rule when update replication config", errs.ZapError(e))
 			}
 		}
@@ -1224,18 +1257,18 @@ func (s *Server) GetServerOption() *config.PersistOptions {
 
 // GetMetaRegions gets meta regions from cluster.
 func (s *Server) GetMetaRegions() []*metapb.Region {
-	cluster := s.GetRaftCluster()
-	if cluster != nil {
-		return cluster.GetMetaRegions()
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		return rc.GetMetaRegions()
 	}
 	return nil
 }
 
 // GetRegions gets regions from cluster.
 func (s *Server) GetRegions() []*core.RegionInfo {
-	cluster := s.GetRaftCluster()
-	if cluster != nil {
-		return cluster.GetRegions()
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		return rc.GetRegions()
 	}
 	return nil
 }
@@ -1356,9 +1389,9 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	}
 	log.Info("replication mode config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 
-	cluster := s.GetRaftCluster()
-	if cluster != nil {
-		err := cluster.GetReplicationMode().UpdateConfig(cfg)
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		err := rc.GetReplicationMode().UpdateConfig(cfg)
 		if err != nil {
 			log.Warn("failed to update replication mode", errs.ZapError(err))
 			// revert to old config
@@ -1389,6 +1422,14 @@ func (s *Server) leaderLoop() {
 		}
 
 		leader, rev, checkAgain := s.member.CheckLeader()
+		// add failpoint to test leader check go to stuck.
+		failpoint.Inject("leaderLoopCheckAgain", func(val failpoint.Value) {
+			memberString := val.(string)
+			memberID, _ := strconv.ParseUint(memberString, 10, 64)
+			if s.member.ID() == memberID {
+				checkAgain = true
+			}
+		})
 		if checkAgain {
 			continue
 		}
@@ -1414,6 +1455,25 @@ func (s *Server) leaderLoop() {
 		// To make sure the etcd leader and PD leader are on the same server.
 		etcdLeader := s.member.GetEtcdLeader()
 		if etcdLeader != s.member.ID() {
+			if s.member.GetLeader() == nil {
+				lastUpdated := s.member.GetLastLeaderUpdatedTime()
+				// use random timeout to avoid leader campaigning storm.
+				randomTimeout := time.Duration(rand.Intn(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
+				// add failpoint to test the campaign leader logic.
+				failpoint.Inject("timeoutWaitPDLeader", func() {
+					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
+					randomTimeout = time.Duration(rand.Intn(10))*time.Millisecond + 100*time.Millisecond
+				})
+				if lastUpdated.Add(randomTimeout).Before(time.Now()) && !lastUpdated.IsZero() && etcdLeader != 0 {
+					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
+						zap.Duration("timeout", randomTimeout),
+						zap.Time("last-updated", lastUpdated),
+						zap.String("current-leader-member-id", types.ID(etcdLeader).String()),
+						zap.String("transferee-member-id", types.ID(s.member.ID()).String()),
+					)
+					s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID())
+				}
+			}
 			log.Info("skip campaigning of pd leader and check later",
 				zap.String("server-name", s.Name()),
 				zap.Uint64("etcd-leader-id", etcdLeader),
@@ -1522,6 +1582,16 @@ func (s *Server) campaignLeader() {
 				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
+			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
+			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
+				memberString := val.(string)
+				memberID, _ := strconv.ParseUint(memberString, 10, 64)
+				if s.member.ID() == memberID {
+					log.Info("exit PD leader")
+					failpoint.Return()
+				}
+			})
+
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
@@ -1610,8 +1680,15 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
+	if name != replication.DrStatusFile {
+		return errors.New("Invalid file name")
+	}
 	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
-	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
+	path := filepath.Join(s.GetConfig().DataDir, name)
+	if !isPathInDirectory(path, s.GetConfig().DataDir) {
+		return errors.New("Invalid file path")
+	}
+	return os.WriteFile(path, data, 0644) // #nosec
 }
 
 // SaveTTLConfig save ttl config
@@ -1691,7 +1768,11 @@ func (s *Server) GetGlobalTS() (uint64, error) {
 
 // GetExternalTS returns external timestamp.
 func (s *Server) GetExternalTS() uint64 {
-	return s.GetRaftCluster().GetExternalTS()
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return 0
+	}
+	return rc.GetExternalTS()
 }
 
 // SetExternalTS returns external timestamp.
@@ -1705,12 +1786,22 @@ func (s *Server) SetExternalTS(externalTS uint64) error {
 		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
 		return errors.New(desc)
 	}
-	currentExternalTS := s.GetRaftCluster().GetExternalTS()
+	c := s.GetRaftCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	currentExternalTS := c.GetExternalTS()
 	if tsoutil.CompareTimestampUint64(externalTS, currentExternalTS) != 1 {
 		desc := "the external timestamp should be larger than now"
 		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("current external timestamp", currentExternalTS))
 		return errors.New(desc)
 	}
-	s.GetRaftCluster().SetExternalTS(externalTS)
-	return nil
+
+	return c.SetExternalTS(externalTS)
+}
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
 }

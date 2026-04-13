@@ -411,11 +411,23 @@ func TestCheckRegionWithScheduleDeny(t *testing.T) {
 		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
 	})
 
+	// should allow to do rule checker
 	re.True(labelerManager.ScheduleDisabled(region))
-	checkRegionAndOperator(re, tc, co, 1, 0)
+	checkRegionAndOperator(re, tc, co, 1, 1)
+
+	// should not allow to merge
+	tc.opt.SetSplitMergeInterval(time.Duration(0))
+
+	re.NoError(tc.addLeaderRegion(2, 2, 3, 4))
+	re.NoError(tc.addLeaderRegion(3, 2, 3, 4))
+	region = tc.GetRegion(2)
+	re.True(labelerManager.ScheduleDisabled(region))
+	checkRegionAndOperator(re, tc, co, 2, 0)
+
+	// delete label rule, should allow to do merge
 	labelerManager.DeleteLabelRule("schedulelabel")
 	re.False(labelerManager.ScheduleDisabled(region))
-	checkRegionAndOperator(re, tc, co, 1, 1)
+	checkRegionAndOperator(re, tc, co, 2, 2)
 }
 
 func TestCheckerIsBusy(t *testing.T) {
@@ -496,11 +508,11 @@ func TestReplica(t *testing.T) {
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	waitNoResponse(re, stream)
 
-	// Remove peer from store 4.
+	// Remove peer from store 3.
 	re.NoError(tc.addLeaderRegion(2, 1, 2, 3, 4))
 	region = tc.GetRegion(2)
 	re.NoError(dispatchHeartbeat(co, region, stream))
-	region = waitRemovePeer(re, stream, region, 4)
+	region = waitRemovePeer(re, stream, region, 3) // store3 is down, we should remove it firstly.
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	waitNoResponse(re, stream)
 
@@ -814,8 +826,9 @@ func TestPersistScheduler(t *testing.T) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
-	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
+	shuffle, err := schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
+	re.NoError(co.addScheduler(shuffle))
 	// suppose we add a new default enable scheduler
 	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {
@@ -874,6 +887,45 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(co.schedulers, 4)
 	re.NoError(co.removeScheduler(schedulers.EvictLeaderName))
 	re.Len(co.schedulers, 3)
+}
+
+func TestDenyScheduler(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) {
+		labelerManager := co.cluster.GetRegionLabeler()
+		labelerManager.SetLabelRule(&labeler.LabelRule{
+			ID:       "schedulelabel",
+			Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
+			RuleType: labeler.KeyRange,
+			Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
+		})
+		co.run()
+	}, re)
+	defer cleanup()
+
+	re.Len(co.schedulers, len(config.DefaultSchedulers))
+
+	// Transfer peer from store 4 to store 1 if not set deny.
+	re.NoError(tc.addRegionStore(4, 40))
+	re.NoError(tc.addRegionStore(3, 30))
+	re.NoError(tc.addRegionStore(2, 20))
+	re.NoError(tc.addRegionStore(1, 10))
+	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
+
+	// Transfer leader from store 4 to store 2 if not set deny.
+	re.NoError(tc.updateLeaderCount(4, 1000))
+	re.NoError(tc.updateLeaderCount(3, 50))
+	re.NoError(tc.updateLeaderCount(2, 20))
+	re.NoError(tc.updateLeaderCount(1, 10))
+	re.NoError(tc.addLeaderRegion(2, 4, 3, 2))
+
+	// there should no balance leader/region operator
+	for i := 0; i < 10; i++ {
+		re.Nil(co.opController.GetOperator(1))
+		re.Nil(co.opController.GetOperator(2))
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestRemoveScheduler(t *testing.T) {

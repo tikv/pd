@@ -336,14 +336,23 @@ func TestFailed(t *testing.T) {
 	req := newStoreHeartbeat(2, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Nil(resp.RecoveryPlan)
+	re.Equal(exitForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
 		req.StoreReport = report
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-		re.Nil(resp.RecoveryPlan)
+		re.NotNil(resp.RecoveryPlan)
+		applyRecoveryPlan(re, storeID, reports, resp)
+	}
+
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID, report)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		applyRecoveryPlan(re, storeID, reports, resp)
 	}
 	re.Equal(failed, recoveryController.GetStage())
 }
@@ -595,6 +604,48 @@ func TestAutoDetectMode(t *testing.T) {
 			re.Empty(len(report.PeerReports))
 		}
 	}
+}
+
+// Failed learner replica/ store should be considered by auto-recover.
+func TestAutoDetectModeWithOneLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(1, "6.0.0") {
+		re.NoError(cluster.PutStore(store.GetMeta()))
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+
+	storeReport := pdpb.StoreReport{
+		PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
+		},
+	}
+	req := newStoreHeartbeat(1, &storeReport)
+	req.StoreReport.Step = 1
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	hasStore3AsFailedStore := false
+	for _, failedStore := range resp.RecoveryPlan.ForceLeader.FailedStores {
+		if failedStore == 3 {
+			hasStore3AsFailedStore = true
+			break
+		}
+	}
+	re.True(hasStore3AsFailedStore)
 }
 
 func TestOneLearner(t *testing.T) {
@@ -1076,7 +1127,7 @@ func TestJointState(t *testing.T) {
 	}
 }
 
-func TestTimeout(t *testing.T) {
+func TestExecutionTimeout(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1096,10 +1147,39 @@ func TestTimeout(t *testing.T) {
 
 	time.Sleep(time.Second)
 	req := newStoreHeartbeat(1, nil)
-	req.StoreReport = &pdpb.StoreReport{Step: 1}
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
+	re.Equal(exitForceLeader, recoveryController.GetStage())
+	req.StoreReport = &pdpb.StoreReport{Step: 2}
+	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(failed, recoveryController.GetStage())
+
+	output := recoveryController.Show()
+	re.Equal(len(output), 3)
+	re.Contains(output[1].Details[0], "triggered by error: Exceeds timeout")
+}
+
+func TestNoHeartbeatTimeout(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(3, "6.0.0") {
+		re.NoError(cluster.PutStore(store.GetMeta()))
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
+	}, 1, false))
+
+	time.Sleep(time.Second)
+	recoveryController.Show()
+	re.Equal(exitForceLeader, recoveryController.GetStage())
 }
 
 func TestExitForceLeader(t *testing.T) {

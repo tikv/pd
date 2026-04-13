@@ -16,7 +16,6 @@ package pd
 
 import (
 	"context"
-	"go.uber.org/zap"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -24,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/grpcutil"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 

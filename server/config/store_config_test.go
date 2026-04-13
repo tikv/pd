@@ -15,6 +15,7 @@
 package config
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"net/http"
@@ -63,13 +64,13 @@ func TestTiKVConfig(t *testing.T) {
 func TestUpdateConfig(t *testing.T) {
 	re := require.New(t)
 	manager := NewTestStoreConfigManager([]string{"tidb.com"})
-	manager.ObserveConfig("tikv.com")
+	manager.ObserveConfig(context.Background(), "tikv.com")
 	re.Equal(uint64(144), manager.GetStoreConfig().GetRegionMaxSize())
-	manager.ObserveConfig("tidb.com")
+	manager.ObserveConfig(context.Background(), "tidb.com")
 	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
 
 	// case2: the config should not update if config is same expect some ignore field.
-	c, err := manager.source.GetConfig("tidb.com")
+	c, err := manager.source.GetConfig(context.Background(), "tidb.com")
 	re.NoError(err)
 	re.True(manager.GetStoreConfig().Equal(c))
 

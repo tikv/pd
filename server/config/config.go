@@ -247,6 +247,7 @@ const (
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
 	defaultEnableWitness        = false
+	defaultHaltScheduling       = false
 
 	defaultDashboardAddress = "auto"
 
@@ -270,7 +271,7 @@ const (
 )
 
 var (
-	defaultEnableTelemetry = true
+	defaultEnableTelemetry = false
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
@@ -409,10 +410,6 @@ func (c *Config) Parse(arguments []string) error {
 		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
 			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
-			c.WarningMsgs = append(c.WarningMsgs, msg)
-		}
-		if meta.IsDefined("dashboard", "disable-telemetry") {
-			msg := fmt.Sprintf("disable-telemetry in %s is deprecated, use enable-telemetry instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
@@ -776,6 +773,10 @@ type ScheduleConfig struct {
 
 	// EnableWitness is the option to enable using witness
 	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
+
+	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
+	// and any other scheduling configs will be ignored.
+	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -897,6 +898,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
 		adjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
+	}
+
+	if !meta.IsDefined("halt-scheduling") {
+		c.HaltScheduling = defaultHaltScheduling
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
@@ -1368,8 +1373,6 @@ type DashboardConfig struct {
 	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
-	// WARN: DisableTelemetry is deprecated.
-	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
@@ -1393,7 +1396,6 @@ func (c *DashboardConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("enable-telemetry") {
 		c.EnableTelemetry = defaultEnableTelemetry
 	}
-	c.EnableTelemetry = c.EnableTelemetry && !c.DisableTelemetry
 }
 
 // ReplicationModeConfig is the configuration for the replication policy.

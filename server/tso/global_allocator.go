@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -338,6 +339,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 			// Send SyncMaxTSRequest to all allocator leaders concurrently.
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *syncResp) {
+				defer logutil.LogPanic()
 				defer wg.Done()
 				syncMaxTSResp := &syncResp{}
 				syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -336,4 +337,15 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	suite.NoError(err)
 	bodyString := string(bodyBytes)
 	suite.Equal("Hello World\n", bodyString)
+}
+
+func (suite *leaderServerTestSuite) TestIsPathInDirectory() {
+	fileName := "test"
+	directory := "/root/project"
+	path := filepath.Join(directory, fileName)
+	suite.True(isPathInDirectory(path, directory))
+
+	fileName = "../../test"
+	path = filepath.Join(directory, fileName)
+	suite.False(isPathInDirectory(path, directory))
 }

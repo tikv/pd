@@ -16,9 +16,12 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -31,12 +34,14 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/server/schedule/pkdbforcemerge"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -223,7 +228,7 @@ func TestSetOfflineStore(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -420,7 +425,7 @@ func TestUpStore(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -523,7 +528,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -833,6 +838,16 @@ func TestRegionHeartbeat(t *testing.T) {
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
 		checkRegions(re, cluster.core, regions[:i+1])
+
+		// Flashback
+		region = region.Clone(core.WithFlashback(true, 1))
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core, regions[:i+1])
+		region = region.Clone(core.WithFlashback(false, 0))
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -964,7 +979,7 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.WithLeader(region.GetPeers()[2]),
 		core.SetApproximateSize(curMaxMergeSize-1),
 		core.SetApproximateKeys(curMaxMergeKeys-1),
-		core.SetFromHeartbeat(true),
+		core.SetSource(core.Heartbeat),
 	)
 	cluster.processRegionHeartbeat(region)
 	regionID := region.GetID()
@@ -974,7 +989,7 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.WithLeader(region.GetPeers()[2]),
 		core.SetApproximateSize(curMaxMergeSize+1),
 		core.SetApproximateKeys(curMaxMergeKeys+1),
-		core.SetFromHeartbeat(true),
+		core.SetSource(core.Heartbeat),
 	)
 	cluster.processRegionHeartbeat(region)
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
@@ -1232,7 +1247,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -1318,9 +1333,45 @@ func TestSyncConfig(t *testing.T) {
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
-		re.Equal(v.updated, syncConfig(tc.storeConfigManager, tc.GetStores()))
+		re.Equal(v.updated, syncConfig(tc.ctx, tc.storeConfigManager, tc.GetStores()))
 		re.Equal(v.maxRegionSize, tc.GetStoreConfig().GetRegionMaxSize())
 	}
+}
+
+func TestSyncConfigContext(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(ctx, opt)
+	tc.storeConfigManager = config.NewStoreConfigManager(http.DefaultClient)
+	tc.httpClient = &http.Client{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Second * 100)
+		cfg := &config.StoreConfig{}
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
+			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			return
+		}
+
+		res.WriteHeader(http.StatusOK)
+		res.Write(b)
+	}))
+	stores := newTestStores(1, "2.0.0")
+	for _, s := range stores {
+		re.NoError(tc.putStoreLocked(s))
+	}
+	// trip schema header
+	now := time.Now()
+	stores[0].GetMeta().StatusAddress = server.URL[7:]
+	synced := syncConfig(tc.ctx, tc.storeConfigManager, stores)
+	re.False(synced)
+	re.Less(time.Since(now), clientTimeout*2)
 }
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {
@@ -1800,8 +1851,128 @@ func TestAwakenStore(t *testing.T) {
 	re.True(store1.NeedAwakenStore())
 }
 
+func TestUpdateAndDeleteLabel(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	stores := newTestStores(1, "6.5.1")
+	for _, store := range stores {
+		re.NoError(cluster.PutStore(store.GetMeta()))
+	}
+	re.Empty(cluster.GetStore(1).GetLabels())
+	// Update label.
+	cluster.UpdateStoreLabels(
+		1,
+		[]*metapb.StoreLabel{
+			{Key: "zone", Value: "zone1"},
+			{Key: "host", Value: "host1"},
+		},
+		false,
+	)
+	re.Equal(
+		[]*metapb.StoreLabel{
+			{Key: "zone", Value: "zone1"},
+			{Key: "host", Value: "host1"},
+		},
+		cluster.GetStore(1).GetLabels(),
+	)
+	// Update label again.
+	cluster.UpdateStoreLabels(
+		1,
+		[]*metapb.StoreLabel{
+			{Key: "mode", Value: "readonly"},
+		},
+		false,
+	)
+	// Update label with empty value.
+	cluster.UpdateStoreLabels(
+		1,
+		[]*metapb.StoreLabel{},
+		false,
+	)
+	re.Equal(
+		[]*metapb.StoreLabel{
+			{Key: "zone", Value: "zone1"},
+			{Key: "host", Value: "host1"},
+			{Key: "mode", Value: "readonly"},
+		},
+		cluster.GetStore(1).GetLabels(),
+	)
+	// Delete label.
+	err = cluster.DeleteStoreLabel(1, "mode")
+	re.NoError(err)
+	re.Equal(
+		[]*metapb.StoreLabel{
+			{Key: "zone", Value: "zone1"},
+			{Key: "host", Value: "host1"},
+		},
+		cluster.GetStore(1).GetLabels(),
+	)
+	// Delete a non-exist label.
+	err = cluster.DeleteStoreLabel(1, "mode")
+	re.Error(err)
+	re.Equal(
+		[]*metapb.StoreLabel{
+			{Key: "zone", Value: "zone1"},
+			{Key: "host", Value: "host1"},
+		},
+		cluster.GetStore(1).GetLabels(),
+	)
+	// Update label without force.
+	cluster.UpdateStoreLabels(
+		1,
+		[]*metapb.StoreLabel{},
+		false,
+	)
+	re.Equal(
+		[]*metapb.StoreLabel{
+			{Key: "zone", Value: "zone1"},
+			{Key: "host", Value: "host1"},
+		},
+		cluster.GetStore(1).GetLabels(),
+	)
+	// Update label with force.
+	cluster.UpdateStoreLabels(
+		1,
+		[]*metapb.StoreLabel{},
+		true,
+	)
+	re.Empty(cluster.GetStore(1).GetLabels())
+	// Update label first and then reboot the store.
+	cluster.UpdateStoreLabels(
+		1,
+		[]*metapb.StoreLabel{{Key: "mode", Value: "readonly"}},
+		false,
+	)
+	re.Equal([]*metapb.StoreLabel{{Key: "mode", Value: "readonly"}}, cluster.GetStore(1).GetLabels())
+	// Mock the store doesn't have any label configured.
+	newStore := typeutil.DeepClone(cluster.GetStore(1).GetMeta(), core.StoreFactory)
+	newStore.Labels = nil
+	// Store rebooting will call PutStore.
+	err = cluster.PutStore(newStore)
+	re.NoError(err)
+	// Check the label after rebooting.
+	re.Equal([]*metapb.StoreLabel{{Key: "mode", Value: "readonly"}}, cluster.GetStore(1).GetLabels())
+}
+
 type testCluster struct {
 	*RaftCluster
+}
+
+func TestGetForceMergeManager(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	re.NotNil(cluster.GetForceMergeManager())
 }
 
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
@@ -1834,11 +2005,16 @@ func newTestRaftCluster(
 	rc.InitCluster(id, opt, s, basicCluster)
 	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
-		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
 	}
+	forceMergeManager, err := pkdbforcemerge.NewManager(s)
+	if err != nil {
+		panic(err)
+	}
+	rc.forceMergeManager = forceMergeManager
 	return rc
 }
 

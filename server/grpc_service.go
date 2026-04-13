@@ -63,6 +63,7 @@ var (
 	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
 	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
 	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+	ErrEtcdNotStarted       = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
 )
 
 // GrpcServer wraps Server to provide grpc service.
@@ -102,7 +103,17 @@ func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string)
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
-	members, err := s.Server.GetMembers()
+	if s.IsClosed() {
+		return &pdpb.GetMembersResponse{
+			Header: &pdpb.ResponseHeader{
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
+				},
+			},
+		}, nil
+	}
+	members, err := cluster.GetMembers(s.GetClient())
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -926,7 +937,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request, flowRoundOption, core.SetFromHeartbeat(true))
+		region := core.RegionFromHeartbeat(request, flowRoundOption)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -1221,7 +1232,6 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 	if rc == nil {
 		return &pdpb.ReportBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-
 	_, err := rc.HandleBatchReportSplit(request)
 	if err != nil {
 		return &pdpb.ReportBatchSplitResponse{
@@ -1684,6 +1694,9 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		return rsp.(*pdpb.SplitAndScatterRegionsResponse), err
 	}
 	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SplitAndScatterRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()))
 	if err != nil {
@@ -1886,6 +1899,9 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 
 // StoreGlobalConfig store global config into etcd by transaction
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
+	if s.client == nil {
+		return nil, ErrEtcdNotStarted
+	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
 		name := globalConfigPath + item.GetName()
@@ -1905,6 +1921,9 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
+	if s.client == nil {
+		return nil, ErrEtcdNotStarted
+	}
 	names := request.Names
 	res := make([]*pdpb.GlobalConfigItem, len(names))
 	for i, name := range names {
@@ -1925,6 +1944,9 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // or stoped by whatever reason
 // just reconnect to it.
 func (s *GrpcServer) WatchGlobalConfig(_ *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+	if s.client == nil {
+		return ErrEtcdNotStarted
+	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	err := s.sendAllGlobalConfig(ctx, server)

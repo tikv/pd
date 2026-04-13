@@ -113,6 +113,12 @@ var (
 	ErrBuildRuleList = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
 )
 
+// force merge errors
+var (
+	ErrForceMergeRangeContent = errors.Normalize("invalid force merge range content, %s", errors.RFCCodeText("PD:forcemerge:ErrForceMergeRangeContent"))
+	ErrLoadForceMergeRange    = errors.Normalize("load force merge range failed", errors.RFCCodeText("PD:forcemerge:ErrLoadForceMergeRange"))
+)
+
 // region label errors
 var (
 	ErrRegionRuleContent  = errors.Normalize("invalid region rule content, %s", errors.RFCCodeText("PD:region:ErrRegionRuleContent"))
@@ -121,9 +127,10 @@ var (
 
 // cluster errors
 var (
-	ErrNotBootstrapped = errors.Normalize("TiKV cluster not bootstrapped, please start TiKV first", errors.RFCCodeText("PD:cluster:ErrNotBootstrapped"))
-	ErrStoreIsUp       = errors.Normalize("store is still up, please remove store gracefully", errors.RFCCodeText("PD:cluster:ErrStoreIsUp"))
-	ErrInvalidStoreID  = errors.Normalize("invalid store id %d, not found", errors.RFCCodeText("PD:cluster:ErrInvalidStoreID"))
+	ErrNotBootstrapped    = errors.Normalize("TiKV cluster not bootstrapped, please start TiKV first", errors.RFCCodeText("PD:cluster:ErrNotBootstrapped"))
+	ErrStoreIsUp          = errors.Normalize("store is still up, please remove store gracefully", errors.RFCCodeText("PD:cluster:ErrStoreIsUp"))
+	ErrInvalidStoreID     = errors.Normalize("invalid store id %d, not found", errors.RFCCodeText("PD:cluster:ErrInvalidStoreID"))
+	ErrSchedulingIsHalted = errors.Normalize("scheduling is halted", errors.RFCCodeText("PD:cluster:ErrSchedulingIsHalted"))
 )
 
 // versioninfo errors

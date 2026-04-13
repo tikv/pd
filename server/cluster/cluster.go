@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/server/schedule/pkdbforcemerge"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -66,6 +67,8 @@ var (
 	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
 	regionUpdateCacheEventCounter           = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter              = regionEventCounter.WithLabelValues("update_kv")
+
+	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -141,6 +144,7 @@ type RaftCluster struct {
 	hotStat                  *statistics.HotStat
 	hotBuckets               *buckets.HotBucketCache
 	ruleManager              *placement.RuleManager
+	forceMergeManager        *pkdbforcemerge.Manager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsafeRecoveryController
@@ -257,10 +261,14 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
-		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
 		if err != nil {
 			return err
 		}
+	}
+	c.forceMergeManager, err = pkdbforcemerge.NewManager(c.storage)
+	if err != nil {
+		return err
 	}
 
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
@@ -305,22 +313,28 @@ func (c *RaftCluster) runSyncConfig() {
 	defer ticker.Stop()
 	stores := c.GetStores()
 
-	syncConfig(c.storeConfigManager, stores)
+	syncConfig(c.ctx, c.storeConfigManager, stores)
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			if !syncConfig(c.storeConfigManager, stores) {
+			if !syncConfig(c.ctx, c.storeConfigManager, stores) {
 				stores = c.GetStores()
 			}
 		}
 	}
 }
 
-func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
+func syncConfig(ctx context.Context, manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
 	for index := 0; index < len(stores); index++ {
+		select {
+		case <-ctx.Done():
+			log.Info("stop sync store config job due to raft cluster exit")
+			return false
+		default:
+		}
 		// filter out the stores that are tiflash
 		store := stores[index]
 		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
@@ -333,7 +347,9 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		if err := manager.ObserveConfig(address); err != nil {
+		if err := manager.ObserveConfig(ctx, address); err != nil {
+			stores = append(stores[:index], stores[index+1:]...)
+			index--
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
@@ -369,7 +385,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -636,6 +652,11 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
 }
 
+// GetForceMergeManager returns the force merge manager reference.
+func (c *RaftCluster) GetForceMergeManager() *pkdbforcemerge.Manager {
+	return c.forceMergeManager
+}
+
 // GetRegionLabeler returns the region labeler.
 func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.regionLabeler
@@ -846,7 +867,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.coordinator.CheckTransferWitnessLeader(region)
 
 	hasRegionStats := c.regionStats != nil
-	// Save to storage if meta is updated.
+	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
@@ -1074,21 +1095,15 @@ func (c *RaftCluster) GetRangeHoles() [][]string {
 }
 
 // UpdateStoreLabels updates a store's location labels
-// If 'force' is true, then update the store's labels forcibly.
+// If 'force' is true, the origin labels will be overwritten with the new one forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
 	}
 	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
-	if force {
-		newStore.Labels = labels
-	} else {
-		// If 'force' isn't set, the given labels will merge into those labels which already existed in the store.
-		newStore.Labels = core.MergeLabels(newStore.GetLabels(), labels)
-	}
-	// PutStore will perform label merge.
-	return c.putStoreImpl(newStore)
+	newStore.Labels = labels
+	return c.putStoreImpl(newStore, force)
 }
 
 // DeleteStoreLabel updates a store's location labels
@@ -1109,13 +1124,12 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 		return errors.Errorf("the label key %s does not exist", labelKey)
 	}
 	newStore.Labels = labels
-	// PutStore will perform label merge.
-	return c.putStoreImpl(newStore)
+	return c.putStoreImpl(newStore, true)
 }
 
 // PutStore puts a store.
 func (c *RaftCluster) PutStore(store *metapb.Store) error {
-	if err := c.putStoreImpl(store); err != nil {
+	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
@@ -1124,8 +1138,9 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 }
 
 // putStoreImpl puts a store.
-// If 'force' is true, then overwrite the store's labels.
-func (c *RaftCluster) putStoreImpl(store *metapb.Store) error {
+// If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
+// If 'force' is false, the store's labels will merge into those labels which already existed in the store.
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -1155,6 +1170,9 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store) error {
 	} else {
 		// Use the given labels to update the store.
 		labels := store.GetLabels()
+		if !force {
+			labels = core.MergeLabels(s.GetLabels(), labels)
+		}
 		// Update an existed store.
 		s = s.Clone(
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
@@ -1551,12 +1569,13 @@ func (c *RaftCluster) checkStores() {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
+						zap.Int("region-count", c.GetRegionCount()),
 						errs.ZapError(err))
 				}
 			} else if c.IsPrepared() {
 				threshold := c.getThreshold(stores, store)
-				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 				regionSize := float64(store.GetRegionSize())
+				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
 				if regionSize >= threshold {
 					if err := c.ReadyToServe(storeID); err != nil {
 						log.Error("change store to serving failed",
@@ -2227,11 +2246,9 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(
-		core.SetMinResolvedTS(minResolvedTS),
-	)
-
-	return c.putStoreLocked(newStore)
+	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
+	c.core.PutStore(newStore)
+	return nil
 }
 
 func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {
@@ -2309,6 +2326,20 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 		return math.MaxUint64
 	}
 	return c.minResolvedTS
+}
+
+// GetStoreMinResolvedTS returns the min resolved ts of the store.
+func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	store := c.GetStore(storeID)
+	if store == nil {
+		return math.MaxUint64
+	}
+	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(store) {
+		return math.MaxUint64
+	}
+	return c.GetStore(storeID).GetMinResolvedTS()
 }
 
 // GetExternalTS returns the external timestamp.
@@ -2523,4 +2554,26 @@ func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
 // GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
 func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	return c.coordinator.getPausedSchedulerDelayUntil(name)
+}
+
+var (
+	onlineUnsafeRecoveryStatus = schedulingAllowanceStatusGauge.WithLabelValues("online-unsafe-recovery")
+	haltSchedulingStatus       = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")
+)
+
+// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
+func (c *RaftCluster) CheckSchedulingAllowance() (bool, error) {
+	// If the cluster is in the process of online unsafe recovery, it should not allow scheduling.
+	if c.GetUnsafeRecoveryController().IsRunning() {
+		onlineUnsafeRecoveryStatus.Set(1)
+		return false, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
+	onlineUnsafeRecoveryStatus.Set(0)
+	// If the halt-scheduling is set, it should not allow scheduling.
+	if c.opt.IsSchedulingHalted() {
+		haltSchedulingStatus.Set(1)
+		return false, errs.ErrSchedulingIsHalted.FastGenByArgs()
+	}
+	haltSchedulingStatus.Set(0)
+	return true, nil
 }

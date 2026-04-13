@@ -91,6 +91,11 @@ error = '''
 TiKV cluster not bootstrapped, please start TiKV first
 '''
 
+["PD:cluster:ErrSchedulingIsHalted"]
+error = '''
+scheduling is halted
+'''
+
 ["PD:cluster:ErrStoreIsUp"]
 error = '''
 store is still up, please remove store gracefully
@@ -374,6 +379,16 @@ start etcd failed
 ["PD:filepath:ErrFilePathAbs"]
 error = '''
 failed to convert a path to absolute path
+'''
+
+["PD:forcemerge:ErrForceMergeRangeContent"]
+error = '''
+invalid force merge range content, %s
+'''
+
+["PD:forcemerge:ErrLoadForceMergeRange"]
+error = '''
+load force merge range failed
 '''
 
 ["PD:gin:ErrBindJSON"]

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/syncutil"
 	"go.uber.org/zap"
 )
@@ -142,6 +143,7 @@ func (c *ttlCache) Clear() {
 }
 
 func (c *ttlCache) doGC() {
+	defer logutil.LogPanic()
 	ticker := time.NewTicker(c.gcInterval)
 	defer ticker.Stop()
 

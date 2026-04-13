@@ -15,12 +15,14 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"reflect"
 	"sync/atomic"
+	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -41,6 +43,7 @@ var (
 	defaultRegionMaxKey = uint64(1440000)
 	// default region split key is 960000
 	defaultRegionSplitKey = uint64(960000)
+	clientTimeout         = 3 * time.Second
 )
 
 // StoreConfig is the config of store like TiKV.
@@ -191,8 +194,8 @@ func NewTestStoreConfigManager(whiteList []string) *StoreConfigManager {
 }
 
 // ObserveConfig is used to observe the config change.
-func (m *StoreConfigManager) ObserveConfig(address string) error {
-	cfg, err := m.source.GetConfig(address)
+func (m *StoreConfigManager) ObserveConfig(ctx context.Context, address string) error {
+	cfg, err := m.source.GetConfig(ctx, address)
 	if err != nil {
 		return err
 	}
@@ -222,7 +225,7 @@ func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
 
 // Source is used to get the store config.
 type Source interface {
-	GetConfig(statusAddress string) (*StoreConfig, error)
+	GetConfig(ctx context.Context, statusAddress string) (*StoreConfig, error)
 }
 
 // TiKVConfigSource is used to get the store config from TiKV.
@@ -239,9 +242,15 @@ func newTiKVConfigSource(schema string, client *http.Client) *TiKVConfigSource {
 }
 
 // GetConfig returns the store config from TiKV.
-func (s TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error) {
+func (s TiKVConfigSource) GetConfig(ctx context.Context, statusAddress string) (*StoreConfig, error) {
 	url := fmt.Sprintf("%s://%s/config", s.schema, statusAddress)
-	resp, err := s.client.Get(url)
+	ctx, cancel := context.WithTimeout(ctx, clientTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create store config http request: %w", err)
+	}
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +278,7 @@ func newFakeSource(whiteList []string) *FakeSource {
 }
 
 // GetConfig returns the config.
-func (f *FakeSource) GetConfig(url string) (*StoreConfig, error) {
+func (f *FakeSource) GetConfig(_ context.Context, url string) (*StoreConfig, error) {
 	if !slice.Contains(f.whiteList, url) {
 		return nil, fmt.Errorf("[url:%s] is not in white list", url)
 	}
