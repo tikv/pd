@@ -345,7 +345,7 @@ func TestDemandRUTracking(t *testing.T) {
 	gc.mu.Unlock()
 	re.Positive(demandTotal, "demand should be accumulated after requests")
 
-	// Now issue a request that gets throttled (rejected).
+	// Now issue a request that gets throttled (rejected) on `onRequestWaitImpl`.
 	bigReq := &TestRequestInfo{
 		isWrite:    true,
 		writeBytes: 10000000,
@@ -361,18 +361,82 @@ func TestDemandRUTracking(t *testing.T) {
 	re.Greater(demandAfterThrottle, demandTotal,
 		"demand should increase even for throttled requests")
 
-	// Verify that the demand EMA is computed correctly.
-	now := time.Now()
-	gc.run.now = now
-	gc.updateRunState()
-	gc.updateAvgRequestResourcePerSec()
-
-	// Advance time and update again so the EMA has two data points.
-	gc.run.now = now.Add(time.Second)
-	gc.updateRunState()
-	gc.updateAvgRequestResourcePerSec()
+	// Verify the demand EMA math directly. We deliberately avoid going through
+	// `updateRunState` here because that method overwrites `gc.run.now` with
+	// `time.Now()` on every call, which makes any caller-side time control a
+	// no-op. Instead, snapshot demand into `gc.run` once and drive `calcDemandAvg`
+	// with hand-set timestamps so the EMA's behavior is observable.
+	gc.updateRunState() // copy mu.demandRUTotal into gc.run.demandRUTotal once.
 
 	counter := gc.run.requestUnitTokens
-	re.GreaterOrEqual(counter.avgDemandRUPerSec, 0.0,
-		"demand EMA should be non-negative")
+	// Reset the EMA bookkeeping so we can measure a clean two-tick trajectory.
+	counter.avgDemandRUPerSec = 0
+	counter.avgDemandRUPerSecLastRU = 0
+	base := time.Unix(0, 0)
+	counter.avgDemandLastTime = base
+	gc.run.now = base.Add(time.Second)
+
+	re.True(gc.calcDemandAvg(counter, gc.run.demandRUTotal))
+	// First tick: avg = movingAvgFactor*0 + (1-movingAvgFactor) * (demandTotal/1s).
+	expectedFirst := (1 - movingAvgFactor) * gc.run.demandRUTotal
+	re.InEpsilon(expectedFirst, counter.avgDemandRUPerSec, 1e-9,
+		"first EMA tick should equal (1-movingAvgFactor) * demand-rate")
+
+	// Second tick: same demand snapshot, one more second elapsed -> rate is 0,
+	// so the EMA must decay toward zero by movingAvgFactor.
+	gc.run.now = base.Add(2 * time.Second)
+	prev := counter.avgDemandRUPerSec
+	re.True(gc.calcDemandAvg(counter, gc.run.demandRUTotal))
+	re.InEpsilon(movingAvgFactor*prev, counter.avgDemandRUPerSec, 1e-9,
+		"with no new demand the EMA should decay by movingAvgFactor")
+
+	// Same `gc.run.now` -> calcDemandAvg must report no update and leave state alone.
+	re.False(gc.calcDemandAvg(counter, gc.run.demandRUTotal))
+}
+
+// TestDemandRUCapturedOnResponseWaitThrottle locks in the invariant that
+// `demand_ru_per_sec` reflects rejected responses too. Without the
+// `recordDemand` hoist in `onResponseWaitImpl`, throttle-rejected responses
+// would be silently absent from the demand counter -- defeating the metric.
+func TestDemandRUCapturedOnResponseWaitThrottle(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	// Short retry budget so the test fails fast.
+	gc.mainCfg.WaitRetryInterval = 5 * time.Millisecond
+	gc.mainCfg.WaitRetryTimes = 2
+	gc.mainCfg.LTBMaxWaitDuration = 10 * time.Millisecond
+
+	// Stop the bucket from refilling. The limiter still carries its initial
+	// tokens (FillRate=1000 -> 1000 RU seeded in initRunState), so the request
+	// below must demand strictly more than that to provoke a throttle error.
+	counter := gc.run.requestUnitTokens
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+	// `allowDebt` in `onResponseWaitImpl` is false only when the response is
+	// "big" (read+write bytes >= bigRequestThreshold) AND the group is already
+	// throttled. Force both.
+	gc.isThrottled.Store(true)
+
+	gc.mu.Lock()
+	demandBefore := gc.mu.demandRUTotal
+	gc.mu.Unlock()
+
+	const readBytes = 128 * 1024 * 1024 // 128 MiB -> 2048 RRU at default 1/64KiB cost
+	req := &TestRequestInfo{isWrite: false}
+	resp := &TestResponseInfo{
+		readBytes: readBytes,
+		succeed:   true,
+	}
+	_, _, err := gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+
+	gc.mu.Lock()
+	demandAfter := gc.mu.demandRUTotal
+	gc.mu.Unlock()
+	re.Greater(demandAfter, demandBefore,
+		"demand should be recorded for responses rejected by the limiter")
 }

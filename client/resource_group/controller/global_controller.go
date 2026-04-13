@@ -637,8 +637,9 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 				metrics.DemandRUPerSecGauge.DeleteLabelValues(resourceGroupName)
 				// TODO: clean up the remaining per-group metrics (e.g. TokenConsumedHistogram,
 				// GroupRunningKVRequestCounter, SuccessfulRequestDuration, FailedRequestCounter,
-				// ResourceGroupTokenRequestCounter, RequestRetryCounter, FailedLimitReserveDuration)
-				// which currently leak label series on resource group deletion.
+				// ResourceGroupTokenRequestCounter, RequestRetryCounter, FailedLimitReserveDuration,
+				// LowTokenRequestNotifyCounter) which currently leak label series on resource
+				// group deletion.
 				return true
 			}
 			gc.inactive = true

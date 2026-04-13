@@ -278,6 +278,23 @@ func (gc *groupCostController) updateRunState() {
 	gc.run.now = newTime
 }
 
+// recordDemand accumulates a delta into the pre-throttling demand counter.
+//
+// Call sites MUST invoke this before any token-bucket wait/acquire so that
+// demand is captured even when the request is ultimately rejected by the
+// limiter; that is the entire reason `demandRUTotal` is tracked separately
+// from `consumption`. Demand is monotonically increasing and is never rolled
+// back on throttle failure.
+func (gc *groupCostController) recordDemand(delta *rmpb.Consumption) {
+	v := getRUValueFromConsumption(delta)
+	if v == 0 {
+		return
+	}
+	gc.mu.Lock()
+	gc.mu.demandRUTotal += v
+	gc.mu.Unlock()
+}
+
 func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	isBurstable := true
 	counter := gc.run.requestUnitTokens
@@ -287,8 +304,9 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
 		return
 	}
-	gc.calcDemandAvg(counter, gc.run.demandRUTotal)
-	gc.metrics.demandRUPerSecGauge.Set(counter.avgDemandRUPerSec)
+	if gc.calcDemandAvg(counter, gc.run.demandRUTotal) {
+		gc.metrics.demandRUPerSecGauge.Set(counter.avgDemandRUPerSec)
+	}
 	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Float64("avg-demand-ru-per-sec", counter.avgDemandRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.burstable.Store(isBurstable)
 }
@@ -337,18 +355,26 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	return true
 }
 
-func (gc *groupCostController) calcDemandAvg(counter *tokenCounter, new float64) {
+// calcDemandAvg recomputes the EMA of pre-throttling demanded RU/s.
+//
+// Returns false (and leaves state untouched) when no time has elapsed since
+// the last update so the gauge is not re-Set with a stale reading. Unlike
+// `calcAvg`, no negative-clamp is needed because `demandRUTotal` is
+// monotonically increasing; the EMA of a non-negative-delta sequence cannot
+// itself become negative.
+func (gc *groupCostController) calcDemandAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgDemandLastTime)
+	failpoint.Inject("acceleratedReportingPeriod", func() {
+		deltaDuration = 100 * time.Millisecond
+	})
 	if deltaDuration <= 0 {
-		return
+		return false
 	}
 	delta := (new - counter.avgDemandRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgDemandRUPerSec = movingAvgFactor*counter.avgDemandRUPerSec + (1-movingAvgFactor)*delta
-	if counter.avgDemandRUPerSec < 0 {
-		counter.avgDemandRUPerSec = 0
-	}
 	counter.avgDemandLastTime = gc.run.now
 	counter.avgDemandRUPerSecLastRU = new
+	return true
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {
@@ -584,9 +610,12 @@ func (gc *groupCostController) onRequestWaitImpl(
 		calc.BeforeKVRequest(delta, info)
 	}
 
+	// Record pre-throttling demand before any limiter interaction so a
+	// subsequent rollback only unwinds consumption, not demand.
+	gc.recordDemand(delta)
+
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
-	gc.mu.demandRUTotal += getRUValueFromConsumption(delta)
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
@@ -634,6 +663,13 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+
+	// Record pre-throttling demand. `onResponseImpl` does not block on token
+	// acquisition, so this could equivalently sit inside the lock block below;
+	// keeping it here makes the demand-before-limiter invariant uniform across
+	// all entry points.
+	gc.recordDemand(delta)
+
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
@@ -644,8 +680,6 @@ func (gc *groupCostController) onResponseImpl(
 	gc.mu.Lock()
 	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
-	// Record the response-phase demand as well (actual read bytes, CPU, etc.)
-	gc.mu.demandRUTotal += getRUValueFromConsumption(delta)
 	// Record the consumption of the request by store
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -667,6 +701,13 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+
+	// Record pre-throttling demand BEFORE acquireTokens so it is captured
+	// even when the response is rejected by the limiter. Without this hoist
+	// the demand counter would silently miss exactly the throttled responses
+	// the metric is supposed to surface.
+	gc.recordDemand(delta)
+
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
 		allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
@@ -687,7 +728,6 @@ func (gc *groupCostController) onResponseWaitImpl(
 	gc.mu.Lock()
 	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
-	gc.mu.demandRUTotal += getRUValueFromConsumption(delta)
 	// Record the consumption of the request by store
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -703,9 +743,9 @@ func (gc *groupCostController) onResponseWaitImpl(
 }
 
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
+	gc.recordDemand(consumption)
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
-	gc.mu.demandRUTotal += getRUValueFromConsumption(consumption)
 	gc.mu.Unlock()
 }
 
