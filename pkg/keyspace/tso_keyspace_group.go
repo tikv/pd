@@ -452,11 +452,11 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, keyspaceIDs []ui
 			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
 		}
 
-		// Build a set of keyspaces to remove (excluding default keyspace)
+		// Build a set of keyspaces to remove (excluding protected bootstrap/system keyspace)
 		toRemove := make(map[uint32]struct{})
 		for _, ksID := range keyspaceIDs {
-			// Skip default keyspace
-			if ksID == constant.DefaultKeyspaceID {
+			// Keep the protected bootstrap/system keyspace in the default group.
+			if isProtectedKeyspaceID(ksID) {
 				continue
 			}
 			// Only add if it exists in the group (skip if not present)
