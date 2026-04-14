@@ -538,7 +538,7 @@ func NewRegionWithKeyspaceCommand() *cobra.Command {
 	}
 	r.AddCommand(&cobra.Command{
 		Use:   "id <keyspace_id> [table-id <table_id>] [<limit>]",
-		Short: "show region information for the given keyspace id",
+		Short: "show region information for the given keyspace id, optionally filtered by table id",
 		Run:   showRegionWithKeyspaceCommandFunc,
 	})
 	return r
