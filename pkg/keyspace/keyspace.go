@@ -80,6 +80,8 @@ type Config interface {
 	ToWaitRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
+	// GetMetaServiceGroups returns the meta-service groups for keyspace assignment.
+	// key is the meta-service group id and value is the meta-service group addresses.
 	SetMetaServiceGroups(map[string]string)
 	GetMetaServiceGroups() map[string]string
 }
@@ -269,6 +271,19 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	tracer.SetKeyspace(newID, request.Name)
 	tracer.OnAllocateIDFinished()
 
+	// assign meta-service group for the new keyspace if meta-service groups exist.
+	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	if assignToMetaServiceGroup {
+		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
+		if err != nil {
+			return nil, err
+		}
+		if request.Config == nil {
+			request.Config = make(map[string]string)
+		}
+		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
+	}
+
 	// Get keyspace config.
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
@@ -283,17 +298,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
 	}
-	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
-	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
-		if err != nil {
-			return nil, err
-		}
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
-		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
-	}
+
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
 		if request.Config == nil {

@@ -68,7 +68,8 @@ type mockConfig struct {
 	WaitRegionSplit          bool
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
-	MetaServiceGroups        map[string]string
+	// MetaServiceGroups is used to mock the meta-service groups for keyspace assignment.
+	MetaServiceGroups map[string]string
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
