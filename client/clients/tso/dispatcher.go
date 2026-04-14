@@ -375,13 +375,17 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	conCtxMgr.Release(streamURL)
 	// Update the member list to ensure the latest topology is used before the next batch.
 	svcDiscovery := td.provider.getServiceDiscovery()
-	if errs.IsLeaderChange(err) {
+	switch {
+	case errs.IsCalleeMismatch(err):
+		// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
+		svcDiscovery.RemoveClientConn(streamURL)
+	case errs.IsLeaderChange(err):
 		// If the leader changed, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
 			log.Error("[tso] check member changed error after the leader changed", zap.Error(err))
 		}
-	} else {
+	default:
 		// For other errors, we can just schedule a member change check asynchronously.
 		svcDiscovery.ScheduleCheckMemberChanged()
 	}

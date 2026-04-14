@@ -18,10 +18,13 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -98,6 +101,15 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		clusterID := header.GetClusterId()
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
+		}
+		if calleeID := header.GetCalleeId(); calleeID != "" {
+			advertiseURL, _ := url.Parse(s.GetAdvertiseListenAddr())
+			if advertiseURL != nil && advertiseURL.Host != "" && calleeID != advertiseURL.Host {
+				return status.Errorf(
+					codes.FailedPrecondition, "mismatch callee id, need %s but got %s",
+					s.GetAdvertiseListenAddr(), calleeID,
+				)
+			}
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()

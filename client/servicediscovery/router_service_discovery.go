@@ -104,6 +104,17 @@ func (r *routerServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientCo
 	return grpcutil.GetOrCreateGRPCConn(r.ctx, &r.clientConns, url, r.tlsCfg, r.option.GRPCDialOptions...)
 }
 
+// RemoveClientConn removes and closes the grpc client connection of the given URL.
+func (r *routerServiceDiscovery) RemoveClientConn(url string) {
+	cc, ok := r.clientConns.LoadAndDelete(url)
+	if !ok {
+		return
+	}
+	if err := cc.(*grpc.ClientConn).Close(); err != nil {
+		log.Error("[router service] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+	}
+}
+
 // ScheduleCheckMemberChanged schedules a check for member changes.
 func (r *routerServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
