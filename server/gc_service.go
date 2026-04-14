@@ -411,8 +411,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request, stream pdpb.PD_WatchGCSafePointV2Server) error {
 	log.Warn("deprecated API WatchGCSafePointV2 is called", zap.Int64("req-revision", request.GetRevision()))
 
-	// TODO: Decide this parameter.
-	const watchGCSafePointV2SkipLoadingInitial = false
+	const watchGCSafePointV2SkipLoadingInitial = true
 
 	watch, done, err := s.openGCStateWatch(
 		stream.Context(),
