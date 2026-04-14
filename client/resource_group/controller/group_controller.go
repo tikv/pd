@@ -249,9 +249,6 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
-	if sourceState == nil {
-		sourceState = newRequestSourceMetricsState(group.Name)
-	}
 	ms := initMetrics(group.Name, group.Name, sourceState)
 	gc := &groupCostController{
 		meta:    group,

@@ -45,7 +45,7 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 	}
 	ch1 := make(chan notifyMsg)
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2, nil)
+	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2, newRequestSourceMetricsState(group.Name))
 	re.NoError(err)
 	return gc
 }
@@ -239,7 +239,7 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	cfg := DefaultRUConfig()
 	cfg.WaitRetryInterval = 5 * time.Second
 	cfg.WaitRetryTimes = 3
-	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1), nil)
+	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1), newRequestSourceMetricsState(group.Name))
 	re.NoError(err)
 
 	// Set fillRate=0 so reservation always fails with InfDuration,
