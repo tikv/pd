@@ -22,12 +22,13 @@ import "time"
 
 // TestRequestInfo is used to test the request info interface.
 type TestRequestInfo struct {
-	isWrite         bool
-	writeBytes      uint64
-	numReplicas     int64
-	storeID         uint64
-	accessType      AccessLocationType
-	pagingSizeBytes uint64
+	isWrite            bool
+	writeBytes         uint64
+	numReplicas        int64
+	storeID            uint64
+	accessType         AccessLocationType
+	pagingSizeBytes    uint64
+	predictedReadBytes uint64
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
@@ -74,6 +75,12 @@ func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 // PagingSizeBytes implements the RequestInfo interface.
 func (tri *TestRequestInfo) PagingSizeBytes() uint64 {
 	return tri.pagingSizeBytes
+}
+
+// PredictedReadBytes implements the optional predictedReadBytesProvider
+// interface so tests can exercise the EMA-based hint path.
+func (tri *TestRequestInfo) PredictedReadBytes() uint64 {
+	return tri.predictedReadBytes
 }
 
 // TestResponseInfo is used to test the response info interface.
