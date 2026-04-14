@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,18 +73,26 @@ func AddMetaServiceGroups(c *gin.Context) {
 	}
 
 	var requests []AddMetaServiceGroupRequest
-	err := c.BindJSON(&requests)
+	err := c.ShouldBindJSON(&requests)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	// Constructs new meta-service groups.
 	currentGroups := manager.GetGroups()
-	newGroups := make(map[string]string)
+	newGroups := make(map[string]string, len(currentGroups)+len(requests))
 	for _, request := range requests {
+		if request.ID == "" || request.Addresses == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "id and addresses must be non-empty")
+			return
+		}
+		if _, exists := newGroups[request.ID]; exists {
+			c.AbortWithStatusJSON(http.StatusBadRequest, fmt.Sprintf("meta-service group %s is duplicated in request", request.ID))
+			return
+		}
 		// Update existing newGroups is not allowed via the post-method.
 		if _, exists := currentGroups[request.ID]; exists {
-			c.AbortWithStatusJSON(http.StatusBadRequest, fmt.Errorf(metaServiceGroupAlreadyExistsErr, request.ID))
+			c.AbortWithStatusJSON(http.StatusBadRequest, fmt.Sprintf(metaServiceGroupAlreadyExistsErr, request.ID))
 			return
 		}
 		newGroups[request.ID] = request.Addresses

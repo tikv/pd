@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -147,5 +147,25 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	}
 	// Add the same keyspace group should result in error.
 	code, _ := tryAddMetaServiceGroups(re, suite.server, newGroups)
+	re.Equal(http.StatusBadRequest, code)
+
+	// Empty fields should be rejected.
+	code, _ = tryAddMetaServiceGroups(re, suite.server, []*handlers.AddMetaServiceGroupRequest{{
+		ID:        "",
+		Addresses: "etcd-group-6.tidb-serverless.cluster.svc.local",
+	}})
+	re.Equal(http.StatusBadRequest, code)
+
+	// Duplicates within the same request should be rejected.
+	code, _ = tryAddMetaServiceGroups(re, suite.server, []*handlers.AddMetaServiceGroupRequest{
+		{
+			ID:        "etcd-group-6",
+			Addresses: "etcd-group-6.tidb-serverless.cluster.svc.local",
+		},
+		{
+			ID:        "etcd-group-6",
+			Addresses: "etcd-group-6-dup.tidb-serverless.cluster.svc.local",
+		},
+	})
 	re.Equal(http.StatusBadRequest, code)
 }

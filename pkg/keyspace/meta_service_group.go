@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,12 +54,44 @@ func (m *MetaServiceGroupManager) GetAssignmentCounts() (map[string]int, error) 
 	)
 	err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		count, err = m.store.GetAssignmentCount(txn, m.metaServiceGroups)
-		if err != nil {
-			return nil
-		}
-		return nil
+		return err
 	})
 	return count, err
+}
+
+func (m *MetaServiceGroupManager) selectGroupTxn(txn kv.Txn) (string, error) {
+	countMap, err := m.store.GetAssignmentCount(txn, m.metaServiceGroups)
+	if err != nil {
+		return "", err
+	}
+	minCount := math.MaxInt
+	var assignedGroup string
+	for currentGroup, currentCount := range countMap {
+		if currentCount < minCount {
+			minCount = currentCount
+			assignedGroup = currentGroup
+		}
+	}
+	if assignedGroup == "" {
+		return "", errNoAvailableMetaServiceGroups
+	}
+	return assignedGroup, nil
+}
+
+// SelectGroup returns the meta-service group with the least assigned keyspaces
+// without updating the persisted assignment count.
+func (m *MetaServiceGroupManager) SelectGroup() (string, error) {
+	m.RLock()
+	defer m.RUnlock()
+	var assignedGroup string
+	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		assignedGroup, err = m.selectGroupTxn(txn)
+		return err
+	}); err != nil {
+		return "", err
+	}
+	return assignedGroup, nil
 }
 
 // AssignToGroup increments count of the meta-service group with least assigned keyspaces.
@@ -69,25 +101,30 @@ func (m *MetaServiceGroupManager) AssignToGroup(count int) (string, error) {
 	defer m.RUnlock()
 	var assignedGroup string
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		countMap, err := m.store.GetAssignmentCount(txn, m.metaServiceGroups)
+		var err error
+		assignedGroup, err = m.selectGroupTxn(txn)
 		if err != nil {
 			return err
-		}
-		minCount := math.MaxInt
-		for currentGroup, currentCount := range countMap {
-			if currentCount < minCount {
-				minCount = currentCount
-				assignedGroup = currentGroup
-			}
-		}
-		if assignedGroup == "" {
-			return errNoAvailableMetaServiceGroups
 		}
 		return m.store.IncrementAssignmentCount(txn, assignedGroup, count)
 	}); err != nil {
 		return "", err
 	}
 	return assignedGroup, nil
+}
+
+func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
+	if oldGroupID != "" {
+		if err := m.store.IncrementAssignmentCount(txn, oldGroupID, -1); err != nil {
+			return err
+		}
+	}
+	if newGroupID != "" {
+		if err := m.store.IncrementAssignmentCount(txn, newGroupID, 1); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateAssignment moves a keyspace from one meta-service group to another.
@@ -100,17 +137,7 @@ func (m *MetaServiceGroupManager) UpdateAssignment(oldGroupID, newGroupID string
 		return errUnknownMetaServiceGroup
 	}
 	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		if oldGroupID != "" {
-			if err := m.store.IncrementAssignmentCount(txn, oldGroupID, -1); err != nil {
-				return err
-			}
-		}
-		if newGroupID != "" {
-			if err := m.store.IncrementAssignmentCount(txn, newGroupID, 1); err != nil {
-				return err
-			}
-		}
-		return nil
+		return m.updateAssignmentTxn(txn, oldGroupID, newGroupID)
 	})
 }
 

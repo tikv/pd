@@ -271,10 +271,13 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	tracer.SetKeyspace(newID, request.Name)
 	tracer.OnAllocateIDFinished()
 
+	if request.Config != nil {
+		delete(request.Config, MetaServiceGroupAddressesKey)
+	}
 	// assign meta-service group for the new keyspace if meta-service groups exist.
 	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
+		metaServiceGroup, err := manager.mgm.SelectGroup()
 		if err != nil {
 			return nil, err
 		}
@@ -340,7 +343,13 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			if e != nil {
 				return e
 			}
-			return txn.Remove(metaPath)
+			if e = txn.Remove(metaPath); e != nil {
+				return e
+			}
+			if assignToMetaServiceGroup {
+				return manager.mgm.updateAssignmentTxn(txn, request.Config[MetaServiceGroupIDKey], "")
+			}
+			return nil
 		})
 		if err2 != nil {
 			log.Warn("[create-keyspace] failed to remove pre-created keyspace after split failed",
@@ -419,6 +428,9 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if request.Config != nil {
+		delete(request.Config, MetaServiceGroupAddressesKey)
+	}
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
@@ -443,7 +455,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	}
 	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.AssignToGroup(1)
+		metaServiceGroup, err := manager.mgm.SelectGroup()
 		if err != nil {
 			return nil, err
 		}
@@ -474,8 +486,18 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			idPath := keypath.KeyspaceIDPath(name)
 			metaPath := keypath.KeyspaceMetaPath(id)
-			return txn.Remove(metaPath)
+			if err := txn.Remove(idPath); err != nil {
+				return err
+			}
+			if err := txn.Remove(metaPath); err != nil {
+				return err
+			}
+			if assignToMetaServiceGroup {
+				return manager.mgm.updateAssignmentTxn(txn, request.Config[MetaServiceGroupIDKey], "")
+			}
+			return nil
 		})
 		if err2 != nil {
 			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
@@ -539,6 +561,13 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		}
 		if loadedMeta != nil {
 			return errs.ErrKeyspaceExists
+		}
+		if manager.mgm != nil {
+			if groupID := keyspace.GetConfig()[MetaServiceGroupIDKey]; groupID != "" {
+				if err := manager.mgm.updateAssignmentTxn(txn, "", groupID); err != nil {
+					return err
+				}
+			}
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
@@ -807,6 +836,7 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		if err := update(meta); err != nil {
 			return err
 		}
+		delete(meta.Config, MetaServiceGroupAddressesKey)
 		newConfig := meta.GetConfig()
 		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
 		newUserKind := endpoint.StringUserKind(newConfig[UserKindKey])
@@ -821,7 +851,10 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
 		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
-			if err := manager.mgm.UpdateAssignment(oldMetaServiceGroup, newMetaServiceGroup); err != nil {
+			if newMetaServiceGroup != "" && manager.mgm.GetGroups()[newMetaServiceGroup] == "" {
+				return errUnknownMetaServiceGroup
+			}
+			if err := manager.mgm.updateAssignmentTxn(txn, oldMetaServiceGroup, newMetaServiceGroup); err != nil {
 				return err
 			}
 		}
