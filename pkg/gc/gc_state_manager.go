@@ -139,7 +139,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 
 const (
 	gcStateListenerChannelSize = 128
-	gcStateListenerSendTimeout = 3 * time.Second
+	gcStateListenerSendTimeout = 10 * time.Second
 )
 
 type gcStateListenerFlags uint64
@@ -253,11 +253,13 @@ func (m *GCStateManager) OnNodeBecomesFollower() {
 	m.nodeLeadership.Add(-1)
 	listeners := m.gcStateListeners
 	m.gcStateListeners = nil
-	m.mu.Unlock()
 
+	// The listeners must be closed within the mutex to avoid concurrent callback invocations. Otherwise the concurrent
+	// invocation has the risk of panicking due to trying to send to the closed channel.
 	for _, listener := range listeners {
 		listener.watcher.internalClose(errs.ErrNotLeader)
 	}
+	m.mu.Unlock()
 }
 
 func (m *GCStateManager) nodeIsLeader() bool {
@@ -270,12 +272,12 @@ func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial b
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	listener := newGCStateListener(ctx, excludeGCBarriers)
 	if !m.nodeIsLeader() {
 		return nil, errs.ErrNotLeader
 	}
-	m.gcStateListeners = append(m.gcStateListeners, listener)
 
+	listener := newGCStateListener(ctx, excludeGCBarriers)
+	m.gcStateListeners = append(m.gcStateListeners, listener)
 	go m.holdGCStateWatcher(listener, skipLoadingInitial)
 
 	return listener.watcher, nil
@@ -296,31 +298,46 @@ func (m *GCStateManager) holdGCStateWatcher(listener gcStateListener, skipLoadin
 }
 
 func (m *GCStateManager) sendInitialGCStates(listener gcStateListener) {
-	gcStates, err := m.GetAllKeyspacesGCStates(listener.watcher.ctx)
-	if err != nil {
-		if listener.watcher.ctx.Err() == nil {
-			log.Warn("failed to load initial GC states for watcher", zap.Error(err))
-		}
-		return
-	}
-
-	for _, gcState := range gcStates {
+	//gcStates, err := m.GetAllKeyspacesGCStates(listener.watcher.ctx)
+	//if err != nil {
+	//	if listener.watcher.ctx.Err() == nil {
+	//		log.Warn("failed to load initial GC states for watcher", zap.Error(err))
+	//	}
+	//	return
+	//}
+	//
+	//for _, gcState := range gcStates {
+	//	select {
+	//	case <-listener.watcher.Done():
+	//		return
+	//	default:
+	//	}
+	//
+	//	m.mu.Lock()
+	//	if !m.hasGCStateListenerLocked(listener) {
+	//		m.mu.Unlock()
+	//		return
+	//	}
+	//	if !m.sendGCStateToListenerLocked(listener, gcState, false) {
+	//		m.mu.Unlock()
+	//		return
+	//	}
+	//	m.mu.Unlock()
+	//}
+	err := m.iterateAllKeyspacesGCStates(listener.watcher.ctx, listener.flags&gcStateListenerExcludeGCBarriers != 0, func(gcState GCState) {
+		// iterateAllKeyspacesGCStates guarantees that this callback is executed within the mutex.
+		// Check whether the listener is closed during the time gap that the mutex is not hold.
 		select {
 		case <-listener.watcher.Done():
+			// Do nothing. The `iterateAllKeyspacesGCStates` call should be able to exit when it checks the context the
+			// next time.
 			return
 		default:
 		}
-
-		m.mu.Lock()
-		if !m.hasGCStateListenerLocked(listener) {
-			m.mu.Unlock()
-			return
-		}
-		if !m.sendGCStateToListenerLocked(listener, gcState, false) {
-			m.mu.Unlock()
-			return
-		}
-		m.mu.Unlock()
+		m.sendGCStateToListenerLocked(listener, gcState, false)
+	})
+	if err != nil {
+		log.Warn("failed to load initial GC states for GC state watcher", zap.Error(err))
 	}
 }
 
@@ -349,13 +366,6 @@ func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener, e
 		m.gcStateListeners = slices.Delete(m.gcStateListeners, i, i+1)
 		return
 	}
-}
-
-func (m *GCStateManager) cancelAllGCStateListenersLocked() {
-	for _, listener := range m.gcStateListeners {
-		listener.watcher.internalClose(errs.ErrNotLeader)
-	}
-	m.gcStateListeners = nil
 }
 
 func (m *GCStateManager) getGCStateListenerCount() int {
@@ -1085,13 +1095,18 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 // started earlier than the current one.
 func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint32]GCState, error) {
 	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
-		result, err := m.getAllKeyspacesGCStatesImpl(execCtx)
+		result := make(map[uint32]GCState)
+		err := m.iterateAllKeyspacesGCStates(execCtx, false, func(gcState GCState) {
+			result[gcState.KeyspaceID] = gcState
+		})
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 		return result, err
 	})
 }
 
-func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[uint32]GCState, error) {
+// iterateAllKeyspacesGCStates iterates GC states of all keyspaces, and calls the given callback on each of them.
+// It's guaranteed that `cb` is always called within the mutex.
+func (m *GCStateManager) iterateAllKeyspacesGCStates(ctx context.Context, excludeGCBarriers bool, cb func(GCState)) error {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 
 	mutexLocked := false
@@ -1114,31 +1129,35 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
 	// Do not guarantee atomicity among different keyspaces here.
-	results := make(map[uint32]GCState)
 	lock()
-	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		nullKeyspaceState, _, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, false, wb)
-		if err1 != nil {
-			return err1
+	{
+		var nullKeyspaceGCState GCState
+		err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			var err1 error
+			nullKeyspaceGCState, _, err1 = m.getGCStateInTransaction(constant.NullKeyspaceID, excludeGCBarriers, wb)
+			if err1 != nil {
+				return err1
+			}
+			return nil
+		})
+		if err != nil {
+			unlock()
+			return err
 		}
-		results[constant.NullKeyspaceID] = nullKeyspaceState
-		return nil
-	})
-	unlock()
-	if err != nil {
-		return nil, err
+		cb(nullKeyspaceGCState)
 	}
+	unlock()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		default:
 		}
 
 		keyspaceMeta, ok, err := keyspaceIterator.Next()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !ok {
 			break
@@ -1150,29 +1169,38 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 		}
 
 		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
-			results[keyspaceMeta.Id] = GCState{
-				KeyspaceID:      keyspaceMeta.Id,
-				IsKeyspaceLevel: false,
+			lock()
+			{
+				gcState := GCState{
+					KeyspaceID:      keyspaceMeta.Id,
+					IsKeyspaceLevel: false,
+				}
+				cb(gcState)
 			}
+			unlock()
 			continue
 		}
 
 		lock()
-		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			state, _, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, false, wb)
-			if err1 != nil {
-				return err1
+		{
+			var gcState GCState
+			err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+				var err1 error
+				gcState, _, err1 = m.getGCStateInTransaction(keyspaceMeta.Id, excludeGCBarriers, wb)
+				if err1 != nil {
+					return err1
+				}
+				return nil
+			})
+			if err != nil {
+				return err
 			}
-			results[keyspaceMeta.Id] = state
-			return nil
-		})
-		unlock()
-		if err != nil {
-			return nil, err
+			cb(gcState)
 		}
+		unlock()
 	}
 
-	return results, nil
+	return nil
 }
 
 // LoadAllGlobalGCBarriers returns global GC barriers.
