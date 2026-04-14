@@ -24,8 +24,9 @@ const (
 	// TODO: remove old label in 8.x
 	resourceGroupNameLabel    = "name"
 	newResourceGroupNameLabel = "resource_group"
+	requestSourceLabel        = "request_source"
 
-	errType = "type"
+	typeLabel = "type"
 )
 
 var (
@@ -98,7 +99,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Name:        "fail",
 			Help:        "Counter of failed request.",
 			ConstLabels: constLabels,
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, errType})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 
 	GroupRunningKVRequestCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -162,7 +163,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Name:        "ru_total",
 			Help:        "Counter of request RU consumption grouped by resource group and request source.",
 			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel, "request_source", errType})
+		}, []string{newResourceGroupNameLabel, requestSourceLabel, typeLabel})
 
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
