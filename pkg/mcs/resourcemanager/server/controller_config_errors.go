@@ -44,6 +44,7 @@ func (e *controllerConfigValidationError) Unwrap() error {
 	return e.err
 }
 
+// Is makes controllerConfigValidationError match errControllerConfigValidation via errors.Is.
 func (*controllerConfigValidationError) Is(target error) bool {
 	return target == errControllerConfigValidation
 }

@@ -348,7 +348,7 @@ func (suite *resourceManagerAPITestSuite) TestControllerConfigAPIAllOrNothing() 
 		"write-cost-per-byte":      6.0,
 		"ltb-max-wait-duration":    "not-a-duration",
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		// Old code updated fields one by one after decoding into a map, so repeating the
 		// same mixed payload makes a partial write overwhelmingly likely if batching is gone.
 		resp, statusCode := tryToSetControllerConfig(re, suite.cluster.GetLeaderServer().GetAddr(), payload)
