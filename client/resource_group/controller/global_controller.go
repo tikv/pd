@@ -490,9 +490,8 @@ func (c *ResourceGroupsController) getOrCreateRequestSourceMetricsState(name str
 }
 
 func (c *ResourceGroupsController) cleanupRequestSourceMetricsState(name string) {
-	if state, ok := c.requestSourceStates.Load(name); ok {
-		state.(*requestSourceMetricsState).cleanup()
-		c.requestSourceStates.Delete(name)
+	if v, loaded := c.requestSourceStates.LoadAndDelete(name); loaded {
+		v.(*requestSourceMetricsState).cleanup()
 	}
 }
 
@@ -621,9 +620,8 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
-				gc.metrics.cleanupRequestSourceMetrics()
+				c.cleanupRequestSourceMetricsState(resourceGroupName)
 				c.groupsController.Delete(resourceGroupName)
-				c.requestSourceStates.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true
 			}

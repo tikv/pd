@@ -208,10 +208,6 @@ func (mc *groupMetricsCollection) addRequestSourceRU(requestSource string, consu
 	}
 }
 
-func (mc *groupMetricsCollection) cleanupRequestSourceMetrics() {
-	mc.sourceState.cleanup()
-}
-
 type tokenCounter struct {
 	fillRate uint64
 

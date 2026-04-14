@@ -396,3 +396,161 @@ func TestRevivedResourceGroupCleanupRemovesExistingRequestSourceMetrics(t *testi
 	re.False(ok)
 	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 }
+
+// TestGetOrCreateAfterCleanupReturnsFreshState verifies the fix for the race
+// rleungx identified: after cleanupRequestSourceMetricsState runs,
+// getOrCreateRequestSourceMetricsState must return a fresh, non-closed state
+// so that a newly created gc can record metrics normally.
+func TestGetOrCreateAfterCleanupReturnsFreshState(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "request-source-create-after-cleanup",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+
+	// Phase 1: create a gc, record some metrics, then clean up.
+	gc, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    64,
+		numReplicas:   1,
+		storeID:       1,
+		requestSource: "internal_create_after_cleanup",
+	}
+	resp := &TestResponseInfo{readBytes: 64, succeed: true}
+
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+
+	gc.mu.Lock()
+	*gc.run.consumption = *gc.mu.consumption
+	gc.mu.Unlock()
+	gc.inactive = true
+	controller.cleanUpResourceGroup()
+
+	_, loaded := controller.loadGroupController(group.Name)
+	re.False(loaded)
+
+	// Phase 2: getOrCreateRequestSourceMetricsState must return a fresh,
+	// non-closed state after cleanup has removed the old one.
+	state := controller.getOrCreateRequestSourceMetricsState(group.Name)
+	re.NotNil(state)
+
+	state.mu.RLock()
+	re.False(state.closed)
+	state.mu.RUnlock()
+
+	// Phase 3: create a new gc with this state and verify it can record metrics.
+	newGC, err := newGroupCostController(
+		group,
+		controller.ruConfig,
+		controller.lowTokenNotifyChan,
+		controller.tokenBucketUpdateChan,
+		state,
+	)
+	re.NoError(err)
+
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+	_, _, _, _, err = newGC.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = newGC.onResponseImpl(req, resp)
+	re.NoError(err)
+
+	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, newGC, req.requestSource)
+	re.Equal(1, cacheSize)
+	re.NotNil(sourceMetrics)
+	re.Greater(counterValue(t, sourceMetrics.wru), float64(0))
+	re.Greater(counterValue(t, sourceMetrics.rru), float64(0))
+	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	// Cleanup for this test.
+	state.cleanup()
+}
+
+// TestCleanupThenRecreateViaFullPath exercises the full end-to-end path:
+// cleanup a group, then tryGetResourceGroupController re-creates it, and
+// the new gc records metrics successfully.
+func TestCleanupThenRecreateViaFullPath(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "request-source-full-recreate",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    64,
+		numReplicas:   1,
+		storeID:       1,
+		requestSource: "internal_full_recreate",
+	}
+	resp := &TestResponseInfo{readBytes: 64, succeed: true}
+
+	// Create, use, and clean up the group.
+	gc, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+
+	gc.mu.Lock()
+	*gc.run.consumption = *gc.mu.consumption
+	gc.mu.Unlock()
+	gc.inactive = true
+	controller.cleanUpResourceGroup()
+
+	_, loaded := controller.loadGroupController(group.Name)
+	re.False(loaded)
+
+	// Re-create through the normal path (simulates a new request arriving
+	// after the group was cleaned up).
+	gc2, err := controller.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+	_, _, _, _, err = gc2.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc2.onResponseImpl(req, resp)
+	re.NoError(err)
+
+	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc2, req.requestSource)
+	re.Equal(1, cacheSize)
+	re.NotNil(sourceMetrics)
+	re.Greater(counterValue(t, sourceMetrics.wru), float64(0))
+	re.Greater(counterValue(t, sourceMetrics.rru), float64(0))
+	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	// Cleanup for this test.
+	gc2.metrics.sourceState.cleanup()
+}
