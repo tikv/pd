@@ -2129,7 +2129,7 @@ func assertNoGCStateReceived(re *require.Assertions, ch <-chan GCState) {
 func assertGCStateChannelClosed(re *require.Assertions, ch <-chan GCState) {
 	gcState, ok, got := recvGCStateFromChannelWithTimeout(ch, time.Second)
 	if !got {
-		re.FailNow("timed out waiting for GC state watch channel to close")
+		re.FailNow("timed out waiting for GC state watcher channel to close")
 	}
 	re.False(ok)
 	re.Equal(GCState{}, gcState)

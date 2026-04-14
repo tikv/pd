@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	gcStateWatchReceiveBatchSize = 128
+	gcStateWatchReceiveBatchSize = 1024
 	gcStateWatchMaxResponseBytes = 1 << 20
 )
 
@@ -413,7 +413,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 
 	const watchGCSafePointV2SkipLoadingInitial = true
 
-	watch, done, err := s.openGCStateWatch(
+	watcher, done, err := s.openGCStateWatch(
 		stream.Context(),
 		request.GetHeader(),
 		watchGCSafePointV2SkipLoadingInitial,
@@ -422,15 +422,15 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	if err != nil {
 		return err
 	}
-	// GCStateManager cancels the watch itself on internal shutdown such as leadership loss. This deferred
+	// GCStateManager cancels the watcher itself on internal shutdown such as leadership loss. This deferred
 	// cancel remains as a fallback for stream-send failures or other early exits owned by the gRPC handler.
-	defer watch.Cancel()
+	defer watcher.Close()
 	if done != nil {
 		defer done()
 	}
 
 	lastSafePoints := make(map[uint32]uint64)
-	return s.consumeGCStateWatch(watch, func(gcStates []gc.GCState) error {
+	return s.consumeGCStateWatch(watcher, func(gcStates []gc.GCState) error {
 		header := grpcutil.WrapHeader()
 		baseResponse := &pdpb.WatchGCSafePointV2Response{Header: header}
 		currentEvents := make([]*pdpb.SafePointEvent, 0, len(gcStates))
@@ -488,7 +488,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 
 // WatchGCStates watches GC state changes.
 func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
-	watch, done, err := s.openGCStateWatch(
+	watcher, done, err := s.openGCStateWatch(
 		stream.Context(),
 		request.GetHeader(),
 		request.GetSkipLoadingInitial(),
@@ -497,14 +497,14 @@ func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pd
 	if err != nil {
 		return err
 	}
-	// GCStateManager cancels the watch itself on internal shutdown such as leadership loss. This deferred
+	// GCStateManager cancels the watcher itself on internal shutdown such as leadership loss. This deferred
 	// cancel remains as a fallback for stream-send failures or other early exits owned by the gRPC handler.
-	defer watch.Cancel()
+	defer watcher.Close()
 	if done != nil {
 		defer done()
 	}
 
-	return s.consumeGCStateWatch(watch, func(gcStates []gc.GCState) error {
+	return s.consumeGCStateWatch(watcher, func(gcStates []gc.GCState) error {
 		header := grpcutil.WrapHeader()
 		baseResponse := &pdpb.WatchGCStatesResponse{Header: header}
 		currentStates := make([]*pdpb.GCState, 0, len(gcStates))
@@ -571,22 +571,22 @@ func (s *GrpcServer) openGCStateWatch(
 		return nil, nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 
-	watch, err := s.gcStateManager.WatchGCStates(streamCtx, skipLoadingInitial, excludeGCBarriers)
+	watcher, err := s.gcStateManager.WatchGCStates(streamCtx, skipLoadingInitial, excludeGCBarriers)
 	if err != nil {
 		if done != nil {
 			done()
 		}
 		return nil, nil, err
 	}
-	return watch, done, nil
+	return watcher, done, nil
 }
 
 func (*GrpcServer) consumeGCStateWatch(
-	watch *gc.GCStateWatcher,
+	watcher *gc.GCStateWatcher,
 	send func([]gc.GCState) error,
 ) error {
 	for {
-		gcStates, err := recvGCStateBatch(watch)
+		gcStates, err := recvGCStateBatch(watcher)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil
@@ -601,38 +601,38 @@ func (*GrpcServer) consumeGCStateWatch(
 	}
 }
 
-func recvGCStateBatch(watch *gc.GCStateWatcher) ([]gc.GCState, error) {
-	if err := watch.Err(); err != nil {
+func recvGCStateBatch(watcher *gc.GCStateWatcher) ([]gc.GCState, error) {
+	if err := watcher.Err(); err != nil {
 		return nil, err
 	}
 
 	select {
-	case gcState, ok := <-watch.Chan():
+	case gcState, ok := <-watcher.Chan():
 		if !ok {
-			return nil, gcStateWatchClosedErr(watch)
+			return nil, gcStateWatchClosedErr(watcher)
 		}
 
 		gcStates := make([]gc.GCState, 1, gcStateWatchReceiveBatchSize)
 		gcStates[0] = gcState
 		for len(gcStates) < gcStateWatchReceiveBatchSize {
-			if watch.Err() != nil {
+			if watcher.Err() != nil {
 				return gcStates, nil
 			}
 			select {
-			case gcState, ok := <-watch.Chan():
+			case gcState, ok := <-watcher.Chan():
 				if !ok {
 					return gcStates, nil
 				}
 				gcStates = append(gcStates, gcState)
-			case <-watch.Done():
+			case <-watcher.Done():
 				return gcStates, nil
 			default:
 				return gcStates, nil
 			}
 		}
 		return gcStates, nil
-	case <-watch.Done():
-		return nil, gcStateWatchClosedErr(watch)
+	case <-watcher.Done():
+		return nil, gcStateWatchClosedErr(watcher)
 	}
 }
 
