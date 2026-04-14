@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"slices"
@@ -2170,15 +2171,86 @@ func assertNextWatchedGCStateEqualsExpected(re *require.Assertions, ch <-chan GC
 	return gcState
 }
 
+func collectWatchedGCStatesUntilClosed(re *require.Assertions, ch <-chan GCState) map[uint32]GCState {
+	deadline := time.Now().Add(time.Second)
+	received := make(map[uint32]GCState)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			re.FailNow("timed out waiting for watched GC state channel to close")
+		}
+		gcState, ok, got := recvGCStateFromChannelWithTimeout(ch, remaining)
+		if !got {
+			re.FailNow("timed out waiting for watched GC state channel to close")
+		}
+		if !ok {
+			return received
+		}
+		received[gcState.KeyspaceID] = gcState
+	}
+}
+
+type watchedGCStateCollector struct {
+	mu       sync.Mutex
+	received map[uint32]GCState
+	started  chan struct{}
+	done     chan struct{}
+	once     sync.Once
+}
+
+func startWatchedGCStateCollector(ch <-chan GCState) *watchedGCStateCollector {
+	collector := &watchedGCStateCollector{
+		received: make(map[uint32]GCState),
+		started:  make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	go func() {
+		defer close(collector.done)
+		for gcState := range ch {
+			collector.once.Do(func() {
+				close(collector.started)
+			})
+			collector.mu.Lock()
+			collector.received[gcState.KeyspaceID] = gcState
+			collector.mu.Unlock()
+		}
+	}()
+	return collector
+}
+
+func (c *watchedGCStateCollector) waitUntilStarted(re *require.Assertions) {
+	select {
+	case <-c.started:
+	case <-time.After(time.Second):
+		re.FailNow("timed out waiting for watched GC state collector to start")
+	}
+}
+
+func (c *watchedGCStateCollector) waitUntilClosed(re *require.Assertions) map[uint32]GCState {
+	select {
+	case <-c.done:
+	case <-time.After(5 * time.Second):
+		re.FailNow("timed out waiting for watched GC state collector to stop")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return maps.Clone(c.received)
+}
+
 func buildExpectedWatchedGCStates(states map[uint32]GCState, excludeGCBarriers bool) map[uint32]GCState {
 	expected := make(map[uint32]GCState, len(states))
 	for keyspaceID, gcState := range states {
-		expected[keyspaceID] = cloneGCStateForListener(gcState, func() gcStateListenerFlags {
+		expectedGCState := cloneGCStateForListener(gcState, func() gcStateListenerFlags {
 			if excludeGCBarriers {
 				return gcStateListenerExcludeGCBarriers
 			}
 			return 0
 		}())
+		if excludeGCBarriers {
+			expectedGCState.GCBarrierLoaded = false
+		}
+		expected[keyspaceID] = expectedGCState
 	}
 	return expected
 }
@@ -2457,6 +2529,59 @@ func TestWatchGCStatesLoadingInitial(t *testing.T) {
 	withInitialState := assertNextWatchedGCStateEqualsCurrent(re, manager, withInitialCh, 2)
 	withoutInitialState := assertNextWatchedGCStateEqualsCurrent(re, manager, withoutInitialCh, 2)
 	re.Equal(withInitialState, withoutInitialState)
+}
+
+func TestWatchGCStatesLoadingInitialInterrupted(t *testing.T) {
+	t.Run("ContextCanceled", func(t *testing.T) {
+		re := require.New(t)
+		manager, clean := newWatchGCStateManagerForTest(t, gcStateListenerChannelSize*16)
+		defer clean()
+		manager.OnNodeBecomesLeader()
+
+		expected, err := manager.GetAllKeyspacesGCStates(context.Background())
+		re.NoError(err)
+		re.Greater(len(expected), gcStateListenerChannelSize*8)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		watch, err := manager.WatchGCStates(ctx, false, false)
+		re.NoError(err)
+		ch := watch.Chan()
+		waitGCStateListenerCount(re, manager, 1)
+		collector := startWatchedGCStateCollector(ch)
+		collector.waitUntilStarted(re)
+
+		cancel()
+
+		received := collector.waitUntilClosed(re)
+		waitGCStateListenerCount(re, manager, 0)
+		re.Less(len(received), len(expected))
+		re.ErrorIs(watch.Err(), context.Canceled)
+	})
+
+	t.Run("LeadershipLost", func(t *testing.T) {
+		re := require.New(t)
+		manager, clean := newWatchGCStateManagerForTest(t, gcStateListenerChannelSize*16)
+		defer clean()
+		manager.OnNodeBecomesLeader()
+
+		expected, err := manager.GetAllKeyspacesGCStates(context.Background())
+		re.NoError(err)
+		re.Greater(len(expected), gcStateListenerChannelSize*8)
+
+		watch, err := manager.WatchGCStates(context.Background(), false, false)
+		re.NoError(err)
+		ch := watch.Chan()
+		waitGCStateListenerCount(re, manager, 1)
+		collector := startWatchedGCStateCollector(ch)
+		collector.waitUntilStarted(re)
+
+		manager.OnNodeBecomesFollower()
+
+		received := collector.waitUntilClosed(re)
+		waitGCStateListenerCount(re, manager, 0)
+		re.Less(len(received), len(expected))
+		re.ErrorIs(watch.Err(), errs.ErrNotLeader)
+	})
 }
 
 func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
