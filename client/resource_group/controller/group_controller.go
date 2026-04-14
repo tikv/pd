@@ -697,6 +697,9 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	if source, bytesForEst := estimatePrechargeSource(req); bytesForEst > 0 {
+		gc.metrics.observePagingActual(source, bytesForEst, resp.ReadBytes())
+	}
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
 		v := getRUValueFromConsumption(delta)
