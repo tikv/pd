@@ -158,7 +158,11 @@ func (m *MetaServiceGroupManager) AttachEndpoints(keyspaceConfig map[string]stri
 func (m *MetaServiceGroupManager) GetGroups() map[string]string {
 	m.RLock()
 	defer m.RUnlock()
-	return m.metaServiceGroups
+	groups := make(map[string]string, len(m.metaServiceGroups))
+	for id, endpoints := range m.metaServiceGroups {
+		groups[id] = endpoints
+	}
+	return groups
 }
 
 // updateGroups updates currently available meta-service groups.

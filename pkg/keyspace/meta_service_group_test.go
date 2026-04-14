@@ -156,6 +156,17 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpoints() {
 	re.Equal("foo.bar.local", config[MetaServiceGroupAddressesKey], "should read from updated metaServiceGroups map")
 }
 
+func (suite *metaServiceGroupTestSuite) TestGetGroupsReturnsCopy() {
+	re := suite.Require()
+	groups := suite.manager.GetGroups()
+	groups["etcd-group-0"] = "mutated"
+	delete(groups, "etcd-group-1")
+
+	currentGroups := suite.manager.GetGroups()
+	re.Equal(mockMetaServiceGroups()["etcd-group-0"], currentGroups["etcd-group-0"])
+	re.Equal(mockMetaServiceGroups()["etcd-group-1"], currentGroups["etcd-group-1"])
+}
+
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment() {
 	re := suite.Require()
 	// Assign to some existing group
