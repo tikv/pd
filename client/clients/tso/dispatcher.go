@@ -84,11 +84,10 @@ type tsoDispatcher struct {
 
 func newTSODispatcher(
 	ctx context.Context,
-	maxBatchSize int,
 	provider tsoServiceProvider,
 ) *tsoDispatcher {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
-	tsoRequestCh := make(chan *Request, maxBatchSize*2)
+	tsoRequestCh := make(chan *Request, defaultMaxTSOBatchSize*2)
 	failpoint.Inject("shortDispatcherChannel", func() {
 		tsoRequestCh = make(chan *Request, 1)
 	})
@@ -106,7 +105,7 @@ func newTSODispatcher(
 		batchBufferPool: &sync.Pool{
 			New: func() any {
 				return batch.NewController[*Request](
-					maxBatchSize*2,
+					defaultMaxTSOBatchSize*2,
 					tsoRequestFinisher(0, 0, invalidStreamID),
 					metrics.TSOBestBatchSize,
 				)

@@ -539,7 +539,7 @@ func (c *Cli) tryCreateTSODispatcher() {
 	if len(url) == 0 {
 		return
 	}
-	dispatcher := newTSODispatcher(c.ctx, defaultMaxTSOBatchSize, c)
+	dispatcher := newTSODispatcher(c.ctx, c)
 	c.wg.Add(1)
 	go dispatcher.handleDispatcher(&c.wg)
 	// Try to set the dispatcher atomically.

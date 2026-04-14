@@ -18,7 +18,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -54,6 +53,7 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 // Service is the TSO grpc service.
 type Service struct {
 	*Server
+	advertiseListenHost string
 }
 
 // NewService creates a new TSO service.
@@ -63,7 +63,8 @@ func NewService(svr bs.Server) registry.RegistrableService {
 		log.Fatal("create tso server failed")
 	}
 	return &Service{
-		Server: server,
+		Server:              server,
+		advertiseListenHost: getAdvertiseListenHost(server.GetAdvertiseListenAddr()),
 	}
 }
 
@@ -102,9 +103,8 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
 		}
-		if calleeID := header.GetCalleeId(); calleeID != "" {
-			advertiseURL, _ := url.Parse(s.GetAdvertiseListenAddr())
-			if advertiseURL != nil && advertiseURL.Host != "" && calleeID != advertiseURL.Host {
+		if calleeID := header.GetCalleeId(); calleeID != "" && s.advertiseListenHost != "" {
+			if calleeID != s.advertiseListenHost {
 				return status.Errorf(
 					codes.FailedPrecondition, "mismatch callee id, need %s but got %s",
 					s.GetAdvertiseListenAddr(), calleeID,

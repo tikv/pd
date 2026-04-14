@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -90,6 +91,14 @@ type Server struct {
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
+}
+
+func getAdvertiseListenHost(advertiseListenAddr string) string {
+	parsed, err := url.Parse(advertiseListenAddr)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Host
 }
 
 // Implement the following methods defined in bs.Server
