@@ -90,27 +90,52 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		Status:  pending,
 		Timeout: defaultJobTimeout,
 	}
-	job.Engine = input["engine"].(string)
-	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", input["engine"].(string)))
+	engine, ok := input["engine"].(string)
+	if !ok || len(engine) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "engine is required and must be a string")
 		return
 	}
-	job.Rule = core.NewRule(input["rule"].(string))
+	job.Engine = engine
+	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", job.Engine))
+		return
+	}
+	ruleStr, ok := input["rule"].(string)
+	if !ok || len(ruleStr) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "rule is required and must be a string")
+		return
+	}
+	job.Rule = core.NewRule(ruleStr)
 	if job.Rule != core.LeaderScatter && job.Rule != core.PeerScatter && job.Rule != core.LearnerScatter {
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule:%s must be leader-scatter, learner-scatter or peer-scatter",
-			input["engine"].(string)))
+			ruleStr))
 		return
 	}
 
-	job.Alias = input["alias"].(string)
-	timeoutStr, ok := input["timeout"].(string)
-	if ok && len(timeoutStr) > 0 {
-		timeout, err := time.ParseDuration(timeoutStr)
-		if err != nil {
-			handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", input["timeout"].(string)))
+	alias, ok := input["alias"].(string)
+	if !ok || len(alias) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "alias is required and must be a string")
+		return
+	}
+	job.Alias = alias
+	if timeoutVal, exists := input["timeout"]; exists {
+		timeoutStr, ok := timeoutVal.(string)
+		if !ok {
+			handler.rd.JSON(w, http.StatusBadRequest, "timeout must be a string")
 			return
 		}
-		job.Timeout = timeout
+		if len(timeoutStr) > 0 {
+			timeout, err := time.ParseDuration(timeoutStr)
+			if err != nil {
+				handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", timeoutStr))
+				return
+			}
+			if timeout <= 0 {
+				handler.rd.JSON(w, http.StatusBadRequest, "timeout must be positive")
+				return
+			}
+			job.Timeout = timeout
+		}
 	}
 
 	keys, err := keyutil.DecodeHTTPKeyRanges(input)
