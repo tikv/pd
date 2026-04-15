@@ -373,6 +373,7 @@ func cloneGCBarrier(barrier *endpoint.GCBarrier) *endpoint.GCBarrier {
 func cloneGCStateForListener(gcState GCState, flags gcStateListenerFlags) GCState {
 	cloned := gcState
 	if flags&gcStateListenerExcludeGCBarriers != 0 {
+		cloned.IsGCBarriersLoaded = false
 		cloned.GCBarriers = nil
 		return cloned
 	}
@@ -570,12 +571,12 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 		}
 
 		newGCState = GCState{
-			KeyspaceID:      keyspaceID,
-			IsKeyspaceLevel: oldGCState.IsKeyspaceLevel,
-			TxnSafePoint:    oldGCState.TxnSafePoint,
-			GCSafePoint:     target,
-			GCBarrierLoaded: oldGCState.GCBarrierLoaded,
-			GCBarriers:      oldGCState.GCBarriers,
+			KeyspaceID:         keyspaceID,
+			IsKeyspaceLevel:    oldGCState.IsKeyspaceLevel,
+			TxnSafePoint:       oldGCState.TxnSafePoint,
+			GCSafePoint:        target,
+			IsGCBarriersLoaded: oldGCState.IsGCBarriersLoaded,
+			GCBarriers:         oldGCState.GCBarriers,
 		}
 		return wb.SetGCSafePoint(keyspaceID, target)
 	})
@@ -672,12 +673,12 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 
 		newGCState = GCState{
-			KeyspaceID:      keyspaceID,
-			IsKeyspaceLevel: oldGCState.IsKeyspaceLevel,
-			TxnSafePoint:    oldGCState.TxnSafePoint,
-			GCSafePoint:     oldGCState.GCSafePoint,
-			GCBarrierLoaded: true,
-			GCBarriers:      make([]*endpoint.GCBarrier, 0, len(oldGCState.GCBarriers)),
+			KeyspaceID:         keyspaceID,
+			IsKeyspaceLevel:    oldGCState.IsKeyspaceLevel,
+			TxnSafePoint:       oldGCState.TxnSafePoint,
+			GCSafePoint:        oldGCState.GCSafePoint,
+			IsGCBarriersLoaded: true,
+			GCBarriers:         make([]*endpoint.GCBarrier, 0, len(oldGCState.MustGetGCBarriers())),
 		}
 
 		for _, barrier := range oldGCState.MustGetGCBarriers() {
@@ -998,8 +999,8 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 // keyspace-level GC enabled. Otherwise, the result would be undefined.
 func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, excludeGCBarrier bool, _ *endpoint.GCStateWriteBatch) (GCState, bool, error) {
 	result := GCState{
-		KeyspaceID:      keyspaceID,
-		GCBarrierLoaded: !excludeGCBarrier,
+		KeyspaceID:         keyspaceID,
+		IsGCBarriersLoaded: !excludeGCBarrier,
 	}
 	if keyspaceID != constant.NullKeyspaceID {
 		// Assuming the parameter `keyspaceID` is either the NullKeyspaceID or the ID of a keyspace that has
@@ -1330,14 +1331,14 @@ type GCState struct {
 	GCSafePoint     uint64
 	// GC barriers are not needed for some operations, in which case loading them causes significant overhead as there
 	// may be too many of them. In this case, it can be explicitly excluded when loading the GCState, marked by
-	// the GCBarrierLoaded field.
-	GCBarrierLoaded bool
-	GCBarriers      []*endpoint.GCBarrier
+	// the IsGCBarriersLoaded field.
+	IsGCBarriersLoaded bool
+	GCBarriers         []*endpoint.GCBarrier
 }
 
 // MustGetGCBarriers asserts the GC barriers (if any) must have been loaded, and extract them.
 func (s GCState) MustGetGCBarriers() []*endpoint.GCBarrier {
-	if !s.GCBarrierLoaded {
+	if !s.IsGCBarriersLoaded {
 		panic("force getting GC barriers from a GCState object where GC barrier is explicitly excluded")
 	}
 	return s.GCBarriers

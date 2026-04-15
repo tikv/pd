@@ -753,8 +753,10 @@ func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.Gl
 
 func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	gcBarriers := make([]*pdpb.GCBarrierInfo, 0, len(gcState.GCBarriers))
-	for _, b := range gcState.GCBarriers {
-		gcBarriers = append(gcBarriers, gcBarrierToProto(b, now))
+	if gcState.IsGCBarriersLoaded {
+		for _, b := range gcState.GCBarriers {
+			gcBarriers = append(gcBarriers, gcBarrierToProto(b, now))
+		}
 	}
 	return &pdpb.GCState{
 		KeyspaceScope: &pdpb.KeyspaceScope{

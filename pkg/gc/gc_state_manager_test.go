@@ -2241,16 +2241,12 @@ func (c *watchedGCStateCollector) waitUntilClosed(re *require.Assertions) map[ui
 func buildExpectedWatchedGCStates(states map[uint32]GCState, excludeGCBarriers bool) map[uint32]GCState {
 	expected := make(map[uint32]GCState, len(states))
 	for keyspaceID, gcState := range states {
-		expectedGCState := cloneGCStateForListener(gcState, func() gcStateListenerFlags {
+		expected[keyspaceID] = cloneGCStateForListener(gcState, func() gcStateListenerFlags {
 			if excludeGCBarriers {
 				return gcStateListenerExcludeGCBarriers
 			}
 			return 0
 		}())
-		if excludeGCBarriers {
-			expectedGCState.GCBarrierLoaded = false
-		}
-		expected[keyspaceID] = expectedGCState
 	}
 	return expected
 }
@@ -2506,6 +2502,7 @@ func TestWatchGCStatesLoadingInitial(t *testing.T) {
 
 	expected, err := manager.GetAllKeyspacesGCStates(context.Background())
 	re.NoError(err)
+	re.True(expected[2].IsGCBarriersLoaded)
 
 	withInitialCtx, withInitialCancel := context.WithCancel(context.Background())
 	defer withInitialCancel()
@@ -2522,6 +2519,7 @@ func TestWatchGCStatesLoadingInitial(t *testing.T) {
 	assertNoGCStateReceived(re, withoutInitialCh)
 	initialReceived := collectWatchedGCStates(re, withInitialCh, len(expected))
 	re.Equal(expected, initialReceived)
+	re.True(initialReceived[2].IsGCBarriersLoaded)
 
 	res, err := manager.AdvanceTxnSafePoint(2, 15, now.Add(time.Second))
 	re.NoError(err)
@@ -2529,6 +2527,8 @@ func TestWatchGCStatesLoadingInitial(t *testing.T) {
 	withInitialState := assertNextWatchedGCStateEqualsCurrent(re, manager, withInitialCh, 2)
 	withoutInitialState := assertNextWatchedGCStateEqualsCurrent(re, manager, withoutInitialCh, 2)
 	re.Equal(withInitialState, withoutInitialState)
+	re.True(withInitialState.IsGCBarriersLoaded)
+	re.True(withoutInitialState.IsGCBarriersLoaded)
 }
 
 func TestWatchGCStatesLoadingInitialInterrupted(t *testing.T) {
@@ -2630,18 +2630,22 @@ func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
 	excludeGCBarriersInitial := collectWatchedGCStates(re, excludeGCBarriersCh, len(expected))
 	re.Equal(expected, includeGCBarriersInitial)
 	re.Equal(buildExpectedWatchedGCStates(expected, true), excludeGCBarriersInitial)
+	re.True(includeGCBarriersInitial[2].IsGCBarriersLoaded)
+	re.False(excludeGCBarriersInitial[2].IsGCBarriersLoaded)
 
 	res, err = manager.AdvanceTxnSafePoint(2, 40, now.Add(2*time.Second))
 	re.NoError(err)
 	re.Equal(uint64(40), res.OldTxnSafePoint)
 	re.Equal(uint64(40), res.NewTxnSafePoint)
 	includeGCBarriersState := assertNextWatchedGCStateEqualsCurrent(re, manager, includeGCBarriersCh, 2)
+	re.True(includeGCBarriersState.IsGCBarriersLoaded)
 	re.Len(includeGCBarriersState.GCBarriers, 1)
 	assertNoGCStateReceived(re, excludeGCBarriersCh)
 
 	_, err = manager.SetGCBarrier(2, "b4", 60, time.Hour, now.Add(time.Second))
 	re.NoError(err)
 	includeGCBarriersState = assertNextWatchedGCStateEqualsCurrent(re, manager, includeGCBarriersCh, 2)
+	re.True(includeGCBarriersState.IsGCBarriersLoaded)
 	re.Len(includeGCBarriersState.GCBarriers, 2)
 	assertNoGCStateReceived(re, excludeGCBarriersCh)
 
@@ -2655,6 +2659,8 @@ func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
 		cloneGCStateForListener(includeGCBarriersState, gcStateListenerExcludeGCBarriers),
 		time.Second,
 	)
+	re.True(includeGCBarriersState.IsGCBarriersLoaded)
+	re.False(excludeGCBarriersState.IsGCBarriersLoaded)
 	re.Empty(excludeGCBarriersState.GCBarriers)
 }
 
