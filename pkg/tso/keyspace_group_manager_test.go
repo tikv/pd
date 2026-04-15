@@ -26,8 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
@@ -36,11 +34,13 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -1459,7 +1459,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 	keyspaceID2 := uint32(200)
 	configuredGroupID := uint32(5)
 
-	allocator, kg, groupID, _, err := mgr.state.getKeyspaceGroupMetaWithCheck(
+	allocator, kg, groupID, _, err := mgr.getKeyspaceGroupMetaWithCheck(
 		constant.NullKeyspaceID, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.NotNil(allocator)
@@ -1479,7 +1479,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 	})
 	re.NoError(err)
 
-	allocator, kg, groupID, _, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+	allocator, kg, groupID, _, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID1, constant.DefaultKeyspaceGroupID, mgr)
 	re.Nil(allocator)
 	re.Nil(kg)
@@ -1496,7 +1496,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 	})
 	re.NoError(err)
 
-	allocator, kg, groupID, _, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+	allocator, kg, groupID, _, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID2, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.NotNil(allocator)
@@ -1505,7 +1505,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 
 	keyspaceID3 := uint32(300)
-	allocator, kg, groupID, _, err = mgr.state.getKeyspaceGroupMetaWithCheck(
+	allocator, kg, groupID, _, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.NotNil(allocator)
