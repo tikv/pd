@@ -268,6 +268,9 @@ func (m *GCStateManager) nodeIsLeader() bool {
 
 // WatchGCStates watches GC state updates. The returned channel is closed when the caller's context is done, the
 // current PD node loses leadership, or the watcher becomes too slow to consume updates.
+//   - skipLoadingInitial: only observe the new updates, ignoring the state at the moment of calling this function.
+//   - excludeGCBarriers: Exclude information of GC barriers from the observed GC states; ignore GC state update
+//     events that only affect GC barriers.
 func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial bool, excludeGCBarriers bool) (*GCStateWatcher, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -298,32 +301,6 @@ func (m *GCStateManager) holdGCStateWatcher(listener gcStateListener, skipLoadin
 }
 
 func (m *GCStateManager) sendInitialGCStates(listener gcStateListener) {
-	//gcStates, err := m.GetAllKeyspacesGCStates(listener.watcher.ctx)
-	//if err != nil {
-	//	if listener.watcher.ctx.Err() == nil {
-	//		log.Warn("failed to load initial GC states for watcher", zap.Error(err))
-	//	}
-	//	return
-	//}
-	//
-	//for _, gcState := range gcStates {
-	//	select {
-	//	case <-listener.watcher.Done():
-	//		return
-	//	default:
-	//	}
-	//
-	//	m.mu.Lock()
-	//	if !m.hasGCStateListenerLocked(listener) {
-	//		m.mu.Unlock()
-	//		return
-	//	}
-	//	if !m.sendGCStateToListenerLocked(listener, gcState, false) {
-	//		m.mu.Unlock()
-	//		return
-	//	}
-	//	m.mu.Unlock()
-	//}
 	err := m.iterateAllKeyspacesGCStates(listener.watcher.ctx, listener.flags&gcStateListenerExcludeGCBarriers != 0, func(gcState GCState) {
 		// iterateAllKeyspacesGCStates guarantees that this callback is executed within the mutex.
 		// Check whether the listener is closed during the time gap that the mutex is not hold.
